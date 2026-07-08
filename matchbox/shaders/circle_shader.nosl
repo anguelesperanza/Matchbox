@@ -23,9 +23,15 @@ vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output {
 
 frag :: #fragment (input: Vert_Output) -> vec4 @io(0) {
 	p:vec2 = input.frag_pos;
+
+	resolution:vec2 = vec2(1920.0, 1080.0);
+	aspect:float = resolution.x / resolution.y;
+
+	p_corrected:vec2 = vec2(p.x * aspect, p.y);
+	
 	center:vec2 = vec2(0.0, 0.0);
 
-	circle_radius := length(p - center) * 3;
+	circle_radius := length(p_corrected - center) * 3;
 
 	if circle_radius < 1 {
 		input.color = vec4(1.0, 1.0, 0.0, 1.0);

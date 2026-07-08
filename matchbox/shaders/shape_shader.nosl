@@ -7,12 +7,14 @@ Vertex :: struct
 Data :: struct
 {
     verts: []Vertex,
+    shape: int,
 }
 
 Vert_Output :: struct
 {
     pos: vec4 @position,
     color: vec4 @io(0),
+   	frag_pos:vec2 @io(1),
 }
 
 vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output
@@ -20,10 +22,14 @@ vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output
     out: Vert_Output;
     out.pos = vec4(data.verts[vert_id].pos, 1.0);
     out.color = vec4(data.verts[vert_id].color, 1.0);
+	out.frag_pos = data.verts[vert_id].pos.xy;
+
     return out;
 }
 
-frag :: #fragment (input: Vert_Output) -> vec4 @io(0)
-{
+
+frag :: #fragment (input: Vert_Output) -> vec4 @io(0) {
+
     return input.color;
 }
+

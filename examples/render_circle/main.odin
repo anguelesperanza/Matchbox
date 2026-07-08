@@ -1,5 +1,7 @@
 package renderrectangle
 
+
+import "core:fmt"
 import "../../matchbox"
 
 main :: proc() {
@@ -7,6 +9,8 @@ main :: proc() {
 	mbi := matchbox.init("Render Circle", 1920, 1080)
 
 	default_circle := matchbox.create_default_circle()
+
+	fmt.println(default_circle.shape)
 
 	for mbi.running {
 		matchbox.poll_events(&mbi)

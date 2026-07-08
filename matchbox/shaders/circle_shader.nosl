@@ -1,19 +1,24 @@
-Vertex :: struct {
-	pos:vec3,
-	color:vec3
+Vertex :: struct
+{
+    pos: vec3,
+    color: vec3
 }
 
-Data :: struct {
-	verts: []Vertex,
+Data :: struct
+{
+    verts: []Vertex,
+    shape: int,
 }
 
-Vert_Output :: struct {
-	pos:vec4 @position,
-	color:vec4 @io(0),
-	frag_pos:vec2 @io(1),
+Vert_Output :: struct
+{
+    pos: vec4 @position,
+    color: vec4 @io(0),
+   	frag_pos:vec2 @io(1),
 }
 
-vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output {
+vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output
+{
     out: Vert_Output;
     out.pos = vec4(data.verts[vert_id].pos, 1.0);
     out.color = vec4(data.verts[vert_id].color, 1.0);
@@ -21,23 +26,27 @@ vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output {
     return out;
 }
 
+
 frag :: #fragment (input: Vert_Output) -> vec4 @io(0) {
-	p:vec2 = input.frag_pos;
 
-	resolution:vec2 = vec2(1920.0, 1080.0);
-	aspect:float = resolution.x / resolution.y;
+   	p:vec2 = input.frag_pos;
 
-	p_corrected:vec2 = vec2(p.x * aspect, p.y);
-	
-	center:vec2 = vec2(0.0, 0.0);
+   	resolution:vec2 = vec2(1920.0, 1080.0);
+   	aspect:float = resolution.x / resolution.y;
 
-	circle_radius := length(p_corrected - center) * 3;
+   	p_corrected:vec2 = vec2(p.x * aspect, p.y);
 
-	if circle_radius < 1 {
-		input.color = vec4(1.0, 1.0, 0.0, 1.0);
-	} else {
-		input.color = vec4(0.0, 0.0, 0.0, 1.0);
-	}
+   	center:vec2 = vec2(0.0, 0.0);
+
+   	circle_radius := length(p_corrected - center) * 3;
+
+   	if circle_radius < 1 {
+  		input.color = vec4(1.0, 1.0, 0.0, 1.0);
+   	} else {
+  		input.color = vec4(0.0, 0.0, 0.0, 1.0);
+   	}
 
     return input.color;
 }
+
+

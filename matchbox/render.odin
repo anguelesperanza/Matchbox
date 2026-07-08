@@ -60,40 +60,57 @@ end_render :: proc(matchbox_info:^MatchboxInfo) {
     matchbox_info.next_frame += 1
 }
 
+
+render_shape :: proc(matchbox_info:^MatchboxInfo, shape:Shape) {
+
+	if shape.shape == 2 {
+		gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.circle_vertex_shader, matchbox_info.circle_frag_shader)
+	} else {
+		
+		gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.shape_vertex_shader, matchbox_info.shape_frag_shader)
+	}
+	
+	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+	verts_data.cpu^ = {
+		verts = shape.verts_local.gpu.ptr,
+	}
+	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, shape.indices_local)
+}
+
 // Make procedure group for different render shape procs
-render_triangle :: proc(matchbox_info:^MatchboxInfo, triangle:Triangle) {
+// render_triangle :: proc(matchbox_info:^MatchboxInfo, triangle:Triangle) {
 
-	gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.triangle_vertex_shader, matchbox_info.triangle_frag_shader)
-	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts = triangle.verts_local.gpu.ptr,
-	}
-	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, triangle.indices_local)
-}
+// 	gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.triangle_vertex_shader, matchbox_info.triangle_frag_shader)
+// 	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+// 	verts_data.cpu^ = {
+// 		verts = triangle.verts_local.gpu.ptr,
+// 	}
+// 	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, triangle.indices_local)
+// }
 
-render_rectangle :: proc(matchbox_info:^MatchboxInfo, rectangle:Rectangle) {
+// render_rectangle :: proc(matchbox_info:^MatchboxInfo, rectangle:Rectangle) {
 
-	gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.rectangle_vertex_shader, matchbox_info.rectangle_frag_shader)
-	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts = rectangle.verts_local.gpu.ptr,
-	}
-	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, rectangle.indices_local)
-}
+// 	gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.rectangle_vertex_shader, matchbox_info.rectangle_frag_shader)
+// 	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+// 	verts_data.cpu^ = {
+// 		verts = rectangle.verts_local.gpu.ptr,
+// 	}
+// 	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, rectangle.indices_local)
+// }
 
-render_circle :: proc(matchbox_info:^MatchboxInfo, circle:Circle) {
+// render_circle :: proc(matchbox_info:^MatchboxInfo, circle:Circle) {
 
-	gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.circle_vertex_shader, matchbox_info.circle_frag_shader)
-	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts = circle.verts_local.gpu.ptr,
-	}
-	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, circle.indices_local)
-}
+// 	gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.circle_vertex_shader, matchbox_info.circle_frag_shader)
+// 	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+// 	verts_data.cpu^ = {
+// 		verts = circle.verts_local.gpu.ptr,
+// 	}
+// 	gpu.cmd_draw_indexed(matchbox_info.frame_command, verts_data, {}, circle.indices_local)
+// }
 
-render_shape :: proc {
-	render_triangle,
-	render_rectangle,
-	render_circle,
-}
+// render_shape :: proc {
+// 	render_triangle,
+// 	render_rectangle,
+// 	render_circle,
+// }
 

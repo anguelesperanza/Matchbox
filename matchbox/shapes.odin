@@ -16,6 +16,7 @@ Vertex :: struct {
 
 VertData :: struct {
 	verts: rawptr,
+	shape: int, // 0 -> triangle, 1 -> rectangle, 2 -> circle | Used to determine what shader to use
 }
 
 FragData :: struct #align(16) {
@@ -27,23 +28,8 @@ FragData :: struct #align(16) {
 	may fold into a single Shape struct if other shapes follow pattern as well
  */
 
-Triangle :: struct {
-	arena:gpu.Arena,
-	verts:gpu.slice_t(Vertex),
-	verts_local:gpu.slice_t(Vertex),
-	indices:gpu.slice_t(u32),
-	indices_local:gpu.slice_t(u32),
-}
-
-Rectangle :: struct {
-	arena:gpu.Arena,
-	verts:gpu.slice_t(Vertex),
-	verts_local:gpu.slice_t(Vertex),
-	indices:gpu.slice_t(u32),
-	indices_local:gpu.slice_t(u32),
-}
-
-Circle :: struct {
+Shape :: struct {
+	shape:int,
 	arena:gpu.Arena,
 	verts:gpu.slice_t(Vertex),
 	verts_local:gpu.slice_t(Vertex),
@@ -52,9 +38,11 @@ Circle :: struct {
 }
 
 /*3D Shapes*/
-create_default_triangle :: proc() -> (triangle:Triangle) {
+create_default_triangle :: proc() -> (triangle:Shape) {
 
 	triangle.arena = gpu.arena_create()
+
+	triangle.shape = 0
 
 	triangle.verts = gpu.arena_alloc(&triangle.arena, Vertex, 3)
 	triangle.verts.cpu[0].position = {-0.5, 0.5, 0.0}
@@ -81,15 +69,17 @@ create_default_triangle :: proc() -> (triangle:Triangle) {
 	return
 }
 
-destroy_triangle :: proc (triangle:^Triangle) {
+destroy_triangle :: proc (triangle:^Shape) {
 	gpu.mem_free(triangle.verts_local)
 	gpu.mem_free(triangle.indices_local)
 	gpu.arena_destroy(&triangle.arena)
 }
 
 
-create_default_rectangle :: proc() -> (rectangle:Rectangle) {
+create_default_rectangle :: proc() -> (rectangle:Shape) {
 	rectangle.arena = gpu.arena_create()
+
+	rectangle.shape = 1
 
 	rectangle.verts = gpu.arena_alloc(&rectangle.arena, Vertex, 4)
 	rectangle.verts.cpu[0].position = {-0.5,  0.5, 0.0}
@@ -121,15 +111,17 @@ create_default_rectangle :: proc() -> (rectangle:Rectangle) {
 	return
 }
 
-destroy_rectangle :: proc (rectangle:^Rectangle) {
+destroy_rectangle :: proc (rectangle:^Shape) {
 	gpu.mem_free(rectangle.verts_local)
 	gpu.mem_free(rectangle.indices_local)
 	gpu.arena_destroy(&rectangle.arena)
 }
 
-create_default_circle :: proc() -> (circle:Circle) {
+create_default_circle :: proc() -> (circle:Shape) {
 
 	circle.arena = gpu.arena_create()
+
+	circle.shape = 2
 
 	circle.verts = gpu.arena_alloc(&circle.arena, Vertex,4)
 
@@ -154,7 +146,6 @@ create_default_circle :: proc() -> (circle:Circle) {
 	circle.indices_local = gpu.mem_alloc(u32, 6, gpu.Memory.GPU)
 
 
-
 	upload_cmd_buf := gpu.commands_begin(.Main)
 	gpu.cmd_mem_copy(upload_cmd_buf, circle.verts_local, circle.verts)
 	gpu.cmd_mem_copy(upload_cmd_buf, circle.indices_local,circle.indices)
@@ -164,16 +155,8 @@ create_default_circle :: proc() -> (circle:Circle) {
 	return
 }
 
-destroy_circle :: proc (circle:^Circle) {
-	gpu.mem_free(circle.verts_local)
-	gpu.mem_free(circle.indices_local)
-	gpu.arena_destroy(&circle.arena)
+destroy_shape :: proc(shape:^Shape) {
+	gpu.mem_free(shape.verts_local)
+	gpu.mem_free(shape.indices_local)
+	gpu.arena_destroy(&shape.arena)
 }
-
-/*Procedure Group -- destroy_shape*/
-destroy_shape :: proc {
-	destroy_triangle,
-	destroy_rectangle,
-	destroy_circle,
-}
-

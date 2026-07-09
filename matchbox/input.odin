@@ -25,7 +25,6 @@ Input :: struct {
 
 // Processes SDL events, updates input state, and calculates delta_time.
 // Call this at the very start of your game loop, before any game logic.
-
 poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 	for &key in matchbox_info.input.keys {
 		key.pressed = false
@@ -112,3 +111,16 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 set_escape_key :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) {
 	matchbox_info.escape_key = key
 }
+
+is_key_pressed :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
+	return matchbox_info.input.keys[key].pressed
+}
+
+is_key_held :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
+	return matchbox_info.input.keys[key].pressing
+}
+
+is_key_released :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
+	return matchbox_info.input.keys[key].released
+}
+

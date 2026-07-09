@@ -21,6 +21,7 @@ VertData :: struct {
 
 FragData :: struct #align(16) {
 	color: [4]f32,
+	position:[3]f32, // Using the Fragment data to move the shapes.
 }
 
 /*
@@ -30,6 +31,7 @@ FragData :: struct #align(16) {
 
 Shape :: struct {
 	shape:int,
+	pos:[3]f32,
 	arena:gpu.Arena,
 	verts:gpu.slice_t(Vertex),
 	verts_local:gpu.slice_t(Vertex),

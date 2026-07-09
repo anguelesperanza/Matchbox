@@ -7,7 +7,6 @@ package matchbox
 
 import "gpu"
 
-
 /*Structs*/
 Vertex :: struct {
 	position: [3]f32,
@@ -21,7 +20,6 @@ VertData :: struct {
 
 FragData :: struct #align(16) {
 	color: [4]f32,
-	position:[3]f32, // Using the Fragment data to move the shapes.
 }
 
 /*
@@ -69,12 +67,6 @@ create_default_triangle :: proc() -> (triangle:Shape) {
 	gpu.queue_submit(.Main, {upload_cmd_buf})
 
 	return
-}
-
-destroy_triangle :: proc (triangle:^Shape) {
-	gpu.mem_free(triangle.verts_local)
-	gpu.mem_free(triangle.indices_local)
-	gpu.arena_destroy(&triangle.arena)
 }
 
 

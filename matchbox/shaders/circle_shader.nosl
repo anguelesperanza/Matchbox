@@ -12,6 +12,7 @@ Data :: struct
 
 FragData :: struct {
     color:vec4,
+    pos:vec3,
 }
 
 Vert_Output :: struct

@@ -69,8 +69,9 @@ render_shape :: proc(matchbox_info:^MatchboxInfo, shape:Shape, color:[4]f32 = PU
 		
 		gpu.cmd_set_shaders(matchbox_info.frame_command, matchbox_info.shape_vertex_shader, matchbox_info.shape_frag_shader)
 	}
-	
+
 	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+
 	verts_data.cpu^ = {
 		verts = shape.verts_local.gpu.ptr,
 	}

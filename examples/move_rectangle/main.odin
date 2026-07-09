@@ -11,14 +11,17 @@ import "core:fmt"
 
 main :: proc() {
 
-	mbi := matchbox.init("Key Press", 200, 200)
+	mbi := matchbox.init("Key Press", 1280, 720)
 
+	rectangle := matchbox.create_default_rectangle()
 
 	for mbi.running {
 		matchbox.poll_events(&mbi)
 
-		if matchbox.is_key_pressed(&mbi, .W) {
-			fmt.println("W Key Pressed")
+		if matchbox.is_key_held(&mbi, .W) {
+			rectangle.pos.x += 10
+
+			fmt.println(rectangle.pos)
 		}
 
 		if matchbox.is_key_pressed(&mbi, .A) {
@@ -32,18 +35,11 @@ main :: proc() {
 			fmt.println("D Key Pressed")
 		}
 
-		if matchbox.is_key_released(&mbi, .F) {
-			fmt.println("F Key Released")
-		}
-
-		if matchbox.is_key_held(&mbi, .E) {
-			fmt.println("E Key Pressed")
-		}
-
-		
 		matchbox.begin_render(&mbi)
+		matchbox.render_shape(&mbi, rectangle)
 		matchbox.end_render(&mbi)
 	}
 
+	matchbox.destroy_shape(&rectangle)
 	matchbox.cleanup(&mbi)
 }

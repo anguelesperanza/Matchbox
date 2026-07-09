@@ -10,6 +10,10 @@ Data :: struct
     shape: int,
 }
 
+FragData :: struct {
+    color:vec4,
+}
+
 Vert_Output :: struct
 {
     pos: vec4 @position,
@@ -28,8 +32,9 @@ vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output
 }
 
 
-frag :: #fragment (input: Vert_Output) -> vec4 @io(0) {
+frag :: #fragment (input: Vert_Output, frag_data:^FragData @data ) -> vec4 @io(0) {
 
-    return input.color;
+    return frag_data.color;
+
 }
 

@@ -10,6 +10,10 @@ Data :: struct
     shape: int,
 }
 
+FragData :: struct {
+    color:vec4,
+}
+
 Vert_Output :: struct
 {
     pos: vec4 @position,
@@ -26,10 +30,11 @@ vert :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Vert_Output
     return out;
 }
 
-
-frag :: #fragment (input: Vert_Output) -> vec4 @io(0) {
+frag :: #fragment (input: Vert_Output, frag_data:^FragData @data) -> vec4 @io(0) {
 
    	p:vec2 = input.frag_pos;
+
+	final_color:vec4 = frag_data.color;
 
    	resolution:vec2 = vec2(1920.0, 1080.0);
    	aspect:float = resolution.x / resolution.y;
@@ -41,12 +46,10 @@ frag :: #fragment (input: Vert_Output) -> vec4 @io(0) {
    	circle_radius := length(p_corrected - center) * 3;
 
    	if circle_radius < 1 {
-  		input.color = vec4(1.0, 1.0, 0.0, 1.0);
+  		final_color = frag_data.color;
    	} else {
-  		input.color = vec4(0.0, 0.0, 0.0, 1.0);
+  		final_color = vec4(0.0, 0.0, 0.0, 1.0);
    	}
 
-    return input.color;
+    return final_color;
 }
-
-

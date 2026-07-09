@@ -12,7 +12,7 @@ main :: proc() {
 		matchbox.poll_events(&mbi)
 	
 		matchbox.begin_render(&mbi)
-		matchbox.render_shape(&mbi, default_rectangle)
+		matchbox.render_shape(&mbi, default_rectangle, matchbox.LIME_GREEN)
 		matchbox.end_render(&mbi)
 	}
 

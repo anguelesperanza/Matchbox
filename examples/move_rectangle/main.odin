@@ -11,7 +11,7 @@ import "core:fmt"
 
 main :: proc() {
 
-	mbi := matchbox.init("Key Press", 1280, 720)
+	mbi := matchbox.init("Move Rectangle", 1280, 720)
 
 	rectangle := matchbox.create_default_rectangle()
 
@@ -19,21 +19,21 @@ main :: proc() {
 		matchbox.poll_events(&mbi)
 
 		if matchbox.is_key_held(&mbi, .W) {
-			rectangle.pos.x += 10
-
-			fmt.println(rectangle.pos)
+			rectangle.pos.y -= 0.001
 		}
 
-		if matchbox.is_key_pressed(&mbi, .A) {
-			fmt.println("A Key Pressed")
+		if matchbox.is_key_held(&mbi, .A) {
+			rectangle.pos.x -= 0.001
 		}
 
-		if matchbox.is_key_pressed(&mbi, .S) {
-			fmt.println("S Key Pressed")
+		if matchbox.is_key_held(&mbi, .S) {
+			rectangle.pos.y += 0.001
 		}
-		if matchbox.is_key_pressed(&mbi, .D) {
-			fmt.println("D Key Pressed")
+		if matchbox.is_key_held(&mbi, .D) {
+			rectangle.pos.x += 0.001
 		}
+
+		fmt.println(rectangle.pos)
 
 		matchbox.begin_render(&mbi)
 		matchbox.render_shape(&mbi, rectangle)

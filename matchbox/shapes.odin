@@ -16,6 +16,7 @@ Vertex :: struct {
 VertData :: struct {
 	verts: rawptr,
 	shape: int, // 0 -> triangle, 1 -> rectangle, 2 -> circle | Used to determine what shader to use
+	position: [3]f32,
 }
 
 FragData :: struct #align(16) {

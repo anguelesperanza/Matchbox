@@ -74,6 +74,7 @@ render_shape :: proc(matchbox_info:^MatchboxInfo, shape:Shape, color:[4]f32 = PU
 
 	verts_data.cpu^ = {
 		verts = shape.verts_local.gpu.ptr,
+		position = shape.pos,
 	}
 
 	frag_data := gpu.arena_alloc(matchbox_info.frame_arena, FragData)

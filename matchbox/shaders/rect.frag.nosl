@@ -1,0 +1,9 @@
+Data :: struct {
+    color: vec4,
+}
+
+main :: (uv: vec2 @input(0), data: ^Data @data) -> vec4 @output(0)
+{
+    result:vec4 = data.color;
+    return result;
+}

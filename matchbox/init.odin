@@ -1,137 +1,136 @@
 package matchbox
 
-/*
-	Init
-	----
-	This contains all of the procedures and structs that are needed when initializing Matchbox
-*/
-
-
-// Core Imports
+import "gpu"
+import "core:os"
+import "core:slice"
 import "core:strings"
 
-// Vendor Imports
 import sdl "vendor:sdl3"
 
-// Third Party Imports
-import "gpu"
+// -----------------------------------------------------------------------
+// Init / Cleanup
+// -----------------------------------------------------------------------
 
-/*A struct that holds all the shared state for Matchbox*/
-MatchboxInfo :: struct {
-	// Window Information
-	window:            ^sdl.Window,
-	window_width:      i32,
-	window_height:     i32,
-	running:           bool,
+init :: proc(title: string, width: i32, height: i32) -> MatchboxInfo {
+	matchbox_info: MatchboxInfo
+	matchbox_info.title          = title
+	matchbox_info.width          = width
+	matchbox_info.height         = height
+	matchbox_info.flags          = {.HIGH_PIXEL_DENSITY, .VULKAN, .RESIZABLE}
+	matchbox_info.running        = true
+	matchbox_info.max_delta_time = 1.0 / 60
 
-	// Render Information
-	frame_semaphore:   gpu.Semaphore,
-	frame_arenas:      [3]gpu.Arena,
-	frame_arena:       ^gpu.Arena,
-	depth_desc:        gpu.Texture_Desc,
-	depth_texture:     gpu.Owned_Texture,
-	shape_vertex_shader: gpu.Shader,
-	shape_frag_shader:   gpu.Shader,
-	circle_vertex_shader:       gpu.Shader, 
-	circle_frag_shader:         gpu.Shader, 
-	now_ts:            u64,
-	ts_freq:           u64,
-	max_delta_time:    f32,
-	command:           gpu.Command_Buffer,
-	frame_command:     gpu.Command_Buffer,
-	next_frame:        u64,
-	target_frame_time: f32,
-
-	// Input Information
-	input:             Input,
-	escape_key:        sdl.Scancode,
-}
-
-
-/*
-Initializes all the behind the scene things needed for matchbox
-returns an instance of the "MatchboxInfo" struct called "matchbox_info"
-*/
-init :: proc(
-	window_title: string,window_width: i32,	window_height: i32,	window_flags: sdl.WindowFlags = {.HIGH_PIXEL_DENSITY, .VULKAN, .RESIZABLE}) -> (matchbox_info: MatchboxInfo) {
-
-	// SDL3 Setup
-	ensure(condition = sdl.Init({.VIDEO, .AUDIO}), message = "Could not initialize SDL3")
-	matchbox_info.window = sdl.CreateWindow(
-		strings.clone_to_cstring(window_title),
-		window_width,
-		window_height,
-		window_flags,
-	)
-	ensure(condition = matchbox_info.window != nil, message = "Could not create SDL 3 Window")
-
-	// no_gfx_api Setup
-	ensure(condition = gpu.init(), message = "Could not initialize no_gfx_api graphics")
-	gpu.swapchain_init_from_sdl(matchbox_info.window, 3)
-
-	matchbox_info.window_width = window_width
-	matchbox_info.window_height = window_height
-	matchbox_info.escape_key = .ESCAPE
+	init_ok := sdl.Init({.VIDEO, .AUDIO})
+	if !init_ok { panic("Cannot init SDL3") }
 
 	matchbox_info.ts_freq = sdl.GetPerformanceFrequency()
-	matchbox_info.max_delta_time = 1.0 / 60.0
 
-	matchbox_info.target_frame_time = 0 // 0 being uncapped framerate
+	matchbox_info.window = sdl.CreateWindow(
+		strings.clone_to_cstring(title),
+		width, height,
+		matchbox_info.flags,
+	)
 
+	if matchbox_info.window == nil { panic("Could not create SDL3 window") }
+	matchbox_info.window_width  = width
+	matchbox_info.window_height = height
+	matchbox_info.draw_scale    = 1
+	matchbox_info.draw_offset   = {0, 0}
+
+	gpu_ok := gpu.init()
+	if !gpu_ok { panic("Could not initialize gpu library") }
+
+	gpu.swapchain_init_from_sdl(matchbox_info.window, 3)
+
+	matchbox_info.desc_pool  = gpu.desc_pool_create()
+	matchbox_info.now_ts     = sdl.GetPerformanceCounter()
 	matchbox_info.next_frame = 1
+	matchbox_info.frame_sem  = gpu.semaphore_create(0)
 
-	matchbox_info.depth_desc = gpu.Texture_Desc {
-		dimensions = {cast(u32)window_width, cast(u32)window_height, 1},
-		format     = .D32_Float,
-		usage      = {.Depth_Stencil_Attachment},
+	for &fa in matchbox_info.frame_arenas do fa = gpu.arena_create()
+
+	matchbox_info.vertex_shader   = gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
+	matchbox_info.fragment_shader = gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
+	matchbox_info.outline_shader   = gpu.shader_create(#load("shaders/outline.frag.spv", []u32), .Fragment)
+	matchbox_info.font_vert_shader = gpu.shader_create(#load("shaders/font.vert.spv", []u32), .Vertex)
+	matchbox_info.font_frag_shader = gpu.shader_create(#load("shaders/font.frag.spv", []u32), .Fragment)
+	matchbox_info.rect_frag_shader = gpu.shader_create(#load("shaders/rect.frag.spv", []u32), .Fragment)
+
+	// Upload shared rect quad (reused by every draw_rect call)
+	{
+		upload_arena := gpu.arena_create()
+		defer gpu.arena_destroy(&upload_arena)
+
+		stage_verts := gpu.arena_alloc(&upload_arena, Vertex, 4)
+		stage_verts.cpu[0] = {pos = {-0.5,  0.5, 0}, uv = {0, 1}}
+		stage_verts.cpu[1] = {pos = { 0.5, -0.5, 0}, uv = {1, 0}}
+		stage_verts.cpu[2] = {pos = { 0.5,  0.5, 0}, uv = {1, 1}}
+		stage_verts.cpu[3] = {pos = {-0.5, -0.5, 0}, uv = {0, 0}}
+
+		stage_indices := gpu.arena_alloc(&upload_arena, u32, 6)
+		stage_indices.cpu[0] = 0; stage_indices.cpu[1] = 2; stage_indices.cpu[2] = 1
+		stage_indices.cpu[3] = 0; stage_indices.cpu[4] = 1; stage_indices.cpu[5] = 3
+
+		matchbox_info.rect_verts   = gpu.mem_alloc(Vertex, 4, gpu.Memory.GPU)
+		matchbox_info.rect_indices = gpu.mem_alloc(u32, 6, gpu.Memory.GPU)
+
+		cmd := gpu.commands_begin(.Main)
+		gpu.cmd_mem_copy(cmd, matchbox_info.rect_verts, stage_verts)
+		gpu.cmd_mem_copy(cmd, matchbox_info.rect_indices, stage_indices)
+		gpu.cmd_barrier(cmd, .Transfer, .All, {})
+		gpu.queue_submit(.Main, {cmd})
+		gpu.queue_wait_idle(.Main)
 	}
 
-	matchbox_info.depth_texture = gpu.texture_alloc_and_create(matchbox_info.depth_desc)
+	matchbox_info.font = load_font(&matchbox_info, #load("fonts/Silver.ttf"), 32)
 
-	next_frame := 1
-	matchbox_info.frame_semaphore = gpu.semaphore_create(0)
-
-	matchbox_info.now_ts = sdl.GetPerformanceCounter()
-
-	for &frame_arena in matchbox_info.frame_arenas {
-		frame_arena = gpu.arena_create()
+	matchbox_info.camera = Camera{
+		position = {f32(width) * 0.5, f32(height) * 0.5},
+		zoom     = 1.0,
+		active   = false,
 	}
 
-	matchbox_info.shape_vertex_shader = gpu.shader_create(#load("./shaders/shape_shader.vert.spv", []u32), .Vertex)
-	matchbox_info.shape_frag_shader = gpu.shader_create(#load("./shaders/shape_shader.frag.spv", []u32),.Fragment)
-	matchbox_info.circle_vertex_shader = gpu.shader_create(#load("./shaders/circle_shader.vert.spv", []u32), .Vertex)
-	matchbox_info.circle_frag_shader = gpu.shader_create(#load("./shaders/circle_shader.frag.spv", []u32), .Fragment)
+	set_logical_size(&matchbox_info, width, height)
 
-	matchbox_info.running = true
-
-	matchbox_info.command = gpu.commands_begin(.Main)
-
-	gpu.cmd_barrier(matchbox_info.command, .Transfer, .All, {})
-	gpu.queue_submit(.Main, {matchbox_info.command})
-	gpu.queue_wait_idle(.Main)
-
-	return
+	return matchbox_info
 }
 
-/*
-This procedure frees up everthing created by init.
-Must be called otherwise application will not close properly.
-*/
 cleanup :: proc(matchbox_info: ^MatchboxInfo) {
-	// Waits for the gpu to finish up whatever it's doing first
-	gpu.wait_idle()
+	gpu.semaphore_destroy(matchbox_info.frame_sem)
+	for &fa in matchbox_info.frame_arenas do gpu.arena_destroy(&fa)
 
-	for &frame_arena in matchbox_info.frame_arenas {
-		gpu.arena_destroy(&frame_arena)
-	}
+	if matchbox_info.vertex_shader   != nil do gpu.shader_destroy(matchbox_info.vertex_shader)
+	if matchbox_info.fragment_shader != nil do gpu.shader_destroy(matchbox_info.fragment_shader)
+	if matchbox_info.outline_shader  != nil do gpu.shader_destroy(matchbox_info.outline_shader)
+	if matchbox_info.font_vert_shader != nil do gpu.shader_destroy(matchbox_info.font_vert_shader)
+	if matchbox_info.font_frag_shader != nil do gpu.shader_destroy(matchbox_info.font_frag_shader)
+	if matchbox_info.rect_frag_shader != nil do gpu.shader_destroy(matchbox_info.rect_frag_shader)
 
-	gpu.shader_destroy(matchbox_info.shape_vertex_shader)
-	gpu.shader_destroy(matchbox_info.shape_frag_shader)
+	gpu.mem_free(matchbox_info.rect_verts)
+	gpu.mem_free(matchbox_info.rect_indices)
 
-	gpu.shader_destroy(matchbox_info.circle_vertex_shader)
-	gpu.shader_destroy(matchbox_info.circle_frag_shader)
-	gpu.texture_free_and_destroy(&matchbox_info.depth_texture)
-	gpu.semaphore_destroy(matchbox_info.frame_semaphore)
+	destroy_font(matchbox_info, &matchbox_info.font)
 
+	gpu.desc_pool_destroy(&matchbox_info.desc_pool)
 	gpu.cleanup()
+}
+
+wait_idle :: proc() {
+	gpu.wait_idle()
+}
+
+// Limits the frame rate to `fps` frames per second by sleeping in poll_events.
+// Pass 0 to remove the limit (default).
+set_target_fps :: proc(mbi: ^MatchboxInfo, fps: i32) {
+	mbi.target_frame_time = 1.0 / f32(fps) if fps > 0 else 0
+}
+
+// -----------------------------------------------------------------------
+// Shaders
+// -----------------------------------------------------------------------
+
+load_shader :: proc(shader_path: string, shader_type: gpu.Shader_Type_Graphics) -> gpu.Shader {
+	data, err := os.read_entire_file_from_path(shader_path, context.allocator)
+	if err != nil { panic("Cannot read shader file") }
+	return gpu.shader_create(slice.reinterpret([]u32, data), shader_type)
 }

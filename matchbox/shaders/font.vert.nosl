@@ -10,9 +10,9 @@ Data :: struct {
     uv_min:   vec2,
     uv_max:   vec2,
 }
-Output :: struct { pos: vec4 @position, uv: vec2 @output(0) }
+Output :: struct { pos: vec4 @position, uv: vec2 @io(0) }
 
-main :: (vert_id: uint @vert_id, data: ^Data @data) -> Output
+main :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Output
 {
     out: Output;
     local:vec2   = data.verts[vert_id].pos.xy * data.size;

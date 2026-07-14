@@ -23,21 +23,24 @@ main :: proc() {
 
 	for mbi.running {
 
-		forward := matchbox.sprite_foward_by_rotation(tank.body)
+		matchbox.poll_events(&mbi)
+		
 
-		if matchbox.is_key_down(&mbi, .W) {
+		forward := matchbox.sprite_forward_by_rotation(tank.body)
+
+		if matchbox.is_key_held(&mbi, .W) {
 			tank.body.position += forward * tank.body.speed * mbi.delta_time
 		}
 
-		if matchbox.is_key_down(&mbi, .S) {
+		if matchbox.is_key_held(&mbi, .S) {
 			tank.body.position -= forward * tank.body.speed * mbi.delta_time
 		}
 
-		if matchbox.is_key_down(&mbi, .A) {
+		if matchbox.is_key_held(&mbi, .A) {
 			tank.body.rotation -= tank.rotation_speed * mbi.delta_time
 		}
 
-		if matchbox.is_key_down(&mbi, .D) {
+		if matchbox.is_key_held(&mbi, .D) {
 			tank.body.rotation += tank.rotation_speed * mbi.delta_time
 		}
 

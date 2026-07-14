@@ -99,11 +99,12 @@ Body :: struct {
 // Types -- Application
 // -----------------------------------------------------------------------
 
+// Absolute mouse state, updated every poll_events. `x`/`y` are in logical
+// screen space (draw_offset/draw_scale applied), matching where you draw.
 Mouse :: struct {
-	x:f32,
-	y:f32,
-	buttons_pressed:[sdl.MouseButtonFlag]bool,
-	buttons_down:[sdl.MouseButtonFlag]bool,
+	x:       f32,
+	y:       f32,
+	buttons: [Mouse_Button]Key_State,
 }
 
 Rectangle :: struct {
@@ -157,9 +158,9 @@ MatchboxInfo :: struct {
 	frame_sem:       gpu.Semaphore,
 	swapchain:       gpu.Texture,
 	// Input
-	keys_down:    #sparse[sdl.Scancode]bool,
-	keys_pressed: #sparse[sdl.Scancode]bool,
+	input:        Input,
 	mouse:        Mouse,
+	escape_key:   sdl.Scancode,
 	font:         Font,
 	camera:       Camera,
 }

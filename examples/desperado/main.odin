@@ -1,7 +1,7 @@
 package desperado
 
 import "core:time"
-import "../../../matchbox"
+import "../../matchbox"
 
 Entity :: struct {
 	sprite:matchbox.Sprite,
@@ -21,13 +21,13 @@ main :: proc() {
 	mbi := matchbox.init("Desperado Vs. Sheriff", 1280, 720)
 
 	player:Entity
-	player.sprite = matchbox.create_sprite(&mbi, #load("assets/images/desperado.png"), 20)
+	player.sprite = matchbox.create_sprite(&mbi, #load("./assets/images/desperado.png"), 20)
 	player.sprite.velocity = {10, 100}
 	player.sprite.speed = 25
 	player.sprite.jump_force = 1000
 
 	sheriff:Entity
-	sheriff.sprite = matchbox.create_sprite(&mbi, #load("assets/images/sheriff.png"), 20)
+	sheriff.sprite = matchbox.create_sprite(&mbi, #load("./assets/images/sheriff.png"), 20)
 	sheriff.sprite.flip_x = true
 	sheriff.sprite.position.x = cast(f32)mbi.width - sheriff.sprite.size.x
 	sheriff.sprite.velocity = {10, 200}
@@ -35,10 +35,10 @@ main :: proc() {
 	sheriff.sprite.jump_force = 1000
 
 	pg:matchbox.Sprite
-	pg = matchbox.create_sprite(&mbi, #load("assets/images/gun.png"), 10)
+	pg = matchbox.create_sprite(&mbi, #load("./assets/images/gun.png"), 10)
 	pg.rotation = 90
 	sg:matchbox.Sprite
-	sg = matchbox.create_sprite(&mbi, #load("assets/images/gun.png"), 10)
+	sg = matchbox.create_sprite(&mbi, #load("./assets/images/gun.png"), 10)
 	sg.rotation = 45
 	sg.flip_y = true
 
@@ -46,6 +46,9 @@ main :: proc() {
 	matchbox.start_cooldown(&timer.timer, 3)
 
 	for mbi.running {
+
+		matchbox.poll_events(&mbi)
+		
 		matchbox.begin_drawing(&mbi)
 		matchbox.clear_background(&mbi, matchbox.PUMPKIN_ORANGE)
 

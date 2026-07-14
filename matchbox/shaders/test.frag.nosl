@@ -5,7 +5,7 @@ Data :: struct {
     flip_y:    uint,
 }
 
-main :: (uv: vec2 @input(0), data: ^Data @data) -> vec4 @output(0)
+main :: #fragment (uv: vec2 @io(0), data: ^Data @data) -> vec4 @io(0)
 {
     uv_final:vec2 = uv;
     if data.flip_x != 0 { uv_final.x = 1.0 - uv_final.x; }

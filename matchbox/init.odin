@@ -19,11 +19,16 @@ init :: proc(title: string, width: i32, height: i32) -> MatchboxInfo {
 	matchbox_info.flags          = {.HIGH_PIXEL_DENSITY, .VULKAN, .RESIZABLE}
 	matchbox_info.running        = true
 	matchbox_info.max_delta_time = 1.0 / 60
+	matchbox_info.escape_key     = .ESCAPE
 
 	init_ok := sdl.Init({.VIDEO, .AUDIO})
 	if !init_ok { panic("Cannot init SDL3") }
 
 	matchbox_info.ts_freq = sdl.GetPerformanceFrequency()
+
+	gpu_ok := gpu.init()
+	if !gpu_ok { panic("Could not initialize gpu library") }
+
 
 	matchbox_info.window = sdl.CreateWindow(
 		strings.clone_to_cstring(title),
@@ -37,8 +42,8 @@ init :: proc(title: string, width: i32, height: i32) -> MatchboxInfo {
 	matchbox_info.draw_scale    = 1
 	matchbox_info.draw_offset   = {0, 0}
 
-	gpu_ok := gpu.init()
-	if !gpu_ok { panic("Could not initialize gpu library") }
+
+
 
 	gpu.swapchain_init_from_sdl(matchbox_info.window, 3)
 

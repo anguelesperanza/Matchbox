@@ -1,6 +1,6 @@
 package camera2d
 
-import "../../../matchbox"
+import "../../matchbox"
 
 main :: proc () {
 	mbi := matchbox.init("2D Camera", 1280, 720)
@@ -16,16 +16,18 @@ main :: proc () {
 
 	for mbi.running {
 
-		if matchbox.is_key_down(&mbi, .D) {
+		matchbox.poll_events(&mbi)
+
+		if matchbox.is_key_held(&mbi, .D) {
 			desperado.position.x += desperado.velocity.x * desperado.speed * mbi.delta_time
 		}
-		if matchbox.is_key_down(&mbi, .A) {
+		if matchbox.is_key_held(&mbi, .A) {
 			desperado.position.x -= desperado.velocity.x * desperado.speed * mbi.delta_time
 		}
-		if matchbox.is_key_down(&mbi, .S) {
+		if matchbox.is_key_held(&mbi, .S) {
 			desperado.position.y += desperado.velocity.y * desperado.speed * mbi.delta_time
 		}
-		if matchbox.is_key_down(&mbi, .W) {
+		if matchbox.is_key_held(&mbi, .W) {
 			desperado.position.y -= desperado.velocity.y * desperado.speed * mbi.delta_time
 		}
 

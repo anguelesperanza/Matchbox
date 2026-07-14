@@ -52,12 +52,12 @@ end_drawing_2d :: proc(camera: ^Camera) {
 // mbi.mouse gives logical screen-space coordinates for UI.
 get_mouse_world_pos :: proc(mbi: ^MatchboxInfo) -> [2]f32 {
 	if !mbi.camera.active {
-		return {mbi.mouse.x, mbi.mouse.y}
+		return {mbi.input.mouse_dx, mbi.input.mouse_dy}
 	}
 	screen_center := [2]f32{cast(f32)mbi.width * 0.5, cast(f32)mbi.height * 0.5}
 	zoom: f32 = 1
 	if mbi.camera.zoom > 0 {
 		zoom = mbi.camera.zoom
 	}
-	return ({mbi.mouse.x, mbi.mouse.y} - screen_center) / zoom + mbi.camera.position
+	return ({mbi.input.mouse_dx, mbi.input.mouse_dy} - screen_center) / zoom + mbi.camera.position
 }

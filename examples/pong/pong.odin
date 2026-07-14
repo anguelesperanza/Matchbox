@@ -113,10 +113,10 @@ main :: proc() {
 		matchbox.poll_events(&mbi)
 		
 
-		if matchbox.is_key_down(&mbi, .W) {
+		if matchbox.is_key_held(&mbi, .W) {
 			player.rect.position.y -= player.velocity * player.speed * mbi.delta_time
 		}
-		if matchbox.is_key_down(&mbi, .S) {
+		if matchbox.is_key_held(&mbi, .S) {
 			player.rect.position.y += player.velocity * player.speed * mbi.delta_time
 		}
 

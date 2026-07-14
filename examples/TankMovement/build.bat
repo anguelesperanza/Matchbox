@@ -8,7 +8,7 @@ set PROJECT_NAME=game
 set PROJECT_SRC=src
 set SHADER_DIR=src\shaders
 
-set GPU_COMPILER=..\..\matchbox\gpu_compiler.exe
+set GPU_COMPILER=..\..\gpu_compiler\gpu_compiler.exe
 
 REM ================================
 REM  CHECK GPU COMPILER EXISTS

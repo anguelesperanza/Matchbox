@@ -1,0 +1,9 @@
+Data :: struct {
+    color: vec4,
+}
+
+main :: #fragment (uv: vec2 @io(0), data: ^Data @data) -> vec4 @io(0)
+{
+    result:vec4 = data.color;
+    return result;
+}

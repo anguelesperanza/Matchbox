@@ -1,0 +1,21 @@
+Data :: struct {
+    color: vec4,
+    border: float,
+    flip_x: uint,
+    flip_y: uint,
+}
+
+main :: #fragment (uv: vec2 @io(0), data: ^Data @data) -> vec4 @io(0)
+{
+    result:vec4 = data.color;
+    if uv.x > data.border {
+        if uv.x < 1.0 - data.border {
+            if uv.y > data.border {
+                if uv.y < 1.0 - data.border {
+                    result = vec4(0.0, 0.0, 0.0, 0.0);
+                }
+            }
+        }
+    }
+    return result;
+}

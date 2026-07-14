@@ -1,0 +1,28 @@
+Vertex :: struct { pos: vec3, uv: vec2 }
+Data :: struct {
+    verts:    []Vertex,
+    position: vec2,
+    size:     vec2,
+    screen:   vec2,
+    rotation: float,
+    flip_x:   uint,
+    flip_y:   uint,
+    uv_min:   vec2,
+    uv_max:   vec2,
+}
+Output :: struct { pos: vec4 @position, uv: vec2 @io(0) }
+
+main :: #vertex (vert_id: uint @vert_id, data: ^Data @data) -> Output
+{
+    out: Output;
+    local:vec2   = data.verts[vert_id].pos.xy * data.size;
+    s:float      = sin(data.rotation);
+    c:float      = cos(data.rotation);
+    rotated:vec2 = vec2(local.x * c - local.y * s, local.x * s + local.y * c);
+    world:vec2   = rotated + data.position;
+    ndc:vec2     = (world / data.screen) * 2.0 - 1.0;
+    out.pos      = vec4(ndc, 0.0, 1.0);
+    base_uv:vec2 = data.verts[vert_id].uv;
+    out.uv       = data.uv_min + base_uv * (data.uv_max - data.uv_min);
+    return out;
+}

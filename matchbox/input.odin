@@ -23,6 +23,12 @@ Input :: struct {
 	mouse_dy:             f32, // pixels/dpi (inches), up is positive
 }
 
+Mouse_Button :: enum {
+	LEFT,
+	MIDDLE,
+	RIGHT,
+}
+
 // Processes SDL events, updates input state, and calculates delta_time.
 // Call this at the very start of your game loop, before any game logic.
 poll_events :: proc(matchbox_info: ^MatchboxInfo) {
@@ -30,17 +36,22 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 		key.pressed = false
 		key.released = false
 	}
-	matchbox_info.input.mouse_dx = 0
-	matchbox_info.input.mouse_dy = 0
-	matchbox_info.input.left_click_pressed = false
-
-	for &key in matchbox_info.input.keys {
-		key.pressed = false
-		key.released = false
+	for &btn in matchbox_info.mouse.buttons {
+		btn.pressed = false
+		btn.released = false
 	}
 	matchbox_info.input.mouse_dx = 0
 	matchbox_info.input.mouse_dy = 0
 	matchbox_info.input.left_click_pressed = false
+
+	// Update absolute mouse position in logical screen space (matches where you draw).
+	{
+		raw_x, raw_y: f32
+		_ = sdl.GetMouseState(&raw_x, &raw_y)
+		scale := matchbox_info.draw_scale if matchbox_info.draw_scale > 0 else 1
+		matchbox_info.mouse.x = (raw_x - matchbox_info.draw_offset[0]) / scale
+		matchbox_info.mouse.y = (raw_y - matchbox_info.draw_offset[1]) / scale
+	}
 
 	event: sdl.Event
 	for sdl.PollEvent(&event) {
@@ -57,13 +68,31 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 		case .MOUSE_BUTTON_DOWN, .MOUSE_BUTTON_UP:
 			{
 				event := event.button
+
+				mb: Mouse_Button
+				valid := true
+				switch event.button {
+				case sdl.BUTTON_LEFT:   mb = .LEFT
+				case sdl.BUTTON_MIDDLE: mb = .MIDDLE
+				case sdl.BUTTON_RIGHT:  mb = .RIGHT
+				case:                   valid = false
+				}
+
 				if event.type == .MOUSE_BUTTON_DOWN {
+					if valid {
+						matchbox_info.mouse.buttons[mb].pressed = true
+						matchbox_info.mouse.buttons[mb].pressing = true
+					}
 					if event.button == sdl.BUTTON_RIGHT {
 						matchbox_info.input.pressing_right_click = true
 					} else if event.button == sdl.BUTTON_LEFT {
 						matchbox_info.input.left_click_pressed = true
 					}
 				} else if event.type == .MOUSE_BUTTON_UP {
+					if valid {
+						matchbox_info.mouse.buttons[mb].pressing = false
+						matchbox_info.mouse.buttons[mb].released = true
+					}
 					if event.button == sdl.BUTTON_RIGHT {
 						matchbox_info.input.pressing_right_click = false
 					}
@@ -106,6 +135,14 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 
 	last_ts := matchbox_info.now_ts
 	matchbox_info.now_ts = sdl.GetPerformanceCounter()
+
+	// Seconds elapsed since the previous poll_events, clamped so a slow/stalled
+	// frame can't teleport everything. Without this, delta_time stays 0 and the
+	// whole game appears frozen on the first frame.
+	matchbox_info.delta_time = min(
+		matchbox_info.max_delta_time,
+		f32(f64((matchbox_info.now_ts - last_ts) * 1000) / f64(matchbox_info.ts_freq)) / 1000.0,
+	)
 }
 
 set_escape_key :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) {
@@ -122,5 +159,17 @@ is_key_held :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
 
 is_key_released :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
 	return matchbox_info.input.keys[key].released
+}
+
+is_mouse_pressed :: proc(matchbox_info:^MatchboxInfo, button:Mouse_Button) -> bool {
+	return matchbox_info.mouse.buttons[button].pressed
+}
+
+is_mouse_held :: proc(matchbox_info:^MatchboxInfo, button:Mouse_Button) -> bool {
+	return matchbox_info.mouse.buttons[button].pressing
+}
+
+is_mouse_released :: proc(matchbox_info:^MatchboxInfo, button:Mouse_Button) -> bool {
+	return matchbox_info.mouse.buttons[button].released
 }
 

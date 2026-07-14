@@ -1,10 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM The updated gpu_compiler.exe transpiles a combined NoSL file (#vertex/#fragment)
-REM straight to SPIR-V, emitting output.<entry>.spv in the current directory. No
-REM glslangValidator step is needed anymore. It always names outputs "output.*", so we
-REM compile each shader in its own directory and rename to <name>.<stage>.spv.
+REM gpu_compiler.exe transpiles a NoSL shader straight to SPIR-V. The shader stage is
+REM inferred from the .vert/.frag/.comp infix in the filename, and the output is named
+REM <prefix>.<stage>.spv derived from the -out path (any extension on -out is stripped).
+REM So for test.vert.nosl we pass -out:...\test.vert.spv and get ...\test.vert.spv directly.
+REM NOTE: -out must include a directory component (an absolute path here), otherwise the
+REM compiler silently writes nothing.
 
 set COMPILER=%~dp0\compiler\gpu_compiler.exe
 
@@ -17,17 +19,11 @@ echo === Compiling NOSL shaders ===
 
 for /r %%f in (*.nosl) do (
     echo -- Compiling %%f
-    pushd "%%~dpf"
-    "%COMPILER%" "%%~nxf"
+    "%COMPILER%" "%%f" -out:"%%~dpnf.spv"
     if errorlevel 1 (
         echo ERROR: Failed to compile %%f
-        popd
         exit /b 1
     )
-    if exist output.vert.spv move /y output.vert.spv "%%~nf.vert.spv" >nul
-    if exist output.frag.spv move /y output.frag.spv "%%~nf.frag.spv" >nul
-    if exist output.comp.spv move /y output.comp.spv "%%~nf.comp.spv" >nul
-    popd
 )
 
 echo === Done ===

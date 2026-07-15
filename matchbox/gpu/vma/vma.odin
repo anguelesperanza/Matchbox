@@ -1,14 +1,5 @@
 package vma
 
-when ODIN_OS == .Linux {
-	@(require, extra_linker_flags = "-lstdc++")
-	foreign import stdcpp "system:stdc++"
-}
-when ODIN_OS == .Darwin {
-	@(require)
-	foreign import stdcpp "system:c++"
-}
-
 when ODIN_OS == .Windows {
 	when ODIN_ARCH == .amd64 {
 		@(extra_linker_flags="/NODEFAULTLIB:libcmt /NODEFAULTLIB:libucrt")
@@ -38,6 +29,18 @@ when ODIN_OS == .Windows {
 } else {
 	foreign import _lib_ "system:libvma"
 }
+
+when ODIN_OS == .Linux {
+	@(require, extra_linker_flags = "-lstdc++")
+	foreign import stdcpp "system:stdc++"
+}
+
+when ODIN_OS == .Darwin {
+	@(require)
+	foreign import stdcpp "system:c++"
+}
+
+
 
 // Vendor
 import vk "vendor:vulkan"

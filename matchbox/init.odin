@@ -42,9 +42,6 @@ init :: proc(title: string, width: i32, height: i32) -> MatchboxInfo {
 	matchbox_info.draw_scale    = 1
 	matchbox_info.draw_offset   = {0, 0}
 
-
-
-
 	gpu.swapchain_init_from_sdl(matchbox_info.window, 3)
 
 	matchbox_info.desc_pool  = gpu.desc_pool_create()
@@ -120,6 +117,9 @@ cleanup :: proc(matchbox_info: ^MatchboxInfo) {
 	gpu.cleanup()
 }
 
+// Originally was used to call gpu.wait_idle in main loop,
+// that has been moved to end_render. Leaving in for the time being
+// but may remove if uneeded
 wait_idle :: proc() {
 	gpu.wait_idle()
 }

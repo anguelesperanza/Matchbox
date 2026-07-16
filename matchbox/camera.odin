@@ -37,13 +37,13 @@ screen_dims :: proc(mbi: ^MatchboxInfo) -> [2]f32 {
 
 // Activates the camera transform for all subsequent draw calls.
 // Draw world-space sprites (players, enemies, tiles) between this and end_drawing_2d.
-begin_drawing_2d :: proc(camera: ^Camera) {
+begin_render_2d :: proc(camera: ^Camera) {
     camera.active = true
 }
 
 // Deactivates the camera transform.
 // Draw screen-space elements (UI, HUD, text) after this call.
-end_drawing_2d :: proc(camera: ^Camera) {
+end_render_2d :: proc(camera: ^Camera) {
     camera.active = false
 }
 

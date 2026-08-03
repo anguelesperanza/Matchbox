@@ -7,7 +7,7 @@ import sdl "vendor:sdl3"
 // Frame loop
 // -----------------------------------------------------------------------
 
-begin_render:: proc(matchbox_info: ^MatchboxInfo) {
+begin_drawing :: proc(matchbox_info: ^MatchboxInfo) {
 	old_window_w := matchbox_info.window_width
 	old_window_h := matchbox_info.window_height
 	sdl.GetWindowSize(matchbox_info.window, &matchbox_info.window_width, &matchbox_info.window_height)
@@ -53,7 +53,7 @@ begin_render:: proc(matchbox_info: ^MatchboxInfo) {
 	matchbox_info.frame_cmd = gpu.commands_begin(.Main)
 }
 
-end_render:: proc(matchbox_info: ^MatchboxInfo) {
+end_drawing :: proc(matchbox_info: ^MatchboxInfo) {
 	
 	gpu.wait_idle()
 		

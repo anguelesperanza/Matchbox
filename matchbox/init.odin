@@ -98,6 +98,9 @@ init :: proc(title: string, width: i32, height: i32) -> MatchboxInfo {
 }
 
 cleanup :: proc(matchbox_info: ^MatchboxInfo) {
+
+	gpu.wait_idle()
+	
 	gpu.semaphore_destroy(matchbox_info.frame_sem)
 	for &fa in matchbox_info.frame_arenas do gpu.arena_destroy(&fa)
 

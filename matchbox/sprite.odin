@@ -244,8 +244,21 @@ sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32 {
 
 // Selects a single tile from a sprite sheet by its column and row (0-indexed).
 // Also corrects sprite.size to one tile so the bounding box is right.
-sprite_set_frame :: proc(sprite: ^Sprite, col, row, sheet_cols, sheet_rows: int, tile_w, tile_h: f32) {
-    sprite.size  = {tile_w * sprite.scale, tile_h * sprite.scale}
-    sprite.uv_min = {f32(col)   / f32(sheet_cols), f32(row)   / f32(sheet_rows)}
-    sprite.uv_max = {f32(col+1) / f32(sheet_cols), f32(row+1) / f32(sheet_rows)}
+//
+// spacing: gap in pixels between adjacent tiles (e.g. 1 for a 1px grid line).
+// margin:  gap in pixels before the first tile (top-left border of the sheet).
+//
+// UVs are computed in pixel space from the sprite's own texture dimensions so
+// only the tile is sampled -- the spacing/margin is never included, which would
+// otherwise bleed the neighbouring gap into the tile's edges.
+sprite_set_frame :: proc(sprite: ^Sprite, col, row: int, tile_w, tile_h: f32, spacing: f32 = 0, margin: f32 = 0) {
+    tex_w := f32(sprite.gpu_texture.dimensions[0])
+    tex_h := f32(sprite.gpu_texture.dimensions[1])
+
+    px := margin + f32(col) * (tile_w + spacing)
+    py := margin + f32(row) * (tile_h + spacing)
+
+    sprite.size   = {tile_w * sprite.scale, tile_h * sprite.scale}
+    sprite.uv_min = {px            / tex_w, py            / tex_h}
+    sprite.uv_max = {(px + tile_w) / tex_w, (py + tile_h) / tex_h}
 }

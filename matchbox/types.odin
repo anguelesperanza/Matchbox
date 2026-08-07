@@ -126,6 +126,19 @@ MatchboxInfo :: struct {
 	running:       bool,     // false once the window is closed or escape is hit
 }
 
+// The one and only Matchbox state, filled in by init. Everything in the
+// package reads and writes this directly rather than taking it as an argument.
+//
+// Games are free to read it -- `matchbox.mbi.delta_time`, `matchbox.mbi.running`
+// -- or go through the accessors where one exists. A local alias also works if
+// the qualified name gets tiresome:
+//
+//	mbi := &matchbox.mbi
+//
+// Consequence worth knowing: one global means one window. Matchbox cannot run
+// two independent instances in a process.
+mbi: MatchboxInfo
+
 // -----------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------

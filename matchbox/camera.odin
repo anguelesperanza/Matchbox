@@ -28,16 +28,21 @@ end_drawing_2d :: proc() {
 }
 
 // Returns the mouse position in world space, accounting for camera position and zoom.
-// Use this instead of mbi.input.mouse when clicking on world objects.
-// mbi.input.mouse gives logical screen-space coordinates for UI.
+// Use this instead of get_mouse_position when clicking on world objects;
+// get_mouse_position gives logical screen-space coordinates for UI.
+//
+// This is the inverse of the camera branch of screen_pos, so it only applies
+// the transform while the camera is active -- that is, between begin_drawing_2d
+// and end_drawing_2d. Called outside that pair it returns the screen position
+// unchanged, which is the same thing when no camera is in play.
 get_mouse_world_pos :: proc() -> [2]f32 {
 	if !mbi.camera.active {
-		return {mbi.input.mouse_dx, mbi.input.mouse_dy}
+		return get_mouse_position()
 	}
 	screen_center := [2]f32{cast(f32)mbi.width * 0.5, cast(f32)mbi.height * 0.5}
 	zoom: f32 = 1
 	if mbi.camera.zoom > 0 {
 		zoom = mbi.camera.zoom
 	}
-	return ({mbi.input.mouse_dx, mbi.input.mouse_dy} - screen_center) / zoom + mbi.camera.position
+	return (get_mouse_position() - screen_center) / zoom + mbi.camera.position
 }

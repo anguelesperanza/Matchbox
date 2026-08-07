@@ -8,6 +8,17 @@ areas of improvement while trying to create them.
 
 # Not Started
 
+## Remove / Reduce AI Code
+
+While I wrote a chunk of this, so did Claude. I'd like to
+reduce the AI code as I make breaking api changes,
+optimazations, etc
+
+## Reduce System Usage
+
+Basic Init Window example uses about 53mb of ram.
+Need to compare to other frameworks to see if that's a lot?
+
 ## Removing mbi
 
 `mbi` is a main scoped struct that contains everything Matchbox needs to run effectively.

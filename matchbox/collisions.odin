@@ -19,3 +19,20 @@ sprite_to_index_by_value :: proc(x:f32, y:f32, width:f32) -> (index:int) {
 	index = int(y * width + x)
 	return
 }
+
+mouse_over_sprite :: proc(matchbox_info:^MatchboxInfo, sprite:Sprite) -> bool {
+	mouse_x := matchbox_info.mouse.x
+	mouse_y := matchbox_info.mouse.y
+	sprite_x := sprite.position.x
+	sprite_y := sprite.position.y
+	sprite_width := sprite.size.x
+	sprite_height := sprite.size.y
+
+	if mouse_x >= sprite_x && mouse_x <= sprite_x + sprite_width {
+		if mouse_y >= sprite_y && mouse_y <= sprite_y + sprite_height {
+			return true
+		}
+	}
+	return false
+}
+

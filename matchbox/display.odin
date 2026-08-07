@@ -31,13 +31,13 @@ Display :: struct {
 // Logical resolution / screen helpers
 // -----------------------------------------------------------------------
 
-set_logical_size :: proc(mbi: ^MatchboxInfo, width: i32, height: i32) {
+set_logical_size :: proc(width: i32, height: i32) {
     mbi.width     = width
     mbi.height    = height
     mbi.fixed_res = true
 }
 
-screen_pos :: proc(mbi: ^MatchboxInfo, pos: [2]f32) -> [2]f32 {
+screen_pos :: proc(pos: [2]f32) -> [2]f32 {
 	if mbi.camera.active {
 		screen_center := [2]f32{cast(f32)mbi.width * 0.5, cast(f32)mbi.height * 0.5}
 		zoom: f32 = 1
@@ -50,10 +50,10 @@ screen_pos :: proc(mbi: ^MatchboxInfo, pos: [2]f32) -> [2]f32 {
 	return pos * mbi.draw_scale + mbi.draw_offset
 }
 
-screen_size :: proc(mbi: ^MatchboxInfo, size: [2]f32) -> [2]f32 {
+screen_size :: proc(size: [2]f32) -> [2]f32 {
 	return size * mbi.draw_scale
 }
 
-screen_dims :: proc(mbi: ^MatchboxInfo) -> [2]f32 {
+screen_dims :: proc() -> [2]f32 {
 	return {cast(f32)mbi.window_width, cast(f32)mbi.window_height}
 }

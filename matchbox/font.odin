@@ -18,7 +18,7 @@ Font :: struct {
 	atlas_size:  i32,
 }
 
-load_font :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte, font_size: f32) -> Font {
+load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	font: Font
 	font.atlas_size = FONT_ATLAS_SIZE
 
@@ -70,34 +70,34 @@ load_font :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte, font_size: f32) -
 	gpu.queue_submit(.Main, {cmd})
 	gpu.queue_wait_idle(.Main)
 
-	font.tex_id     = gpu.desc_pool_alloc_texture(&matchbox_info.renderer.desc_pool, gpu.texture_view_descriptor(font.gpu_texture, {}))
-	font.sampler_id = gpu.desc_pool_alloc_sampler(&matchbox_info.renderer.desc_pool, gpu.sampler_descriptor({min_filter = .Linear, mag_filter = .Linear}))
+	font.tex_id     = gpu.desc_pool_alloc_texture(&mbi.renderer.desc_pool, gpu.texture_view_descriptor(font.gpu_texture, {}))
+	font.sampler_id = gpu.desc_pool_alloc_sampler(&mbi.renderer.desc_pool, gpu.sampler_descriptor({min_filter = .Linear, mag_filter = .Linear}))
 
 	return font
 }
 
-destroy_font :: proc(matchbox_info: ^MatchboxInfo, font: ^Font) {
+destroy_font :: proc(font: ^Font) {
 	destroy_mesh(&font.mesh)
 }
 
-draw_text_i64 :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
+draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_int(buf[:], integer, 10)
-    draw_text_string(matchbox_info, font, result[:], x, y, color)
+    draw_text_string(font, result[:], x, y, color)
 }
 
 
-draw_text_float :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) where intrinsics.type_is_float(T) {
+draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) where intrinsics.type_is_float(T) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
-    draw_text_string(matchbox_info, font, result[1:], x, y, color)
+    draw_text_string(font, result[1:], x, y, color)
 }
 
 
-draw_text_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.font_vert, matchbox_info.renderer.shaders.font_frag)
-	set_alpha_blend(matchbox_info.renderer.frame_cmd)
+draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
+	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
+	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.font_vert, mbi.renderer.shaders.font_frag)
+	set_alpha_blend(mbi.renderer.frame_cmd)
 
 	cursor_x := x
 	cursor_y := y
@@ -113,12 +113,12 @@ draw_text_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontVertData)
+		verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontVertData)
 		verts_data.cpu^ = {
 			verts    = font.verts_local.gpu.ptr,
-			position = screen_pos(matchbox_info, pos),
-			size     = screen_size(matchbox_info, size),
-			screen   = screen_dims(matchbox_info),
+			position = screen_pos(pos),
+			size     = screen_size(size),
+			screen   = screen_dims(),
 			rotation = 0,
 			flip_x   = false,
 			flip_y   = false,
@@ -126,14 +126,14 @@ draw_text_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontFragData)
+		frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontFragData)
 		frag_data.cpu^ = {
 			texture_a = font.tex_id,
 			sampler   = font.sampler_id,
 			color     = color,
 		}
 
-		gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
+		gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
 	}
 }
 
@@ -147,10 +147,10 @@ draw_text :: proc {
 // draw_scale is NOT applied.  Use this for HUD / UI text when set_logical_size
 // is active, so the font renders at its native baked size instead of being
 // upscaled by the logical-resolution multiplier.
-draw_text_ui_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.font_vert, matchbox_info.renderer.shaders.font_frag)
-	set_alpha_blend(matchbox_info.renderer.frame_cmd)
+draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
+	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
+	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.font_vert, mbi.renderer.shaders.font_frag)
+	set_alpha_blend(mbi.renderer.frame_cmd)
 
 	cursor_x := x
 	cursor_y := y
@@ -166,12 +166,12 @@ draw_text_ui_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: str
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontVertData)
+		verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontVertData)
 		verts_data.cpu^ = {
 			verts    = font.verts_local.gpu.ptr,
 			position = pos,
 			size     = size,
-			screen   = screen_dims(matchbox_info),
+			screen   = screen_dims(),
 			rotation = 0,
 			flip_x   = false,
 			flip_y   = false,
@@ -179,27 +179,27 @@ draw_text_ui_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: str
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontFragData)
+		frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontFragData)
 		frag_data.cpu^ = {
 			texture_a = font.tex_id,
 			sampler   = font.sampler_id,
 			color     = color,
 		}
 
-		gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
+		gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
 	}
 }
 
-draw_text_ui_int :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
+draw_text_ui_int :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_int(buf[:], integer, 10)
-    draw_text_ui_string(matchbox_info, font, result[:], x, y, color)
+    draw_text_ui_string(font, result[:], x, y, color)
 }
 
-draw_text_ui_f32 :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, float: f32, x: f32, y: f32, color: [4]f32) {
+draw_text_ui_f32 :: proc(font: ^Font, float: f32, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
-    draw_text_ui_string(matchbox_info, font, result[1:], x, y, color)
+    draw_text_ui_string(font, result[1:], x, y, color)
 }
 
 draw_text_ui :: proc {

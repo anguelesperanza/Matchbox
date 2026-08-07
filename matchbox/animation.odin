@@ -25,18 +25,18 @@ AnimatedSprite :: struct {
 	accumulator:   f32,
 }
 
-create_animated_sprite :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1) -> AnimatedSprite {
+create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1) -> AnimatedSprite {
     sprite: AnimatedSprite
-    sprite.clip  = load_animation(matchbox_info, bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
+    sprite.clip  = load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
     sprite.scale = scale
     sprite.size  = {frame_w * scale, frame_h * scale}
     sprite.pivot = {0.5, 0.5}
     return sprite
 }
 
-load_animation :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> AnimationClip {
+load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> AnimationClip {
 	return AnimationClip{
-		mesh              = create_mesh(matchbox_info, bytes),
+		mesh              = create_mesh(bytes),
 		cols              = cols,
 		rows              = rows,
 		frame_count       = frame_count,
@@ -46,7 +46,7 @@ load_animation :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte, frame_w: f32
 	}
 }
 
-destroy_animation_clip :: proc(matchbox_info: ^MatchboxInfo, clip: ^AnimationClip) {
+destroy_animation_clip :: proc(clip: ^AnimationClip) {
 	destroy_mesh(&clip.mesh)
 }
 
@@ -93,18 +93,18 @@ update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
 }
 
 
-draw_animated_sprite :: proc(matchbox_info: ^MatchboxInfo, sprite: AnimatedSprite) {
-	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.vertex, matchbox_info.renderer.shaders.fragment)
+draw_animated_sprite :: proc(sprite: AnimatedSprite) {
+	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
+	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.vertex, mbi.renderer.shaders.fragment)
 
 	draw_center := sprite.position + sprite.pivot * sprite.size + sprite.clip.offset
 
-	verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, VertData)
+	verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, VertData)
 	verts_data.cpu^ = {
 		verts    = sprite.clip.verts_local.gpu.ptr,
-		position = screen_pos(matchbox_info, draw_center),
-		size     = screen_size(matchbox_info, sprite.size),
-		screen   = screen_dims(matchbox_info),
+		position = screen_pos(draw_center),
+		size     = screen_size(sprite.size),
+		screen   = screen_dims(),
 		uv_min   = sprite.uv_min,
 		uv_max   = sprite.uv_max,
 		rotation = sprite.rotation,
@@ -112,12 +112,12 @@ draw_animated_sprite :: proc(matchbox_info: ^MatchboxInfo, sprite: AnimatedSprit
 		flip_y   = cast(b32)sprite.flip_y,
 	}
 
-	frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FragData)
+	frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FragData)
 	frag_data.cpu.texture_a = sprite.clip.tex_id
 	frag_data.cpu.sampler   = sprite.clip.sampler_id
 	frag_data.cpu.flip_x    = false
 	frag_data.cpu.flip_y    = false
 
-	set_alpha_blend(matchbox_info.renderer.frame_cmd)
-	gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, sprite.clip.indices_local)
+	set_alpha_blend(mbi.renderer.frame_cmd)
+	gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, sprite.clip.indices_local)
 }

@@ -19,6 +19,6 @@ Clock :: struct {
 
 // Limits the frame rate to `fps` frames per second by sleeping in poll_events.
 // Pass 0 to remove the limit (default).
-set_target_fps :: proc(mbi: ^MatchboxInfo, fps: i32) {
+set_target_fps :: proc(fps: i32) {
 	mbi.target_frame_time = 1.0 / f32(fps) if fps > 0 else 0
 }

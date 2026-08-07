@@ -30,7 +30,7 @@ end_drawing_2d :: proc(camera: ^Camera) {
 // Returns the mouse position in world space, accounting for camera position and zoom.
 // Use this instead of mbi.input.mouse when clicking on world objects.
 // mbi.input.mouse gives logical screen-space coordinates for UI.
-get_mouse_world_pos :: proc(mbi: ^MatchboxInfo) -> [2]f32 {
+get_mouse_world_pos :: proc() -> [2]f32 {
 	if !mbi.camera.active {
 		return {mbi.input.mouse_dx, mbi.input.mouse_dy}
 	}

@@ -85,7 +85,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		gpu.queue_wait_idle(.Main)
 	}
 
-	mbi.font = load_font(&mbi, #load("fonts/Silver.ttf"), 32)
+	mbi.font = load_font(#load("fonts/Silver.ttf"), 32)
 
 	mbi.camera = Camera{
 		position = {f32(width) * 0.5, f32(height) * 0.5},
@@ -93,7 +93,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		active   = false,
 	}
 
-	set_logical_size(&mbi, width, height)
+	set_logical_size(width, height)
 }
 
 // Tears down everything init brought up. Call once, after the game loop ends.
@@ -114,7 +114,7 @@ cleanup :: proc() {
 	gpu.mem_free(mbi.renderer.rect_verts)
 	gpu.mem_free(mbi.renderer.rect_indices)
 
-	destroy_font(&mbi, &mbi.font)
+	destroy_font(&mbi.font)
 
 	gpu.desc_pool_destroy(&mbi.renderer.desc_pool)
 	gpu.cleanup()

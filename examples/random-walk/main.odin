@@ -4,7 +4,7 @@ import "core:fmt"
 import "../../../matchbox/matchbox"
 
 main :: proc() {
-	mbi := matchbox.init("Random Walk", 600, 600)
+	matchbox.init("Random Walk", 600, 600)
 
 	size:[2]int = {200, 200} // The area the random walk will traverse
 	start:[2]f32 = {300, 300} // starting position based on window size
@@ -16,24 +16,24 @@ main :: proc() {
 	cols := size.x / cast(int)stride
 	rows := size.y / cast(int)stride
 
-	for mbi.running {
-		matchbox.poll_events(&mbi)
-		matchbox.begin_drawing(&mbi)
-		matchbox.clear_background(&mbi, matchbox.BLACK)
+	for matchbox.mbi.running {
+		matchbox.poll_events()
+		matchbox.begin_drawing()
+		matchbox.clear_background(matchbox.BLACK)
 
 		for row in 0 ..< rows {
 			for col in 0..< cols {
 				index := row * cols + col
 				cell := level[index]
 				if cell == 1 { 
-					matchbox.draw_rect(&mbi,{{f32(col) * stride, f32(row) * stride}, {stride, stride}, matchbox.PUMPKIN_ORANGE, 0})
+					matchbox.draw_rect({{f32(col) * stride, f32(row) * stride}, {stride, stride}, matchbox.PUMPKIN_ORANGE, 0})
 				}
 
 			}
 		}
-		matchbox.end_drawing(&mbi)
+		matchbox.end_drawing()
 	}
 
 	matchbox.wait_idle()
-	matchbox.cleanup(&mbi)
+	matchbox.cleanup()
 }

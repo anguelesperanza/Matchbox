@@ -16,7 +16,7 @@ main :: proc() {
 	cols := size.x / cast(int)stride
 	rows := size.y / cast(int)stride
 
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 		matchbox.poll_events()
 		matchbox.begin_drawing()
 		matchbox.clear_background(matchbox.BLACK)

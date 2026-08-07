@@ -124,6 +124,7 @@ MatchboxInfo :: struct {
 	camera:        Camera,
 	font:          Font,     // default font, loaded by init
 	running:       bool,     // false once the window is closed or escape is hit
+	initialized:   bool,     // set by init; guards against using a zeroed mbi
 }
 
 // The one and only Matchbox state, filled in by init. Everything in the

@@ -108,23 +108,23 @@ main :: proc() {
 	start_dir = rand.int_range(0, 2)
 	if start_dir == 0 {ball.velocity.y = -5} else {ball.velocity.y = 5}
 
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 
 		matchbox.poll_events()
 		
 
 		if matchbox.is_key_held(.W) {
-			player.rect.position.y -= player.velocity * player.speed * matchbox.mbi.delta_time
+			player.rect.position.y -= player.velocity * player.speed * matchbox.delta_time()
 		}
 		if matchbox.is_key_held(.S) {
-			player.rect.position.y += player.velocity * player.speed * matchbox.mbi.delta_time
+			player.rect.position.y += player.velocity * player.speed * matchbox.delta_time()
 		}
 
 		if player.rect.position.y - (player.rect.size.y / 2) < 0 do player.rect.position.y = 0 + (player.rect.size.y / 2)
 		if player.rect.position.y + (player.rect.size.y / 2) > cast(f32)win_height do player.rect.position.y = cast(f32)win_height - (player.rect.size.y / 2) 
 
-		ball.rect.position.x += ball.velocity.x * ball.speed * matchbox.mbi.delta_time
-		ball.rect.position.y += ball.velocity.y * ball.speed * matchbox.mbi.delta_time
+		ball.rect.position.x += ball.velocity.x * ball.speed * matchbox.delta_time()
+		ball.rect.position.y += ball.velocity.y * ball.speed * matchbox.delta_time()
 
 		ball.velocity = ball_collide_wall(ball, win_height)
 		ball.velocity = ball_collide_paddle(ball, player, enemy)
@@ -154,7 +154,7 @@ main :: proc() {
 		if ball.rect.position.y > enemy.rect.position.y do enemy.velocity = 5
 		if ball.rect.position.y < enemy.rect.position.y do enemy.velocity = -5
 
-		enemy.rect.position.y += enemy.velocity * enemy.speed * matchbox.mbi.delta_time
+		enemy.rect.position.y += enemy.velocity * enemy.speed * matchbox.delta_time()
 
 		player_buf:[4]u8
 		enemy_buf:[4]u8

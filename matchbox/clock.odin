@@ -17,6 +17,12 @@ Clock :: struct {
 	target_frame_time: f32, // 0 = unlimited; set via set_target_fps
 }
 
+// Seconds elapsed during the previous frame. Multiply per-frame movement by
+// this so speeds stay the same regardless of frame rate.
+delta_time :: proc() -> f32 {
+	return mbi.delta_time
+}
+
 // Limits the frame rate to `fps` frames per second by sleeping in poll_events.
 // Pass 0 to remove the limit (default).
 set_target_fps :: proc(fps: i32) {

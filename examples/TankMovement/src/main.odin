@@ -21,7 +21,7 @@ main :: proc() {
 	tank.body.speed = 70
 	tank.rotation_speed = 2
 
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 
 		matchbox.poll_events()
 		
@@ -29,23 +29,23 @@ main :: proc() {
 		forward := matchbox.sprite_forward_by_rotation(tank.body)
 
 		if matchbox.is_key_held(.W) {
-			tank.body.position += forward * tank.body.speed * matchbox.mbi.delta_time
+			tank.body.position += forward * tank.body.speed * matchbox.delta_time()
 		}
 
 		if matchbox.is_key_held(.S) {
-			tank.body.position -= forward * tank.body.speed * matchbox.mbi.delta_time
+			tank.body.position -= forward * tank.body.speed * matchbox.delta_time()
 		}
 
 		if matchbox.is_key_held(.A) {
-			tank.body.rotation -= tank.rotation_speed * matchbox.mbi.delta_time
+			tank.body.rotation -= tank.rotation_speed * matchbox.delta_time()
 		}
 
 		if matchbox.is_key_held(.D) {
-			tank.body.rotation += tank.rotation_speed * matchbox.mbi.delta_time
+			tank.body.rotation += tank.rotation_speed * matchbox.delta_time()
 		}
 
 		if matchbox.is_mouse_pressed(.RIGHT) {
-			tank.look_at_dest = {matchbox.mbi.input.mouse.x, matchbox.mbi.input.mouse.y}
+			tank.look_at_dest = matchbox.get_mouse_position()
 			tank.cannon.rotation = matchbox.look_at(tank.cannon, tank.look_at_dest)
 		}
 

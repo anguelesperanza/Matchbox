@@ -6,7 +6,7 @@ main :: proc() {
 
 	matchbox.init("Create Window", 1080, 720)
 
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 
 		matchbox.poll_events()
 		

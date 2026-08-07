@@ -4,7 +4,7 @@ import "../../matchbox"
 
 main :: proc() {
 	matchbox.init("Draw Text", 1920, 1080)
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 
 		matchbox.poll_events()
 		

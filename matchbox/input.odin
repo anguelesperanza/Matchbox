@@ -42,6 +42,8 @@ Input :: struct {
 // Processes SDL events, updates input state, and calculates delta_time.
 // Call this at the very start of your game loop, before any game logic.
 poll_events :: proc() {
+	ensure(mbi.initialized, "matchbox.init must be called before poll_events")
+
 	for &key in mbi.input.keys {
 		key.pressed = false
 		key.released = false
@@ -153,6 +155,13 @@ poll_events :: proc() {
 		mbi.max_delta_time,
 		f32(f64((mbi.now_ts - last_ts) * 1000) / f64(mbi.ts_freq)) / 1000.0,
 	)
+}
+
+// Mouse position in logical screen space, matching the coordinates you draw
+// with. For world-space coordinates under an active camera, use
+// get_mouse_world_pos instead.
+get_mouse_position :: proc() -> [2]f32 {
+	return {mbi.input.mouse.x, mbi.input.mouse.y}
 }
 
 set_escape_key :: proc(key:sdl.Scancode) {

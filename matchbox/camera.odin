@@ -17,14 +17,14 @@ Camera :: struct {
 
 // Activates the camera transform for all subsequent draw calls.
 // Draw world-space sprites (players, enemies, tiles) between this and end_drawing_2d.
-begin_drawing_2d :: proc(camera: ^Camera) {
-    camera.active = true
+begin_drawing_2d :: proc() {
+    mbi.camera.active = true
 }
 
 // Deactivates the camera transform.
 // Draw screen-space elements (UI, HUD, text) after this call.
-end_drawing_2d :: proc(camera: ^Camera) {
-    camera.active = false
+end_drawing_2d :: proc() {
+    mbi.camera.active = false
 }
 
 // Returns the mouse position in world space, accounting for camera position and zoom.

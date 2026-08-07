@@ -8,7 +8,7 @@ main :: proc() {
 
 	font := matchbox.load_font(#load("new_hiscore.ttf"), 64)
 
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 		matchbox.poll_events()
 		
 		matchbox.begin_drawing()

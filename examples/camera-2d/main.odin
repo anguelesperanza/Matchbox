@@ -14,21 +14,21 @@ main :: proc () {
 	sheriff.position = {1000, 0}
 
 
-	for matchbox.mbi.running {
+	for matchbox.is_running() {
 
 		matchbox.poll_events()
 
 		if matchbox.is_key_held(.D) {
-			desperado.position.x += desperado.velocity.x * desperado.speed * matchbox.mbi.delta_time
+			desperado.position.x += desperado.velocity.x * desperado.speed * matchbox.delta_time()
 		}
 		if matchbox.is_key_held(.A) {
-			desperado.position.x -= desperado.velocity.x * desperado.speed * matchbox.mbi.delta_time
+			desperado.position.x -= desperado.velocity.x * desperado.speed * matchbox.delta_time()
 		}
 		if matchbox.is_key_held(.S) {
-			desperado.position.y += desperado.velocity.y * desperado.speed * matchbox.mbi.delta_time
+			desperado.position.y += desperado.velocity.y * desperado.speed * matchbox.delta_time()
 		}
 		if matchbox.is_key_held(.W) {
-			desperado.position.y -= desperado.velocity.y * desperado.speed * matchbox.mbi.delta_time
+			desperado.position.y -= desperado.velocity.y * desperado.speed * matchbox.delta_time()
 		}
 
 		matchbox.mbi.camera.position = matchbox.sprite_center(desperado)
@@ -36,10 +36,10 @@ main :: proc () {
 		matchbox.begin_drawing()
 		matchbox.clear_background(matchbox.LIME_GREEN)
 
-			matchbox.begin_drawing_2d(&matchbox.mbi.camera)
+			matchbox.begin_drawing_2d()
 				matchbox.draw_sprite(sheriff)
 				matchbox.draw_sprite(desperado)
-			matchbox.end_drawing_2d(&matchbox.mbi.camera)
+			matchbox.end_drawing_2d()
 
 			matchbox.draw_text(&matchbox.mbi.font, "Text is here", 10, 20, matchbox.WHITE)
 

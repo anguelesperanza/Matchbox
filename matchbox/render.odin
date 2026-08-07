@@ -34,6 +34,8 @@ Renderer :: struct {
 // -----------------------------------------------------------------------
 
 begin_drawing :: proc() {
+	ensure(mbi.initialized, "matchbox.init must be called before begin_drawing")
+
 	old_window_w := mbi.window_width
 	old_window_h := mbi.window_height
 	sdl.GetWindowSize(mbi.window, &mbi.window_width, &mbi.window_height)

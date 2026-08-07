@@ -94,6 +94,14 @@ init :: proc(title: string, width: i32, height: i32) {
 	}
 
 	set_logical_size(width, height)
+
+	mbi.initialized = true
+}
+
+// True until the window is closed or the escape key is pressed. The usual
+// shape of a game loop is `for matchbox.is_running() { ... }`.
+is_running :: proc() -> bool {
+	return mbi.running
 }
 
 // Tears down everything init brought up. Call once, after the game loop ends.

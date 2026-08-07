@@ -4,18 +4,18 @@ import "../../matchbox"
 
 main :: proc() {
 
-	mbi := matchbox.init("Create Window", 1080, 720)
+	matchbox.init("Create Window", 1080, 720)
 
-	for mbi.running {
+	for matchbox.is_running() {
 
-		matchbox.poll_events(&mbi)
+		matchbox.poll_events()
 		
-		matchbox.begin_drawing(&mbi)
-		matchbox.clear_background(&mbi, matchbox.CORNFLOWER_BLUE)
-		matchbox.end_drawing(&mbi)
+		matchbox.begin_drawing()
+		matchbox.clear_background(matchbox.CORNFLOWER_BLUE)
+		matchbox.end_drawing()
 	}
 	
 	matchbox.wait_idle()
-	matchbox.cleanup(&mbi)
+	matchbox.cleanup()
 	
 }

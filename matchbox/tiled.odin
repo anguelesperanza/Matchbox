@@ -160,7 +160,7 @@ tiled_resolve_y_collision :: proc(body: ^Body, collisions: []TiledObjectLayer, v
 
 /*Draw tiled layer to the screen.
 NEEDS IMPROVEMENT: need to add batch drawing once I learn how*/
-draw_tiled_layer :: proc(matchbox_info: ^MatchboxInfo, layer:TiledLayer, tileset:Sprite, tile_width:int, tile_height:int) {
+draw_tiled_layer :: proc(layer:TiledLayer, tileset:Sprite, tile_width:int, tile_height:int) {
 
 	offset:[2]f32 = {cast(f32)layer.x, cast(f32)layer.y} // get the initial x,y pos for the layer to know where to draw
 	
@@ -192,7 +192,7 @@ draw_tiled_layer :: proc(matchbox_info: ^MatchboxInfo, layer:TiledLayer, tileset
 		t.uv_min = {src_x / (tileset.size.x / tileset.scale), src_y / (tileset.size.y / tileset.scale)}
 		t.uv_max = {(src_x + cast(f32)tile_width) / (tileset.size.x / tileset.scale ), (src_y + cast(f32)tile_height) / (tileset.size.y / tileset.scale)}
 
-		draw_sprite(matchbox_info, t)
+		draw_sprite(t)
 
 		offset.x += 1
 	}
@@ -208,11 +208,11 @@ and layers hidden in Tiled are skipped.
 Tile width/height are taken from the level, so callers don't have to pass them.
 Use this instead of calling draw_tiled_layer per layer to guarantee the in-game
 layering matches what you see in the Tiled editor.*/
-draw_tiled_layers :: proc(matchbox_info: ^MatchboxInfo, level: Tiled, tileset: Sprite) {
+draw_tiled_layers :: proc(level: Tiled, tileset: Sprite) {
 	for layer in level.layers {
 		if layer.type != "tilelayer" do continue
 		if !layer.visible do continue
-		draw_tiled_layer(matchbox_info, layer, tileset, level.tilewidth, level.tileheight)
+		draw_tiled_layer(layer, tileset, level.tilewidth, level.tileheight)
 	}
 }
 

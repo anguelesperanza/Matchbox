@@ -69,7 +69,7 @@ main :: proc() {
 	win_width:i32 = 1080
 	win_height:i32 = 720
 
-	mbi := matchbox.init("Pong", win_width, win_height)
+	matchbox.init("Pong", win_width, win_height)
 
 	player:Paddle = {
 		rect = {
@@ -100,7 +100,7 @@ main :: proc() {
 		speed = 75,
 	}
 
-	font := matchbox.load_font(&mbi, #load("new_hiscore.ttf"), 64)
+	font := matchbox.load_font(#load("new_hiscore.ttf"), 64)
 	
 
 	start_dir := rand.int_range(0, 2)
@@ -108,23 +108,23 @@ main :: proc() {
 	start_dir = rand.int_range(0, 2)
 	if start_dir == 0 {ball.velocity.y = -5} else {ball.velocity.y = 5}
 
-	for mbi.running {
+	for matchbox.is_running() {
 
-		matchbox.poll_events(&mbi)
+		matchbox.poll_events()
 		
 
-		if matchbox.is_key_held(&mbi, .W) {
-			player.rect.position.y -= player.velocity * player.speed * mbi.delta_time
+		if matchbox.is_key_held(.W) {
+			player.rect.position.y -= player.velocity * player.speed * matchbox.delta_time()
 		}
-		if matchbox.is_key_held(&mbi, .S) {
-			player.rect.position.y += player.velocity * player.speed * mbi.delta_time
+		if matchbox.is_key_held(.S) {
+			player.rect.position.y += player.velocity * player.speed * matchbox.delta_time()
 		}
 
 		if player.rect.position.y - (player.rect.size.y / 2) < 0 do player.rect.position.y = 0 + (player.rect.size.y / 2)
 		if player.rect.position.y + (player.rect.size.y / 2) > cast(f32)win_height do player.rect.position.y = cast(f32)win_height - (player.rect.size.y / 2) 
 
-		ball.rect.position.x += ball.velocity.x * ball.speed * mbi.delta_time
-		ball.rect.position.y += ball.velocity.y * ball.speed * mbi.delta_time
+		ball.rect.position.x += ball.velocity.x * ball.speed * matchbox.delta_time()
+		ball.rect.position.y += ball.velocity.y * ball.speed * matchbox.delta_time()
 
 		ball.velocity = ball_collide_wall(ball, win_height)
 		ball.velocity = ball_collide_paddle(ball, player, enemy)
@@ -154,24 +154,24 @@ main :: proc() {
 		if ball.rect.position.y > enemy.rect.position.y do enemy.velocity = 5
 		if ball.rect.position.y < enemy.rect.position.y do enemy.velocity = -5
 
-		enemy.rect.position.y += enemy.velocity * enemy.speed * mbi.delta_time
+		enemy.rect.position.y += enemy.velocity * enemy.speed * matchbox.delta_time()
 
 		player_buf:[4]u8
 		enemy_buf:[4]u8
 
 
-		matchbox.begin_drawing(&mbi)
-		matchbox.clear_background(&mbi)
-		matchbox.draw_text(&mbi, &font, strconv.write_int(player_buf[:], player.score, 10), f32(win_width / 2 - 64), f32(win_height / 2), {1, 1, 1, 1})
-		matchbox.draw_text(&mbi, &font, strconv.write_int(player_buf[:], enemy.score, 10), f32(win_width / 2 + 64), f32(win_height / 2), {1, 1, 1, 1})
+		matchbox.begin_drawing()
+		matchbox.clear_background()
+		matchbox.draw_text(&font, strconv.write_int(player_buf[:], player.score, 10), f32(win_width / 2 - 64), f32(win_height / 2), {1, 1, 1, 1})
+		matchbox.draw_text(&font, strconv.write_int(player_buf[:], enemy.score, 10), f32(win_width / 2 + 64), f32(win_height / 2), {1, 1, 1, 1})
 	
-		matchbox.draw_rect(&mbi, player.rect)
-		matchbox.draw_rect(&mbi, enemy.rect)
-		matchbox.draw_rect(&mbi, ball.rect)
-		matchbox.end_drawing(&mbi)
+		matchbox.draw_rect(player.rect)
+		matchbox.draw_rect(enemy.rect)
+		matchbox.draw_rect(ball.rect)
+		matchbox.end_drawing()
 	}
 
-	matchbox.destroy_font(&mbi, &font)
+	matchbox.destroy_font(&font)
 	matchbox.wait_idle()
-	matchbox.cleanup(&mbi)
+	matchbox.cleanup()
 }

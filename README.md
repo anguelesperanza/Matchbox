@@ -21,6 +21,51 @@ Matchbox is a **WIP** game framework for making video games; built on top of the
 ## How to use
 Copy the `matchbox` folder to your project directory and import it
 
+```odin
+package game
+
+import "matchbox"
+
+main :: proc() {
+	matchbox.init("My Game", 1280, 720)
+
+	player := matchbox.create_sprite(#load("player.png"))
+
+	for matchbox.is_running() {
+		matchbox.poll_events()
+
+		if matchbox.is_key_held(.D) {
+			player.position.x += 200 * matchbox.delta_time()
+		}
+
+		matchbox.begin_drawing()
+		matchbox.clear_background(matchbox.CORNFLOWER_BLUE)
+		matchbox.draw_sprite(player)
+		matchbox.end_drawing()
+	}
+
+	matchbox.destroy_sprite(&player)
+	matchbox.cleanup()
+}
+```
+
+### State
+Matchbox keeps everything it needs in one global, `matchbox.mbi`, so no state has
+to be passed between procedures. It is grouped by subsystem -- `display`, `clock`,
+`renderer`, `input`, `camera` -- and the fields games reach for most often are
+promoted to the top, so `mbi.delta_time` and `mbi.width` work directly while the
+internals stay behind `mbi.renderer`.
+
+Read it wherever you like (`matchbox.mbi.camera.position = ...`), or take a local
+alias if the qualified name gets tiresome:
+
+```odin
+mbi := &matchbox.mbi
+```
+
+One global means one window: Matchbox cannot run two independent instances in a
+process.
+
 ### Linux
 Build `SDL3` on linux (Min. 3.4.2)
 call `make -C {path to Odin/vendor/stb/src}` to build stb on linux

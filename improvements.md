@@ -19,17 +19,50 @@ optimazations, etc
 Basic Init Window example uses about 53mb of ram.
 Need to compare to other frameworks to see if that's a lot?
 
-## Removing mbi
-
-`mbi` is a main scoped struct that contains everything Matchbox needs to run effectively.
-While added originally to make everything explicit and clear, having to type `&mbi` everywhere
-is starting to hurt. Need to look into making the struct itself global and calling that where `mbi`
-is needed as a procedure argument instead of passing it.
-
 ## Procedure Groups
 
 `destroy` procedure group so individual procedures do not need to be called
 
+## Fixed Resolution Is Always On
+
+`init` ends by calling `set_logical_size`, which unconditionally sets `fixed_res = true`.
+So every window gets letterboxed whether or not a logical resolution was asked for.
+Should probably only turn on when the user actually calls `set_logical_size` themselves.
+
+## Redundant Input Flags
+
+`Input.left_click_pressed` and `Input.pressing_right_click` say the same thing as
+`mbi.input.mouse.buttons[.LEFT].pressed` and `[.RIGHT].pressing`. Two ways to ask the
+same question, and only one of them generalises to the middle button. Fold them away.
+
+## get_mouse_world_pos Only Works While Drawing
+
+It applies the camera transform only when `camera.active` is set, which is only true
+between `begin_drawing_2d` and `end_drawing_2d`. But the natural place to ask where the
+mouse is in the world is update code, which runs outside that pair, and there it silently
+returns the screen position instead. Either always apply the transform or split the
+active flag from "is there a camera".
+
 ---
 
 # Completed
+
+## Removing mbi
+
+`mbi` was a main scoped struct that contained everything Matchbox needs to run
+effectively. While added originally to make everything explicit and clear, having to
+type `&mbi` everywhere started to hurt.
+
+It is now a package-level global, so no procedure takes it as an argument any more:
+`matchbox.draw_sprite(&mbi, player)` became `matchbox.draw_sprite(player)`. The struct
+itself stuck around as one place to find everything, but the god struct is now split
+into per-subsystem structs that live in the file that owns them -- `Display`, `Clock`,
+`Renderer`, `Input`, `Camera`. `display` and `clock` are `using` fields so `mbi.width`
+and `mbi.delta_time` still read flat, while the GPU plumbing stays behind `mbi.renderer`.
+
+Accessors cover the common reads: `is_running()`, `delta_time()`, `get_mouse_position()`.
+`poll_events` and `begin_drawing` now `ensure(mbi.initialized)`, since a global starts
+zeroed and the old required argument was what used to make "call init first" a compile
+error.
+
+The one thing given up is multiple windows: one global means one instance per process.

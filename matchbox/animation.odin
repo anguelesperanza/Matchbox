@@ -94,12 +94,12 @@ update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
 
 
 draw_animated_sprite :: proc(matchbox_info: ^MatchboxInfo, sprite: AnimatedSprite) {
-	gpu.cmd_set_desc_heap(matchbox_info.frame_cmd, matchbox_info.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.frame_cmd, matchbox_info.vertex_shader, matchbox_info.fragment_shader)
+	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
+	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.vertex, matchbox_info.renderer.shaders.fragment)
 
 	draw_center := sprite.position + sprite.pivot * sprite.size + sprite.clip.offset
 
-	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+	verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, VertData)
 	verts_data.cpu^ = {
 		verts    = sprite.clip.verts_local.gpu.ptr,
 		position = screen_pos(matchbox_info, draw_center),
@@ -112,12 +112,12 @@ draw_animated_sprite :: proc(matchbox_info: ^MatchboxInfo, sprite: AnimatedSprit
 		flip_y   = cast(b32)sprite.flip_y,
 	}
 
-	frag_data := gpu.arena_alloc(matchbox_info.frame_arena, FragData)
+	frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FragData)
 	frag_data.cpu.texture_a = sprite.clip.tex_id
 	frag_data.cpu.sampler   = sprite.clip.sampler_id
 	frag_data.cpu.flip_x    = false
 	frag_data.cpu.flip_y    = false
 
-	set_alpha_blend(matchbox_info.frame_cmd)
-	gpu.cmd_draw_indexed(matchbox_info.frame_cmd, verts_data, frag_data, sprite.clip.indices_local)
+	set_alpha_blend(matchbox_info.renderer.frame_cmd)
+	gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, sprite.clip.indices_local)
 }

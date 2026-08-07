@@ -15,18 +15,28 @@ Key_State :: struct {
 	released: bool,
 }
 
-Input :: struct {
-	pressing_right_click: bool,
-	left_click_pressed:   bool, // One-shot flag for left mouse button press
-	keys:                 #sparse[sdl.Scancode]Key_State,
-	mouse_dx:             f32, // pixels/dpi (inches), right is positive
-	mouse_dy:             f32, // pixels/dpi (inches), up is positive
+// Absolute mouse state, updated every poll_events. `x`/`y` are in logical
+// screen space (draw_offset/draw_scale applied), matching where you draw.
+Mouse :: struct {
+	x:       f32,
+	y:       f32,
+	buttons: [Mouse_Button]Key_State,
 }
 
 Mouse_Button :: enum {
 	LEFT,
 	MIDDLE,
 	RIGHT,
+}
+
+Input :: struct {
+	keys:                 #sparse[sdl.Scancode]Key_State,
+	mouse:                Mouse,
+	mouse_dx:             f32, // pixels/dpi (inches), right is positive
+	mouse_dy:             f32, // pixels/dpi (inches), up is positive
+	escape_key:           sdl.Scancode, // closes the window when pressed
+	pressing_right_click: bool,
+	left_click_pressed:   bool, // One-shot flag for left mouse button press
 }
 
 // Processes SDL events, updates input state, and calculates delta_time.
@@ -36,7 +46,7 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 		key.pressed = false
 		key.released = false
 	}
-	for &btn in matchbox_info.mouse.buttons {
+	for &btn in matchbox_info.input.mouse.buttons {
 		btn.pressed = false
 		btn.released = false
 	}
@@ -49,8 +59,8 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 		raw_x, raw_y: f32
 		_ = sdl.GetMouseState(&raw_x, &raw_y)
 		scale := matchbox_info.draw_scale if matchbox_info.draw_scale > 0 else 1
-		matchbox_info.mouse.x = (raw_x - matchbox_info.draw_offset[0]) / scale
-		matchbox_info.mouse.y = (raw_y - matchbox_info.draw_offset[1]) / scale
+		matchbox_info.input.mouse.x = (raw_x - matchbox_info.draw_offset[0]) / scale
+		matchbox_info.input.mouse.y = (raw_y - matchbox_info.draw_offset[1]) / scale
 	}
 
 	event: sdl.Event
@@ -80,8 +90,8 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 
 				if event.type == .MOUSE_BUTTON_DOWN {
 					if valid {
-						matchbox_info.mouse.buttons[mb].pressed = true
-						matchbox_info.mouse.buttons[mb].pressing = true
+						matchbox_info.input.mouse.buttons[mb].pressed = true
+						matchbox_info.input.mouse.buttons[mb].pressing = true
 					}
 					if event.button == sdl.BUTTON_RIGHT {
 						matchbox_info.input.pressing_right_click = true
@@ -90,8 +100,8 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 					}
 				} else if event.type == .MOUSE_BUTTON_UP {
 					if valid {
-						matchbox_info.mouse.buttons[mb].pressing = false
-						matchbox_info.mouse.buttons[mb].released = true
+						matchbox_info.input.mouse.buttons[mb].pressing = false
+						matchbox_info.input.mouse.buttons[mb].released = true
 					}
 					if event.button == sdl.BUTTON_RIGHT {
 						matchbox_info.input.pressing_right_click = false
@@ -103,7 +113,7 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 				event := event.key
 				if event.repeat do break
 
-				if event.scancode == matchbox_info.escape_key do matchbox_info.running = false
+				if event.scancode == matchbox_info.input.escape_key do matchbox_info.running = false
 
 				if event.type == .KEY_DOWN {
 					matchbox_info.input.keys[event.scancode].pressed = true
@@ -146,7 +156,7 @@ poll_events :: proc(matchbox_info: ^MatchboxInfo) {
 }
 
 set_escape_key :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) {
-	matchbox_info.escape_key = key
+	matchbox_info.input.escape_key = key
 }
 
 is_key_pressed :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
@@ -162,14 +172,14 @@ is_key_released :: proc(matchbox_info:^MatchboxInfo, key:sdl.Scancode) -> bool {
 }
 
 is_mouse_pressed :: proc(matchbox_info:^MatchboxInfo, button:Mouse_Button) -> bool {
-	return matchbox_info.mouse.buttons[button].pressed
+	return matchbox_info.input.mouse.buttons[button].pressed
 }
 
 is_mouse_held :: proc(matchbox_info:^MatchboxInfo, button:Mouse_Button) -> bool {
-	return matchbox_info.mouse.buttons[button].pressing
+	return matchbox_info.input.mouse.buttons[button].pressing
 }
 
 is_mouse_released :: proc(matchbox_info:^MatchboxInfo, button:Mouse_Button) -> bool {
-	return matchbox_info.mouse.buttons[button].released
+	return matchbox_info.input.mouse.buttons[button].released
 }
 

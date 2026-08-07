@@ -60,8 +60,8 @@ create_mesh :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte) -> Mesh {
 		gpu_texture   = gpu_texture,
 		verts_local   = verts_local,
 		indices_local = indices_local,
-		tex_id        = gpu.desc_pool_alloc_texture(&matchbox_info.desc_pool, gpu.texture_view_descriptor(gpu_texture, {})),
-		sampler_id    = gpu.desc_pool_alloc_sampler(&matchbox_info.desc_pool, gpu.sampler_descriptor({min_filter = .Nearest, mag_filter = .Nearest})),
+		tex_id        = gpu.desc_pool_alloc_texture(&matchbox_info.renderer.desc_pool, gpu.texture_view_descriptor(gpu_texture, {})),
+		sampler_id    = gpu.desc_pool_alloc_sampler(&matchbox_info.renderer.desc_pool, gpu.sampler_descriptor({min_filter = .Nearest, mag_filter = .Nearest})),
 	}
 }
 
@@ -113,12 +113,12 @@ destroy_parallax :: proc(matchbox_info: ^MatchboxInfo, parallax_sprites: ^Parall
 }
 
 draw_sprite :: proc(matchbox_info: ^MatchboxInfo, sprite: Sprite) {
-	gpu.cmd_set_desc_heap(matchbox_info.frame_cmd, matchbox_info.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.frame_cmd, matchbox_info.vertex_shader, matchbox_info.fragment_shader)
+	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
+	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.vertex, matchbox_info.renderer.shaders.fragment)
 
 	draw_center := sprite.position + sprite.pivot * sprite.size
 
-	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+	verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, VertData)
 	verts_data.cpu^ = {
 		verts    = sprite.verts_local.gpu.ptr,
 		position = screen_pos(matchbox_info, draw_center),
@@ -131,14 +131,14 @@ draw_sprite :: proc(matchbox_info: ^MatchboxInfo, sprite: Sprite) {
 		uv_max   = sprite.uv_max,
 	}
 
-	frag_data := gpu.arena_alloc(matchbox_info.frame_arena, FragData)
+	frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FragData)
 	frag_data.cpu.texture_a = sprite.tex_id
 	frag_data.cpu.sampler   = sprite.sampler_id
 	frag_data.cpu.flip_x    = cast(b32)sprite.flip_x
 	frag_data.cpu.flip_y    = cast(b32)sprite.flip_y
 
-	set_alpha_blend(matchbox_info.frame_cmd)
-	gpu.cmd_draw_indexed(matchbox_info.frame_cmd, verts_data, frag_data, sprite.indices_local)
+	set_alpha_blend(matchbox_info.renderer.frame_cmd)
+	gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, sprite.indices_local)
 }
 
 sprite_bounds :: proc(body: ^Body) -> [4]f32 {
@@ -165,12 +165,12 @@ set_alpha_blend :: proc(cmd: gpu.Command_Buffer) {
 }
 
 draw_outline :: proc(matchbox_info: ^MatchboxInfo, center: [2]f32, size: [2]f32, color: [4]f32, border: f32, rotation: f32) {
-	gpu.cmd_set_desc_heap(matchbox_info.frame_cmd, matchbox_info.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.frame_cmd, matchbox_info.vertex_shader, matchbox_info.outline_shader)
+	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
+	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.vertex, matchbox_info.renderer.shaders.outline)
 
-	verts_data := gpu.arena_alloc(matchbox_info.frame_arena, VertData)
+	verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, VertData)
 	verts_data.cpu^ = {
-		verts    = matchbox_info.rect_verts.gpu.ptr,
+		verts    = matchbox_info.renderer.rect_verts.gpu.ptr,
 		position = screen_pos(matchbox_info, center),
 		size     = screen_size(matchbox_info, size),
 		screen   = screen_dims(matchbox_info),
@@ -181,7 +181,7 @@ draw_outline :: proc(matchbox_info: ^MatchboxInfo, center: [2]f32, size: [2]f32,
 		flip_y = false,
 	}
 
-	frag_data := gpu.arena_alloc(matchbox_info.frame_arena, OutlineFragData)
+	frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, OutlineFragData)
 	frag_data.cpu^ = {
 		color  = color,
 		border = border,
@@ -189,8 +189,8 @@ draw_outline :: proc(matchbox_info: ^MatchboxInfo, center: [2]f32, size: [2]f32,
 		flip_y = false,
 	}
 
-	set_alpha_blend(matchbox_info.frame_cmd)
-	gpu.cmd_draw_indexed(matchbox_info.frame_cmd, verts_data, frag_data, matchbox_info.rect_indices)
+	set_alpha_blend(matchbox_info.renderer.frame_cmd)
+	gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, matchbox_info.renderer.rect_indices)
 }
 
 draw_bounding_box_outline :: proc(matchbox_info: ^MatchboxInfo, body: ^Body, color: [4]f32, border: f32) {

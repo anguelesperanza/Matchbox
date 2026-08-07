@@ -70,8 +70,8 @@ load_font :: proc(matchbox_info: ^MatchboxInfo, bytes: []byte, font_size: f32) -
 	gpu.queue_submit(.Main, {cmd})
 	gpu.queue_wait_idle(.Main)
 
-	font.tex_id     = gpu.desc_pool_alloc_texture(&matchbox_info.desc_pool, gpu.texture_view_descriptor(font.gpu_texture, {}))
-	font.sampler_id = gpu.desc_pool_alloc_sampler(&matchbox_info.desc_pool, gpu.sampler_descriptor({min_filter = .Linear, mag_filter = .Linear}))
+	font.tex_id     = gpu.desc_pool_alloc_texture(&matchbox_info.renderer.desc_pool, gpu.texture_view_descriptor(font.gpu_texture, {}))
+	font.sampler_id = gpu.desc_pool_alloc_sampler(&matchbox_info.renderer.desc_pool, gpu.sampler_descriptor({min_filter = .Linear, mag_filter = .Linear}))
 
 	return font
 }
@@ -95,9 +95,9 @@ draw_text_float :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, float: $T, x:
 
 
 draw_text_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	gpu.cmd_set_desc_heap(matchbox_info.frame_cmd, matchbox_info.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.frame_cmd, matchbox_info.font_vert_shader, matchbox_info.font_frag_shader)
-	set_alpha_blend(matchbox_info.frame_cmd)
+	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
+	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.font_vert, matchbox_info.renderer.shaders.font_frag)
+	set_alpha_blend(matchbox_info.renderer.frame_cmd)
 
 	cursor_x := x
 	cursor_y := y
@@ -113,7 +113,7 @@ draw_text_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		verts_data := gpu.arena_alloc(matchbox_info.frame_arena, FontVertData)
+		verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontVertData)
 		verts_data.cpu^ = {
 			verts    = font.verts_local.gpu.ptr,
 			position = screen_pos(matchbox_info, pos),
@@ -126,14 +126,14 @@ draw_text_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := gpu.arena_alloc(matchbox_info.frame_arena, FontFragData)
+		frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontFragData)
 		frag_data.cpu^ = {
 			texture_a = font.tex_id,
 			sampler   = font.sampler_id,
 			color     = color,
 		}
 
-		gpu.cmd_draw_indexed(matchbox_info.frame_cmd, verts_data, frag_data, font.indices_local)
+		gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
 	}
 }
 
@@ -148,9 +148,9 @@ draw_text :: proc {
 // is active, so the font renders at its native baked size instead of being
 // upscaled by the logical-resolution multiplier.
 draw_text_ui_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	gpu.cmd_set_desc_heap(matchbox_info.frame_cmd, matchbox_info.desc_pool)
-	gpu.cmd_set_shaders(matchbox_info.frame_cmd, matchbox_info.font_vert_shader, matchbox_info.font_frag_shader)
-	set_alpha_blend(matchbox_info.frame_cmd)
+	gpu.cmd_set_desc_heap(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.desc_pool)
+	gpu.cmd_set_shaders(matchbox_info.renderer.frame_cmd, matchbox_info.renderer.shaders.font_vert, matchbox_info.renderer.shaders.font_frag)
+	set_alpha_blend(matchbox_info.renderer.frame_cmd)
 
 	cursor_x := x
 	cursor_y := y
@@ -166,7 +166,7 @@ draw_text_ui_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: str
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		verts_data := gpu.arena_alloc(matchbox_info.frame_arena, FontVertData)
+		verts_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontVertData)
 		verts_data.cpu^ = {
 			verts    = font.verts_local.gpu.ptr,
 			position = pos,
@@ -179,14 +179,14 @@ draw_text_ui_string :: proc(matchbox_info: ^MatchboxInfo, font: ^Font, text: str
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := gpu.arena_alloc(matchbox_info.frame_arena, FontFragData)
+		frag_data := gpu.arena_alloc(matchbox_info.renderer.frame_arena, FontFragData)
 		frag_data.cpu^ = {
 			texture_a = font.tex_id,
 			sampler   = font.sampler_id,
 			color     = color,
 		}
 
-		gpu.cmd_draw_indexed(matchbox_info.frame_cmd, verts_data, frag_data, font.indices_local)
+		gpu.cmd_draw_indexed(matchbox_info.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
 	}
 }
 

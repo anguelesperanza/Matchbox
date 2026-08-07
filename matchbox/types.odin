@@ -1,7 +1,6 @@
 package matchbox
 
 import "gpu"
-import sdl "vendor:sdl3"
 
 // -----------------------------------------------------------------------
 // Types -- GPU data
@@ -99,14 +98,6 @@ Body :: struct {
 // Types -- Application
 // -----------------------------------------------------------------------
 
-// Absolute mouse state, updated every poll_events. `x`/`y` are in logical
-// screen space (draw_offset/draw_scale applied), matching where you draw.
-Mouse :: struct {
-	x:       f32,
-	y:       f32,
-	buttons: [Mouse_Button]Key_State,
-}
-
 Rectangle :: struct {
 	position: [2]f32,
 	size:     [2]f32,
@@ -118,51 +109,21 @@ ParallaxSprites :: struct {
 	sprites:[dynamic]Sprite
 }
 
-Camera :: struct {
-	position: [2]f32, // world point the camera is centered on
-	zoom:     f32,    // 1.0 = normal, >1 zooms in, <1 zooms out
-	active:   bool,   // true while inside begin_drawing_2d / end_drawing_2d
-	follow_speed:f32, // How fast the camera will follow the position (used for lerp)
-}
-
+// Every piece of state Matchbox needs to run, grouped by subsystem. There is
+// exactly one of these -- the package-level `mbi` -- so nothing has to be
+// threaded through procedure arguments.
+//
+// `display` and `clock` are `using` so the fields games reach for most often
+// stay flat: `mbi.delta_time`, `mbi.width`, `mbi.window`. `renderer` is left
+// qualified because it is internal plumbing that games should not touch.
 MatchboxInfo :: struct {
-	window:          ^sdl.Window,
-	width:           i32,
-	height:          i32,
-	window_width:    i32,
-	window_height:   i32,
-	fixed_res:       bool,
-	draw_scale:      f32,
-	draw_offset:     [2]f32,
-	title:           string,
-	flags:           sdl.WindowFlags,
-	running:         bool,
-	vertex_shader:   gpu.Shader,
-	fragment_shader: gpu.Shader,
-	outline_shader:      gpu.Shader,
-	font_vert_shader:    gpu.Shader,
-	font_frag_shader:    gpu.Shader,
-	rect_frag_shader:    gpu.Shader,
-	rect_verts:          gpu.slice_t(Vertex),
-	rect_indices:        gpu.slice_t(u32),
-	ts_freq:         u64,
-	now_ts:          u64,
-	delta_time:        f32,
-	max_delta_time:    f32,
-	target_frame_time: f32,  // 0 = unlimited; set via set_target_fps
-	frame_cmd:       gpu.Command_Buffer,
-	desc_pool:       gpu.Descriptor_Pool,
-	frame_arenas:    [3]gpu.Arena,
-	frame_arena:     ^gpu.Arena,
-	next_frame:      u64,
-	frame_sem:       gpu.Semaphore,
-	swapchain:       gpu.Texture,
-	// Input
-	input:        Input,
-	mouse:        Mouse,
-	escape_key:   sdl.Scancode,
-	font:         Font,
-	camera:       Camera,
+	using display: Display,  // window, logical resolution, letterbox transform
+	using clock:   Clock,    // frame timing
+	renderer:      Renderer, // shaders, descriptor pool, per-frame GPU state
+	input:         Input,    // keyboard + mouse
+	camera:        Camera,
+	font:          Font,     // default font, loaded by init
+	running:       bool,     // false once the window is closed or escape is hit
 }
 
 // -----------------------------------------------------------------------

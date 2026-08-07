@@ -45,7 +45,7 @@ main :: proc() {
 		}
 
 		if matchbox.is_mouse_pressed(&mbi, .RIGHT) {
-			tank.look_at_dest = {mbi.mouse.x, mbi.mouse.y}
+			tank.look_at_dest = {mbi.input.mouse.x, mbi.input.mouse.y}
 			tank.cannon.rotation = matchbox.look_at(tank.cannon, tank.look_at_dest)
 		}
 

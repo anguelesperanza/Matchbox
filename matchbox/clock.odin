@@ -1,0 +1,24 @@
+package matchbox
+
+/*
+	Clock
+	-----
+	Frame timing. Updated once per poll_events.
+
+	This is engine timing -- see timer.odin for CooldownTimer, which is a
+	gameplay utility built on top of delta_time.
+*/
+
+Clock :: struct {
+	ts_freq:           u64, // performance counter ticks per second
+	now_ts:            u64, // counter value at the most recent poll_events
+	delta_time:        f32, // seconds since the previous poll_events, clamped
+	max_delta_time:    f32, // delta_time ceiling, so a stalled frame can't teleport everything
+	target_frame_time: f32, // 0 = unlimited; set via set_target_fps
+}
+
+// Limits the frame rate to `fps` frames per second by sleeping in poll_events.
+// Pass 0 to remove the limit (default).
+set_target_fps :: proc(mbi: ^MatchboxInfo, fps: i32) {
+	mbi.target_frame_time = 1.0 / f32(fps) if fps > 0 else 0
+}

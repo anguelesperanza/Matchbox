@@ -55,7 +55,18 @@ screen_pos :: proc(pos: [2]f32) -> [2]f32 {
 	return pos * mbi.draw_scale + mbi.draw_offset
 }
 
+// The camera zoom has to be applied here as well as in screen_pos. Every draw
+// call pairs the two, so scaling only the position pulled things closer
+// together while leaving them full size -- zoom out far enough and neighbours
+// that are laid out apart start to overlap.
 screen_size :: proc(size: [2]f32) -> [2]f32 {
+	if mbi.camera.active {
+		zoom: f32 = 1
+		if mbi.camera.zoom > 0 {
+			zoom = mbi.camera.zoom
+		}
+		return size * zoom * mbi.draw_scale
+	}
 	return size * mbi.draw_scale
 }
 

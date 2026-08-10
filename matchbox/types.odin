@@ -103,6 +103,13 @@ Rectangle :: struct {
 	size:     [2]f32,
 	color:    [4]f32,
 	rotation: f32,
+
+	// Fraction of `size` added to `position` to reach the centre. Note this is
+	// the opposite way round from most engines, and matches Body: {0, 0} -- the
+	// zero value -- means `position` already is the centre, and {0.5, 0.5} means
+	// `position` is the top-left corner. Go through rect_center / rect_top_left
+	// rather than reading `position` directly.
+	pivot:    [2]f32,
 }
 
 ParallaxSprites :: struct {

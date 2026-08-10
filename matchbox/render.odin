@@ -103,6 +103,20 @@ clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 // Basic Shapes
 // -----------------------------------------------------------------------
 
+// The middle of a rectangle, which is the point the vertex shader builds the
+// quad around. Mirrors draw_sprite: `pivot` is the fraction of the size added
+// to `position` to reach the centre.
+rect_center :: proc(rectangle: Rectangle) -> [2]f32 {
+	return rectangle.position + rectangle.pivot * rectangle.size
+}
+
+// The top-left corner. Hit tests and anything laying content out inside a
+// rectangle want this, not `position` -- the two are only the same thing when
+// the pivot is {0.5, 0.5}.
+rect_top_left :: proc(rectangle: Rectangle) -> [2]f32 {
+	return rect_center(rectangle) - rectangle.size * 0.5
+}
+
 draw_rect :: proc(rectangle: Rectangle) {
 	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
 	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.vertex, mbi.renderer.shaders.rect_frag)
@@ -110,7 +124,7 @@ draw_rect :: proc(rectangle: Rectangle) {
 	verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, VertData)
 	verts_data.cpu^ = {
 		verts    = mbi.renderer.rect_verts.gpu.ptr,
-		position = screen_pos(rectangle.position),
+		position = screen_pos(rect_center(rectangle)),
 		size     = screen_size(rectangle.size),
 		screen   = screen_dims(),
 		rotation = rectangle.rotation,

@@ -15,28 +15,31 @@ Button :: struct {
 
 draw_button :: proc(button:Button) {
 	draw_rect(button.rectangle)
+
+	// Centre the label in the box. draw_text's y is a baseline rather than a top
+	// edge, so the ascent has to be added on -- without it the glyphs hang above
+	// the button instead of sitting inside it.
+	top_left := rect_top_left(button.rectangle)
+	text     := measure_text(&mbi.font, button.text)
+
 	draw_text(
 		&mbi.font,
 		button.text,
-		button.rectangle.position.x + 2,
-		button.rectangle.position.y + 2,
+		top_left.x + (button.rectangle.size.x - text.x) * 0.5,
+		top_left.y + (button.rectangle.size.y - text.y) * 0.5 + mbi.font.ascent,
 		WHITE,
 	)
 }
 
 
 mouse_over_button :: proc(button:Button) -> bool {
-	mouse_x := mbi.input.mouse.x
-	mouse_y := mbi.input.mouse.y
-	button_x := button.rectangle.position.x
-	button_y := button.rectangle.position.y
-	button_width := button.rectangle.size.x
-	button_height := button.rectangle.size.y
+	// Off rect_top_left, not off `position`: the two only agree when the pivot
+	// is {0.5, 0.5}, and getting this wrong offsets the whole hitbox from the
+	// button you can see by half its size.
+	top_left := rect_top_left(button.rectangle)
+	size     := button.rectangle.size
+	mouse    := get_mouse_position()
 
-	if mouse_x >= button_x && mouse_x <= button_x + button_width {
-		if mouse_y >= button_y && mouse_y <= button_y + button_height {
-			return true
-		}
-	}
-	return false
+	return mouse.x >= top_left.x && mouse.x <= top_left.x + size.x &&
+	       mouse.y >= top_left.y && mouse.y <= top_left.y + size.y
 }

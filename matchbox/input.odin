@@ -17,9 +17,14 @@ Key_State :: struct {
 
 // Absolute mouse state, updated every poll_events. `x`/`y` are in logical
 // screen space (draw_offset/draw_scale applied), matching where you draw.
+//
+// `wheel` is per-frame, not absolute: it is the scroll that happened during
+// this poll_events and is back to zero on the next one. Positive y is away
+// from the user, positive x is to the right.
 Mouse :: struct {
 	x:       f32,
 	y:       f32,
+	wheel:   [2]f32,
 	buttons: [Mouse_Button]Key_State,
 }
 
@@ -52,6 +57,7 @@ poll_events :: proc() {
 	}
 	mbi.input.mouse_dx = 0
 	mbi.input.mouse_dy = 0
+	mbi.input.mouse.wheel = {0, 0}
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
 	{
@@ -118,6 +124,17 @@ poll_events :: proc() {
 				mbi.input.mouse_dx += event.xrel
 				mbi.input.mouse_dy -= event.yrel // In sdl, up is negative
 			}
+		case .MOUSE_WHEEL:
+			{
+				event := event.wheel
+
+				// A FLIPPED wheel (natural scrolling) reports the opposite sign,
+				// so undo it here and hand games one consistent direction.
+				scroll := [2]f32{event.x, event.y}
+				if event.direction == .FLIPPED do scroll = -scroll
+
+				mbi.input.mouse.wheel += scroll
+			}
 		}
 	}
 
@@ -149,6 +166,13 @@ poll_events :: proc() {
 // get_mouse_world_pos instead.
 get_mouse_position :: proc() -> [2]f32 {
 	return {mbi.input.mouse.x, mbi.input.mouse.y}
+}
+
+// How far the wheel was scrolled during this frame, zero when it was not
+// touched. Positive is away from the user -- the usual "zoom in" direction.
+// Horizontal scroll, from tilt wheels and trackpads, is in `.x`.
+get_mouse_wheel :: proc() -> [2]f32 {
+	return mbi.input.mouse.wheel
 }
 
 set_escape_key :: proc(key:sdl.Scancode) {

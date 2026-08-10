@@ -31,6 +31,11 @@ Display :: struct {
 // Logical resolution / screen helpers
 // -----------------------------------------------------------------------
 
+// Pins the resolution games draw against. From here on the logical image is
+// scaled to fit the window and centered, so a resize letterboxes rather than
+// changing how much of the world is on screen.
+//
+// Off by default -- without this, width/height follow the window size.
 set_logical_size :: proc(width: i32, height: i32) {
     mbi.width     = width
     mbi.height    = height

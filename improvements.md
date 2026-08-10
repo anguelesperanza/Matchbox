@@ -23,12 +23,6 @@ Need to compare to other frameworks to see if that's a lot?
 
 `destroy` procedure group so individual procedures do not need to be called
 
-## Fixed Resolution Is Always On
-
-`init` ends by calling `set_logical_size`, which unconditionally sets `fixed_res = true`.
-So every window gets letterboxed whether or not a logical resolution was asked for.
-Should probably only turn on when the user actually calls `set_logical_size` themselves.
-
 ## Redundant Input Flags
 
 `Input.left_click_pressed` and `Input.pressing_right_click` say the same thing as
@@ -46,6 +40,17 @@ active flag from "is there a camera".
 ---
 
 # Completed
+
+## Fixed Resolution Is Always On
+
+`init` ended by calling `set_logical_size`, which unconditionally set `fixed_res = true`,
+so every window got letterboxed whether or not a logical resolution was asked for. That
+call is gone -- it only ever re-set the width and height `init` had already assigned, so
+flipping the flag was its entire effect.
+
+Letterboxing is now opt-in: without `set_logical_size`, the logical size follows the
+window and a resize just gives you more room to draw in. Pong asks for it explicitly,
+since its paddle bounds and ball collisions are written in terms of a fixed 1080x720.
 
 ## Removing mbi
 

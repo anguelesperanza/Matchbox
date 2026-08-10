@@ -70,6 +70,9 @@ main :: proc() {
 	win_height:i32 = 720
 
 	matchbox.init("Pong", win_width, win_height)
+	// Paddle bounds and ball collisions are all in terms of win_width/win_height,
+	// so pin the resolution and let the window letterbox it.
+	matchbox.set_logical_size(win_width, win_height)
 
 	player:Paddle = {
 		rect = {

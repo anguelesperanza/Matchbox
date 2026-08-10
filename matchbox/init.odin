@@ -93,7 +93,9 @@ init :: proc(title: string, width: i32, height: i32) {
 		active   = false,
 	}
 
-	set_logical_size(width, height)
+	// fixed_res stays off: the logical size tracks the window, so a resize just
+	// gives you more room to draw in. Call set_logical_size to pin a resolution
+	// and letterbox it instead.
 
 	mbi.initialized = true
 }

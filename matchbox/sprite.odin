@@ -70,7 +70,7 @@ create_mesh :: proc(bytes: []byte) -> Mesh {
 		verts_local   = verts_local,
 		indices_local = indices_local,
 		tex_id        = gpu.desc_pool_alloc_texture(&mbi.renderer.desc_pool, gpu.texture_view_descriptor(gpu_texture, {})),
-		sampler_id    = gpu.desc_pool_alloc_sampler(&mbi.renderer.desc_pool, gpu.sampler_descriptor({min_filter = .Nearest, mag_filter = .Nearest})),
+		sampler_id    = mbi.renderer.sprite_sampler,
 	}
 }
 
@@ -98,7 +98,11 @@ create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 	}
 }
 
+// The texture descriptor has to be given back or the pool drains as sprites are
+// created and destroyed. The sampler is not freed here: sprites share one that
+// outlives them, and the font's is one-off and goes with the program.
 destroy_mesh :: proc(mesh: ^Mesh) {
+	gpu.desc_pool_free_textures(&mbi.renderer.desc_pool, mesh.tex_id)
 	gpu.mem_free(mesh.verts_local)
 	gpu.mem_free(mesh.indices_local)
 	gpu.texture_free_and_destroy(&mesh.gpu_texture)

@@ -52,6 +52,13 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	for &fa in mbi.renderer.frame_arenas do fa = gpu.arena_create()
 
+	// Every sprite wants the same filtering, and samplers are the scarcest thing
+	// in the descriptor pool, so one is allocated here and shared by all of them
+	mbi.renderer.sprite_sampler = gpu.desc_pool_alloc_sampler(
+		&mbi.renderer.desc_pool,
+		gpu.sampler_descriptor({min_filter = .Nearest, mag_filter = .Nearest}),
+	)
+
 	mbi.renderer.shaders.vertex    = gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
 	mbi.renderer.shaders.fragment  = gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
 	mbi.renderer.shaders.outline   = gpu.shader_create(#load("shaders/outline.frag.spv", []u32), .Fragment)

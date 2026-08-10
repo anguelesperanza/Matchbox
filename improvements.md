@@ -28,6 +28,27 @@ Need to compare to other frameworks to see if that's a lot?
 
 # Completed
 
+## A Sampler Per Sprite Capped The Whole Program At Two Dozen Sprites
+
+`create_mesh` allocated a fresh sampler for every sprite, and `desc_pool_create` gives the
+sampler pool a default capacity of 32 against 65536 for textures. Every one of those
+samplers was identical -- nearest filtering, no other state -- so the pool filled up with
+copies of one thing and then
+
+	gpu.odin(980) runtime assertion: pool.res_count + u32(count) < pool.res_capacity
+
+The card game hit it building a 60 card deck, but the real ceiling was about two dozen
+sprites alive at once, whatever they were.
+
+Samplers are immutable state objects meant to be shared. `init` now allocates the one
+nearest-neighbour sampler and every sprite references it, which takes the count from
+"one per sprite" to one, full stop.
+
+`destroy_mesh` was also giving nothing back to the descriptor pool -- neither the sampler
+nor the texture. The sampler no longer belongs to the mesh, but the texture descriptor
+does, and it is now freed. Without that the texture pool drained as sprites came and
+went, just far more slowly than the sampler pool did.
+
 ## Image Loading Was Five Times Slower Than It Needed To Be
 
 The card game took four and a half seconds to reach its first frame. Timing the stages

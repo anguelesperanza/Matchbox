@@ -27,6 +27,11 @@ Renderer :: struct {
 	swapchain:    gpu.Texture,
 	rect_verts:   gpu.slice_t(Vertex), // shared unit quad, reused by every draw_rect
 	rect_indices: gpu.slice_t(u32),
+
+	// One nearest-neighbour sampler shared by every sprite. The descriptor pool
+	// only has room for 32 samplers, so handing each sprite its own put a hard
+	// ceiling of about two dozen sprites on the whole program.
+	sprite_sampler: u32,
 }
 
 // -----------------------------------------------------------------------

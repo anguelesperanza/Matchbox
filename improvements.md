@@ -28,6 +28,27 @@ Need to compare to other frameworks to see if that's a lot?
 
 # Completed
 
+## Image Loading Was Five Times Slower Than It Needed To Be
+
+The card game took four and a half seconds to reach its first frame. Timing the stages
+showed almost all of it was one thing: decoding PNGs. For a 750x1050 card, `create_sprite`
+took 88.5ms of which `core:image` decode was 89.0ms -- the gpu upload and the
+`queue_wait_idle` in `create_mesh` did not register at all. Batching the uploads, the
+obvious-looking fix, would have bought nothing.
+
+`core:image` is a pure Odin decoder and is not fast. Measured against `vendor:stb/image`
+on the same files it is about five times slower: 89.0ms vs 18.7ms for a card, 323ms vs
+67.8ms for a 1500x2100 image. stb was already linked for the font atlas, so moving
+`create_mesh` onto it costs no new dependency -- `desired_channels = 4` gives the RGBA the
+texture format wants, which is what `.alpha_add_if_missing` was there for.
+
+Startup went from ~4530ms to ~1280ms with no other change. What is left is roughly 514ms
+of `init` and the decoding that remains, so the next wins are fewer and smaller images
+rather than a faster decoder.
+
+Worth knowing for Linux: the README already says to run `make -C {Odin}/vendor/stb/src`,
+which builds the image library along with truetype, so nothing new is needed there.
+
 ## Rectangle.position Meant Two Different Things
 
 `draw_rect` passed `rectangle.position` straight to the vertex shader, which centres the

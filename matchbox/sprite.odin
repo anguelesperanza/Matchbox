@@ -2,8 +2,8 @@ package matchbox
 
 import "gpu"
 import "core:math"
-import "core:image"
-import "core:image/png" // unused directly but needed to register the PNG decoder
+
+import stbi "vendor:stb/image"
 
 import "base:runtime"
 
@@ -17,20 +17,29 @@ Sprite :: struct {
 	parallax_speed: f32,
 }
 
+// Decoding is what loading an image costs -- the upload to the gpu underneath
+// is nothing next to it -- so this goes through stb rather than core:image,
+// which is roughly five times slower on the same file. stb is already linked
+// for the font atlas, so it is not a new dependency.
 create_mesh :: proc(bytes: []byte) -> Mesh {
-	options := image.Options{.alpha_add_if_missing}
-	img, err := image.load_from_bytes(bytes, options)
-	ensure(err == nil, "Could not load texture")
-	defer image.destroy(img)
+	width, height, channels_in_file: i32
+
+	// 4 forces RGBA out of whatever the file holds, which is what the texture
+	// format below wants and what alpha_add_if_missing used to guarantee
+	pixels := stbi.load_from_memory(raw_data(bytes), cast(i32)len(bytes), &width, &height, &channels_in_file, 4)
+	ensure(pixels != nil, "Could not load texture")
+	defer stbi.image_free(pixels)
+
+	pixels_size := cast(int)width * cast(int)height * 4
 
 	upload_arena := gpu.arena_create()
 	defer gpu.arena_destroy(&upload_arena)
 
-	staging := gpu.arena_alloc_raw(&upload_arena, cast(u64)len(img.pixels.buf), 1)
-	runtime.mem_copy(staging.cpu, raw_data(img.pixels.buf), len(img.pixels.buf))
+	staging := gpu.arena_alloc_raw(&upload_arena, cast(u64)pixels_size, 1)
+	runtime.mem_copy(staging.cpu, pixels, pixels_size)
 
 	gpu_texture := gpu.texture_alloc_and_create({
-		dimensions = {cast(u32)img.width, cast(u32)img.height, 1},
+		dimensions = {cast(u32)width, cast(u32)height, 1},
 		format     = .RGBA8_Unorm,
 		usage      = {.Sampled},
 	})

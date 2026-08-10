@@ -23,23 +23,30 @@ Need to compare to other frameworks to see if that's a lot?
 
 `destroy` procedure group so individual procedures do not need to be called
 
-## Redundant Input Flags
-
-`Input.left_click_pressed` and `Input.pressing_right_click` say the same thing as
-`mbi.input.mouse.buttons[.LEFT].pressed` and `[.RIGHT].pressing`. Two ways to ask the
-same question, and only one of them generalises to the middle button. Fold them away.
-
-## get_mouse_world_pos Only Works While Drawing
-
-It applies the camera transform only when `camera.active` is set, which is only true
-between `begin_drawing_2d` and `end_drawing_2d`. But the natural place to ask where the
-mouse is in the world is update code, which runs outside that pair, and there it silently
-returns the screen position instead. Either always apply the transform or split the
-active flag from "is there a camera".
 
 ---
 
 # Completed
+
+## Redundant Input Flags
+
+`Input.left_click_pressed` and `Input.pressing_right_click` said the same thing as
+`mbi.input.mouse.buttons[.LEFT].pressed` and `[.RIGHT].pressing`, and only the button
+array generalises to the middle button. Both are gone. Nothing read them -- `poll_events`
+was the only code that touched them, and only ever to write.
+
+## get_mouse_world_pos Only Works While Drawing
+
+It applied the camera transform only when `camera.active` was set, which is only true
+between `begin_drawing_2d` and `end_drawing_2d`. The natural place to ask where the mouse
+is in the world is update code, which runs outside that pair, so it quietly returned a
+screen position everywhere it was actually useful.
+
+Split the flag, as the note suggested: `active` still means "a world-space draw is in
+progress" and is what `screen_pos` reads, while a new `in_use` is set the first time
+`begin_drawing_2d` runs and stays set. `get_mouse_world_pos` keys off `in_use`, so it
+works anywhere in the frame. A game that never draws through a camera still gets the
+plain screen position back.
 
 ## Fixed Resolution Is Always On
 

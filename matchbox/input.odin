@@ -30,13 +30,11 @@ Mouse_Button :: enum {
 }
 
 Input :: struct {
-	keys:                 #sparse[sdl.Scancode]Key_State,
-	mouse:                Mouse,
-	mouse_dx:             f32, // pixels/dpi (inches), right is positive
-	mouse_dy:             f32, // pixels/dpi (inches), up is positive
-	escape_key:           sdl.Scancode, // closes the window when pressed
-	pressing_right_click: bool,
-	left_click_pressed:   bool, // One-shot flag for left mouse button press
+	keys:       #sparse[sdl.Scancode]Key_State,
+	mouse:      Mouse,
+	mouse_dx:   f32, // pixels/dpi (inches), right is positive
+	mouse_dy:   f32, // pixels/dpi (inches), up is positive
+	escape_key: sdl.Scancode, // closes the window when pressed
 }
 
 // Processes SDL events, updates input state, and calculates delta_time.
@@ -54,7 +52,6 @@ poll_events :: proc() {
 	}
 	mbi.input.mouse_dx = 0
 	mbi.input.mouse_dy = 0
-	mbi.input.left_click_pressed = false
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
 	{
@@ -90,23 +87,13 @@ poll_events :: proc() {
 				case:                   valid = false
 				}
 
-				if event.type == .MOUSE_BUTTON_DOWN {
-					if valid {
-						mbi.input.mouse.buttons[mb].pressed = true
+				if valid {
+					if event.type == .MOUSE_BUTTON_DOWN {
+						mbi.input.mouse.buttons[mb].pressed  = true
 						mbi.input.mouse.buttons[mb].pressing = true
-					}
-					if event.button == sdl.BUTTON_RIGHT {
-						mbi.input.pressing_right_click = true
-					} else if event.button == sdl.BUTTON_LEFT {
-						mbi.input.left_click_pressed = true
-					}
-				} else if event.type == .MOUSE_BUTTON_UP {
-					if valid {
+					} else if event.type == .MOUSE_BUTTON_UP {
 						mbi.input.mouse.buttons[mb].pressing = false
 						mbi.input.mouse.buttons[mb].released = true
-					}
-					if event.button == sdl.BUTTON_RIGHT {
-						mbi.input.pressing_right_click = false
 					}
 				}
 			}

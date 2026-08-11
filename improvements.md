@@ -182,3 +182,49 @@ zeroed and the old required argument was what used to make "call init first" a c
 error.
 
 The one thing given up is multiple windows: one global means one instance per process.
+
+## Text Input, and a Text_Field to Put It In
+
+There was no way to type anything into a Matchbox program. Not just no widget -- no SDL
+text input at all, so a game asking for a name, an address or a password had nowhere to
+start.
+
+Scancodes are the wrong tool for it. `is_key_pressed(.A)` says which key moved, not what
+the person meant by it: shift, the keyboard layout, dead keys and accents are all still
+ahead of you, and anybody typing Japanese, Chinese or Korean goes through an IME that
+turns many keystrokes into one character. Rebuilding that on top of scancodes means
+reimplementing every keyboard layout in the world.
+
+So `poll_events` now handles `.TEXT_INPUT` and `get_text_input()` returns what was typed
+this frame as utf-8, already correct. It is per-frame like `mouse.wheel`, and the string
+SDL hands over is only valid during the event, so it is copied out there and then.
+
+Text input is off until `begin_text_input()`. That is not just bookkeeping: it is what
+tells the platform somebody is about to type, and mobile on-screen keyboards and IME
+candidate windows key off it. `end_text_input()` turns it back off, which matters because
+while it is on the platform may swallow keystrokes to compose characters -- not what a
+game wants during play.
+
+`Key_State` gained `repeated` alongside `pressed`, set on auto-repeat as well as the
+first press, read with `is_key_repeated`. Auto-repeat used to be dropped outright, so a
+held backspace deleted one character and stopped. The two are kept apart rather than
+folded together because they answer different questions: firing a weapon wants the first
+press, deleting a character wants every repeat, and code written against one is wrong
+with the other.
+
+`get_clipboard_text` came along with it, since a password is the sort of thing people
+paste.
+
+On top of that, `ui.odin` gained `Text_Field`: a box, a caret, insert and delete at the
+caret, arrows, Home/End, Ctrl+V, and a masked mode for passwords that stars per character
+rather than per byte, so an accented letter does not become two. Clicking inside focuses
+it and clicking away drops focus, which gives several fields on one screen exactly one
+focus between them without their having to know about each other.
+
+It deliberately turns text input on and never off. Doing both per field would let one
+field switch input off in the same frame another switched it on, and which won would come
+down to the order they were updated in -- so the screen that owns the fields ends it.
+
+What it is not: there is no selection, no dragging the caret with the mouse, and no
+scrolling when the text outruns the box. It exists for the short answers a game asks for.
+Anything longer wants a real editor widget, not this one grown into one.

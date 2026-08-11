@@ -50,12 +50,43 @@ mouse_over_button :: proc(button:Button) -> bool {
 	       mouse.y >= top_left.y && mouse.y <= top_left.y + size.y
 }
 
+/*
+	A border of one even thickness all the way round, in pixels.
+
+	Four rectangles rather than draw_rect_outline, because that one's `border`
+	is a fraction compared against uv on both axes -- so the thickness it
+	produces is `border * size` per axis, and on anything that is not square it
+	comes out heavier along the long side. On a 460x52 text box a border of
+	0.04 is eighteen pixels at the sides and two at the top, which swallows the
+	first characters typed into it.
+
+	Use this whenever the thickness should look the same all the way round.
+	draw_rect_outline is still the one to use when the border should scale with
+	the shape, which is what a card-shaped zone wants.
+*/
+draw_rect_border :: proc(rectangle:Rectangle, color:[4]f32, thickness:f32) {
+	top_left := rect_top_left(rectangle)
+	size     := rectangle.size
+
+	// Corners are covered twice. With a flat colour that is invisible, and it
+	// is cheaper than four rects mitred to meet exactly.
+	bar :: proc(x, y, w, h:f32, color:[4]f32) {
+		draw_rect({position = {x, y}, size = {w, h}, pivot = {0.5, 0.5}, color = color})
+	}
+
+	bar(top_left.x, top_left.y,                          size.x,    thickness, color)
+	bar(top_left.x, top_left.y + size.y - thickness,     size.x,    thickness, color)
+	bar(top_left.x, top_left.y,                          thickness, size.y,    color)
+	bar(top_left.x + size.x - thickness, top_left.y,     thickness, size.y,    color)
+}
+
 // -----------------------------------------------------------------------
 // Text_Field -- somewhere to type
 // -----------------------------------------------------------------------
 
 TEXT_FIELD_PADDING     :: 8    // gap between the box edge and the text
 TEXT_FIELD_CARET_WIDTH :: 2
+TEXT_FIELD_RING        :: 2    // pixels, all the way round
 TEXT_FIELD_BLINK       :: 1.06 // seconds for a full off-on cycle
 TEXT_FIELD_MASK        :: '*'
 
@@ -221,16 +252,7 @@ draw_text_field :: proc(field:^Text_Field) {
 	baseline := top_left.y + (field.rectangle.size.y - (mbi.font.ascent + mbi.font.descent)) * 0.5 + mbi.font.ascent
 	left     := top_left.x + TEXT_FIELD_PADDING
 
-	if field.focused {
-		// A Body rather than the Rectangle, because that is what draws an
-		// outline. Same three fields mean the same thing in both.
-		ring := Body{
-			position = field.rectangle.position,
-			size     = field.rectangle.size,
-			pivot    = field.rectangle.pivot,
-		}
-		draw_rect_outline(&ring, TEXT_FIELD_FOCUS_RING, 0.04)
-	}
+	if field.focused do draw_rect_border(field.rectangle, TEXT_FIELD_FOCUS_RING, TEXT_FIELD_RING)
 
 	shown := text_field_shown(field, context.temp_allocator)
 

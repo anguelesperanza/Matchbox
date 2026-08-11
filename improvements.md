@@ -260,3 +260,27 @@ Both are worth having, so neither replaced the other:
 
 The API is the trap here, not the maths. `border` is a fraction and reads like a width,
 and nothing at the call site says otherwise.
+
+## A Window Bigger Than The Screen
+
+`init` passed the width and height straight to `SDL_CreateWindow`, so a game
+written on a desktop and run on a laptop asked for a window the display could not
+hold. What happens then is up to the window manager -- some clamp it, some leave
+part of it off the screen where nothing can reach it -- and either way the game
+believes it has a size it does not have and lays out for that.
+
+It is capped to `SDL_GetDisplayUsableBounds` now. Usable rather than raw, so a
+taskbar, dock or panel is already taken off. A display that cannot be measured
+leaves the request alone rather than guessing at it.
+
+This is a floor, not a solution. It stops a window opening larger than the
+screen; it does not make anything drawn inside it fit. A layout written against
+fixed pixel positions still runs off the edge of a narrower window, and the only
+answer to that is laying out from `mbi.width` and `mbi.height`, which follow the
+window every frame when a logical size has not been asked for.
+
+The game that prompted this had a card grid of six fixed columns and lost the
+last one on a 13 inch laptop. Capping the window would not have saved it -- it
+now works out how many columns fit and sizes the cards to use the width exactly.
+Worth saying plainly, because a cap like this looks like it solves more than it
+does.

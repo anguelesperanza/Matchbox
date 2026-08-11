@@ -13,11 +13,19 @@ import sdl "vendor:sdl3"
 
 // Brings up SDL, the GPU backend and the window, and fills in the global `mbi`.
 // Call this once before anything else in the package.
+/*
+	Brings up SDL, the GPU backend and the window, and fills in the global `mbi`.
+	Call this once before anything else in the package.
+
+	The size is what you would like, not what you are guaranteed. It is capped
+	to the display so a window never opens larger than the screen it is on --
+	see below for why that is worth doing.
+*/
 init :: proc(title: string, width: i32, height: i32) {
-	mbi.title            = title
-	mbi.width            = width
-	mbi.height           = height
+	width, height := width, height
+
 	mbi.flags            = {.HIGH_PIXEL_DENSITY, .VULKAN, .RESIZABLE}
+	mbi.title            = title
 	mbi.running          = true
 	mbi.max_delta_time   = 1.0 / 60
 	mbi.input.escape_key = .ESCAPE
@@ -30,6 +38,22 @@ init :: proc(title: string, width: i32, height: i32) {
 	gpu_ok := gpu.init()
 	if !gpu_ok { panic("Could not initialize gpu library") }
 
+	// A game written on a desktop asks for a desktop-sized window, and what
+	// happens when it is opened on a laptop is up to the window manager: some
+	// clamp it, some leave part of it off the screen where nothing can reach
+	// it, and either way the game is drawing to a size it does not have.
+	//
+	// Usable bounds rather than the raw display size, so a taskbar, dock or
+	// panel is already accounted for. A display that cannot be measured leaves
+	// the request alone rather than guessing at it.
+	bounds: sdl.Rect
+	if sdl.GetDisplayUsableBounds(sdl.GetPrimaryDisplay(), &bounds) && bounds.w > 0 && bounds.h > 0 {
+		width  = min(width,  bounds.w)
+		height = min(height, bounds.h)
+	}
+
+	mbi.width  = width
+	mbi.height = height
 
 	mbi.window = sdl.CreateWindow(
 		strings.clone_to_cstring(title),

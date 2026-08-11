@@ -228,3 +228,35 @@ down to the order they were updated in -- so the screen that owns the fields end
 What it is not: there is no selection, no dragging the caret with the mouse, and no
 scrolling when the text outruns the box. It exists for the short answers a game asks for.
 Anything longer wants a real editor widget, not this one grown into one.
+
+## An Outline Is Thicker On The Long Side
+
+`draw_rect_outline` takes a `border`, and it is easy to read that as a thickness. It is
+not. The outline shader compares it against uv, on both axes:
+
+```glsl
+if (uv.x > border) { if (uv.x < 1.0 - border) { ... } }
+```
+
+uv runs 0..1 across whatever the rectangle happens to be, so the thickness that comes out
+is `border * size` **per axis**. On a square that is one number. On anything else it is
+two, and the long side gets the heavy one.
+
+It went unnoticed for a while because the only things using it were card-shaped zones at
+150x210, where 0.02 is 3 pixels one way and 4.2 the other -- wrong, and not wrong enough
+to see. A 460x52 text box is where it showed up: a border of 0.04 drew eighteen pixels
+down each side and two along the top, and swallowed the first characters typed into it.
+
+Rather than change the shader, `ui.odin` gained `draw_rect_border`, which draws four bars
+at a thickness in pixels. The corners are covered twice, which a flat colour hides and
+which is cheaper than mitring them to meet.
+
+Both are worth having, so neither replaced the other:
+
+- `draw_rect_border` when the border should look the same all the way round -- boxes,
+  fields, panels, anything a person reads as a frame
+- `draw_rect_outline` when it should scale with the shape, which is what the card zones
+  actually want: their outline stays in proportion as the board zooms
+
+The API is the trap here, not the maths. `border` is a fraction and reads like a width,
+and nothing at the call site says otherwise.

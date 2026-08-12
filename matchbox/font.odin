@@ -1,8 +1,6 @@
 package matchbox
 
-import "gpu"
 import "core:strconv"
-import "base:runtime"
 
 import "base:intrinsics"
 
@@ -50,41 +48,13 @@ load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 		rgba[i*4 + 3] = bitmap[i]
 	}
 
-	upload_arena := gpu.arena_create()
-	defer gpu.arena_destroy(&upload_arena)
-
-	staging := gpu.arena_alloc_raw(&upload_arena, cast(u64)len(rgba), 1)
-	runtime.mem_copy(staging.cpu, raw_data(rgba), len(rgba))
-
-	font.gpu_texture = gpu.texture_alloc_and_create({
-		dimensions = {cast(u32)FONT_ATLAS_SIZE, cast(u32)FONT_ATLAS_SIZE, 1},
-		format     = .RGBA8_Unorm,
-		usage      = {.Sampled},
-	})
-
-	stage_verts := gpu.arena_alloc(&upload_arena, Vertex, 4)
-	stage_verts.cpu[0] = {pos = {-0.5,  0.5, 0}, uv = {0, 1}}
-	stage_verts.cpu[1] = {pos = { 0.5, -0.5, 0}, uv = {1, 0}}
-	stage_verts.cpu[2] = {pos = { 0.5,  0.5, 0}, uv = {1, 1}}
-	stage_verts.cpu[3] = {pos = {-0.5, -0.5, 0}, uv = {0, 0}}
-
-	stage_indices := gpu.arena_alloc(&upload_arena, u32, 6)
-	stage_indices.cpu[0] = 0; stage_indices.cpu[1] = 2; stage_indices.cpu[2] = 1
-	stage_indices.cpu[3] = 0; stage_indices.cpu[4] = 1; stage_indices.cpu[5] = 3
-
-	font.verts_local   = gpu.mem_alloc(Vertex, 4, gpu.Memory.GPU)
-	font.indices_local = gpu.mem_alloc(u32, 6, gpu.Memory.GPU)
-
-	cmd := gpu.commands_begin(.Main)
-	gpu.cmd_copy_to_texture(cmd, font.gpu_texture, staging)
-	gpu.cmd_mem_copy(cmd, font.verts_local, stage_verts)
-	gpu.cmd_mem_copy(cmd, font.indices_local, stage_indices)
-	gpu.cmd_barrier(cmd, .Transfer, .All, {})
-	gpu.queue_submit(.Main, {cmd})
-	gpu.queue_wait_idle(.Main)
-
-	font.tex_id     = gpu.desc_pool_alloc_texture(&mbi.renderer.desc_pool, gpu.texture_view_descriptor(font.gpu_texture, {}))
-	font.sampler_id = gpu.desc_pool_alloc_sampler(&mbi.renderer.desc_pool, gpu.sampler_descriptor({min_filter = .Linear, mag_filter = .Linear}))
+	// Linear filtering, unlike a sprite's nearest: glyph quads rarely land on
+	// whole pixels, and the atlas is a coverage mask that reads badly when it
+	// is point sampled.
+	font.texture = upload_texture(raw_data(rgba), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE)
+	font.sampler = mbi.renderer.font_sampler
+	font.width   = FONT_ATLAS_SIZE
+	font.height  = FONT_ATLAS_SIZE
 
 	return font
 }
@@ -108,10 +78,6 @@ draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) w
 
 
 draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
-	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.font_vert, mbi.renderer.shaders.font_frag)
-	set_alpha_blend(mbi.renderer.frame_cmd)
-
 	cursor_x := x
 	cursor_y := y
 
@@ -126,27 +92,20 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontVertData)
-		verts_data.cpu^ = {
-			verts    = font.verts_local.gpu.ptr,
+		vert_data := VertData{
 			position = screen_pos(pos),
 			size     = screen_size(size),
 			screen   = screen_dims(),
-			rotation = 0,
-			flip_x   = false,
-			flip_y   = false,
 			uv_min   = {q.s0, q.t0},
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontFragData)
-		frag_data.cpu^ = {
-			texture_a = font.tex_id,
-			sampler   = font.sampler_id,
-			color     = color,
-		}
+		frag_data := FontFragData{color = color}
 
-		gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
+		draw_quad(
+			mbi.renderer.pipelines.font, &vert_data, &frag_data, size_of(frag_data),
+			font.texture, font.sampler,
+		)
 	}
 }
 
@@ -177,10 +136,6 @@ measure_text :: proc(font: ^Font, text: string) -> [2]f32 {
 // is active, so the font renders at its native baked size instead of being
 // upscaled by the logical-resolution multiplier.
 draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
-	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.font_vert, mbi.renderer.shaders.font_frag)
-	set_alpha_blend(mbi.renderer.frame_cmd)
-
 	cursor_x := x
 	cursor_y := y
 
@@ -195,27 +150,22 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontVertData)
-		verts_data.cpu^ = {
-			verts    = font.verts_local.gpu.ptr,
+		// No screen_pos / screen_size here: that is what makes this the UI
+		// variant, drawing at the font's baked size in window pixels.
+		vert_data := VertData{
 			position = pos,
 			size     = size,
 			screen   = screen_dims(),
-			rotation = 0,
-			flip_x   = false,
-			flip_y   = false,
 			uv_min   = {q.s0, q.t0},
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FontFragData)
-		frag_data.cpu^ = {
-			texture_a = font.tex_id,
-			sampler   = font.sampler_id,
-			color     = color,
-		}
+		frag_data := FontFragData{color = color}
 
-		gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, font.indices_local)
+		draw_quad(
+			mbi.renderer.pipelines.font, &vert_data, &frag_data, size_of(frag_data),
+			font.texture, font.sampler,
+		)
 	}
 }
 

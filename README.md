@@ -2,7 +2,7 @@
 ---
 **Highly Experimental**
 
-Matchbox is a **WIP** game framework for making video games; built on top of the `no_gfx_api` (https://github.com/LeonardoTemperanza/no_gfx_api)
+Matchbox is a **WIP** game framework for making video games; built on SDL3, using its GPU API for rendering.
 
 **Currenlt status: Currenlty rewriting. Due to the heady use of AI in the 3D rewrite, it became unruly and stopped making sense**
 
@@ -12,11 +12,25 @@ Matchbox is a **WIP** game framework for making video games; built on top of the
 ## Technology Stack for Matchbox
 |Name|Descirption|Repo|
 |----      |-----------|----|
-|no_gfx_api|The underlying graphics layer|https://github.com/LeonardoTemperanza/no_gfx_api|
-|SDL3      |The window platform layer. the version is whatever the current in Odin is.    | In vendor
+|SDL3      |The window platform layer *and* the graphics layer, through its GPU API. The version is whatever the current one in Odin is.| In vendor
 |stb       |The font sytem| In vendor
 
-**IMPORTANT** Matchbox comes with its own copy of `no_gfx_api` as to avoid any breaking changes.
+SDL3 is the only thing Matchbox needs at runtime. It used to render through a
+vendored copy of `no_gfx_api`, which required `VK_EXT_shader_object` -- an
+extension Intel's Vulkan driver does not provide, so an Arc B580 could not start
+a game at all. SDL3's GPU API asks for nothing of the kind, and brings a D3D12
+fallback with it.
+
+## Shaders
+The built-in shaders live in `matchbox/shaders` as HLSL and are compiled into
+the package, so a game does not build them. If you change one, run
+`build_shaders.bat` (or `.sh`) at the repository root.
+
+This needs `dxc` on PATH, which the Vulkan SDK provides -- it emits both the
+SPIR-V that the Vulkan backend wants and the DXIL that D3D12 wants, from the
+same source. Both are compiled and embedded, because SDL only offers a backend
+whose shader format it was told about at startup; shipping SPIR-V alone would
+mean Vulkan or nothing.
 
 ## How to use
 Copy the `matchbox` folder to your project directory and import it

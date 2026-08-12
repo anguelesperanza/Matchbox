@@ -8,7 +8,6 @@ package matchbox
 
 import "core:strings"
 
-import "gpu"
 import sdl "vendor:sdl3"
 
 Key_State :: struct {

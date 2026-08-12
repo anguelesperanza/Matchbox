@@ -1,6 +1,5 @@
 package matchbox
 
-import "gpu"
 
 // -----------------------------------------------------------------------
 // Animation
@@ -51,7 +50,9 @@ destroy_animation_clip :: proc(clip: ^AnimationClip) {
 }
 
 switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip) {
-    if sprite.clip.tex_id == clip.tex_id do return
+    // Same sheet means same clip: the texture handle identifies it now that
+    // there are no descriptor-pool ids to compare.
+    if sprite.clip.texture == clip.texture do return
     sprite.clip          = clip
     sprite.current_frame = 0
     sprite.accumulator   = 0
@@ -94,30 +95,23 @@ update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
 
 
 draw_animated_sprite :: proc(sprite: AnimatedSprite) {
-	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
-	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.vertex, mbi.renderer.shaders.fragment)
-
 	draw_center := sprite.position + sprite.pivot * sprite.size + sprite.clip.offset
 
-	verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts    = sprite.clip.verts_local.gpu.ptr,
+	vert_data := VertData{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
 		screen   = screen_dims(),
 		uv_min   = sprite.uv_min,
 		uv_max   = sprite.uv_max,
 		rotation = sprite.rotation,
-		flip_x   = cast(b32)sprite.flip_x,
-		flip_y   = cast(b32)sprite.flip_y,
 	}
 
-	frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FragData)
-	frag_data.cpu.texture_a = sprite.clip.tex_id
-	frag_data.cpu.sampler   = sprite.clip.sampler_id
-	frag_data.cpu.flip_x    = false
-	frag_data.cpu.flip_y    = false
+	// Flipping is already folded into uv_min/uv_max by the frame selection
+	// above, so the shader is told not to do it a second time.
+	frag_data := FragData{flip_x = false, flip_y = false}
 
-	set_alpha_blend(mbi.renderer.frame_cmd)
-	gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, sprite.clip.indices_local)
+	draw_quad(
+		mbi.renderer.pipelines.sprite, &vert_data, &frag_data, size_of(frag_data),
+		sprite.clip.texture, sprite.clip.sampler,
+	)
 }

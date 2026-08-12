@@ -1,11 +1,9 @@
 package matchbox
 
-import "gpu"
 import "core:math"
 
 import stbi "vendor:stb/image"
-
-import "base:runtime"
+import sdl "vendor:sdl3"
 
 // -----------------------------------------------------------------------
 // Sprites
@@ -30,47 +28,13 @@ create_mesh :: proc(bytes: []byte) -> Mesh {
 	ensure(pixels != nil, "Could not load texture")
 	defer stbi.image_free(pixels)
 
-	pixels_size := cast(int)width * cast(int)height * 4
-
-	upload_arena := gpu.arena_create()
-	defer gpu.arena_destroy(&upload_arena)
-
-	staging := gpu.arena_alloc_raw(&upload_arena, cast(u64)pixels_size, 1)
-	runtime.mem_copy(staging.cpu, pixels, pixels_size)
-
-	gpu_texture := gpu.texture_alloc_and_create({
-		dimensions = {cast(u32)width, cast(u32)height, 1},
-		format     = .RGBA8_Unorm,
-		usage      = {.Sampled},
-	})
-
-	stage_verts := gpu.arena_alloc(&upload_arena, Vertex, 4)
-	stage_verts.cpu[0] = {pos = {-0.5,  0.5, 0}, uv = {0, 1}}
-	stage_verts.cpu[1] = {pos = { 0.5, -0.5, 0}, uv = {1, 0}}
-	stage_verts.cpu[2] = {pos = { 0.5,  0.5, 0}, uv = {1, 1}}
-	stage_verts.cpu[3] = {pos = {-0.5, -0.5, 0}, uv = {0, 0}}
-
-	stage_indices := gpu.arena_alloc(&upload_arena, u32, 6)
-	stage_indices.cpu[0] = 0; stage_indices.cpu[1] = 2; stage_indices.cpu[2] = 1
-	stage_indices.cpu[3] = 0; stage_indices.cpu[4] = 1; stage_indices.cpu[5] = 3
-
-	verts_local   := gpu.mem_alloc(Vertex, 4, gpu.Memory.GPU)
-	indices_local := gpu.mem_alloc(u32, 6, gpu.Memory.GPU)
-
-	cmd := gpu.commands_begin(.Main)
-	gpu.cmd_copy_to_texture(cmd, gpu_texture, staging)
-	gpu.cmd_mem_copy(cmd, verts_local, stage_verts)
-	gpu.cmd_mem_copy(cmd, indices_local, stage_indices)
-	gpu.cmd_barrier(cmd, .Transfer, .All, {})
-	gpu.queue_submit(.Main, {cmd})
-	gpu.queue_wait_idle(.Main)
-
+	// The quad every sprite draws with is shared and already on the GPU, so all
+	// that is uploaded here is the texture.
 	return Mesh{
-		gpu_texture   = gpu_texture,
-		verts_local   = verts_local,
-		indices_local = indices_local,
-		tex_id        = gpu.desc_pool_alloc_texture(&mbi.renderer.desc_pool, gpu.texture_view_descriptor(gpu_texture, {})),
-		sampler_id    = mbi.renderer.sprite_sampler,
+		texture = upload_texture(pixels, width, height),
+		sampler = mbi.renderer.sprite_sampler,
+		width   = width,
+		height  = height,
 	}
 }
 
@@ -82,8 +46,8 @@ create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 		final_scale = 1
 	}
 
-	width  := cast(f32)mesh.gpu_texture.dimensions[0] * final_scale
-	height := cast(f32)mesh.gpu_texture.dimensions[1] * final_scale
+	width  := cast(f32)mesh.width  * final_scale
+	height := cast(f32)mesh.height * final_scale
 
 	return Sprite{
 		mesh = mesh,
@@ -98,14 +62,13 @@ create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 	}
 }
 
-// The texture descriptor has to be given back or the pool drains as sprites are
-// created and destroyed. The sampler is not freed here: sprites share one that
-// outlives them, and the font's is one-off and goes with the program.
+// Only the texture is owned. The sampler is shared with every other sprite and
+// outlives them, and the quad belongs to the renderer.
 destroy_mesh :: proc(mesh: ^Mesh) {
-	gpu.desc_pool_free_textures(&mbi.renderer.desc_pool, mesh.tex_id)
-	gpu.mem_free(mesh.verts_local)
-	gpu.mem_free(mesh.indices_local)
-	gpu.texture_free_and_destroy(&mesh.gpu_texture)
+	if mesh.texture != nil && mbi.renderer.device != nil {
+		sdl.ReleaseGPUTexture(mbi.renderer.device, mesh.texture)
+	}
+	mesh.texture = nil
 }
 
 destroy_sprite :: proc(sprite: ^Sprite) {
@@ -126,32 +89,26 @@ destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites) {
 }
 
 draw_sprite :: proc(sprite: Sprite) {
-	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
-	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.vertex, mbi.renderer.shaders.fragment)
-
 	draw_center := sprite.position + sprite.pivot * sprite.size
 
-	verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts    = sprite.verts_local.gpu.ptr,
+	vert_data := VertData{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
 		screen   = screen_dims(),
 		rotation = sprite.rotation,
-		flip_x   = cast(b32)sprite.flip_x,
-		flip_y   = cast(b32)sprite.flip_y,
 		uv_min   = sprite.uv_min,
 		uv_max   = sprite.uv_max,
 	}
 
-	frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, FragData)
-	frag_data.cpu.texture_a = sprite.tex_id
-	frag_data.cpu.sampler   = sprite.sampler_id
-	frag_data.cpu.flip_x    = cast(b32)sprite.flip_x
-	frag_data.cpu.flip_y    = cast(b32)sprite.flip_y
+	frag_data := FragData{
+		flip_x = cast(b32)sprite.flip_x,
+		flip_y = cast(b32)sprite.flip_y,
+	}
 
-	set_alpha_blend(mbi.renderer.frame_cmd)
-	gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, sprite.indices_local)
+	draw_quad(
+		mbi.renderer.pipelines.sprite, &vert_data, &frag_data, size_of(frag_data),
+		sprite.texture, sprite.sampler,
+	)
 }
 
 sprite_bounds :: proc(body: ^Body) -> [4]f32 {
@@ -164,59 +121,83 @@ sprite_bounds :: proc(body: ^Body) -> [4]f32 {
 	}
 }
 
-set_alpha_blend :: proc(cmd: gpu.Command_Buffer) {
-	gpu.cmd_set_blend_state(cmd, {
-		enable           = true,
-		color_op         = .Add,
-		src_color_factor = .Src_Alpha,
-		dst_color_factor = .One_Minus_Src_Alpha,
-		alpha_op         = .Add,
-		src_alpha_factor = .One,
-		dst_alpha_factor = .Zero,
-		color_write_mask = {.R, .G, .B, .A},
-	})
+/*
+	A hollow rectangle, `thickness` pixels thick on every side.
+
+	`thickness` used to be a fraction the shader compared against uv on both
+	axes, which made the thickness that came out `thickness * size` per axis:
+	one number on a square, two on anything else, with the long side getting
+	the heavy one. A 460x52 text box with 0.04 drew eighteen pixels down the
+	sides against two along the top, and swallowed the first characters typed
+	into it.
+
+	It reads like a width, so now it is one. The conversion to the shader's
+	per-axis half-extent happens here, where the size is known.
+
+	Note the units changed with the meaning: a call that used to pass 0.04
+	wants roughly 2 for the same look on a short box, not 0.04, which is now a
+	line too thin to see. draw_outline_proportional is the old behaviour under
+	a name that says so.
+*/
+draw_outline :: proc(center: [2]f32, size: [2]f32, color: [4]f32, thickness: f32, rotation: f32) {
+	// Guarded because a zero-sized rectangle would divide by zero, and because
+	// past half the extent the two edges cross and the frame fills solid.
+	border := [2]f32{0, 0}
+	if size.x > 0 do border.x = clamp(thickness / size.x, 0, 0.5)
+	if size.y > 0 do border.y = clamp(thickness / size.y, 0, 0.5)
+
+	draw_outline_uv(center, size, color, border, rotation)
 }
 
-draw_outline :: proc(center: [2]f32, size: [2]f32, color: [4]f32, border: f32, rotation: f32) {
-	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
-	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.vertex, mbi.renderer.shaders.outline)
+/*
+	A hollow rectangle whose border keeps its proportions as the shape changes.
 
-	verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts    = mbi.renderer.rect_verts.gpu.ptr,
+	This is what draw_outline did before it took a thickness, kept because it
+	is the right thing for an outline that should scale with what it surrounds
+	-- a card-shaped zone whose frame stays in proportion as the board zooms.
+	`fraction` is a share of each side, so 0.02 is two percent of the width
+	across the vertical edges and two percent of the height across the
+	horizontal ones.
+*/
+draw_outline_proportional :: proc(center: [2]f32, size: [2]f32, color: [4]f32, fraction: f32, rotation: f32) {
+	f := clamp(fraction, 0, 0.5)
+	draw_outline_uv(center, size, color, {f, f}, rotation)
+}
+
+@(private)
+draw_outline_uv :: proc(center: [2]f32, size: [2]f32, color: [4]f32, border: [2]f32, rotation: f32) {
+	vert_data := VertData{
 		position = screen_pos(center),
 		size     = screen_size(size),
 		screen   = screen_dims(),
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
 		rotation = rotation,
-		flip_x = false,
-		flip_y = false,
 	}
 
-	frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, OutlineFragData)
-	frag_data.cpu^ = {
+	frag_data := OutlineFragData{
 		color  = color,
 		border = border,
-		flip_x = false,
-		flip_y = false,
 	}
 
-	set_alpha_blend(mbi.renderer.frame_cmd)
-	gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, mbi.renderer.rect_indices)
+	draw_quad(mbi.renderer.pipelines.outline, &vert_data, &frag_data, size_of(frag_data))
 }
 
-draw_bounding_box_outline :: proc(body: ^Body, color: [4]f32, border: f32) {
+// `thickness` is in pixels, the same on every side. See draw_outline for what
+// that used to mean and why it changed.
+draw_bounding_box_outline :: proc(body: ^Body, color: [4]f32, thickness: f32) {
 	bb     := sprite_bounds(body)
 	center := [2]f32{(bb[0] + bb[2]) * 0.5, (bb[1] + bb[3]) * 0.5}
 	size   := [2]f32{bb[2] - bb[0], bb[3] - bb[1]}
 
-	draw_outline(center, size, color, border, body.rotation)
+	draw_outline(center, size, color, thickness, body.rotation)
 }
 
-draw_rect_outline :: proc(body: ^Body, color: [4]f32, border: f32) {
+// `thickness` is in pixels, the same on every side. See draw_outline for what
+// that used to mean and why it changed.
+draw_rect_outline :: proc(body: ^Body, color: [4]f32, thickness: f32) {
 	center := body.position + body.pivot * body.size
-	draw_outline(center, body.size, color, border, body.rotation)
+	draw_outline(center, body.size, color, thickness, body.rotation)
 }
 
 
@@ -265,8 +246,8 @@ sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32 {
 // only the tile is sampled -- the spacing/margin is never included, which would
 // otherwise bleed the neighbouring gap into the tile's edges.
 sprite_set_frame :: proc(sprite: ^Sprite, col, row: int, tile_w, tile_h: f32, spacing: f32 = 0, margin: f32 = 0) {
-    tex_w := f32(sprite.gpu_texture.dimensions[0])
-    tex_h := f32(sprite.gpu_texture.dimensions[1])
+    tex_w := f32(sprite.width)
+    tex_h := f32(sprite.height)
 
     px := margin + f32(col) * (tile_w + spacing)
     py := margin + f32(row) * (tile_h + spacing)

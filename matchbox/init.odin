@@ -1,10 +1,8 @@
 package matchbox
 
-import "gpu"
 import "core:fmt"
 import "core:log"
 import "core:os"
-import "core:slice"
 import "core:strings"
 
 import sdl "vendor:sdl3"
@@ -25,13 +23,49 @@ import sdl "vendor:sdl3"
 	Beside the executable rather than the working directory, since a shortcut
 	can start a program anywhere and the folder they were given is the one
 	place they will think to look.
+
+	This says much less than the Vulkan-specific report it replaces, which
+	could name the exact missing extension. It is also much less likely to be
+	needed: the failure that motivated that report was a required extension
+	the driver did not have, and SDL3 asks for nothing of the kind.
 */
 @(private)
 write_gpu_report :: proc() {
-	body := gpu.startup_report()
-	if body == "" {
-		body = "The renderer would not start, and had nothing further to say about why.\n"
+	sb := strings.builder_make_none()
+	defer strings.builder_destroy(&sb)
+
+	strings.write_string(&sb, "The renderer could not start.\n\n")
+
+	if err := sdl.GetError(); err != nil && err != "" {
+		fmt.sbprintf(&sb, "SDL said: %s\n\n", err)
 	}
+
+	// Which backends were compiled in, and which would take the shaders that
+	// ship with this program. A backend listed as unsupported here is one the
+	// machine cannot provide -- no driver, or too old a one.
+	strings.write_string(&sb, "graphics backends:\n")
+	for i in 0 ..< sdl.GetNumGPUDrivers() {
+		name := sdl.GetGPUDriver(i)
+		spirv := sdl.GPUSupportsShaderFormats({.SPIRV}, name)
+		dxil  := sdl.GPUSupportsShaderFormats({.DXIL},  name)
+
+		status := "unsupported on this machine"
+		if spirv || dxil {
+			status = "available"
+		}
+
+		fmt.sbprintf(&sb, "  %-14s %s", name, status)
+		if spirv do strings.write_string(&sb, "  (SPIR-V)")
+		if dxil  do strings.write_string(&sb, "  (DXIL)")
+		strings.write_string(&sb, "\n")
+	}
+
+	strings.write_string(&sb,
+		"\nIf nothing above is available, the graphics driver is the thing to\n" +
+		"look at -- installing the newest one from the GPU maker's own site,\n" +
+		"rather than through Windows Update, fixes the majority of these.\n")
+
+	body := strings.to_string(sb)
 
 	header := fmt.tprintf(
 		"%s could not start.\n\nSend this file to whoever gave you the game.\n\n%s\n\n",
@@ -57,6 +91,111 @@ write_gpu_report :: proc() {
 }
 
 /*
+	Loads one of the built-in shaders.
+
+	Both a SPIR-V and a DXIL build of every shader is compiled in, and which
+	one is handed over depends on the backend SDL picked. Declaring both at
+	device creation is what makes the D3D12 fallback possible at all -- SDL
+	will only offer a backend whose shader format it was told about.
+*/
+@(private)
+create_builtin_shader :: proc(
+	spirv, dxil:  []u8,
+	stage:        sdl.GPUShaderStage,
+	num_samplers: u32,
+) -> ^sdl.GPUShader {
+	formats := sdl.GetGPUShaderFormats(mbi.renderer.device)
+
+	code:   []u8
+	format: sdl.GPUShaderFormat
+
+	switch {
+	case .SPIRV in formats: code, format = spirv, {.SPIRV}
+	case .DXIL  in formats: code, format = dxil,  {.DXIL}
+	case:
+		panic("GPU backend accepts neither SPIR-V nor DXIL")
+	}
+
+	shader := sdl.CreateGPUShader(mbi.renderer.device, {
+		code_size           = len(code),
+		code                = raw_data(code),
+		entrypoint          = "main",
+		format              = format,
+		stage               = stage,
+		num_samplers        = num_samplers,
+		num_uniform_buffers = 1,
+	})
+
+	if shader == nil {
+		log.errorf("could not create shader: %s", sdl.GetError())
+		panic("could not create a built-in shader")
+	}
+
+	return shader
+}
+
+/*
+	Builds one pipeline: the shared vertex shader, the given fragment shader,
+	and the alpha blend every draw in Matchbox uses.
+
+	Culling is off. The quad's winding flips with the y negation in the vertex
+	shader, and nothing here is a closed solid, so there is nothing to gain by
+	being careful about it.
+*/
+@(private)
+create_pipeline :: proc(fragment: ^sdl.GPUShader) -> ^sdl.GPUGraphicsPipeline {
+	vertex_buffers := [1]sdl.GPUVertexBufferDescription{
+		{slot = 0, pitch = size_of(Vertex), input_rate = .VERTEX},
+	}
+
+	attributes := [2]sdl.GPUVertexAttribute{
+		{location = 0, buffer_slot = 0, format = .FLOAT3, offset = 0},
+		{location = 1, buffer_slot = 0, format = .FLOAT2, offset = size_of([3]f32)},
+	}
+
+	color_targets := [1]sdl.GPUColorTargetDescription{
+		{
+			format = sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
+			blend_state = {
+				enable_blend            = true,
+				color_blend_op          = .ADD,
+				src_color_blendfactor   = .SRC_ALPHA,
+				dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
+				alpha_blend_op          = .ADD,
+				src_alpha_blendfactor   = .ONE,
+				dst_alpha_blendfactor   = .ZERO,
+				enable_color_write_mask = true,
+				color_write_mask        = {.R, .G, .B, .A},
+			},
+		},
+	}
+
+	pipeline := sdl.CreateGPUGraphicsPipeline(mbi.renderer.device, {
+		vertex_shader   = mbi.renderer.shaders.quad,
+		fragment_shader = fragment,
+		primitive_type  = .TRIANGLELIST,
+		vertex_input_state = {
+			vertex_buffer_descriptions = raw_data(vertex_buffers[:]),
+			num_vertex_buffers         = 1,
+			vertex_attributes          = raw_data(attributes[:]),
+			num_vertex_attributes      = 2,
+		},
+		rasterizer_state = {fill_mode = .FILL, cull_mode = .NONE},
+		target_info = {
+			color_target_descriptions = raw_data(color_targets[:]),
+			num_color_targets         = 1,
+		},
+	})
+
+	if pipeline == nil {
+		log.errorf("could not create pipeline: %s", sdl.GetError())
+		panic("could not create a graphics pipeline")
+	}
+
+	return pipeline
+}
+
+/*
 	Brings up SDL, the GPU backend and the window, and fills in the global `mbi`.
 	Call this once before anything else in the package.
 
@@ -66,16 +205,17 @@ write_gpu_report :: proc() {
 init :: proc(title: string, width: i32, height: i32) {
 	width, height := width, height
 
-	mbi.flags            = {.HIGH_PIXEL_DENSITY, .VULKAN, .RESIZABLE}
+	// No API-specific window flag. Asking for .VULKAN here would pin the window
+	// to a Vulkan surface and take the D3D12 fallback away.
+	mbi.flags            = {.HIGH_PIXEL_DENSITY, .RESIZABLE}
 	mbi.title            = title
 	mbi.running          = true
 	mbi.max_delta_time   = 1.0 / 60
 	mbi.input.escape_key = .ESCAPE
 
-	// Odin's default logger discards everything, and the gpu layer reports why
+	// Odin's default logger discards everything, and the renderer reports why
 	// it cannot start by logging -- so without this, a machine that cannot run
-	// the game says "could not initialize gpu library" and nothing else, when
-	// it was ready to name the exact extension it was missing.
+	// the game says "could not initialize gpu library" and nothing else.
 	//
 	// Only when the caller has not set one. A game with its own logger wants
 	// its own logger.
@@ -84,6 +224,15 @@ init :: proc(title: string, width: i32, height: i32) {
 		context.logger = mbi.logger
 	}
 
+	// The uniform structs are pushed straight at shader cbuffers, and a
+	// mismatch shows up as wrong geometry or colour rather than an error.
+	// Cheaper to find out here.
+	#assert(size_of(VertData)        == 48)
+	#assert(size_of(FragData)        == 16)
+	#assert(size_of(OutlineFragData) == 32)
+	#assert(size_of(FontFragData)    == 16)
+	#assert(size_of(Rect_Frag_Data)  == 16)
+
 	init_ok := sdl.Init({.VIDEO, .AUDIO})
 	if !init_ok {
 		log.errorf("SDL_Init failed: %s", sdl.GetError())
@@ -91,12 +240,6 @@ init :: proc(title: string, width: i32, height: i32) {
 	}
 
 	mbi.ts_freq = sdl.GetPerformanceFrequency()
-
-	gpu_ok := gpu.init()
-	if !gpu_ok {
-		write_gpu_report()
-		panic("Could not initialize gpu library -- see gpu-report.txt next to the program")
-	}
 
 	// A game written on a desktop asks for a desktop-sized window, and what
 	// happens when it is opened on a laptop is up to the window manager: some
@@ -115,6 +258,8 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.width  = width
 	mbi.height = height
 
+	// Window before device: SDL3 creates the device independently and then has
+	// it claim a window, the reverse of the old swapchain-from-window order.
 	mbi.window = sdl.CreateWindow(
 		strings.clone_to_cstring(title),
 		width, height,
@@ -127,53 +272,62 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.draw_scale    = 1
 	mbi.draw_offset   = {0, 0}
 
-	gpu.swapchain_init_from_sdl(mbi.window, 3)
+	// Both shader formats are declared so SDL can fall back to D3D12 where
+	// Vulkan is unavailable.
+	mbi.renderer.device = sdl.CreateGPUDevice({.SPIRV, .DXIL}, ODIN_DEBUG, nil)
+	if mbi.renderer.device == nil {
+		write_gpu_report()
+		panic("Could not create a GPU device -- see gpu-report.txt next to the program")
+	}
 
-	mbi.now_ts              = sdl.GetPerformanceCounter()
-	mbi.renderer.desc_pool  = gpu.desc_pool_create()
-	mbi.renderer.next_frame = 1
-	mbi.renderer.frame_sem  = gpu.semaphore_create(0)
+	if !sdl.ClaimWindowForGPUDevice(mbi.renderer.device, mbi.window) {
+		write_gpu_report()
+		panic("Could not attach the window to the GPU device -- see gpu-report.txt next to the program")
+	}
 
-	for &fa in mbi.renderer.frame_arenas do fa = gpu.arena_create()
+	log.infof("gpu backend: %s", sdl.GetGPUDeviceDriver(mbi.renderer.device))
 
-	// Every sprite wants the same filtering, and samplers are the scarcest thing
-	// in the descriptor pool, so one is allocated here and shared by all of them
-	mbi.renderer.sprite_sampler = gpu.desc_pool_alloc_sampler(
-		&mbi.renderer.desc_pool,
-		gpu.sampler_descriptor({min_filter = .Nearest, mag_filter = .Nearest}),
-	)
+	mbi.now_ts = sdl.GetPerformanceCounter()
 
-	mbi.renderer.shaders.vertex    = gpu.shader_create(#load("shaders/test.vert.spv", []u32), .Vertex)
-	mbi.renderer.shaders.fragment  = gpu.shader_create(#load("shaders/test.frag.spv", []u32), .Fragment)
-	mbi.renderer.shaders.outline   = gpu.shader_create(#load("shaders/outline.frag.spv", []u32), .Fragment)
-	mbi.renderer.shaders.font_vert = gpu.shader_create(#load("shaders/font.vert.spv", []u32), .Vertex)
-	mbi.renderer.shaders.font_frag = gpu.shader_create(#load("shaders/font.frag.spv", []u32), .Fragment)
-	mbi.renderer.shaders.rect_frag = gpu.shader_create(#load("shaders/rect.frag.spv", []u32), .Fragment)
+	mbi.renderer.shaders.quad = create_builtin_shader(
+		#load("shaders/quad.vert.spv"), #load("shaders/quad.vert.dxil"), .VERTEX, 0)
+	mbi.renderer.shaders.sprite = create_builtin_shader(
+		#load("shaders/sprite.frag.spv"), #load("shaders/sprite.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.rect = create_builtin_shader(
+		#load("shaders/rect.frag.spv"), #load("shaders/rect.frag.dxil"), .FRAGMENT, 0)
+	mbi.renderer.shaders.outline = create_builtin_shader(
+		#load("shaders/outline.frag.spv"), #load("shaders/outline.frag.dxil"), .FRAGMENT, 0)
+	mbi.renderer.shaders.font = create_builtin_shader(
+		#load("shaders/font.frag.spv"), #load("shaders/font.frag.dxil"), .FRAGMENT, 1)
 
-	// Upload shared rect quad (reused by every draw_rect call)
+	mbi.renderer.pipelines.sprite  = create_pipeline(mbi.renderer.shaders.sprite)
+	mbi.renderer.pipelines.rect    = create_pipeline(mbi.renderer.shaders.rect)
+	mbi.renderer.pipelines.outline = create_pipeline(mbi.renderer.shaders.outline)
+	mbi.renderer.pipelines.font    = create_pipeline(mbi.renderer.shaders.font)
+
+	// Every sprite wants the same filtering, and the font wants smoothing, so
+	// two samplers serve the whole program.
+	mbi.renderer.sprite_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter = .NEAREST, mag_filter = .NEAREST,
+	})
+	mbi.renderer.font_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter = .LINEAR, mag_filter = .LINEAR,
+	})
+	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil,
+		"could not create samplers")
+
+	// The one quad every draw uses.
 	{
-		upload_arena := gpu.arena_create()
-		defer gpu.arena_destroy(&upload_arena)
+		verts := [4]Vertex{
+			{pos = {-0.5,  0.5, 0}, uv = {0, 1}},
+			{pos = { 0.5, -0.5, 0}, uv = {1, 0}},
+			{pos = { 0.5,  0.5, 0}, uv = {1, 1}},
+			{pos = {-0.5, -0.5, 0}, uv = {0, 0}},
+		}
+		indices := [6]u32{0, 2, 1, 0, 1, 3}
 
-		stage_verts := gpu.arena_alloc(&upload_arena, Vertex, 4)
-		stage_verts.cpu[0] = {pos = {-0.5,  0.5, 0}, uv = {0, 1}}
-		stage_verts.cpu[1] = {pos = { 0.5, -0.5, 0}, uv = {1, 0}}
-		stage_verts.cpu[2] = {pos = { 0.5,  0.5, 0}, uv = {1, 1}}
-		stage_verts.cpu[3] = {pos = {-0.5, -0.5, 0}, uv = {0, 0}}
-
-		stage_indices := gpu.arena_alloc(&upload_arena, u32, 6)
-		stage_indices.cpu[0] = 0; stage_indices.cpu[1] = 2; stage_indices.cpu[2] = 1
-		stage_indices.cpu[3] = 0; stage_indices.cpu[4] = 1; stage_indices.cpu[5] = 3
-
-		mbi.renderer.rect_verts   = gpu.mem_alloc(Vertex, 4, gpu.Memory.GPU)
-		mbi.renderer.rect_indices = gpu.mem_alloc(u32, 6, gpu.Memory.GPU)
-
-		cmd := gpu.commands_begin(.Main)
-		gpu.cmd_mem_copy(cmd, mbi.renderer.rect_verts, stage_verts)
-		gpu.cmd_mem_copy(cmd, mbi.renderer.rect_indices, stage_indices)
-		gpu.cmd_barrier(cmd, .Transfer, .All, {})
-		gpu.queue_submit(.Main, {cmd})
-		gpu.queue_wait_idle(.Main)
+		mbi.renderer.quad_verts   = upload_buffer(&verts,   size_of(verts),   {.VERTEX})
+		mbi.renderer.quad_indices = upload_buffer(&indices, size_of(indices), {.INDEX})
 	}
 
 	mbi.font = load_font(#load("fonts/Silver.ttf"), 32)
@@ -199,41 +353,89 @@ is_running :: proc() -> bool {
 
 // Tears down everything init brought up. Call once, after the game loop ends.
 cleanup :: proc() {
+	device := mbi.renderer.device
+	if device == nil do return
 
-	gpu.wait_idle()
-	
-	gpu.semaphore_destroy(mbi.renderer.frame_sem)
-	for &fa in mbi.renderer.frame_arenas do gpu.arena_destroy(&fa)
-
-	if mbi.renderer.shaders.vertex    != nil do gpu.shader_destroy(mbi.renderer.shaders.vertex)
-	if mbi.renderer.shaders.fragment  != nil do gpu.shader_destroy(mbi.renderer.shaders.fragment)
-	if mbi.renderer.shaders.outline   != nil do gpu.shader_destroy(mbi.renderer.shaders.outline)
-	if mbi.renderer.shaders.font_vert != nil do gpu.shader_destroy(mbi.renderer.shaders.font_vert)
-	if mbi.renderer.shaders.font_frag != nil do gpu.shader_destroy(mbi.renderer.shaders.font_frag)
-	if mbi.renderer.shaders.rect_frag != nil do gpu.shader_destroy(mbi.renderer.shaders.rect_frag)
-
-	gpu.mem_free(mbi.renderer.rect_verts)
-	gpu.mem_free(mbi.renderer.rect_indices)
+	// Nothing may be released while the GPU is still reading it.
+	_ = sdl.WaitForGPUIdle(device)
 
 	destroy_font(&mbi.font)
 
-	gpu.desc_pool_destroy(&mbi.renderer.desc_pool)
-	gpu.cleanup()
+	if mbi.renderer.quad_verts   != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.quad_verts)
+	if mbi.renderer.quad_indices != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.quad_indices)
+
+	if mbi.renderer.sprite_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.sprite_sampler)
+	if mbi.renderer.font_sampler   != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.font_sampler)
+
+	if mbi.renderer.pipelines.sprite  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.sprite)
+	if mbi.renderer.pipelines.rect    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.rect)
+	if mbi.renderer.pipelines.outline != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.outline)
+	if mbi.renderer.pipelines.font    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.font)
+
+	if mbi.renderer.shaders.quad    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.quad)
+	if mbi.renderer.shaders.sprite  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.sprite)
+	if mbi.renderer.shaders.rect    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.rect)
+	if mbi.renderer.shaders.outline != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.outline)
+	if mbi.renderer.shaders.font    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.font)
+
+	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
+	sdl.DestroyGPUDevice(device)
+	mbi.renderer.device = nil
 }
 
-// Originally was used to call gpu.wait_idle in main loop,
-// that has been moved to end_render. Leaving in for the time being
-// but may remove if uneeded
+// Blocks until the GPU has finished everything submitted so far. Rarely needed
+// -- the frame loop paces itself on the swapchain -- but kept for the cases
+// where a game wants to be certain before tearing something down.
 wait_idle :: proc() {
-	gpu.wait_idle()
+	if mbi.renderer.device != nil {
+		_ = sdl.WaitForGPUIdle(mbi.renderer.device)
+	}
 }
 
 // -----------------------------------------------------------------------
 // Shaders
 // -----------------------------------------------------------------------
 
-load_shader :: proc(shader_path: string, shader_type: gpu.Shader_Type_Graphics) -> gpu.Shader {
-	data, err := os.read_entire_file_from_path(shader_path, context.allocator)
-	if err != nil { panic("Cannot read shader file") }
-	return gpu.shader_create(slice.reinterpret([]u32, data), shader_type)
+/*
+	Loads a shader off disk.
+
+	`path` is given without the format extension: pass "shaders/water.frag" and
+	the ".spv" or ".dxil" that matches the running backend is appended. Both
+	need to exist beside each other for a game to keep working on either.
+*/
+load_shader :: proc(path: string, stage: sdl.GPUShaderStage, num_samplers: u32 = 0) -> ^sdl.GPUShader {
+	formats := sdl.GetGPUShaderFormats(mbi.renderer.device)
+
+	full:   string
+	format: sdl.GPUShaderFormat
+
+	switch {
+	case .SPIRV in formats: full, format = fmt.tprintf("%s.spv",  path), {.SPIRV}
+	case .DXIL  in formats: full, format = fmt.tprintf("%s.dxil", path), {.DXIL}
+	case:
+		panic("GPU backend accepts neither SPIR-V nor DXIL")
+	}
+
+	data, err := os.read_entire_file_from_path(full, context.allocator)
+	if err != nil {
+		log.errorf("could not read shader %s: %v", full, err)
+		panic("Cannot read shader file")
+	}
+
+	shader := sdl.CreateGPUShader(mbi.renderer.device, {
+		code_size           = len(data),
+		code                = raw_data(data),
+		entrypoint          = "main",
+		format              = format,
+		stage               = stage,
+		num_samplers        = num_samplers,
+		num_uniform_buffers = 1,
+	})
+
+	if shader == nil {
+		log.errorf("could not create shader from %s: %s", full, sdl.GetError())
+		panic("Cannot create shader")
+	}
+
+	return shader
 }

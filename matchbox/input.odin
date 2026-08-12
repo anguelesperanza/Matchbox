@@ -66,6 +66,12 @@ Input :: struct {
 	text:        [MAX_TEXT_INPUT]u8,
 	text_length: int,
 	text_open:   bool, // whether text input is currently being accepted
+
+	// Controllers, by slot. See gamepad.odin -- slots behave like player
+	// numbers and a disconnected pad frees its own.
+	gamepads:                  [MAX_GAMEPADS]Gamepad,
+	gamepad_deadzone:          f32,
+	gamepad_trigger_threshold: f32,
 }
 
 // Processes SDL events, updates input state, and calculates delta_time.
@@ -86,6 +92,7 @@ poll_events :: proc() {
 	mbi.input.mouse_dx = 0
 	mbi.input.mouse_dy = 0
 	mbi.input.mouse.wheel = {0, 0}
+	gamepads_begin_frame()
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
 	{
@@ -183,6 +190,8 @@ poll_events :: proc() {
 
 				mbi.input.mouse.wheel += scroll
 			}
+		case .GAMEPAD_ADDED, .GAMEPAD_REMOVED, .GAMEPAD_BUTTON_DOWN, .GAMEPAD_BUTTON_UP:
+			gamepad_handle_event(event)
 		}
 	}
 

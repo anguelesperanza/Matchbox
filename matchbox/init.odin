@@ -213,6 +213,9 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.max_delta_time   = 1.0 / 60
 	mbi.input.escape_key = .ESCAPE
 
+	mbi.input.gamepad_deadzone          = GAMEPAD_STICK_DEADZONE
+	mbi.input.gamepad_trigger_threshold = GAMEPAD_TRIGGER_THRESHOLD
+
 	// Odin's default logger discards everything, and the renderer reports why
 	// it cannot start by logging -- so without this, a machine that cannot run
 	// the game says "could not initialize gpu library" and nothing else.
@@ -233,11 +236,16 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(FontFragData)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
 
-	init_ok := sdl.Init({.VIDEO, .AUDIO})
+	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
+	// database along -- which is what lets a game ask for `.NORTH` rather than
+	// working out that button 3 means something different on a DualSense.
+	init_ok := sdl.Init({.VIDEO, .AUDIO, .GAMEPAD})
 	if !init_ok {
 		log.errorf("SDL_Init failed: %s", sdl.GetError())
 		panic("Cannot init SDL3")
 	}
+
+	gamepads_init()
 
 	mbi.ts_freq = sdl.GetPerformanceFrequency()
 
@@ -353,6 +361,8 @@ is_running :: proc() -> bool {
 
 // Tears down everything init brought up. Call once, after the game loop ends.
 cleanup :: proc() {
+	gamepads_cleanup()
+
 	device := mbi.renderer.device
 	if device == nil do return
 

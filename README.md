@@ -80,6 +80,35 @@ mbi := &matchbox.mbi
 One global means one window: Matchbox cannot run two independent instances in a
 process.
 
+### Gamepads
+Up to four controllers, addressed by a slot that behaves like a player number.
+The first pad to connect is 0, and a pad that is unplugged frees its slot for
+the next one. Nothing has to be set up -- plugging one in mid-game is handled.
+
+```odin
+if matchbox.is_gamepad_connected(0) {
+	move := matchbox.get_gamepad_stick(0, .LEFT)
+	player.position += move * speed * matchbox.delta_time()
+
+	if matchbox.is_gamepad_button_pressed(0, .SOUTH) {
+		matchbox.set_gamepad_rumble(0, 0.6, 0.6, 200)
+	}
+}
+```
+
+`get_gamepad_stick` takes the deadzone out and rescales what is left, so a
+stick starts from a standstill rather than jumping to a quarter speed the
+moment it leaves the centre. The deadzone is radial rather than per-axis, which
+is what stops a diagonal push snapping to one axis. `get_gamepad_axis` is the
+same reading untreated, for when you want to do that yourself.
+
+Y is positive downward on a stick, matching the screen coordinates everything
+else draws in, so `position += stick` moves the way the stick is pushed.
+
+Button names are SDL's, which are positional rather than branded: `.SOUTH` is
+the bottom face button whether the pad in someone's hands calls it A, B or
+Cross. `examples/gamepad` shows every button, stick and trigger at once.
+
 ### Linux
 Build `SDL3` on linux (Min. 3.4.2)
 call `make -C {path to Odin/vendor/stb/src}` to build stb on linux

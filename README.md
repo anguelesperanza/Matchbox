@@ -4,7 +4,7 @@
 
 Matchbox is a **WIP** game framework for making video games; built on SDL3, using its GPU API for rendering.
 
-**Currenlt status: Currenlty rewriting. Due to the heady use of AI in the 3D rewrite, it became unruly and stopped making sense**
+**Currenlt status: WIP for sure; I update this add needed. Only 2D support for now but 3D support planned**
 
 ## What is Matchbox
 `Matchbox` is a personal project of mine to make a framework for making video games / graphical applications.

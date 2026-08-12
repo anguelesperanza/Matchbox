@@ -337,3 +337,60 @@ and exactly the case that was broken.
 
 The report is worth the hour it costs. It turns "it does not work on my friend's
 computer" into a file naming a driver version.
+
+## Left For Later After The SDL3_GPU Move
+
+The backend move deliberately changed as little as it could get away with, so a
+difference in the picture meant a porting mistake and nothing else. That left a
+few things standing that are worth coming back to. None of them block anything.
+
+### The Arc B580 has not actually been tested
+
+This is the one that matters, because it is the machine the whole move was for.
+Everything was verified on an NVIDIA card, which could run the old backend fine
+and so proves the least interesting half of the claim. SDL3's Vulkan backend
+asks for nothing Intel withholds, and D3D12 is there underneath it either way,
+but that is reasoning rather than evidence until the branch is built on the B580.
+
+### Text draws one quad per glyph
+
+`draw_text_string` binds the font pipeline once and then pushes a fresh uniform
+block and issues a draw for every character. A line of twenty characters is
+twenty draws. That was true before the move as well, and it is correct -- it is
+just the obvious thing to batch: one vertex buffer built per string, or per
+frame, and a single indexed draw.
+
+Worth measuring before rewriting. Nothing here draws enough text for it to
+matter yet, and a batched path is more code than the loop it would replace.
+
+### Flipping a spritesheet frame samples the wrong tile
+
+`sprite.frag` flips uv after `uv_min`/`uv_max` have already narrowed it to one
+tile:
+
+```hlsl
+if (flip_x != 0) uv_final.x = 1.0 - uv_final.x;
+```
+
+On a full-sheet sprite where uv runs 0..1 that is right. On a frame picked out
+by `sprite_set_frame` it reflects around the middle of the whole atlas instead
+of the middle of the tile, so a flipped frame shows some other frame. The fix is
+to reflect within the sub-rect -- `uv_min + uv_max - uv` -- rather than within
+the unit square.
+
+Pre-existing, and ported across unchanged on purpose so that anything that
+looked different after the move was the move's fault. `draw_animated_sprite`
+sidesteps it by folding the flip into the uv bounds it hands over, which is why
+this has not been noticed.
+
+### random-walk does not build
+
+```
+examples/random-walk/main.odin(29): Too few values in structure literal, expected 5, got 4
+```
+
+A positional `Rectangle` literal that was not updated when `pivot` was added. It
+has nothing to do with the backend and was already broken on main, so it was
+left out of that branch rather than folded into an unrelated diff. Switching it
+to a named-field literal is the fix, and is what stops it happening again the
+next time the struct grows.

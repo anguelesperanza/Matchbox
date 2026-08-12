@@ -1,0 +1,5 @@
+# SDL3 is taken from the Odin installation by copy_sdl.bat / copy_sdl.sh rather
+# than kept here. A committed copy goes stale without saying so -- this repo
+# carried SDL 3.3.0 while vendor:sdl3's bindings were generated against 3.4.2.
+SDL3.dll
+libSDL3.so

@@ -109,12 +109,31 @@ Button names are SDL's, which are positional rather than branded: `.SOUTH` is
 the bottom face button whether the pad in someone's hands calls it A, B or
 Cross. `examples/gamepad` shows every button, stick and trigger at once.
 
+### Getting SDL3 next to your program
+`SDL3.dll` is not kept in this repository. Run `copy_sdl.bat` (or `copy_sdl.sh`)
+once and it takes the one from your Odin installation, which is the same library
+`vendor:sdl3`'s bindings were generated against:
+
+```
+copy_sdl.bat                 populate every example
+copy_sdl.bat path\to\my\game put it beside your own build
+```
+
+It is worth understanding why rather than committing a copy and forgetting it.
+This repository carried SDL **3.3.0** for months while the bindings were built
+for **3.4.2**, so every build was reaching a two-minor-versions-old runtime
+through newer headers, and nothing anywhere said so. Taking the library from the
+Odin tree means the two cannot drift apart.
+
+### Windows
+Build as normal. `SDL3.dll` has to sit beside the executable -- see above.
+
 ### Linux
 Build `SDL3` on linux (Min. 3.4.2)
 call `make -C {path to Odin/vendor/stb/src}` to build stb on linux
 
-### Windows
-Just build the application as normal and make sure that the SDL3 Bindings are in the same directory as the executable
+Nothing needs copying: matchbox links `system:SDL3` on Linux, so the package
+manager's copy is the one that matters. `copy_sdl.sh` says as much and exits.
 
 ## Font
 The default font for Matchbox is called Silver and can be found here: https://poppyworks.itch.io/silver

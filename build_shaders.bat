@@ -1,29 +1,38 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM gpu_compiler.exe transpiles a NoSL shader straight to SPIR-V. The shader stage is
-REM inferred from the .vert/.frag/.comp infix in the filename, and the output is named
-REM <prefix>.<stage>.spv derived from the -out path (any extension on -out is stripped).
-REM So for test.vert.nosl we pass -out:...\test.vert.spv and get ...\test.vert.spv directly.
-REM NOTE: -out must include a directory component (an absolute path here), otherwise the
-REM compiler silently writes nothing.
+REM Compiles matchbox/shaders/*.hlsl to both SPIR-V (Vulkan) and DXIL (D3D12).
+REM
+REM SDL3_GPU only offers a backend whose shader format you declared at
+REM SDL_CreateGPUDevice, so both blobs are needed for the D3D12 fallback to
+REM exist at all. dxc from the Vulkan SDK emits both from the same source --
+REM SDL_shadercross is not required.
+REM
+REM Stage comes from the .vert. / .frag. infix in the filename, same as the
+REM NoSL script this replaces.
 
-set COMPILER=%~dp0\compiler\gpu_compiler.exe
+set SHADER_DIR=%~dp0matchbox\shaders
 
-if not exist "%COMPILER%" (
-    echo ERROR: gpu_compiler.exe not found at %COMPILER%
+where dxc >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] dxc not found on PATH. Install the Vulkan SDK, or add its Bin
+    echo         directory ^(e.g. C:\VulkanSDK\^<version^>\Bin^) to PATH.
     exit /b 1
 )
 
-echo === Compiling NOSL shaders ===
+echo === Compiling HLSL shaders ===
 
-for /r %%f in (*.nosl) do (
-    echo -- Compiling %%f
-    "%COMPILER%" "%%f" -out:"%%~dpnf.spv"
-    if errorlevel 1 (
-        echo ERROR: Failed to compile %%f
-        exit /b 1
-    )
+for %%F in ("%SHADER_DIR%\*.vert.hlsl") do (
+    echo -- %%~nxF
+    dxc -T vs_6_0 -E main -spirv -Fo "%SHADER_DIR%\%%~nF.spv"  "%%F" || exit /b 1
+    dxc -T vs_6_0 -E main         -Fo "%SHADER_DIR%\%%~nF.dxil" "%%F" || exit /b 1
+)
+
+for %%F in ("%SHADER_DIR%\*.frag.hlsl") do (
+    echo -- %%~nxF
+    dxc -T ps_6_0 -E main -spirv -Fo "%SHADER_DIR%\%%~nF.spv"  "%%F" || exit /b 1
+    dxc -T ps_6_0 -E main         -Fo "%SHADER_DIR%\%%~nF.dxil" "%%F" || exit /b 1
 )
 
 echo === Done ===
+endlocal

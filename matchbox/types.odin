@@ -2,79 +2,82 @@ package matchbox
 
 import "core:log"
 
-import "gpu"
+import sdl "vendor:sdl3"
 
 // -----------------------------------------------------------------------
 // Types -- GPU data
 // -----------------------------------------------------------------------
+
+/*
+	Uniform blocks.
+
+	These are pushed straight into SDL3's per-frame uniform ring with
+	PushGPU*UniformData, so each one has to match the cbuffer its shader
+	declares byte for byte. The packing rule that governs the layouts below is
+	that a float2 may not straddle a 16-byte boundary -- get it wrong and the
+	result is silently wrong colours or geometry rather than an error, which is
+	why every struct here carries its size in a comment and init asserts it.
+
+	The old bindless layout is gone: no `verts` pointer (there is a real vertex
+	buffer now) and no texture/sampler ids (they are bound to the pass).
+*/
 
 Vertex :: struct {
 	pos: [3]f32,
 	uv:  [2]f32,
 }
 
-VertData :: struct {
-	verts:    rawptr,
+// 48 bytes: (position,size) (screen,uv_min) (uv_max,rotation,pad).
+// Shared by every draw -- sprites, rects, outlines and glyphs all go through
+// the one vertex shader, so the separate FontVertData is gone.
+VertData :: struct #align(16) {
 	position: [2]f32,
 	size:     [2]f32,
 	screen:   [2]f32,
 	uv_min:   [2]f32,
 	uv_max:   [2]f32,
 	rotation: f32,
-	flip_x:   b32,
-	flip_y:   b32,
+	_pad:     f32,
 }
 
-FragData :: struct {
-	texture_a: u32,
-	sampler:   u32,
-	flip_x:    b32,
-	flip_y:    b32,
-}
-
-// #align(16): the `color` vec4 is read by outline.frag as a single 128-bit
-// (Aligned 16) buffer_reference load, which requires the allocation to be
-// 16-byte aligned. Odin gives [4]f32 only 4-byte alignment by default, so
-// without this the per-frame arena can place it on an 8-aligned address and
-// NVIDIA reads from the address rounded down to 16 -> wrong color / zero alpha.
-OutlineFragData :: struct #align(16) {
-	color:  [4]f32,
-	border: f32,
+// 16 bytes.
+FragData :: struct #align(16) {
 	flip_x: b32,
 	flip_y: b32,
+	_pad:   [2]f32,
 }
 
-FontVertData :: struct {
-	verts:    rawptr,
-	position: [2]f32,
-	size:     [2]f32,
-	screen:   [2]f32,
-	rotation: f32,
-	flip_x:   b32,
-	flip_y:   b32,
-	uv_min:   [2]f32,
-	uv_max:   [2]f32,
+// 32 bytes: (color) (border, pad).
+//
+// `border` is a half-extent in UV given per axis, not the single fraction the
+// old version took. See draw_outline for why that changed.
+OutlineFragData :: struct #align(16) {
+	color:  [4]f32,
+	border: [2]f32,
+	_pad:   [2]f32,
 }
 
-FontFragData :: struct {
-    texture_a: u32,
-    sampler:   u32,
-    color:     [4]f32,
+// 16 bytes.
+FontFragData :: struct #align(16) {
+	color: [4]f32,
 }
 
-// #align(16): see OutlineFragData. rect.frag reads `color` as a single 128-bit
-// (Aligned 16) buffer_reference load, so the allocation must be 16-byte aligned.
+// 16 bytes.
 Rect_Frag_Data :: struct #align(16) {
 	color: [4]f32,
 }
 
 // GPU handle bundle — shared by Sprite, AnimationClip, and Font.
+//
+// The quad's vertices and indices used to live here, one identical copy per
+// mesh. There is now a single shared quad on the Renderer, so all a mesh owns
+// is its texture. Width and height are kept alongside because an
+// SDL_GPUTexture will not report its own dimensions back.
 Mesh :: struct {
-	gpu_texture:   gpu.Owned_Texture,
-	verts_local:   gpu.slice_t(Vertex),
-	indices_local: gpu.slice_t(u32),
-	tex_id:        u32,
-	sampler_id:    u32,
+	texture: ^sdl.GPUTexture,
+	sampler: ^sdl.GPUSampler,
+	width:   i32,
+	height:  i32,
 }
 
 // Transform + physics + uv — shared by Sprite and AnimatedSprite.

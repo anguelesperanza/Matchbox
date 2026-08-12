@@ -261,6 +261,26 @@ Both are worth having, so neither replaced the other:
 The API is the trap here, not the maths. `border` is a fraction and reads like a width,
 and nothing at the call site says otherwise.
 
+### Fixed
+
+The trap was closed during the move to SDL3_GPU. The shader now takes the border as a
+per-axis half-extent, which puts the choice where the size is known -- at the call site
+-- rather than leaving one number to mean two things:
+
+- `draw_outline` takes a **thickness in pixels** and divides by size per axis, so it is
+  even the whole way round. This is what the name always suggested.
+- `draw_outline_proportional` takes the fraction and passes it on both axes, which is
+  exactly the old behaviour, kept for the card zones.
+
+The units changed with the meaning, and nothing warns about it: a call passing `0.04`
+still compiles and now draws a line four hundredths of a pixel wide, which is to say
+nothing at all. Every existing `draw_rect_outline` / `draw_bounding_box_outline` call
+has to be looked at -- either scaled up to pixels, or switched to
+`draw_outline_proportional` to keep what it had.
+
+`examples/outline` draws both on a 460x52 box, which is the shape the difference shows
+up on.
+
 ## A Window Bigger Than The Screen
 
 `init` passed the width and height straight to `SDL_CreateWindow`, so a game

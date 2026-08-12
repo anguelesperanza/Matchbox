@@ -53,16 +53,16 @@ mouse_over_button :: proc(button:Button) -> bool {
 /*
 	A border of one even thickness all the way round, in pixels.
 
-	Four rectangles rather than draw_rect_outline, because that one's `border`
-	is a fraction compared against uv on both axes -- so the thickness it
-	produces is `border * size` per axis, and on anything that is not square it
-	comes out heavier along the long side. On a 460x52 text box a border of
-	0.04 is eighteen pixels at the sides and two at the top, which swallows the
-	first characters typed into it.
+	This exists because draw_rect_outline's `border` used to be a fraction
+	compared against uv on both axes, which came out heavier along the long
+	side of anything that was not square. That is fixed -- draw_rect_outline
+	now takes a thickness in pixels and is even -- so the two agree, and this
+	one is kept for taking a Rectangle directly.
 
-	Use this whenever the thickness should look the same all the way round.
-	draw_rect_outline is still the one to use when the border should scale with
-	the shape, which is what a card-shaped zone wants.
+	draw_rect_outline is the cheaper of the two: one draw against four, and it
+	rotates with the shape. Reach for that unless you already have a Rectangle
+	in hand. draw_outline_proportional is the one to use when the border should
+	scale with the shape, which is what a card-shaped zone wants.
 */
 draw_rect_border :: proc(rectangle:Rectangle, color:[4]f32, thickness:f32) {
 	top_left := rect_top_left(rectangle)

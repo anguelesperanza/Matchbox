@@ -1,32 +1,42 @@
-#!/bin/bash
+#!/usr/bin/env sh
+# Compiles matchbox/shaders/*.hlsl to both SPIR-V (Vulkan) and DXIL (D3D12).
+#
+# SDL3_GPU only offers a backend whose shader format you declared at
+# SDL_CreateGPUDevice, so both blobs are needed for the D3D12 fallback to exist
+# at all. dxc from the Vulkan SDK emits both from the same source --
+# SDL_shadercross is not required.
+#
+# DXIL is Windows-only in practice; on other platforms the dxil step is skipped
+# and the SPIR-V output alone drives the Vulkan backend.
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPILER="$SCRIPT_DIR/compiler/gpu_compiler"
-SHADERS_DIR="$SCRIPT_DIR/matchbox/shaders"
+SHADER_DIR="$(cd "$(dirname "$0")" && pwd)/matchbox/shaders"
 
-if [ ! -f "$COMPILER" ]; then
-    echo "ERROR: gpu_compiler not found at $COMPILER"
+if ! command -v dxc >/dev/null 2>&1; then
+    echo "[ERROR] dxc not found on PATH. Install the Vulkan SDK and add its Bin directory to PATH." >&2
     exit 1
 fi
 
-if [ ! -d "$SHADERS_DIR" ]; then
-    echo "ERROR: shaders directory not found at $SHADERS_DIR"
-    exit 1
-fi
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) WANT_DXIL=1 ;;
+    *)                    WANT_DXIL=0 ;;
+esac
 
-echo "=== Compiling NOSL shaders ==="
+echo "=== Compiling HLSL shaders ==="
 
-while IFS= read -r -d '' f; do
-    echo "-- Compiling $f"
-    dir=$(dirname "$f")
-    base=$(basename "$f" .nosl)
-    out="$dir/$base"
+for f in "$SHADER_DIR"/*.hlsl; do
+    base="$(basename "$f" .hlsl)"
+    case "$base" in
+        *.vert) profile=vs_6_0 ;;
+        *.frag) profile=ps_6_0 ;;
+        *) echo "-- skipping $base (no .vert/.frag stage in name)"; continue ;;
+    esac
 
-    if ! "$COMPILER" "$f" "$out"; then
-        echo "ERROR: Failed to compile $f"
-        exit 1
+    echo "-- $(basename "$f")"
+    dxc -T "$profile" -E main -spirv -Fo "$SHADER_DIR/$base.spv" "$f"
+    if [ "$WANT_DXIL" = "1" ]; then
+        dxc -T "$profile" -E main -Fo "$SHADER_DIR/$base.dxil" "$f"
     fi
-done < <(find "$SHADERS_DIR" -name "*.nosl" -print0)
+done
 
 echo "=== Done ==="

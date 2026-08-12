@@ -1,37 +1,60 @@
 package matchbox
 
-import "gpu"
 import sdl "vendor:sdl3"
 
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
+//
+// One vertex shader serves every draw: the old test.vert and font.vert had
+// identical bodies and differed only in the field order of their uniform block.
 Shaders :: struct {
-	vertex:    gpu.Shader,
-	fragment:  gpu.Shader,
-	outline:   gpu.Shader,
-	font_vert: gpu.Shader,
-	font_frag: gpu.Shader,
-	rect_frag: gpu.Shader,
+	quad:    ^sdl.GPUShader,
+	sprite:  ^sdl.GPUShader,
+	rect:    ^sdl.GPUShader,
+	outline: ^sdl.GPUShader,
+	font:    ^sdl.GPUShader,
+}
+
+/*
+	One pipeline per fragment shader.
+
+	SDL3 has no dynamic shader or blend state -- the combination is baked into
+	an object at creation. That is the whole reason this port exists: the
+	previous backend got its dynamic state from VK_EXT_shader_object, which
+	Intel's Vulkan driver does not provide at any driver version currently
+	shipping, so an Arc B580 could not start the game at all.
+
+	All four share the one vertex shader and the same alpha blend.
+*/
+Pipelines :: struct {
+	sprite:  ^sdl.GPUGraphicsPipeline,
+	rect:    ^sdl.GPUGraphicsPipeline,
+	outline: ^sdl.GPUGraphicsPipeline,
+	font:    ^sdl.GPUGraphicsPipeline,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
 // this, which is why MatchboxInfo keeps it behind `mbi.renderer` instead of
 // promoting the fields.
 Renderer :: struct {
-	shaders:      Shaders,
-	desc_pool:    gpu.Descriptor_Pool,
-	frame_cmd:    gpu.Command_Buffer,  // command buffer for the frame in flight
-	frame_arenas: [3]gpu.Arena,        // one per frame in flight, cycled by next_frame
-	frame_arena:  ^gpu.Arena,          // this frame's arena, points into frame_arenas
-	frame_sem:    gpu.Semaphore,
-	next_frame:   u64,
-	swapchain:    gpu.Texture,
-	rect_verts:   gpu.slice_t(Vertex), // shared unit quad, reused by every draw_rect
-	rect_indices: gpu.slice_t(u32),
+	device:    ^sdl.GPUDevice,
+	shaders:   Shaders,
+	pipelines: Pipelines,
 
-	// One nearest-neighbour sampler shared by every sprite. The descriptor pool
-	// only has room for 32 samplers, so handing each sprite its own put a hard
-	// ceiling of about two dozen sprites on the whole program.
-	sprite_sampler: u32,
+	cmd:          ^sdl.GPUCommandBuffer,
+	pass:         ^sdl.GPURenderPass,
+	swapchain:    ^sdl.GPUTexture,
+	frame_active: bool, // false when the swapchain had nothing for us this frame
+
+	// The unit quad, uploaded once. Every mesh used to carry its own identical
+	// copy of these four vertices and six indices.
+	quad_verts:   ^sdl.GPUBuffer,
+	quad_indices: ^sdl.GPUBuffer,
+
+	// Two samplers for the whole program: nearest for sprites, linear for the
+	// font atlas. The old backend allocated these out of a descriptor pool with
+	// room for 32, which put a ceiling of about two dozen sprites on a program.
+	sprite_sampler: ^sdl.GPUSampler,
+	font_sampler:   ^sdl.GPUSampler,
 }
 
 // -----------------------------------------------------------------------
@@ -41,8 +64,6 @@ Renderer :: struct {
 begin_drawing :: proc() {
 	ensure(mbi.initialized, "matchbox.init must be called before begin_drawing")
 
-	old_window_w := mbi.window_width
-	old_window_h := mbi.window_height
 	sdl.GetWindowSize(mbi.window, &mbi.window_width, &mbi.window_height)
 
 	if !mbi.fixed_res {
@@ -70,39 +91,87 @@ begin_drawing :: proc() {
 		sdl.Delay(16)
 	}
 
-	if mbi.renderer.next_frame > 3 {
-		gpu.semaphore_wait(mbi.renderer.frame_sem, mbi.renderer.next_frame - 3)
+	mbi.renderer.pass         = nil
+	mbi.renderer.swapchain    = nil
+	mbi.renderer.frame_active = false
+
+	mbi.renderer.cmd = sdl.AcquireGPUCommandBuffer(mbi.renderer.device)
+	if mbi.renderer.cmd == nil do return
+
+	// Blocks until the swapchain has an image free, which is what paces the
+	// frame. The old backend did this with a timeline semaphore and a manual
+	// count of frames in flight, and then stalled the whole GPU on top of it.
+	//
+	// A minimized or zero-sized window legitimately hands back nothing. Every
+	// draw checks frame_active so the frame quietly does nothing rather than
+	// recording into a null pass.
+	if !sdl.WaitAndAcquireGPUSwapchainTexture(
+		mbi.renderer.cmd, mbi.window, &mbi.renderer.swapchain, nil, nil,
+	) {
+		return
 	}
+	if mbi.renderer.swapchain == nil do return
 
-	if old_window_w != mbi.window_width || old_window_h != mbi.window_height {
-		gpu.swapchain_resize({u32(max(0, mbi.window_width)), u32(max(0, mbi.window_height))})
-	}
+	mbi.renderer.frame_active = true
 
-	mbi.renderer.swapchain = gpu.swapchain_acquire_next()
-
-	mbi.renderer.frame_arena = &mbi.renderer.frame_arenas[mbi.renderer.next_frame % 3]
-	gpu.arena_free_all(mbi.renderer.frame_arena)
-
-	mbi.renderer.frame_cmd = gpu.commands_begin(.Main)
+	// The swapchain is resized by SDL as the window changes, so the explicit
+	// resize the old backend needed here is gone.
 }
 
 end_drawing :: proc() {
-	
-	gpu.wait_idle()
-		
-	gpu.cmd_end_render_pass(mbi.renderer.frame_cmd)
-	gpu.cmd_add_signal_semaphore(mbi.renderer.frame_cmd, mbi.renderer.frame_sem, mbi.renderer.next_frame)
-	gpu.queue_submit(.Main, {mbi.renderer.frame_cmd})
-	gpu.swapchain_present(.Main, mbi.renderer.frame_sem, mbi.renderer.next_frame)
-	mbi.renderer.next_frame += 1
+	r := &mbi.renderer
+	if r.cmd == nil do return
+
+	if r.pass != nil {
+		sdl.EndGPURenderPass(r.pass)
+		r.pass = nil
+	}
+
+	// Submitted even on a frame that drew nothing: a command buffer that has
+	// been acquired has to be handed back one way or another.
+	_ = sdl.SubmitGPUCommandBuffer(r.cmd)
+	r.cmd          = nil
+	r.frame_active = false
 }
 
 clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
-	gpu.cmd_begin_render_pass(mbi.renderer.frame_cmd, {
-		color_attachments = {{texture = mbi.renderer.swapchain, clear_color = color}},
-	})
+	r := &mbi.renderer
+	if !r.frame_active do return
+
+	if r.pass != nil {
+		sdl.EndGPURenderPass(r.pass)
+		r.pass = nil
+	}
+
+	target := sdl.GPUColorTargetInfo{
+		texture     = r.swapchain,
+		clear_color = {color[0], color[1], color[2], color[3]},
+		load_op     = .CLEAR,
+		store_op    = .STORE,
+	}
+	r.pass = sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
 }
 
+/*
+	Opens a render pass if the frame does not have one yet.
+
+	clear_background is the usual way a frame gets its pass, but drawing
+	without clearing first is legal, and previously produced a crash rather
+	than a picture. This one loads what is already in the swapchain instead of
+	clearing it.
+*/
+@(private)
+ensure_pass :: proc() {
+	r := &mbi.renderer
+	if !r.frame_active || r.pass != nil do return
+
+	target := sdl.GPUColorTargetInfo{
+		texture  = r.swapchain,
+		load_op  = .LOAD,
+		store_op = .STORE,
+	}
+	r.pass = sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
+}
 
 // -----------------------------------------------------------------------
 // Basic Shapes
@@ -123,23 +192,18 @@ rect_top_left :: proc(rectangle: Rectangle) -> [2]f32 {
 }
 
 draw_rect :: proc(rectangle: Rectangle) {
-	gpu.cmd_set_desc_heap(mbi.renderer.frame_cmd, mbi.renderer.desc_pool)
-	gpu.cmd_set_shaders(mbi.renderer.frame_cmd, mbi.renderer.shaders.vertex, mbi.renderer.shaders.rect_frag)
+	ensure_pass()
 
-	verts_data := gpu.arena_alloc(mbi.renderer.frame_arena, VertData)
-	verts_data.cpu^ = {
-		verts    = mbi.renderer.rect_verts.gpu.ptr,
+	vert_data := VertData{
 		position = screen_pos(rect_center(rectangle)),
 		size     = screen_size(rectangle.size),
 		screen   = screen_dims(),
+		uv_min   = {0, 0},
+		uv_max   = {1, 1},
 		rotation = rectangle.rotation,
-		flip_x   = false,
-		flip_y   = false,
 	}
 
-	frag_data := gpu.arena_alloc(mbi.renderer.frame_arena, Rect_Frag_Data)
-	frag_data.cpu.color = rectangle.color
+	frag_data := Rect_Frag_Data{color = rectangle.color}
 
-	set_alpha_blend(mbi.renderer.frame_cmd)
-	gpu.cmd_draw_indexed(mbi.renderer.frame_cmd, verts_data, frag_data, mbi.renderer.rect_indices)
+	draw_quad(mbi.renderer.pipelines.rect, &vert_data, &frag_data, size_of(frag_data))
 }

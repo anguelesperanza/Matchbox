@@ -1,0 +1,132 @@
+package matchbox
+
+/*
+	Upload
+	------
+	The staging path shared by everything that goes to the GPU once at load
+	time: the unit quad, a sprite's texture, the font atlas.
+
+	SDL3 tracks resource state itself, so the memory barriers and full queue
+	waits the previous backend needed around each of these are gone -- an
+	upload is a copy pass and a submit. The transfer buffer is temporary and
+	released as soon as the copy is recorded.
+*/
+
+import "base:runtime"
+
+import sdl "vendor:sdl3"
+
+// Creates a device-local buffer and fills it from `data`.
+@(private)
+upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -> ^sdl.GPUBuffer {
+	device := mbi.renderer.device
+
+	buffer := sdl.CreateGPUBuffer(device, {usage = usage, size = size})
+	ensure(buffer != nil, "could not create GPU buffer")
+
+	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
+	ensure(transfer != nil, "could not create transfer buffer")
+	defer sdl.ReleaseGPUTransferBuffer(device, transfer)
+
+	dst := sdl.MapGPUTransferBuffer(device, transfer, false)
+	ensure(dst != nil, "could not map transfer buffer")
+	runtime.mem_copy(dst, data, int(size))
+	sdl.UnmapGPUTransferBuffer(device, transfer)
+
+	cmd := sdl.AcquireGPUCommandBuffer(device)
+	pass := sdl.BeginGPUCopyPass(cmd)
+	sdl.UploadToGPUBuffer(
+		pass,
+		{transfer_buffer = transfer, offset = 0},
+		{buffer = buffer, offset = 0, size = size},
+		false,
+	)
+	sdl.EndGPUCopyPass(pass)
+	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit buffer upload")
+
+	return buffer
+}
+
+// Creates a sampled RGBA8 texture and fills it from `pixels`, which must hold
+// width * height * 4 bytes.
+@(private)
+upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
+	device := mbi.renderer.device
+	size   := u32(width) * u32(height) * 4
+
+	texture := sdl.CreateGPUTexture(device, {
+		type                 = .D2,
+		format               = .R8G8B8A8_UNORM,
+		usage                = {.SAMPLER},
+		width                = u32(width),
+		height               = u32(height),
+		layer_count_or_depth = 1,
+		num_levels           = 1,
+	})
+	ensure(texture != nil, "could not create GPU texture")
+
+	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
+	ensure(transfer != nil, "could not create transfer buffer")
+	defer sdl.ReleaseGPUTransferBuffer(device, transfer)
+
+	dst := sdl.MapGPUTransferBuffer(device, transfer, false)
+	ensure(dst != nil, "could not map transfer buffer")
+	runtime.mem_copy(dst, pixels, int(size))
+	sdl.UnmapGPUTransferBuffer(device, transfer)
+
+	cmd := sdl.AcquireGPUCommandBuffer(device)
+	pass := sdl.BeginGPUCopyPass(cmd)
+	sdl.UploadToGPUTexture(
+		pass,
+		{transfer_buffer = transfer, offset = 0, pixels_per_row = u32(width), rows_per_layer = u32(height)},
+		{texture = texture, w = u32(width), h = u32(height), d = 1},
+		false,
+	)
+	sdl.EndGPUCopyPass(pass)
+	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit texture upload")
+
+	return texture
+}
+
+/*
+	Records one quad into the frame's render pass.
+
+	Everything Matchbox draws is this: bind a pipeline, hand the vertex stage a
+	VertData and the fragment stage whatever its shader wants, draw six indices
+	off the shared quad. `texture` is nil for the shapes that do not sample one.
+
+	The uniform pushes go to the command buffer rather than the pass, and SDL3
+	ring-buffers them per frame, which is what replaced the three cycled arenas
+	the old backend needed.
+*/
+@(private)
+draw_quad :: proc(
+	pipeline:  ^sdl.GPUGraphicsPipeline,
+	vert_data: ^VertData,
+	frag_data: rawptr,
+	frag_size: u32,
+	texture:   ^sdl.GPUTexture = nil,
+	sampler:   ^sdl.GPUSampler = nil,
+) {
+	r := &mbi.renderer
+	if !r.frame_active do return
+
+	ensure_pass()
+	if r.pass == nil do return
+
+	sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
+
+	vertex_binding := sdl.GPUBufferBinding{buffer = r.quad_verts, offset = 0}
+	sdl.BindGPUVertexBuffers(r.pass, 0, &vertex_binding, 1)
+	sdl.BindGPUIndexBuffer(r.pass, {buffer = r.quad_indices, offset = 0}, ._32BIT)
+
+	if texture != nil {
+		binding := sdl.GPUTextureSamplerBinding{texture = texture, sampler = sampler}
+		sdl.BindGPUFragmentSamplers(r.pass, 0, &binding, 1)
+	}
+
+	sdl.PushGPUVertexUniformData(r.cmd, 0, vert_data, size_of(VertData))
+	sdl.PushGPUFragmentUniformData(r.cmd, 0, frag_data, frag_size)
+
+	sdl.DrawGPUIndexedPrimitives(r.pass, 6, 1, 0, 0, 0)
+}

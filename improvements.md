@@ -284,3 +284,36 @@ last one on a 13 inch laptop. Capping the window would not have saved it -- it
 now works out how many columns fit and sizes the cards to use the width exactly.
 Worth saying plainly, because a cap like this looks like it solves more than it
 does.
+
+## Telling Somebody Else's Computer Why It Would Not Start
+
+`init` panicked with "Could not initialize gpu library" and nothing else. The gpu
+layer knew perfectly well what was wrong -- it builds a message naming the exact
+extensions it could not find -- but it says so through `context.logger`, and
+Odin's default logger discards everything. The diagnosis was being produced and
+thrown away on every failure.
+
+Three changes, all aimed at the same problem: the machine that cannot run the
+game belongs to somebody else, and you may get one attempt at finding out why.
+
+**A logger, when the caller has not set one.** Everything the gpu layer had to
+say now reaches the console instead of the floor.
+
+**A report file.** On a failed start, `gpu-report.txt` is written next to the
+executable: every physical device found, with its name, type, vendor, driver
+version and Vulkan version, which required extensions each one has and lacks,
+and what to try next. A file rather than console output because the person it
+has to reach double-clicked the game and watched it die -- asking them to run it
+from a terminal reaches the author and nobody else. Beside the executable rather
+than in the working directory, because a shortcut can start a program anywhere
+and the folder they were given is the one place they will look.
+
+**Devices are filtered before they are scored.** Selection used to take the
+highest scoring GPU by type and only then ask whether it supported what the
+renderer needs, so a machine whose best device was unsuitable gave up with a
+second one sitting right there. The machine this was written on has a discrete
+NVIDIA card and AMD integrated graphics, which is an ordinary laptop or desktop
+and exactly the case that was broken.
+
+The report is worth the hour it costs. It turns "it does not work on my friend's
+computer" into a file naming a driver version.

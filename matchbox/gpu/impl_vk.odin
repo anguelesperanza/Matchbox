@@ -268,6 +268,19 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         }
 
         if len(unsupported_extensions) > 0 {
+            // Written down as well as logged: this fails before there is any
+            // device to describe, and without a line here the report would be
+            // empty on exactly the machines that got the least far
+            report_line("Vulkan started, but this installation is missing instance extensions")
+            report_line("the renderer needs. Nothing further could be checked.")
+            report_line("")
+            for missing in unsupported_extensions {
+                report_line("  MISSING  %s", missing)
+            }
+            report_line("")
+            report_line("This usually means a very old Vulkan runtime, or a driver that installed")
+            report_line("only part of one. Updating the graphics driver is the first thing to try.")
+
             log_unsupported_extensions(unsupported_extensions[:], loc)
             return false
         }
@@ -327,6 +340,12 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
         phys_devices := make([]vk.PhysicalDevice, phys_device_count, allocator = scratch)
         vk_check(vk.EnumeratePhysicalDevices(ctx.instance, &phys_device_count, raw_data(phys_devices)))
 
+        // Every device is written down as it is examined, so a machine that
+        // ends up with nothing usable can say what it did have and what each
+        // one was missing. On somebody else's computer that report is the only
+        // evidence there is going to be.
+        record_devices(phys_devices)
+
         found := false
         best_score: u32
         device_loop: for candidate in phys_devices
@@ -338,6 +357,16 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
             vk.GetPhysicalDeviceProperties2(candidate, &properties);
             vk.GetPhysicalDeviceFeatures2(candidate, &features);
 
+            // Asked before scoring, not after.
+            //
+            // This used to pick the highest scoring device and then check
+            // whether it could do the job, so a machine whose best GPU was
+            // unsuitable gave up -- even with a second one sitting there that
+            // would have run fine. A laptop with a discrete card and an
+            // integrated one is the ordinary case, and the discrete card
+            // always won the score.
+            if !device_meets_requirements(candidate) do continue device_loop
+
             #partial switch properties.properties.deviceType
             {
                 case .DISCRETE_GPU:   score += 1000
@@ -346,7 +375,7 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
                 case: {}
             }
 
-            if best_score < score
+            if best_score < score || !found
             {
                 best_score = score
                 ctx.phys_device = candidate
@@ -354,7 +383,11 @@ _init :: proc(validation := true, loc := #caller_location) -> bool
             }
         }
 
-        if !found do fatal_error("Could not find suitable GPU.")
+        if !found
+        {
+            report_no_usable_device(loc)
+            return false
+        }
     }
 
     raytracing_extensions := []cstring {

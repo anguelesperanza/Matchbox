@@ -1,6 +1,8 @@
 package matchbox
 
 import "gpu"
+import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -11,15 +13,55 @@ import sdl "vendor:sdl3"
 // Init / Cleanup
 // -----------------------------------------------------------------------
 
-// Brings up SDL, the GPU backend and the window, and fills in the global `mbi`.
-// Call this once before anything else in the package.
+/*
+	Puts the renderer's account of a failed start next to the program.
+
+	A file rather than console output, because the person this has to reach is
+	whoever was handed a copy of the game: they double-clicked it, it died, and
+	the only thing that can be asked of them is to send back a file sitting in
+	the same folder. Anything requiring a terminal reaches the author and
+	nobody else.
+
+	Beside the executable rather than the working directory, since a shortcut
+	can start a program anywhere and the folder they were given is the one
+	place they will think to look.
+*/
+@(private)
+write_gpu_report :: proc() {
+	body := gpu.startup_report()
+	if body == "" {
+		body = "The renderer would not start, and had nothing further to say about why.\n"
+	}
+
+	header := fmt.tprintf(
+		"%s could not start.\n\nSend this file to whoever gave you the game.\n\n%s\n\n",
+		mbi.title, strings.repeat("-", 60, context.temp_allocator),
+	)
+
+	path := "gpu-report.txt"
+	if exe := os.args[0]; exe != "" {
+		if cut := strings.last_index_any(exe, "/\\"); cut >= 0 {
+			path = fmt.tprintf("%s/gpu-report.txt", exe[:cut])
+		}
+	}
+
+	if err := os.write_entire_file(path, fmt.tprintf("%s%s", header, body)); err != nil {
+		// Nothing left to fall back on but the console, which is where this
+		// went before there was a file at all
+		log.errorf("could not write %s: %v", path, err)
+	} else {
+		log.errorf("wrote %s", path)
+	}
+
+	log.error(body)
+}
+
 /*
 	Brings up SDL, the GPU backend and the window, and fills in the global `mbi`.
 	Call this once before anything else in the package.
 
 	The size is what you would like, not what you are guaranteed. It is capped
-	to the display so a window never opens larger than the screen it is on --
-	see below for why that is worth doing.
+	to the display so a window never opens larger than the screen it is on.
 */
 init :: proc(title: string, width: i32, height: i32) {
 	width, height := width, height
@@ -30,13 +72,31 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.max_delta_time   = 1.0 / 60
 	mbi.input.escape_key = .ESCAPE
 
+	// Odin's default logger discards everything, and the gpu layer reports why
+	// it cannot start by logging -- so without this, a machine that cannot run
+	// the game says "could not initialize gpu library" and nothing else, when
+	// it was ready to name the exact extension it was missing.
+	//
+	// Only when the caller has not set one. A game with its own logger wants
+	// its own logger.
+	if context.logger.procedure == nil {
+		mbi.logger     = log.create_console_logger()
+		context.logger = mbi.logger
+	}
+
 	init_ok := sdl.Init({.VIDEO, .AUDIO})
-	if !init_ok { panic("Cannot init SDL3") }
+	if !init_ok {
+		log.errorf("SDL_Init failed: %s", sdl.GetError())
+		panic("Cannot init SDL3")
+	}
 
 	mbi.ts_freq = sdl.GetPerformanceFrequency()
 
 	gpu_ok := gpu.init()
-	if !gpu_ok { panic("Could not initialize gpu library") }
+	if !gpu_ok {
+		write_gpu_report()
+		panic("Could not initialize gpu library -- see gpu-report.txt next to the program")
+	}
 
 	// A game written on a desktop asks for a desktop-sized window, and what
 	// happens when it is opened on a laptop is up to the window manager: some

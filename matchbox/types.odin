@@ -1,5 +1,7 @@
 package matchbox
 
+import "core:log"
+
 import "gpu"
 
 // -----------------------------------------------------------------------
@@ -132,6 +134,11 @@ MatchboxInfo :: struct {
 	font:          Font,     // default font, loaded by init
 	running:       bool,     // false once the window is closed or escape is hit
 	initialized:   bool,     // set by init; guards against using a zeroed mbi
+
+	// Installed by init only when the caller had not set one, so the gpu
+	// layer's account of why it could not start reaches somebody. Kept here so
+	// cleanup can take it down again.
+	logger:        log.Logger,
 }
 
 // The one and only Matchbox state, filled in by init. Everything in the

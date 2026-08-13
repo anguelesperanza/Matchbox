@@ -111,7 +111,26 @@ Matchbox has `create_sprite` and `destroy_sprite` and nothing in between. A
 `Sprite_Cache` keyed by any comparable type would serve any game with more art
 than it wants resident at once.
 
-## 5. A layout cursor, and a grid fitter
+## 5. A layout cursor, and a grid fitter -- DONE
+
+`Layout` and `Grid` in `matchbox/layout.odin`. Neither draws anything; both hand
+back Rectangles, which is what `button`, `draw_rect` and `Text_Field` already
+take.
+
+`layout_next(&l, height)` gives the next box down the column and moves past it,
+with an optional narrower width centred in the column, which is what
+`menu_button` wanted. `layout_text` advances by ascent plus descent rather than
+by the glyphs actually drawn, so a stack of lines stays evenly spaced whatever
+is written on them.
+
+`grid_fit(area, target, count, spacing)` treats the target size as a wish: it
+takes however many columns fit at that width, then stretches the items so those
+columns fill the area exactly -- no ragged right margin, and nothing hanging off
+a narrower screen. The target's aspect ratio is kept. `grid_height` is what a
+scroll extent is measured against, and rows are deliberately not capped to the
+area's height, because a grid taller than its area is the scrolling case and
+`begin_clip` is what confines it.
+
 
 The `y: ^f32` pattern running through `menu_button`, `menu_field` and
 `menu_note`: draw a thing, advance past it, centre it in a width. Small, and in
@@ -165,3 +184,5 @@ written in the game, then moved:
 - `draw_text_plate`
 - `Sprite_Cache`, with the evicting single slot as `limit = 1`
 - `mouse_over_rect`, which three widgets had each written for themselves
+- `Layout`, the `y: ^f32` cursor, and `Grid`, the fitter that keeps a card
+  layout on a 13 inch laptop

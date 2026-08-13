@@ -121,6 +121,43 @@ if art := matchbox.sprite_cache_get(&cache, card, path); art != nil {
 
 `examples/ui` shows all three.
 
+### Laying things out
+`Layout` is a cursor down a column. Ask it for the next box and it has already
+moved past, which saves threading a `y` through every call and adding heights
+back by hand:
+
+```odin
+l := matchbox.layout_make({24, 24}, 190, 8)
+
+if matchbox.button(matchbox.layout_next(&l, 40), "All cards") { ... }
+if matchbox.button(matchbox.layout_next(&l, 40), "Owned")     { ... }
+matchbox.layout_space(&l, 14)
+matchbox.layout_text(&l, font, "v0.1")
+```
+
+Pass a width to `layout_next` for an item narrower than the column, centred in
+it. It holds no state between frames — rebuild it each frame and there is
+nothing to keep in sync.
+
+`Grid` fits items into an area. The target size is a wish: it takes however
+many columns fit at that width, then resizes the items so they fill the area
+exactly, keeping the target's aspect ratio.
+
+```odin
+grid := matchbox.grid_fit(area, {130, 180}, len(cards), 10)
+
+for card, i in cards {
+	cell := matchbox.grid_cell(grid, i)
+	if matchbox.button(cell, card.name) do pick(card)
+}
+```
+
+That is what keeps a layout picked on a large monitor from running off a small
+one — narrow the window and the column count drops rather than the grid being
+clipped. Rows are not capped to the area's height, because a grid taller than
+its area is the scrolling case; `grid_height` gives the extent and `begin_clip`
+confines it. `examples/layout` resizes live.
+
 ### Clipping
 `begin_clip` confines drawing to a rectangle until the matching `end_clip`, so
 a list can scroll inside a panel rather than running over what is below it.

@@ -89,30 +89,30 @@ upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
 }
 
 /*
-	Records one quad into the frame's render pass.
+	Binds everything a run of quads has in common: the pipeline, the shared
+	quad's vertex and index buffers, and the texture to sample from. `texture`
+	is nil for the shapes that do not sample one.
 
-	Everything Matchbox draws is this: bind a pipeline, hand the vertex stage a
-	VertData and the fragment stage whatever its shader wants, draw six indices
-	off the shared quad. `texture` is nil for the shapes that do not sample one.
+	Separate from the draw so a run can bind once. A string of text is one
+	pipeline and one atlas however many characters it has, and binding all of
+	that again per glyph is work with no effect -- a twenty character line was
+	doing it twenty times.
 
-	The uniform pushes go to the command buffer rather than the pass, and SDL3
-	ring-buffers them per frame, which is what replaced the three cycled arenas
-	the old backend needed.
+	Returns false when the frame has no pass to record into, in which case there
+	is nothing to draw and the caller should stop rather than push uniforms into
+	the void.
 */
 @(private)
-draw_quad :: proc(
-	pipeline:  ^sdl.GPUGraphicsPipeline,
-	vert_data: ^VertData,
-	frag_data: rawptr,
-	frag_size: u32,
-	texture:   ^sdl.GPUTexture = nil,
-	sampler:   ^sdl.GPUSampler = nil,
-) {
+bind_quad_state :: proc(
+	pipeline: ^sdl.GPUGraphicsPipeline,
+	texture:  ^sdl.GPUTexture = nil,
+	sampler:  ^sdl.GPUSampler = nil,
+) -> bool {
 	r := &mbi.renderer
-	if !r.frame_active do return
+	if !r.frame_active do return false
 
 	ensure_pass()
-	if r.pass == nil do return
+	if r.pass == nil do return false
 
 	sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
 
@@ -125,6 +125,21 @@ draw_quad :: proc(
 		sdl.BindGPUFragmentSamplers(r.pass, 0, &binding, 1)
 	}
 
+	return true
+}
+
+/*
+	Draws one quad against whatever bind_quad_state last set up.
+
+	The uniform pushes go to the command buffer rather than the pass, and SDL3
+	ring-buffers them per frame, which is what replaced the three cycled arenas
+	the old backend needed. Only call this after bind_quad_state has returned
+	true.
+*/
+@(private)
+push_quad :: proc(vert_data: ^VertData, frag_data: rawptr, frag_size: u32) {
+	r := &mbi.renderer
+
 	sdl.PushGPUVertexUniformData(r.cmd, 0, vert_data, size_of(VertData))
 
 	// sprite.frag declares no uniform buffer, so there is nothing to push and
@@ -134,4 +149,18 @@ draw_quad :: proc(
 	}
 
 	sdl.DrawGPUIndexedPrimitives(r.pass, 6, 1, 0, 0, 0)
+}
+
+// Bind and draw together, which is what everything drawing a single quad wants.
+@(private)
+draw_quad :: proc(
+	pipeline:  ^sdl.GPUGraphicsPipeline,
+	vert_data: ^VertData,
+	frag_data: rawptr,
+	frag_size: u32,
+	texture:   ^sdl.GPUTexture = nil,
+	sampler:   ^sdl.GPUSampler = nil,
+) {
+	if !bind_quad_state(pipeline, texture, sampler) do return
+	push_quad(vert_data, frag_data, frag_size)
 }

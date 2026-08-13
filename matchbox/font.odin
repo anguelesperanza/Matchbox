@@ -78,6 +78,10 @@ draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) w
 
 
 draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
+	// Bound once for the whole string. The pipeline, the shared quad and the
+	// atlas are the same for every character in it -- only the uniforms differ.
+	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
+
 	cursor_x := x
 	cursor_y := y
 
@@ -102,10 +106,7 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 
 		frag_data := FontFragData{color = color}
 
-		draw_quad(
-			mbi.renderer.pipelines.font, &vert_data, &frag_data, size_of(frag_data),
-			font.texture, font.sampler,
-		)
+		push_quad(&vert_data, &frag_data, size_of(frag_data))
 	}
 }
 
@@ -136,6 +137,9 @@ measure_text :: proc(font: ^Font, text: string) -> [2]f32 {
 // is active, so the font renders at its native baked size instead of being
 // upscaled by the logical-resolution multiplier.
 draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
+	// Bound once for the whole string, as in draw_text_string.
+	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
+
 	cursor_x := x
 	cursor_y := y
 
@@ -162,10 +166,7 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 
 		frag_data := FontFragData{color = color}
 
-		draw_quad(
-			mbi.renderer.pipelines.font, &vert_data, &frag_data, size_of(frag_data),
-			font.texture, font.sampler,
-		)
+		push_quad(&vert_data, &frag_data, size_of(frag_data))
 	}
 }
 

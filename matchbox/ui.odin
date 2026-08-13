@@ -14,6 +14,93 @@ import "core:unicode/utf8"
 
 import sdl "vendor:sdl3"
 
+// Whether a label sits in the middle of its box or against the left edge.
+// Left is what a list of options wants -- centred labels in a stacked column
+// make ragged edges on both sides and nothing lines up.
+Text_Align :: enum {
+	CENTER,
+	LEFT,
+}
+
+Button_Style :: struct {
+	hover:      [4]f32, // fill while the pointer is over it
+	text_color: [4]f32,
+	align:      Text_Align,
+	padding:    f32, // gap from the left edge when aligned LEFT
+}
+
+BUTTON_STYLE :: Button_Style{
+	hover      = {0.35, 0.35, 0.42, 1},
+	text_color = {1, 1, 1, 1},
+	align      = .CENTER,
+	padding    = 10,
+}
+
+/*
+	A button that draws itself and answers in one call. True on the frame it is
+	clicked.
+
+		if matchbox.button({position = {40, 40}, size = {160, 40},
+		                    color = {0.2, 0.2, 0.26, 1}, pivot = {0.5, 0.5}}, "Play") {
+			start_game()
+		}
+
+	Everything a caller needs is at the call site: the size comes from the
+	Rectangle rather than a fixed constant, and `style.align` puts the label
+	left instead of centred. Those two are what every hand-rolled wrapper
+	around Button/draw_button/mouse_over_button ended up adding.
+
+	The fill comes from `rectangle.color`, and `style.hover` replaces it while
+	the pointer is inside. Pass a style to change either, or leave it off.
+
+	Button, draw_button and mouse_over_button are still here and unchanged, for
+	anything that wants the parts separately.
+*/
+button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE) -> bool {
+	rect := rectangle
+
+	hovered := mouse_over_rect(rectangle)
+	if hovered do rect.color = style.hover
+
+	draw_rect(rect)
+
+	if len(text) > 0 {
+		top_left := rect_top_left(rect)
+		measured := measure_text(&mbi.font, text)
+
+		x: f32
+		switch style.align {
+		case .CENTER: x = top_left.x + (rect.size.x - measured.x) * 0.5
+		case .LEFT:   x = top_left.x + style.padding
+		}
+
+		// draw_text's y is a baseline rather than a top edge, so the ascent has
+		// to be added or the glyphs hang above the box instead of sitting in it.
+		y := top_left.y + (rect.size.y - measured.y) * 0.5 + mbi.font.ascent
+
+		draw_text(&mbi.font, text, x, y, style.text_color)
+	}
+
+	return hovered && is_mouse_pressed(.LEFT)
+}
+
+/*
+	Whether the pointer is inside a rectangle.
+
+	Off rect_top_left, not off `position`: the two only agree when the pivot is
+	{0.5, 0.5}, and getting it wrong offsets the whole hitbox from the thing you
+	can see by half its size. Buttons, text fields and anything else clickable
+	go through this rather than writing the test again.
+*/
+mouse_over_rect :: proc(rectangle: Rectangle) -> bool {
+	top_left := rect_top_left(rectangle)
+	size     := rectangle.size
+	mouse    := get_mouse_position()
+
+	return mouse.x >= top_left.x && mouse.x <= top_left.x + size.x &&
+	       mouse.y >= top_left.y && mouse.y <= top_left.y + size.y
+}
+
 Button :: struct {
 	text:string,
 	rectangle:Rectangle,
@@ -39,15 +126,61 @@ draw_button :: proc(button:Button) {
 
 
 mouse_over_button :: proc(button:Button) -> bool {
-	// Off rect_top_left, not off `position`: the two only agree when the pivot
-	// is {0.5, 0.5}, and getting this wrong offsets the whole hitbox from the
-	// button you can see by half its size.
-	top_left := rect_top_left(button.rectangle)
-	size     := button.rectangle.size
-	mouse    := get_mouse_position()
+	return mouse_over_rect(button.rectangle)
+}
 
-	return mouse.x >= top_left.x && mouse.x <= top_left.x + size.x &&
-	       mouse.y >= top_left.y && mouse.y <= top_left.y + size.y
+// -----------------------------------------------------------------------
+// Text on a plate
+// -----------------------------------------------------------------------
+
+TEXT_PLATE_BG      :: [4]f32{0, 0, 0, 0.65}
+TEXT_PLATE_FG      :: [4]f32{1, 1, 1, 1}
+TEXT_PLATE_PADDING :: [2]f32{6, 4}
+
+/*
+	Text on a dark plate cut to fit it. Returns the size of the plate.
+
+	White text drawn straight over artwork disappears the moment it lands on
+	something pale, and there is no outline or drop shadow here to fall back
+	on. A plate behind it is the cheap fix and works over anything.
+
+	Takes a **top-left**, not a baseline, unlike draw_text. Everything reaching
+	for this is stacking boxes rather than typesetting, and the returned size is
+	what to advance by:
+
+		p := matchbox.draw_text_plate(font, name, {x, y})
+		matchbox.draw_text_plate(font, cost, {x, y + p.y + 4})
+
+	The height is the font's ascent plus descent rather than the extent of
+	these particular glyphs, so a line of plates keeps one height whatever is
+	written on them.
+*/
+draw_text_plate :: proc(
+	font:      ^Font,
+	text:      string,
+	top_left:  [2]f32,
+	color:     [4]f32 = TEXT_PLATE_FG,
+	plate:     [4]f32 = TEXT_PLATE_BG,
+	padding:   [2]f32 = TEXT_PLATE_PADDING,
+) -> [2]f32 {
+	measured := measure_text(font, text)
+	size     := measured + padding * 2
+
+	draw_rect({
+		position = top_left,
+		size     = size,
+		color    = plate,
+		pivot    = {0.5, 0.5}, // position is the top-left corner
+	})
+
+	draw_text(
+		font, text,
+		top_left.x + padding.x,
+		top_left.y + padding.y + font.ascent,
+		color,
+	)
+
+	return size
 }
 
 /*
@@ -140,12 +273,7 @@ text_field_set :: proc(field:^Text_Field, text:string) {
 }
 
 mouse_over_text_field :: proc(field:^Text_Field) -> bool {
-	top_left := rect_top_left(field.rectangle)
-	size     := field.rectangle.size
-	mouse    := get_mouse_position()
-
-	return mouse.x >= top_left.x && mouse.x <= top_left.x + size.x &&
-	       mouse.y >= top_left.y && mouse.y <= top_left.y + size.y
+	return mouse_over_rect(field.rectangle)
 }
 
 /*

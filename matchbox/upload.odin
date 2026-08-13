@@ -126,7 +126,12 @@ draw_quad :: proc(
 	}
 
 	sdl.PushGPUVertexUniformData(r.cmd, 0, vert_data, size_of(VertData))
-	sdl.PushGPUFragmentUniformData(r.cmd, 0, frag_data, frag_size)
+
+	// sprite.frag declares no uniform buffer, so there is nothing to push and
+	// pushing anyway would be handing data to a slot the shader does not have.
+	if frag_size > 0 {
+		sdl.PushGPUFragmentUniformData(r.cmd, 0, frag_data, frag_size)
+	}
 
 	sdl.DrawGPUIndexedPrimitives(r.pass, 6, 1, 0, 0, 0)
 }

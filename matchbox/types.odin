@@ -40,12 +40,8 @@ VertData :: struct #align(16) {
 	_pad:     f32,
 }
 
-// 16 bytes.
-FragData :: struct #align(16) {
-	flip_x: b32,
-	flip_y: b32,
-	_pad:   [2]f32,
-}
+// sprite.frag has no uniforms: flipping is a swap of uv_min/uv_max in VertData,
+// so there is nothing left for the fragment stage to be told.
 
 // 32 bytes: (color) (border, pad).
 //

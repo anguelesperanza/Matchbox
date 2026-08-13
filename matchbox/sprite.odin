@@ -91,22 +91,30 @@ destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites) {
 draw_sprite :: proc(sprite: Sprite) {
 	draw_center := sprite.position + sprite.pivot * sprite.size
 
+	// Flipping is a swap of the uv bounds, not `1 - uv` in the shader. The
+	// shader only ever sees uv already narrowed to the sprite's sub-rect, so
+	// reflecting there reflects around the middle of the whole texture and
+	// lands in a different frame -- on a four column sheet, frame 1 runs
+	// 0.25..0.5 and a pixel at 0.30 came out at 0.70, which is frame 2.
+	//
+	// Swapping the bounds is right whatever the sub-rect is, and is what
+	// update_animation was already doing to sidestep the same problem.
+	uv_min := sprite.uv_min
+	uv_max := sprite.uv_max
+	if sprite.flip_x do uv_min.x, uv_max.x = uv_max.x, uv_min.x
+	if sprite.flip_y do uv_min.y, uv_max.y = uv_max.y, uv_min.y
+
 	vert_data := VertData{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
 		screen   = screen_dims(),
 		rotation = sprite.rotation,
-		uv_min   = sprite.uv_min,
-		uv_max   = sprite.uv_max,
-	}
-
-	frag_data := FragData{
-		flip_x = cast(b32)sprite.flip_x,
-		flip_y = cast(b32)sprite.flip_y,
+		uv_min   = uv_min,
+		uv_max   = uv_max,
 	}
 
 	draw_quad(
-		mbi.renderer.pipelines.sprite, &vert_data, &frag_data, size_of(frag_data),
+		mbi.renderer.pipelines.sprite, &vert_data, nil, 0,
 		sprite.texture, sprite.sampler,
 	)
 }

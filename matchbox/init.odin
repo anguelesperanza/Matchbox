@@ -100,9 +100,10 @@ write_gpu_report :: proc() {
 */
 @(private)
 create_builtin_shader :: proc(
-	spirv, dxil:  []u8,
-	stage:        sdl.GPUShaderStage,
-	num_samplers: u32,
+	spirv, dxil:         []u8,
+	stage:               sdl.GPUShaderStage,
+	num_samplers:        u32,
+	num_uniform_buffers: u32 = 1,
 ) -> ^sdl.GPUShader {
 	formats := sdl.GetGPUShaderFormats(mbi.renderer.device)
 
@@ -123,7 +124,7 @@ create_builtin_shader :: proc(
 		format              = format,
 		stage               = stage,
 		num_samplers        = num_samplers,
-		num_uniform_buffers = 1,
+		num_uniform_buffers = num_uniform_buffers,
 	})
 
 	if shader == nil {
@@ -231,7 +232,6 @@ init :: proc(title: string, width: i32, height: i32) {
 	// mismatch shows up as wrong geometry or colour rather than an error.
 	// Cheaper to find out here.
 	#assert(size_of(VertData)        == 48)
-	#assert(size_of(FragData)        == 16)
 	#assert(size_of(OutlineFragData) == 32)
 	#assert(size_of(FontFragData)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
@@ -299,8 +299,9 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	mbi.renderer.shaders.quad = create_builtin_shader(
 		#load("shaders/quad.vert.spv"), #load("shaders/quad.vert.dxil"), .VERTEX, 0)
+	// One sampler and no uniform buffer: sprite.frag samples and nothing else.
 	mbi.renderer.shaders.sprite = create_builtin_shader(
-		#load("shaders/sprite.frag.spv"), #load("shaders/sprite.frag.dxil"), .FRAGMENT, 1)
+		#load("shaders/sprite.frag.spv"), #load("shaders/sprite.frag.dxil"), .FRAGMENT, 1, 0)
 	mbi.renderer.shaders.rect = create_builtin_shader(
 		#load("shaders/rect.frag.spv"), #load("shaders/rect.frag.dxil"), .FRAGMENT, 0)
 	mbi.renderer.shaders.outline = create_builtin_shader(

@@ -107,11 +107,10 @@ draw_animated_sprite :: proc(sprite: AnimatedSprite) {
 	}
 
 	// Flipping is already folded into uv_min/uv_max by the frame selection
-	// above, so the shader is told not to do it a second time.
-	frag_data := FragData{flip_x = false, flip_y = false}
-
+	// above, which is now what draw_sprite does too. sprite.frag has no
+	// uniforms left to hand over.
 	draw_quad(
-		mbi.renderer.pipelines.sprite, &vert_data, &frag_data, size_of(frag_data),
+		mbi.renderer.pipelines.sprite, &vert_data, nil, 0,
 		sprite.clip.texture, sprite.clip.sampler,
 	)
 }

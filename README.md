@@ -80,6 +80,47 @@ mbi := &matchbox.mbi
 One global means one window: Matchbox cannot run two independent instances in a
 process.
 
+### Buttons, text plates and a sprite cache
+`button` draws, hovers and answers a click in one call. The size comes from the
+Rectangle, so it is decided at the call site rather than by a constant:
+
+```odin
+if matchbox.button({position = {40, 40}, size = {180, 42},
+                    color = {0.2, 0.2, 0.26, 1}, pivot = {0.5, 0.5}}, "Play") {
+	start_game()
+}
+```
+
+Pass a `Button_Style` with `align = .LEFT` for a label against the left edge,
+which is what a stacked column of options wants.
+
+`draw_text_plate` puts text on a dark plate cut to fit, for when it is drawn
+over artwork and would otherwise disappear against something pale. It takes a
+top-left rather than a baseline and returns the plate's size, so plates stack:
+
+```odin
+p := matchbox.draw_text_plate(font, name, {x, y})
+matchbox.draw_text_plate(font, cost, {x, y + p.y + 4})
+```
+
+`Sprite_Cache` loads art on demand and keeps it under a key of any comparable
+type. `limit` is how many may be resident -- zero for no limit, or one for a
+single slot that evicts, which is what full-size art too big to keep around
+wants. Eviction is least recently used, and a hit counts as a use.
+
+```odin
+cache := matchbox.sprite_cache_make(Card, limit = 1)
+defer matchbox.sprite_cache_destroy(&cache)
+
+if art := matchbox.sprite_cache_get(&cache, card, path); art != nil {
+	sprite := art^          // a copy: position is yours, the cache keeps its own
+	sprite.position = {x, y}
+	matchbox.draw_sprite(sprite)
+}
+```
+
+`examples/ui` shows all three.
+
 ### Clipping
 `begin_clip` confines drawing to a rectangle until the matching `end_clip`, so
 a list can scroll inside a panel rather than running over what is below it.

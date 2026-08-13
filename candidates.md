@@ -48,7 +48,16 @@ it invites rewriting working paged screens as scrolling ones, which is a
 behaviour change. Worth splitting: expose the clip, then convert one list and
 see how it feels, rather than doing both as one sweep.
 
-## 2. A button that draws and answers in one call
+## 2. A button that draws and answers in one call -- DONE
+
+Now `button(rectangle, text, style) -> bool` in `matchbox/ui.odin`. Both things
+the wrappers wanted are there: the size comes from the Rectangle, and
+`style.align = .LEFT` puts the label against the left edge. The fill comes from
+`rectangle.color` and `style.hover` replaces it while the pointer is inside.
+`Button`, `draw_button` and `mouse_over_button` are untouched.
+
+The hit test that all three of those duplicated is now `mouse_over_rect`, which
+`mouse_over_button` and `mouse_over_text_field` both call.
 
 Matchbox has `Button`, `draw_button` and `mouse_over_button`. Using them means
 three calls plus an `is_mouse_pressed` check, and the game wrote that wrapper
@@ -66,7 +75,10 @@ colour, the draw and the click together. Two things the present API cannot
 express and all four wrappers wanted: **a label aligned left rather than
 centred**, and **a size given at the call site**.
 
-## 3. `draw_text_plate`
+## 3. `draw_text_plate` -- DONE
+
+In `matchbox/ui.odin`. Takes a top-left, as the note asked, and returns the
+plate's size so a column of them can be stacked without measuring twice.
 
 Text on a dark plate cut to fit it. Currently in the game's `ui.odin`.
 
@@ -78,7 +90,16 @@ card-specific.
 Takes a top-left rather than a baseline, which is worth keeping -- every caller
 is stacking boxes rather than typesetting.
 
-## 4. A lazy sprite cache
+## 4. A lazy sprite cache -- DONE
+
+`Sprite_Cache` in `matchbox/sprite_cache.odin`, parameterised on the key type.
+Both shapes the game wrote are the same cache with a different `limit`: zero
+for the map of everything, one for the single evicting slot. Eviction is least
+recently used and counts a hit as a use, so the card on screen is not the one
+thrown away.
+
+Sprites are heap allocated and returned by pointer. A pointer into the map
+would not survive the map growing.
 
 `card_texture` and `view_closeup` in the game's `view.odin` are two hand-rolled
 caches of the same shape: load a sprite from a path on demand, keep it under a
@@ -140,3 +161,7 @@ written in the game, then moved:
 - filtering GPUs by what they support before scoring them
 - scissor clipping, as `begin_clip` / `end_clip` -- see entry 1, which is kept
   in place because its argument is the case for what the game can now delete
+- `button`, drawing and answering in one call, with a left-aligned label
+- `draw_text_plate`
+- `Sprite_Cache`, with the evicting single slot as `limit = 1`
+- `mouse_over_rect`, which three widgets had each written for themselves

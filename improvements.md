@@ -394,3 +394,69 @@ has nothing to do with the backend and was already broken on main, so it was
 left out of that branch rather than folded into an unrelated diff. Switching it
 to a named-field literal is the fix, and is what stops it happening again the
 next time the struct grows.
+
+## A Steam Controller In Mouse Mode Was Steam's Doing, Not The Controller's
+
+A Steam Controller -- the 2026 one, on its wireless dongle -- appeared to be stuck
+acting as a keyboard and mouse. The right trackpad drove the cursor, the right
+trigger clicked, and X opened the on-screen keyboard. Inside Steam the same pad
+behaved as an ordinary controller.
+
+That reads exactly like lizard mode, which is the state these controllers boot into
+and stay in until something claims them, and it is the wrong answer. Two separate
+things were stacked on top of each other and neither was Matchbox.
+
+### It was Steam's Desktop Layout
+
+Steam applies a desktop configuration to a controller whenever the foreground
+program is not a game it launched. Its defaults are right trigger to left click and
+X to the on-screen keyboard -- which is to say, the exact symptoms, item for item.
+Steam had been running for a week.
+
+The tell was that gamepad input arrived *at the same time*. Buttons and axes came
+through normally while the cursor was also moving, because two things were reading
+the pad at once. Lizard mode would not do that; it emulates instead of reporting,
+not as well as.
+
+Nothing to fix. Players who own one of these launch games through Steam, where
+Steam Input applies the game's layout rather than the desktop one and hands over a
+clean virtual controller. For development, add the game to Steam as a non-Steam
+shortcut, which also tests what players actually get, or turn off the desktop
+configuration under Steam -> Settings -> Controller.
+
+### SDL does not drive this controller at all
+
+Underneath that, SDL 3.4.2 never claims the device. Probed with
+`SDL_JOYSTICK_HIDAPI_STEAM` set and unset, the results are identical:
+
+```
+path: \?\HID#VID_28DE&PID_1304&MI_02&Col03#...
+type: STANDARD (real STANDARD)
+underlying joystick: 6 axes, 16 buttons
+```
+
+A raw Windows HID path rather than a hidapi one, and a generic type rather than
+anything Valve-specific. SDL is reading one interface collection of a composite
+device as an ordinary gamepad -- which works, and is why the pad is usable, but it
+is a fallback rather than support. Product `0x1304` is not the 2015 controller's
+`0x1102`, and SDL's driver only knows the older one. That gap is upstream and
+nothing set from this side moves it.
+
+### The part worth remembering
+
+The first version of that probe was run with Steam still open, and the conclusion
+drawn from it -- "the hint changes nothing, so SDL cannot drive this pad" -- did not
+follow. **SDL's Steam driver deliberately stands aside when Steam is running**, so
+identical results with and without the hint had two explanations and the evidence
+could not tell them apart. It only became a real measurement once Steam was fully
+exited and the probe was run again.
+
+The technique that settled it was a listener that printed gamepad events *and mouse
+motion* side by side for twenty seconds. Which channel input arrives on is the whole
+question, and a static device listing cannot answer it: a controller can be listed,
+typed, mapped and completely silent.
+
+`matchbox.steam_controller_mode` came out of this and lives on the unmerged
+`steam-controller-mode` branch. It enables SDL's driver unless Steam launched the
+game, which is right for the 2015 Steam Controller and for a Steam Deck's built-in
+controls. It does nothing for `0x1304` and was never merged as though it did.

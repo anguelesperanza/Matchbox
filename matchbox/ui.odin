@@ -84,21 +84,152 @@ button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE) -> boo
 	return hovered && is_mouse_pressed(.LEFT)
 }
 
-/*
-	Whether the pointer is inside a rectangle.
-
-	Off rect_top_left, not off `position`: the two only agree when the pivot is
-	{0.5, 0.5}, and getting it wrong offsets the whole hitbox from the thing you
-	can see by half its size. Buttons, text fields and anything else clickable
-	go through this rather than writing the test again.
-*/
+// Whether the pointer is inside a rectangle. point_in_rect with the mouse
+// already filled in, which is what almost every caller wants.
 mouse_over_rect :: proc(rectangle: Rectangle) -> bool {
-	top_left := rect_top_left(rectangle)
-	size     := rectangle.size
-	mouse    := get_mouse_position()
+	return point_in_rect(get_mouse_position(), rectangle)
+}
 
-	return mouse.x >= top_left.x && mouse.x <= top_left.x + size.x &&
-	       mouse.y >= top_left.y && mouse.y <= top_left.y + size.y
+// -----------------------------------------------------------------------
+// Confirm-on-second-press
+// -----------------------------------------------------------------------
+
+CONFIRM_TIMEOUT :: 3.0 // seconds before an armed button forgets
+
+// Two colours, because an armed button is nearly always under the pointer --
+// you are about to press it again. If arming only changed the resting colour,
+// the ordinary hover fill would paint over the warning at exactly the moment
+// it matters.
+CONFIRM_ARMED       :: [4]f32{0.55, 0.18, 0.18, 1}
+CONFIRM_ARMED_HOVER :: [4]f32{0.70, 0.24, 0.24, 1}
+
+// Held by the caller, one per button, like Text_Field. Zero value is unarmed.
+Confirm_Button :: struct {
+	armed_at: u64, // 0 when unarmed
+}
+
+/*
+	A button that asks first. True only on the second press.
+
+	The Delete-then-"Sure?" pattern, for anything that cannot be undone. The
+	first press arms it and swaps the label; the second confirms.
+
+		if matchbox.button_confirm(&delete, rect, "Delete", "Sure?") {
+			delete_deck(deck)
+		}
+
+	It disarms on three things, in rough order of how often they happen: the
+	pointer being clicked anywhere else, CONFIRM_TIMEOUT passing, and the
+	pointer leaving is deliberately *not* one of them -- moving off a button by
+	a pixel and back should not lose the arming, or the second press has to be
+	hurried.
+
+	Armed and unarmed are different colours as well as different labels,
+	because a label alone is easy to click straight past.
+*/
+button_confirm :: proc(
+	state:        ^Confirm_Button,
+	rectangle:    Rectangle,
+	text:         string,
+	confirm_text: string,
+	style        := BUTTON_STYLE,
+	armed_color  := CONFIRM_ARMED,
+	armed_hover  := CONFIRM_ARMED_HOVER,
+) -> bool {
+	armed := state.armed_at != 0
+
+	// Forgotten after a while. Somebody who armed this and wandered off should
+	// not come back to a button that deletes on one click.
+	if armed && seconds_since(state.armed_at) > CONFIRM_TIMEOUT {
+		state.armed_at = 0
+		armed = false
+	}
+
+	// A click anywhere else is an answer of no.
+	if armed && is_mouse_pressed(.LEFT) && !mouse_over_rect(rectangle) {
+		state.armed_at = 0
+		armed = false
+	}
+
+	rect  := rectangle
+	shown := style
+
+	if armed {
+		rect.color  = armed_color
+		shown.hover = armed_hover
+	}
+
+	if button(rect, confirm_text if armed else text, shown) {
+		if armed {
+			state.armed_at = 0
+			return true
+		}
+		state.armed_at = mbi.now_ts
+	}
+
+	return false
+}
+
+// Whether it is currently asking. For anything that wants to dim the rest of a
+// row while one of its buttons is waiting for an answer.
+confirm_button_armed :: proc(state: ^Confirm_Button) -> bool {
+	return state.armed_at != 0 && seconds_since(state.armed_at) <= CONFIRM_TIMEOUT
+}
+
+// -----------------------------------------------------------------------
+// Hover dwell
+// -----------------------------------------------------------------------
+
+HOVER_DWELL :: 0.4 // seconds the pointer must rest before it counts
+
+// Held by the caller, one per thing that can be dwelled on.
+Hover :: struct {
+	entered_at: u64, // 0 while the pointer is outside
+}
+
+/*
+	True once the pointer has rested inside `rectangle` for `seconds`.
+
+	The waiting is the feature. A full-size preview that appears on plain hover
+	strobes its way across a grid as the pointer crosses it, opening and
+	closing once per cell; requiring the pointer to settle means only the thing
+	actually being looked at opens.
+
+	Call once a frame for each candidate, whether or not it is hovered -- that
+	is what notices the pointer leaving and resets the clock.
+
+		if matchbox.hover_dwell(&preview, card_rect) {
+			draw_closeup(card)
+		}
+*/
+hover_dwell :: proc(state: ^Hover, rectangle: Rectangle, seconds: f32 = HOVER_DWELL) -> bool {
+	if !mouse_over_rect(rectangle) {
+		state.entered_at = 0
+		return false
+	}
+
+	if state.entered_at == 0 {
+		state.entered_at = mbi.now_ts
+		return false
+	}
+
+	return seconds_since(state.entered_at) >= seconds
+}
+
+// How far through the dwell the pointer is, 0 to 1. For drawing the wait --
+// a ring filling, a bar creeping -- so it does not look like nothing is
+// happening.
+hover_progress :: proc(state: ^Hover, seconds: f32 = HOVER_DWELL) -> f32 {
+	if state.entered_at == 0 || seconds <= 0 do return 0
+	return clamp(seconds_since(state.entered_at) / seconds, 0, 1)
+}
+
+// Seconds since a performance-counter reading. The clock everything here uses
+// is the one poll_events already keeps.
+@(private)
+seconds_since :: proc(ts: u64) -> f32 {
+	if ts == 0 || mbi.ts_freq == 0 do return 0
+	return f32(mbi.now_ts - ts) / f32(mbi.ts_freq)
 }
 
 Button :: struct {

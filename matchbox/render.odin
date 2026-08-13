@@ -205,6 +205,26 @@ rect_top_left :: proc(rectangle: Rectangle) -> [2]f32 {
 	return rect_center(rectangle) - rectangle.size * 0.5
 }
 
+/*
+	Whether a point is inside a rectangle.
+
+	Off rect_top_left rather than `position`, so it is right whatever the pivot
+	is. The two only agree at pivot {0.5, 0.5}, and testing against `position`
+	directly puts the hitbox half a size away from the thing you can see --
+	which is a bug that hides until somebody uses a pivot that is not the
+	default.
+
+	This is the one hit test. mouse_over_rect, mouse_over_button,
+	mouse_over_text_field and mouse_over_sprite all come through here.
+*/
+point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool {
+	top_left := rect_top_left(rectangle)
+	size     := rectangle.size
+
+	return point.x >= top_left.x && point.x <= top_left.x + size.x &&
+	       point.y >= top_left.y && point.y <= top_left.y + size.y
+}
+
 draw_rect :: proc(rectangle: Rectangle) {
 	ensure_pass()
 

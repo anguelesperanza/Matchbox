@@ -12,13 +12,26 @@ Ranked by what it buys, not by effort.
 
 ---
 
-## 1. Expose scissor clipping
+## 1. Expose scissor clipping -- DONE
 
 **The highest-value one by a distance, and the only one that removes a
 constraint rather than saving typing.**
 
-`cmd_set_scissor` already exists down in the GPU layer, and nothing surfaces it.
-Its absence shapes the game:
+Now `begin_clip` / `end_clip` in `matchbox/clip.odin`, with `examples/clipping`
+showing a list scrolling inside a panel. The rest of this entry is left as it
+was written, because the reasoning still describes what the game should now be
+able to drop.
+
+Two things about the implementation that the note below did not anticipate.
+`cmd_set_scissor` is gone -- that was no_gfx, and the backend moved to SDL3
+before this was picked up, so the clip is built on `SDL_SetGPUScissor` instead.
+And the scissor is state on the *render pass* rather than on the command
+buffer, so it has to be re-applied every time a pass opens; `clear_background`
+opens one every frame, which would otherwise drop the clip immediately.
+
+Clips nest and intersect, so a list inside a panel cannot escape the panel.
+
+Its absence shaped the game:
 
 - both lists in the deck editor page instead of scroll, because a list drawn
   past the bottom of its panel would carry on over whatever is below it
@@ -125,3 +138,5 @@ written in the game, then moved:
 - a console logger when the caller has not set one, and `gpu-report.txt` on a
   failed start
 - filtering GPUs by what they support before scoring them
+- scissor clipping, as `begin_clip` / `end_clip` -- see entry 1, which is kept
+  in place because its argument is the case for what the game can now delete

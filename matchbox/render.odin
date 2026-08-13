@@ -55,6 +55,11 @@ Renderer :: struct {
 	// room for 32, which put a ceiling of about two dozen sprites on a program.
 	sprite_sampler: ^sdl.GPUSampler,
 	font_sampler:   ^sdl.GPUSampler,
+
+	// Nested clip rectangles, in window pixels and already intersected. See
+	// clip.odin.
+	clip_stack: [MAX_CLIP_DEPTH]sdl.Rect,
+	clip_depth: int,
 }
 
 // -----------------------------------------------------------------------
@@ -94,6 +99,9 @@ begin_drawing :: proc() {
 	mbi.renderer.pass         = nil
 	mbi.renderer.swapchain    = nil
 	mbi.renderer.frame_active = false
+
+	// A missing end_clip costs one frame rather than every frame after it.
+	clip_reset()
 
 	mbi.renderer.cmd = sdl.AcquireGPUCommandBuffer(mbi.renderer.device)
 	if mbi.renderer.cmd == nil do return
@@ -150,6 +158,10 @@ clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 		store_op    = .STORE,
 	}
 	r.pass = sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
+
+	// A fresh pass starts with the scissor covering the whole target, so an
+	// active clip has to be put back.
+	apply_clip()
 }
 
 /*
@@ -171,6 +183,8 @@ ensure_pass :: proc() {
 		store_op = .STORE,
 	}
 	r.pass = sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
+
+	apply_clip()
 }
 
 // -----------------------------------------------------------------------

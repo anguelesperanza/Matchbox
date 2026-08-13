@@ -80,6 +80,31 @@ mbi := &matchbox.mbi
 One global means one window: Matchbox cannot run two independent instances in a
 process.
 
+### Clipping
+`begin_clip` confines drawing to a rectangle until the matching `end_clip`, so
+a list can scroll inside a panel rather than running over what is below it.
+
+```odin
+matchbox.begin_clip(panel)
+defer matchbox.end_clip()
+
+for row, i in rows {
+	matchbox.draw_text(font, row, x, y + f32(i) * 34 - scroll, matchbox.WHITE)
+}
+```
+
+The rectangle is in the same coordinates you draw in -- the same `Rectangle`
+you would hand `draw_rect` covers exactly the pixels that stay visible. Draw
+every row and let the clip decide what shows; there is no need to work out
+which ones are on screen.
+
+This is the hardware scissor, so it cuts pixels rather than geometry: a glyph
+half outside the box is drawn half rather than dropped. It is axis-aligned, and
+a `Rectangle`'s `rotation` is ignored.
+
+Clips nest and **intersect** -- a list clipped inside a panel cannot escape the
+panel even if its own rectangle is larger. `examples/clipping` shows both.
+
 ### Gamepads
 Up to four controllers, addressed by a slot that behaves like a player number.
 The first pad to connect is 0, and a pad that is unplugged frees its slot for

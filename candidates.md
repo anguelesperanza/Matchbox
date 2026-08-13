@@ -141,23 +141,36 @@ an area and a target item size, work out how many columns fit and what exact
 item size fills the width. That is what stopped the card grid running off the
 edge of a 13 inch laptop after being written on a 1920x1080 monitor.
 
-## 6. Small things
+## 6. Small things -- DONE
 
-- **`point_in_rect`** -- the game defines it; Matchbox has only
-  `mouse_over_button`
-- **A confirm-on-second-press button** -- the Delete then "Sure?" pattern from
-  the deck list, for anything that cannot be undone
-- **Hover dwell** -- "has the mouse rested here for N seconds", which is what
-  drives the full-size card preview and keeps it from strobing across a grid
+All three in `matchbox/ui.odin`, except `point_in_rect`, which went next to
+`rect_center` and `rect_top_left` in `render.odin` where the rest of the
+rectangle arithmetic lives.
+
+- **`point_in_rect`** -- and it turned out four widgets had each written this
+  test out. `mouse_over_rect`, `mouse_over_button`, `mouse_over_text_field` and
+  `mouse_over_sprite` now all come through it. The last of those was quietly
+  wrong: it tested `position` to `position + size` and so ignored `pivot`
+  entirely, which is right only for the {0.5, 0.5} that `create_sprite` happens
+  to give you.
+- **`button_confirm`** -- with `Confirm_Button` held by the caller, like
+  `Text_Field`. Disarms on a click elsewhere or after `CONFIRM_TIMEOUT`, but
+  deliberately *not* on the pointer leaving: nudging off a button by a pixel
+  should not lose the arming. Armed has its own hover colour, because an armed
+  button is nearly always under the pointer and the ordinary hover fill would
+  otherwise paint over the warning exactly when it matters.
+- **`hover_dwell`** -- plus `hover_progress`, 0 to 1, for drawing the wait so it
+  does not look like nothing is happening.
 
 ---
 
 ## Probably not
 
-**The networking.** `proto/conn.odin` is non-blocking TCP with length-prefixed
-CBOR framing, and it is genuinely reusable -- but taking it would commit
-Matchbox to CBOR and to a particular message model. Worth it only if Matchbox is
-meant to become a multiplayer framework rather than a rendering one.
+**The networking. Decided: no.** `proto/conn.odin` is non-blocking TCP with
+length-prefixed CBOR framing, and it is genuinely reusable -- but taking it
+would commit Matchbox to CBOR and to a particular message model. Matchbox is not
+a multiplayer framework and is not trying to become one, so this stays in the
+game.
 
 **Everything else in the game.** The model/view package split, the screen enum,
 the intent-and-snapshot shape: those are application architecture. What is

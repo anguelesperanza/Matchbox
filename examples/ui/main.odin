@@ -50,6 +50,10 @@ main :: proc() {
 	selected := Card.EMBER
 	loads    := 0
 
+	deleted: bool
+	del:     matchbox.Confirm_Button
+	preview: matchbox.Hover
+
 	for matchbox.is_running() {
 		matchbox.poll_events()
 
@@ -98,16 +102,41 @@ main :: proc() {
 			}
 		}
 
+		// ---- confirm on second press --------------------------------------
+		if matchbox.button_confirm(&del,
+			{position = {40, 330}, size = {180, 42}, color = PANEL, pivot = {0.5, 0.5}},
+			"Delete deck", "Sure?") {
+			deleted = true
+		}
+
+		if deleted do matchbox.draw_text(font, "deleted", 250, 358, matchbox.RED)
+
 		// ---- cached art, with plates over it -----------------------------
+		art_rect := matchbox.Rectangle{position = {470, 60}, size = {240, 336}, pivot = {0.5, 0.5}}
+
 		if sprite := matchbox.sprite_cache_get(&cache, selected, CARD_PATH[selected], 2); sprite != nil {
 			art := sprite^ // a copy: position is ours, the cache keeps its own
-			art.position = {470, 60}
+			art.position = art_rect.position
 			art.pivot    = {0.5, 0.5}
 			matchbox.draw_sprite(art)
 
 			// Straight onto the art, which is the case the plate exists for.
 			size := matchbox.draw_text_plate(font, CARD_NAME[selected], {478, 68})
 			matchbox.draw_text_plate(font, "cost 3", {478, 68 + size.y + 4})
+		}
+
+		// ---- hover dwell ---------------------------------------------------
+		// Rest the pointer on the card rather than sweeping over it. A preview
+		// that opened on plain hover would flicker its way across a grid.
+		if matchbox.hover_dwell(&preview, art_rect) {
+			matchbox.draw_text_plate(font, "closeup", {478, 350})
+		} else if p := matchbox.hover_progress(&preview); p > 0 {
+			matchbox.draw_rect({
+				position = {478, 384},
+				size     = {224 * p, 6},
+				color    = {1, 1, 1, 0.7},
+				pivot    = {0.5, 0.5},
+			})
 		}
 
 		matchbox.draw_text(font,

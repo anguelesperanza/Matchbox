@@ -119,7 +119,30 @@ if art := matchbox.sprite_cache_get(&cache, card, path); art != nil {
 }
 ```
 
-`examples/ui` shows all three.
+`button_confirm` is the Delete-then-"Sure?" pattern, for anything that cannot
+be undone. It returns true only on the second press, and forgets after a few
+seconds or if you click elsewhere:
+
+```odin
+if matchbox.button_confirm(&delete, rect, "Delete deck", "Sure?") {
+	delete_deck(deck)
+}
+```
+
+`hover_dwell` answers "has the pointer rested here long enough", which is what
+keeps a preview from flickering its way across a grid as the mouse crosses it.
+`hover_progress` gives 0 to 1 through the wait, for drawing it.
+
+```odin
+if matchbox.hover_dwell(&preview, card_rect) do draw_closeup(card)
+```
+
+Both keep their state in a struct you hold, one per widget, like `Text_Field`.
+
+`point_in_rect` is the plain geometric test the rest are built on, for anything
+hit-testing something that is not the mouse.
+
+`examples/ui` shows all of these.
 
 ### Laying things out
 `Layout` is a cursor down a column. Ask it for the next box and it has already

@@ -1,7 +1,6 @@
 package randomwalk
 
-import "core:fmt"
-import "../../../matchbox/matchbox"
+import "../../matchbox"
 
 main :: proc() {
 	matchbox.init("Random Walk", 600, 600)
@@ -25,8 +24,15 @@ main :: proc() {
 			for col in 0..< cols {
 				index := row * cols + col
 				cell := level[index]
-				if cell == 1 { 
-					matchbox.draw_rect({{f32(col) * stride, f32(row) * stride}, {stride, stride}, matchbox.PUMPKIN_ORANGE, 0})
+				if cell == 1 {
+					// Named fields rather than positional: this broke when
+					// Rectangle grew `pivot`, and a positional literal will
+					// break again the next time it grows.
+					matchbox.draw_rect({
+						position = {f32(col) * stride, f32(row) * stride},
+						size     = {stride, stride},
+						color    = matchbox.PUMPKIN_ORANGE,
+					})
 				}
 
 			}

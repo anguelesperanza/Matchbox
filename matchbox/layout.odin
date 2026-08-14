@@ -120,6 +120,13 @@ Grid :: struct {
 
 	The target's aspect ratio is kept, so cards stay card-shaped as they resize.
 
+	**The item size does not depend on `count`.** It is worked out from how many
+	columns the area holds, whether or not there are enough items to fill one.
+	A grid of three where twelve would fit draws three items at their proper
+	size with space to the right, rather than three enormous ones -- which is
+	what a filtered list of anything looks like most of the time, and the count
+	is exactly what changes as somebody types.
+
 	Rows are however many the items need. Nothing here limits them to the
 	area's height: a grid taller than its area is the normal case for something
 	scrolling, and begin_clip is what confines it.
@@ -134,14 +141,18 @@ grid_fit :: proc(area: Rectangle, target: [2]f32, count: int, spacing: f32 = 0) 
 	// How many whole items of the wished-for width fit, counting the gaps
 	// between them but not after the last one. At least one, or an area
 	// narrower than a single item would come back with a grid of nothing.
-	cols := int((area.size.x + spacing) / (target.x + spacing))
-	cols = clamp(cols, 1, count)
+	fit := max(1, int((area.size.x + spacing) / (target.x + spacing)))
 
 	// Stretch to fill: the leftover that would have been a ragged right margin
-	// is shared out across the columns instead.
-	item_w := (area.size.x - spacing * f32(cols - 1)) / f32(cols)
+	// is shared out across the columns the area holds. Across `fit` and not
+	// across `cols`, so that having too few items to fill a row leaves a gap
+	// on the right instead of inflating each of them to cover it.
+	item_w := (area.size.x - spacing * f32(fit - 1)) / f32(fit)
 	item_h := target.y * (item_w / target.x) // keep the shape
 
+	// Only as many columns as there are items to put in them, so `rows` and
+	// grid_cell agree about the shape of a short grid.
+	cols := clamp(fit, 1, count)
 	rows := (count + cols - 1) / cols
 
 	return Grid{

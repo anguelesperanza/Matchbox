@@ -59,7 +59,10 @@ BUTTON_STYLE :: Button_Style{
 button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE) -> bool {
 	rect := rectangle
 
-	hovered := mouse_over_rect(rectangle)
+	// Not hovered when something above has claimed the pointer, which takes
+	// care of the click and the highlight together: a button under an open
+	// dropdown should neither light up nor answer
+	hovered := mouse_over_rect(rectangle) && !mouse_captured()
 	if hovered do rect.color = style.hover
 
 	draw_rect(rect)
@@ -203,6 +206,14 @@ Hover :: struct {
 		}
 */
 hover_dwell :: proc(state: ^Hover, rectangle: Rectangle, seconds: f32 = HOVER_DWELL) -> bool {
+	// Something above has the pointer, so this is not being looked at even
+	// though the pointer is over it. Cleared rather than merely reported, so
+	// the dwell starts again once whatever it was closes
+	if mouse_captured() {
+		state.entered_at = 0
+		return false
+	}
+
 	if !mouse_over_rect(rectangle) {
 		state.entered_at = 0
 		return false
@@ -421,7 +432,10 @@ mouse_over_text_field :: proc(field:^Text_Field) -> bool {
 	on, and which won would come down to update order.
 */
 update_text_field :: proc(field:^Text_Field) {
-	if is_mouse_pressed(.LEFT) {
+	// A click that belongs to something above neither focuses this field nor
+	// takes focus off it -- picking an option out of a dropdown should leave
+	// the caret where it was
+	if is_mouse_pressed(.LEFT) && !mouse_captured() {
 		field.focused = mouse_over_text_field(field)
 		if field.focused do field.blink_from = mbi.now_ts
 	}
@@ -555,4 +569,219 @@ text_field_shown_caret :: proc(field:^Text_Field) -> int {
 	if !field.masked do return field.caret
 
 	return utf8.rune_count_in_string(string(field.text[:field.caret]))
+}
+
+// -----------------------------------------------------------------------
+// Dropdown -- pick one of a list
+// -----------------------------------------------------------------------
+
+DROPDOWN_PADDING :: 8 // gap from the box edge to the label
+DROPDOWN_ROW_GAP :: 1 // hairline between options, so a long list reads as rows
+
+DROPDOWN_LIST_BG:  [4]f32 = {0.10, 0.10, 0.13, 1}
+DROPDOWN_BORDER:   [4]f32 = {0.35, 0.38, 0.46, 1}
+DROPDOWN_MARK:     [4]f32 = {0.55, 0.80, 0.55, 1} // the option currently chosen
+
+// A variable rather than a constant, because the colours it names are
+// variables themselves and a constant cannot be built out of those.
+DROPDOWN_STYLE := Dropdown_Style{
+	hover            = {0.35, 0.35, 0.42, 1},
+	text_color       = {1, 1, 1, 1},
+	list_bg          = DROPDOWN_LIST_BG,
+	border           = DROPDOWN_BORDER,
+	mark             = DROPDOWN_MARK,
+	padding          = DROPDOWN_PADDING,
+	border_thickness = 1,
+}
+
+Dropdown_Style :: struct {
+	hover:            [4]f32, // fill under the pointer, on the box and on a row
+	text_color:       [4]f32,
+	list_bg:          [4]f32,
+	border:           [4]f32,
+	mark:             [4]f32, // the chosen option, so an open list says where it is
+	padding:          f32,
+	border_thickness: f32,
+}
+
+/*
+	A box that opens into a list and closes again on a choice.
+
+	`selected` indexes whatever slice of options is passed in, and the caller
+	owns those strings -- nothing here copies them, so a dropdown over an enum
+	can be driven straight off a table of names.
+
+	Drawing here is immediate, and an open list has to appear over things that
+	are drawn after it. So this comes in two halves:
+
+		matchbox.dropdown(&state, box, options)   // early: the closed box, and all the input
+		... the rest of the screen ...
+		matchbox.dropdown_overlay(&state, options) // late: the open list, over the top
+
+	All the input is in the first call, including the hit test on the open
+	list, so the caller learns about a change in time to act on it the same
+	frame rather than the next. The second call only draws.
+
+	While the list is open the pointer is captured, so whatever the list covers
+	can ask mouse_captured() and leave the click alone. That only works if this
+	is called before the things it covers.
+*/
+Dropdown :: struct {
+	open:      bool,
+	selected:  int,
+
+	// Where the closed box was last put, kept so the overlay knows where to
+	// hang the list without being handed the geometry twice.
+	rectangle: Rectangle,
+}
+
+/*
+	The closed box, and every scrap of input for the frame.
+
+	True on the frame the selection changes -- not merely on a click, so a
+	caller can rebuild something expensive on the strength of it.
+*/
+dropdown :: proc(
+	state:     ^Dropdown,
+	rectangle: Rectangle,
+	options:   []string,
+	style:     Dropdown_Style = DROPDOWN_STYLE,
+) -> (changed:bool) {
+	state.rectangle = rectangle
+	if len(options) == 0 {
+		state.open = false
+		return false
+	}
+	state.selected = clamp(state.selected, 0, len(options) - 1)
+
+	pressed := is_mouse_pressed(.LEFT)
+	over    := mouse_over_rect(rectangle)
+
+	if state.open {
+		list := dropdown_list_rect(state, len(options))
+
+		// The list is on top, so it takes the pointer whether or not the click
+		// lands on a row -- otherwise closing the list by clicking away also
+		// presses whatever happened to be under that spot
+		if over || mouse_over_rect(list) do capture_mouse()
+
+		if pressed {
+			if hit := dropdown_row_at(state, len(options), get_mouse_position()); hit >= 0 {
+				changed        = hit != state.selected
+				state.selected = hit
+				state.open     = false
+			} else {
+				// Anywhere else, the box included, just puts it away
+				state.open = false
+			}
+		}
+	} else if over {
+		capture_mouse()
+		if pressed do state.open = true
+	}
+
+	box := rectangle
+	if over do box.color = style.hover
+	draw_rect(box)
+	draw_rect_border(box, style.border, style.border_thickness)
+
+	top_left := rect_top_left(box)
+	baseline := top_left.y + (box.size.y - measure_text(&mbi.font, options[state.selected]).y) * 0.5 + mbi.font.ascent
+
+	draw_text(&mbi.font, options[state.selected], top_left.x + style.padding, baseline, style.text_color)
+
+	// Which way it will open, in a character rather than a glyph nobody has
+	// drawn yet. The font is whatever the game loaded, so this stays ASCII
+	caret := "^" if state.open else "v"
+	draw_text(
+		&mbi.font, caret,
+		top_left.x + box.size.x - style.padding - measure_text(&mbi.font, caret).x, baseline,
+		style.text_color,
+	)
+
+	return changed
+}
+
+/*
+	The open list, drawn over whatever came after the box.
+
+	Does nothing when closed, so it can be called unconditionally from the end
+	of a screen. No input: dropdown() already took it.
+*/
+dropdown_overlay :: proc(state:^Dropdown, options:[]string, style:Dropdown_Style = DROPDOWN_STYLE) {
+	if !state.open || len(options) == 0 do return
+
+	list := dropdown_list_rect(state, len(options))
+	list.color = style.list_bg
+	draw_rect(list)
+	draw_rect_border(list, style.border, style.border_thickness)
+
+	mouse := get_mouse_position()
+	for option, i in options {
+		row := dropdown_row_rect(state, i)
+
+		if point_in_rect(mouse, row) {
+			row.color = style.hover
+			draw_rect(row)
+		}
+
+		top_left := rect_top_left(row)
+		baseline := top_left.y + (row.size.y - measure_text(&mbi.font, option).y) * 0.5 + mbi.font.ascent
+
+		draw_text(
+			&mbi.font, option,
+			top_left.x + style.padding, baseline,
+			style.mark if i == state.selected else style.text_color,
+		)
+	}
+}
+
+/*Whether a dropdown is showing its list, for a caller deciding what else to draw*/
+dropdown_is_open :: proc(state:^Dropdown) -> bool {
+	return state.open
+}
+
+/*Shuts the list without changing the choice*/
+dropdown_close :: proc(state:^Dropdown) {
+	state.open = false
+}
+
+/*
+	The whole open list, hanging off the bottom of the box.
+
+	Always downwards. Flipping it up when the box is near the bottom of the
+	window is the obvious next thing, and is left until something actually
+	sits there -- guessing at it now would be untested either way.
+*/
+dropdown_list_rect :: proc(state:^Dropdown, count:int) -> Rectangle {
+	box := state.rectangle
+	top := rect_top_left(box)
+
+	height := f32(count) * box.size.y + f32(max(0, count - 1)) * DROPDOWN_ROW_GAP
+
+	return {
+		position = {top.x, top.y + box.size.y},
+		size     = {box.size.x, height},
+		pivot    = {0.5, 0.5},
+	}
+}
+
+/*One row of the open list*/
+dropdown_row_rect :: proc(state:^Dropdown, index:int) -> Rectangle {
+	box := state.rectangle
+	top := rect_top_left(box)
+
+	return {
+		position = {top.x, top.y + box.size.y + f32(index) * (box.size.y + DROPDOWN_ROW_GAP)},
+		size     = box.size,
+		pivot    = {0.5, 0.5},
+	}
+}
+
+/*Which row a point is on, or -1 for none of them*/
+dropdown_row_at :: proc(state:^Dropdown, count:int, point:[2]f32) -> int {
+	for i in 0..<count {
+		if point_in_rect(point, dropdown_row_rect(state, i)) do return i
+	}
+	return -1
 }

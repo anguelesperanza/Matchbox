@@ -6,11 +6,18 @@ package ui_example
 	  button           draws, hovers and answers a click in one call
 	  draw_text_plate  text on a plate, so it survives landing on pale artwork
 	  Sprite_Cache     art loaded on demand and evicted when it is not wanted
+	  Dropdown         pick one of a list, opening out over everything else
 
 	The cache here has a limit of one, which is the shape the game's full-size
 	card view needed: the art is far too big to keep all of it resident, and
 	only one is ever on screen. Watch the resident count as you switch cards --
 	it never goes above one, and switching back reloads.
+
+	The dropdown is the one worth playing with. Open it and its list covers the
+	button below; click an option and only the option is taken. That is
+	mouse_captured() doing its job -- without it the same click would also
+	press the button underneath, because drawing here is immediate and nothing
+	knows what is drawn above it.
 */
 
 import "core:fmt"
@@ -38,7 +45,7 @@ CARD_NAME := [Card]string{
 PANEL :: [4]f32{0.20, 0.20, 0.26, 1}
 
 main :: proc() {
-	matchbox.init("UI", 760, 520)
+	matchbox.init("UI", 760, 620)
 	defer matchbox.cleanup()
 
 	font := &matchbox.mbi.font
@@ -53,6 +60,9 @@ main :: proc() {
 	deleted: bool
 	del:     matchbox.Confirm_Button
 	preview: matchbox.Hover
+
+	pick:    matchbox.Dropdown
+	covered: int // presses of the button the open list sits on top of
 
 	for matchbox.is_running() {
 		matchbox.poll_events()
@@ -145,6 +155,35 @@ main :: proc() {
 			40, 250, matchbox.WHITE)
 
 		matchbox.draw_text(font, "click a name to switch card", 40, 285, matchbox.WHITE)
+
+		// ---- dropdown -------------------------------------------------------
+		// Drawn before the button it covers, because capture only reaches
+		// things that run after it.
+		matchbox.draw_text(font, "dropdown", 40, 412, matchbox.WHITE)
+
+		names: [len(Card)]string
+		for card, i in Card do names[i] = CARD_NAME[card]
+
+		if matchbox.dropdown(&pick,
+			{position = {40, 426}, size = {180, 42}, color = PANEL, pivot = {0.5, 0.5}},
+			names[:]) {
+			selected = Card(pick.selected)
+			loads += 1
+		}
+
+		// Sits under the open list on purpose. Clicking an option must not
+		// press this, and while the list is open it must not even light up.
+		if matchbox.button(
+			{position = {40, 480}, size = {180, 42}, color = PANEL, pivot = {0.5, 0.5}},
+			"underneath") {
+			covered += 1
+		}
+
+		matchbox.draw_text(font,
+			fmt.tprintf("underneath pressed %d", covered), 250, 492, matchbox.WHITE)
+
+		// Last, so the list is over everything drawn after the box.
+		matchbox.dropdown_overlay(&pick, names[:])
 
 		matchbox.end_drawing()
 	}

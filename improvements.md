@@ -28,6 +28,59 @@ Need to compare to other frameworks to see if that's a lot?
 
 # Completed
 
+## There Was No Way To Draw Something Over Something Else, Or To Stop It Being Clicked Through
+
+The card game's deck builder wanted dropdowns to filter a hundred cards by type,
+subtype, archetype and level. Two things stood in the way, and neither was the
+dropdown itself.
+
+Drawing is immediate, so what is drawn last is on top and nothing knows what is
+above it. An open list has to appear over the card grid, but the grid is drawn
+after the filter row -- so a list drawn where its box is would go underneath the
+very thing it needs to cover.
+
+And there was no notion of input being taken. Every widget tests the mouse for
+itself, so the click that picks an option out of an open list also lands on
+whatever that list was covering. In the deck builder that meant choosing
+"Authority" would quietly add a card to the deck.
+
+`Dropdown` therefore comes in two halves. `dropdown` draws the closed box and
+takes *all* of the input, including the hit test on the open list, so a caller
+learns about a change in time to act on it the same frame. `dropdown_overlay`
+draws the open list and is called late, from the end of the screen, where it
+lands over everything.
+
+The input half is `mouse.captured`, cleared by `poll_events` like `wheel` and
+set by `capture_mouse` while a list is open. `button`, `button_confirm`,
+`hover_dwell` and `Text_Field` all ask `mouse_captured` themselves, so a button
+under an open list neither lights up nor answers -- that seemed better than a
+rule every caller has to remember. Anything hit-testing by hand still has to
+ask; the deck builder's card grid does.
+
+Worth remembering: capture only reaches widgets that run *after* the dropdown,
+because it is a flag set during the frame rather than a hit test against a
+stack. Draw the thing that opens out before the things it covers.
+
+Still to do if something needs it: the list always opens downwards, which will
+be wrong for a box near the bottom of a window. Left undone deliberately rather
+than written untested.
+
+## A Grid Of Three Drew Three Enormous Cells
+
+`grid_fit` sized its items from `clamp(cols, 1, count)`, so the item size
+depended on how many items there were. Twelve cards filled the area at their
+proper size; filter down to one and that card was stretched across the whole
+width of the pool.
+
+It had always been that way and nobody had noticed, because nothing had made
+short grids common. Filter dropdowns make them the normal case -- the count is
+exactly what changes as somebody narrows a search.
+
+The column count for *sizing* now comes from the area alone, and `count` only
+decides how many of those columns get used and therefore how many rows there
+are. Three items where twelve would fit draw at their proper size with a gap on
+the right, which is what a partly filled row should look like.
+
 ## A Sampler Per Sprite Capped The Whole Program At Two Dozen Sprites
 
 `create_mesh` allocated a fresh sampler for every sprite, and `desc_pool_create` gives the

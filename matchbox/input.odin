@@ -41,6 +41,17 @@ Mouse :: struct {
 	y:       f32,
 	wheel:   [2]f32,
 	buttons: [Mouse_Button]Key_State,
+
+	// Whether something on top has claimed the pointer this frame. Per-frame
+	// like `wheel`, and false again on the next poll_events.
+	//
+	// Drawing here is immediate, so what is drawn last is on top and nothing
+	// knows what is above it. A widget that opens out over other things -- a
+	// dropdown's list is the case this was added for -- claims the pointer,
+	// and whatever is underneath asks before acting on a click of its own.
+	// Without it, the click that picks an option out of an open list also
+	// lands on whatever that list was covering.
+	captured: bool,
 }
 
 Mouse_Button :: enum {
@@ -92,6 +103,7 @@ poll_events :: proc() {
 	mbi.input.mouse_dx = 0
 	mbi.input.mouse_dy = 0
 	mbi.input.mouse.wheel = {0, 0}
+	mbi.input.mouse.captured = false
 	gamepads_begin_frame()
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
@@ -334,5 +346,27 @@ is_mouse_held :: proc(button:Mouse_Button) -> bool {
 
 is_mouse_released :: proc(button:Mouse_Button) -> bool {
 	return mbi.input.mouse.buttons[button].released
+}
+
+/*
+	Claims the pointer for whatever is drawn on top, for the rest of this frame.
+
+	Called by a widget that has opened out over the screen. Cleared by the next
+	poll_events, so it never has to be given back.
+*/
+capture_mouse :: proc() {
+	mbi.input.mouse.captured = true
+}
+
+/*
+	Whether something above has already claimed the pointer this frame.
+
+	Ask before acting on a click, and before treating the pointer as hovering
+	anything, in any screen that has a widget capable of opening out over it.
+	Order matters: this only knows about widgets that have already run, so the
+	thing that opens out has to be drawn before the things it covers.
+*/
+mouse_captured :: proc() -> bool {
+	return mbi.input.mouse.captured
 }
 

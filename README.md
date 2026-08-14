@@ -139,6 +139,32 @@ if matchbox.hover_dwell(&preview, card_rect) do draw_closeup(card)
 
 Both keep their state in a struct you hold, one per widget, like `Text_Field`.
 
+`Dropdown` is a box that opens into a list. It comes in two halves, because
+drawing here is immediate and an open list has to appear over things drawn
+after it:
+
+```odin
+// early: the closed box, and all of the input
+if matchbox.dropdown(&filter, box, options) do refilter()
+
+... the rest of the screen ...
+
+// late: the open list, over the top
+matchbox.dropdown_overlay(&filter, options)
+```
+
+While a list is open it calls `capture_mouse`, and `button`, `button_confirm`,
+`hover_dwell` and `Text_Field` all check `mouse_captured` for you -- so a
+button under an open list neither lights up nor answers a click. Anything
+hit-testing the mouse by hand should ask as well:
+
+```odin
+over := matchbox.mouse_over_rect(cell) && !matchbox.mouse_captured()
+```
+
+That only reaches widgets drawn *after* the dropdown, so draw it before the
+things it covers.
+
 `point_in_rect` is the plain geometric test the rest are built on, for anything
 hit-testing something that is not the mouse.
 
@@ -164,7 +190,9 @@ nothing to keep in sync.
 
 `Grid` fits items into an area. The target size is a wish: it takes however
 many columns fit at that width, then resizes the items so they fill the area
-exactly, keeping the target's aspect ratio.
+exactly, keeping the target's aspect ratio. The item size does not depend on
+how many items there are, so a filtered list of three draws three normal cells
+with space to the right rather than three enormous ones.
 
 ```odin
 grid := matchbox.grid_fit(area, {130, 180}, len(cards), 10)

@@ -30,6 +30,7 @@ create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: 
     sprite.scale = scale
     sprite.size  = {frame_w * scale, frame_h * scale}
     sprite.pivot = {0.5, 0.5}
+    sprite.tint  = WHITE
     return sprite
 }
 
@@ -107,10 +108,12 @@ draw_animated_sprite :: proc(sprite: AnimatedSprite) {
 	}
 
 	// Flipping is already folded into uv_min/uv_max by the frame selection
-	// above, which is now what draw_sprite does too. sprite.frag has no
-	// uniforms left to hand over.
+	// above, which is now what draw_sprite does too, so the only thing left for
+	// the fragment stage is the tint.
+	frag_data := sprite_frag_data(sprite.body)
+
 	draw_quad(
-		mbi.renderer.pipelines.sprite, &vert_data, nil, 0,
+		mbi.renderer.pipelines.sprite, &vert_data, &frag_data, size_of(frag_data),
 		sprite.clip.texture, sprite.clip.sampler,
 	)
 }

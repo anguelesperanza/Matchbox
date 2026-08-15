@@ -40,8 +40,35 @@ VertData :: struct #align(16) {
 	_pad:     f32,
 }
 
-// sprite.frag has no uniforms: flipping is a swap of uv_min/uv_max in VertData,
-// so there is nothing left for the fragment stage to be told.
+// 32 bytes: (tint) (desaturate, pad).
+//
+// Flipping is not in here -- that is a swap of uv_min/uv_max in VertData. What
+// is, is the tint, which a sprite had no way of carrying at all: the only way
+// to dim one was a translucent rectangle drawn over the top, which is an extra
+// draw that can only ever darken.
+Sprite_Frag_Data :: struct #align(16) {
+	color:      [4]f32,
+	desaturate: f32,
+	_pad:       [3]f32,
+}
+
+// 48 bytes: (color) (p0,p1) (p2,kind,thickness).
+//
+// The triangle's corners are in the quad's own uv space, because the quad is
+// the shape's bounding box -- see draw_triangle for the mapping. `thickness` is
+// in pixels and converted inside the shader, which is the one place that knows
+// how big a pixel is after rotation, zoom and the letterbox.
+Shape_Frag_Data :: struct #align(16) {
+	color:     [4]f32,
+	p0:        [2]f32,
+	p1:        [2]f32,
+	p2:        [2]f32,
+	kind:      f32,
+	thickness: f32,
+}
+
+SHAPE_ELLIPSE  :: f32(0)
+SHAPE_TRIANGLE :: f32(1)
 
 // 32 bytes: (color) (border, pad).
 //
@@ -90,6 +117,16 @@ Body :: struct {
 	jump_force:           f32,
 	scale:                f32,
 	rotation:             f32,
+
+	// Multiplied into every pixel of the sprite. The zero value {0,0,0,0} means
+	// "as it was painted" rather than "transparent black", because a struct that
+	// has not been filled in has to draw the picture and not a hole. Fading out
+	// is {1,1,1,a}, which is never all-zero, so the two do not collide.
+	tint:                 [4]f32,
+
+	// 0 leaves the colours alone, 1 takes them to grey. Separate from `tint`
+	// because a multiply cannot remove saturation, only add or subtract it.
+	desaturate:           f32,
 	flip_x:               bool,
 	flip_y:               bool,
 	on_ground:            bool,

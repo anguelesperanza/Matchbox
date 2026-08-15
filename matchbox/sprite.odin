@@ -58,6 +58,7 @@ create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 			pivot    = {0.5, 0.5},
 			uv_min   = {0, 0},
 			uv_max   = {1, 1},
+			tint     = WHITE,
 		},
 	}
 }
@@ -113,10 +114,32 @@ draw_sprite :: proc(sprite: Sprite) {
 		uv_max   = uv_max,
 	}
 
+	frag_data := sprite_frag_data(sprite.body)
+
 	draw_quad(
-		mbi.renderer.pipelines.sprite, &vert_data, nil, 0,
+		mbi.renderer.pipelines.sprite, &vert_data, &frag_data, size_of(frag_data),
 		sprite.texture, sprite.sampler,
 	)
+}
+
+/*
+	The tint a body draws with.
+
+	An all-zero tint is read as "as it was painted" rather than "multiply by
+	transparent black". A Body that nobody has filled in has to draw the picture
+	-- every sprite predating the tint has a zero there, and the alternative is
+	that all of them silently stop appearing.
+
+	The two readings do not otherwise collide. Fading a sprite out is
+	{1, 1, 1, a}, which stays non-zero all the way down to a = 0, and multiplying
+	by transparent black is only ever a long way of drawing nothing.
+*/
+@(private)
+sprite_frag_data :: proc(body: Body) -> Sprite_Frag_Data {
+	tint := body.tint
+	if tint == {0, 0, 0, 0} do tint = WHITE
+
+	return Sprite_Frag_Data{color = tint, desaturate = clamp(body.desaturate, 0, 1)}
 }
 
 sprite_bounds :: proc(body: ^Body) -> [4]f32 {

@@ -90,6 +90,8 @@ Input :: struct {
 poll_events :: proc() {
 	ensure(mbi.initialized, "matchbox.init must be called before poll_events")
 
+	mbi.frame += 1
+
 	for &key in mbi.input.keys {
 		key.pressed  = false
 		key.released = false
@@ -356,6 +358,19 @@ is_mouse_released :: proc(button:Mouse_Button) -> bool {
 */
 capture_mouse :: proc() {
 	mbi.input.mouse.captured = true
+}
+
+/*
+	Hands the pointer back, for a widget that claimed it and has now drawn the
+	thing it was protecting.
+
+	A modal is what needs this. It takes the pointer at the top of the frame so
+	nothing underneath answers a click, and then has to give it back before it
+	draws its own buttons -- which ask mouse_captured() like every other button
+	and would otherwise be as dead as the screen behind them.
+*/
+release_mouse :: proc() {
+	mbi.input.mouse.captured = false
 }
 
 /*

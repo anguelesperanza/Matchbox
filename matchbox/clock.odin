@@ -15,6 +15,17 @@ Clock :: struct {
 	delta_time:        f32, // seconds since the previous poll_events, clamped
 	max_delta_time:    f32, // delta_time ceiling, so a stalled frame can't teleport everything
 	target_frame_time: f32, // 0 = unlimited; set via set_target_fps
+
+	// Frames since the program started, counted by poll_events. Anything caching
+	// something for the length of a frame compares against this -- get_font does,
+	// so a font handed out this frame cannot be evicted underneath its caller.
+	frame:             u64,
+}
+
+// How many frames poll_events has run. Starts at 0 and is 1 during the first
+// frame, so a zero recorded anywhere means "never".
+frame_count :: proc() -> u64 {
+	return mbi.frame
 }
 
 // Seconds elapsed during the previous frame. Multiply per-frame movement by

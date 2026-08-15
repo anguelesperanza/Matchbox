@@ -232,6 +232,8 @@ init :: proc(title: string, width: i32, height: i32) {
 	// mismatch shows up as wrong geometry or colour rather than an error.
 	// Cheaper to find out here.
 	#assert(size_of(VertData)        == 48)
+	#assert(size_of(Sprite_Frag_Data) == 32)
+	#assert(size_of(Shape_Frag_Data)  == 48)
 	#assert(size_of(OutlineFragData) == 32)
 	#assert(size_of(FontFragData)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
@@ -268,11 +270,14 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	// Window before device: SDL3 creates the device independently and then has
 	// it claim a window, the reverse of the old swapchain-from-window order.
-	mbi.window = sdl.CreateWindow(
-		strings.clone_to_cstring(title),
-		width, height,
-		mbi.flags,
-	)
+	//
+	// SDL copies the title, so the clone is ours to free again -- it used to be
+	// handed over and forgotten, which is a small leak but the only one the
+	// tracking allocator found in a whole start-and-stop.
+	title_cstring := strings.clone_to_cstring(title)
+	defer delete(title_cstring)
+
+	mbi.window = sdl.CreateWindow(title_cstring, width, height, mbi.flags)
 
 	if mbi.window == nil { panic("Could not create SDL3 window") }
 	mbi.window_width  = width
@@ -299,20 +304,23 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	mbi.renderer.shaders.quad = create_builtin_shader(
 		#load("shaders/quad.vert.spv"), #load("shaders/quad.vert.dxil"), .VERTEX, 0)
-	// One sampler and no uniform buffer: sprite.frag samples and nothing else.
+	// One sampler, and one uniform buffer for the tint.
 	mbi.renderer.shaders.sprite = create_builtin_shader(
-		#load("shaders/sprite.frag.spv"), #load("shaders/sprite.frag.dxil"), .FRAGMENT, 1, 0)
+		#load("shaders/sprite.frag.spv"), #load("shaders/sprite.frag.dxil"), .FRAGMENT, 1)
 	mbi.renderer.shaders.rect = create_builtin_shader(
 		#load("shaders/rect.frag.spv"), #load("shaders/rect.frag.dxil"), .FRAGMENT, 0)
 	mbi.renderer.shaders.outline = create_builtin_shader(
 		#load("shaders/outline.frag.spv"), #load("shaders/outline.frag.dxil"), .FRAGMENT, 0)
 	mbi.renderer.shaders.font = create_builtin_shader(
 		#load("shaders/font.frag.spv"), #load("shaders/font.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.shape = create_builtin_shader(
+		#load("shaders/shape.frag.spv"), #load("shaders/shape.frag.dxil"), .FRAGMENT, 0)
 
 	mbi.renderer.pipelines.sprite  = create_pipeline(mbi.renderer.shaders.sprite)
 	mbi.renderer.pipelines.rect    = create_pipeline(mbi.renderer.shaders.rect)
 	mbi.renderer.pipelines.outline = create_pipeline(mbi.renderer.shaders.outline)
 	mbi.renderer.pipelines.font    = create_pipeline(mbi.renderer.shaders.font)
+	mbi.renderer.pipelines.shape   = create_pipeline(mbi.renderer.shaders.shape)
 
 	// Every sprite wants the same filtering, and the font wants smoothing, so
 	// two samplers serve the whole program.
@@ -339,7 +347,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		mbi.renderer.quad_indices = upload_buffer(&indices, size_of(indices), {.INDEX})
 	}
 
-	mbi.font = load_font(#load("fonts/Silver.ttf"), 32)
+	mbi.font = load_font(DEFAULT_FONT_BYTES, DEFAULT_FONT_SIZE)
 
 	mbi.camera = Camera{
 		position = {f32(width) * 0.5, f32(height) * 0.5},
@@ -370,6 +378,7 @@ cleanup :: proc() {
 	// Nothing may be released while the GPU is still reading it.
 	_ = sdl.WaitForGPUIdle(device)
 
+	font_cache_destroy()
 	destroy_font(&mbi.font)
 
 	if mbi.renderer.quad_verts   != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.quad_verts)
@@ -382,12 +391,14 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.rect    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.rect)
 	if mbi.renderer.pipelines.outline != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.outline)
 	if mbi.renderer.pipelines.font    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.font)
+	if mbi.renderer.pipelines.shape   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shape)
 
 	if mbi.renderer.shaders.quad    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.quad)
 	if mbi.renderer.shaders.sprite  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.sprite)
 	if mbi.renderer.shaders.rect    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.rect)
 	if mbi.renderer.shaders.outline != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.outline)
 	if mbi.renderer.shaders.font    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.font)
+	if mbi.renderer.shaders.shape   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.shape)
 
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
 	sdl.DestroyGPUDevice(device)

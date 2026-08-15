@@ -12,6 +12,7 @@ Shaders :: struct {
 	rect:    ^sdl.GPUShader,
 	outline: ^sdl.GPUShader,
 	font:    ^sdl.GPUShader,
+	shape:   ^sdl.GPUShader,
 }
 
 /*
@@ -23,13 +24,14 @@ Shaders :: struct {
 	Intel's Vulkan driver does not provide at any driver version currently
 	shipping, so an Arc B580 could not start the game at all.
 
-	All four share the one vertex shader and the same alpha blend.
+	All of them share the one vertex shader and the same alpha blend.
 */
 Pipelines :: struct {
 	sprite:  ^sdl.GPUGraphicsPipeline,
 	rect:    ^sdl.GPUGraphicsPipeline,
 	outline: ^sdl.GPUGraphicsPipeline,
 	font:    ^sdl.GPUGraphicsPipeline,
+	shape:   ^sdl.GPUGraphicsPipeline, // ellipses and triangles, cut out in the fragment stage
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of

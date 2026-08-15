@@ -6,13 +6,41 @@ package matchbox
 
 	This is a place to add very basic UI elements that can be resued between projects.
 	Nothing in here is polished at the moment and only has what it is needed for the current project
+
+	  button / Button_Style   draws, hovers, answers a click, and can be disabled
+	  button_confirm          asks first, for anything that cannot be undone
+	  Hover / hover_dwell     the pointer resting on something rather than crossing it
+	  draw_text_plate         text on a plate, so it survives landing on pale artwork
+	  draw_rect_border        a border of one even thickness all the way round
+	  Text_Field              somewhere to type, with its label above it
+	  Scroll_View             a panel whose contents can be taller than it is
+	  Dropdown                pick one of a list, at a box or at a point
+	  draw_tooltip            a plate beside the cursor, kept on screen
+	  Status_Line             a short message with a severity colour
+	  Modal                   a full-screen dim with something centred on top
+	  draw_progress           a bar from 0 to 1
+
+	Three of these come in two halves -- Scroll_View, Dropdown and Modal -- and
+	the reason is the same each time. Drawing is immediate, so what opens out
+	over the screen has to be drawn last; but every widget tests the mouse for
+	itself, so the same widget has to take the pointer first. See examples/ui,
+	whose header lays the order out.
+
+	All of it is here, and that is the point. Some of this was briefly spread
+	over a `widgets.odin`, a `scroll.odin` and a `dropdown.odin`, split up
+	because this file was getting long -- which is a reason to split *a* file and
+	not a reason to split *this* one. "Widgets" and "ui" are the same word, and
+	somebody looking for a tooltip had no way to guess which of four files it
+	was in. One long file you can search beats four you have to choose between.
+
+	Layout and Grid are still in layout.odin, for a different reason: they draw
+	nothing and answer no input. They hand back Rectangles, and everything here
+	takes one.
 */
 
 import "core:math"
 import "core:strings"
 import "core:unicode/utf8"
-
-import sdl "vendor:sdl3"
 
 // Whether a label sits in the middle of its box or against the left edge.
 // Left is what a list of options wants -- centred labels in a stacked column
@@ -27,13 +55,40 @@ Button_Style :: struct {
 	text_color: [4]f32,
 	align:      Text_Align,
 	padding:    f32, // gap from the left edge when aligned LEFT
+
+	// A button that is there and cannot be pressed: drawn dimmed, never
+	// highlighted, and never true. This is in the style rather than being a
+	// separate procedure because "can this be pressed" changes per frame and per
+	// button, and every caller that had to handle it by hand ended up dropping
+	// out of `button` altogether and back to Button / draw_button /
+	// mouse_over_button -- which is the wrapper `button` was added to retire.
+	disabled:     bool,
+
+	// What the fill and the label are multiplied by while disabled. A factor
+	// rather than a colour, so it dims whatever palette the caller is using
+	// without being told about it. Alpha is left alone: a disabled button is
+	// still there.
+	disabled_dim: f32,
 }
 
+// The dim used when a style was built from scratch and left this at zero.
+// Without it a hand-made Button_Style would draw a disabled button in black
+// rather than a dimmed version of its own colour.
+BUTTON_DISABLED_DIM :: f32(0.45)
+
 BUTTON_STYLE :: Button_Style{
-	hover      = {0.35, 0.35, 0.42, 1},
-	text_color = {1, 1, 1, 1},
-	align      = .CENTER,
-	padding    = 10,
+	hover        = {0.35, 0.35, 0.42, 1},
+	text_color   = {1, 1, 1, 1},
+	align        = .CENTER,
+	padding      = 10,
+	disabled_dim = BUTTON_DISABLED_DIM,
+}
+
+// Multiplies the colour channels and leaves alpha alone.
+@(private)
+dimmed :: proc(color: [4]f32, amount: f32) -> [4]f32 {
+	dim := amount if amount > 0 else BUTTON_DISABLED_DIM
+	return {color.r * dim, color.g * dim, color.b * dim, color.a}
 }
 
 /*
@@ -56,20 +111,31 @@ BUTTON_STYLE :: Button_Style{
 	Button, draw_button and mouse_over_button are still here and unchanged, for
 	anything that wants the parts separately.
 */
-button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE) -> bool {
+button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE, font: ^Font = nil) -> bool {
+	font := font if font != nil else &mbi.font
 	rect := rectangle
 
 	// Not hovered when something above has claimed the pointer, which takes
 	// care of the click and the highlight together: a button under an open
-	// dropdown should neither light up nor answer
-	hovered := mouse_over_rect(rectangle) && !mouse_captured()
-	if hovered do rect.color = style.hover
+	// dropdown should neither light up nor answer. Nor when it is disabled,
+	// which takes care of the highlight and the answer the same way.
+	hovered := !style.disabled && mouse_over_rect(rectangle) && !mouse_captured()
+
+	label := style.text_color
+
+	switch {
+	case style.disabled:
+		rect.color = dimmed(rect.color, style.disabled_dim)
+		label      = dimmed(label,      style.disabled_dim)
+	case hovered:
+		rect.color = style.hover
+	}
 
 	draw_rect(rect)
 
 	if len(text) > 0 {
 		top_left := rect_top_left(rect)
-		measured := measure_text(&mbi.font, text)
+		measured := measure_text(font, text)
 
 		x: f32
 		switch style.align {
@@ -79,12 +145,22 @@ button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE) -> boo
 
 		// draw_text's y is a baseline rather than a top edge, so the ascent has
 		// to be added or the glyphs hang above the box instead of sitting in it.
-		y := top_left.y + (rect.size.y - measured.y) * 0.5 + mbi.font.ascent
+		y := top_left.y + (rect.size.y - measured.y) * 0.5 + font.ascent
 
-		draw_text(&mbi.font, text, x, y, style.text_color)
+		draw_text(font, text, x, y, label)
 	}
 
 	return hovered && is_mouse_pressed(.LEFT)
+}
+
+// A style with `disabled` set the way the caller says, which is the shape this
+// is nearly always wanted in:
+//
+//	if matchbox.button(rect, "Play", matchbox.button_enabled_if(hand > 0)) { ... }
+button_enabled_if :: proc(enabled: bool, style := BUTTON_STYLE) -> Button_Style {
+	style := style
+	style.disabled = !enabled
+	return style
 }
 
 // Whether the pointer is inside a rectangle. point_in_rect with the mouse
@@ -365,8 +441,11 @@ TEXT_FIELD_RING        :: 2    // pixels, all the way round
 TEXT_FIELD_BLINK       :: 1.06 // seconds for a full off-on cycle
 TEXT_FIELD_MASK        :: '*'
 
+TEXT_FIELD_LABEL_GAP   :: 4    // between the label's baseline row and the box
+
 TEXT_FIELD_PLACEHOLDER: [4]f32 = {0.6, 0.6, 0.6, 1}
 TEXT_FIELD_FOCUS_RING:  [4]f32 = {1, 1, 1, 1}
+TEXT_FIELD_LABEL:       [4]f32 = {0.78, 0.80, 0.86, 1}
 
 /*
 	A single line of typed text.
@@ -388,6 +467,17 @@ Text_Field :: struct {
 	focused:     bool,
 	masked:      bool,   // draw every character as TEXT_FIELD_MASK
 	max_bytes:   int,    // 0 for no limit. Bytes, not characters
+
+	// Drawn above the box when set. Every form field on a screen wants one, and
+	// a label positioned by hand beside every field is the same four lines
+	// written once per field and gone wrong once per redesign.
+	//
+	// The label is deliberately *not* part of `rectangle`: that stays the box, so
+	// the hit test, the focus ring and the caret are untouched by adding one. It
+	// does mean a labelled field takes up more room than its rectangle says, and
+	// text_field_place and text_field_height are how to lay one out.
+	label:       string,
+	label_color: [4]f32, // TEXT_FIELD_LABEL when left at zero
 
 	// When the caret last moved. The caret is drawn solid for the first half
 	// second after any edit, so it does not blink out mid-keystroke and look
@@ -517,22 +607,60 @@ text_field_insert :: proc(field:^Text_Field, text:string) {
 	field.caret += len(text)
 }
 
-/*Draws the box, what is in it, and the caret. Call after update_text_field*/
-draw_text_field :: proc(field:^Text_Field) {
+// How much room the label takes above the box, gap included. Zero without one.
+text_field_label_height :: proc(field:^Text_Field, font:^Font = nil) -> f32 {
+	if len(field.label) == 0 do return 0
+
+	font := font if font != nil else &mbi.font
+	return font.ascent + font.descent + TEXT_FIELD_LABEL_GAP
+}
+
+// The whole height a field occupies, label included, for a box `box_height`
+// tall. This is what a Layout or a form's own arithmetic needs.
+text_field_height :: proc(field:^Text_Field, box_height:f32, font:^Font = nil) -> f32 {
+	return text_field_label_height(field, font) + box_height
+}
+
+/*
+	Puts the field where the whole thing -- label and box together -- starts at
+	`top_left`, with a box `size` big.
+
+	Set `label` before calling this, since where the box lands depends on whether
+	there is one.
+*/
+text_field_place :: proc(field:^Text_Field, top_left:[2]f32, size:[2]f32, font:^Font = nil) {
+	field.rectangle.position = {top_left.x, top_left.y + text_field_label_height(field, font)}
+	field.rectangle.size     = size
+	field.rectangle.pivot    = {0.5, 0.5} // position is the top-left corner
+}
+
+/*Draws the label, the box, what is in it, and the caret. Call after update_text_field*/
+draw_text_field :: proc(field:^Text_Field, font:^Font = nil) {
+	font := font if font != nil else &mbi.font
+
 	draw_rect(field.rectangle)
 
 	top_left := rect_top_left(field.rectangle)
-	baseline := top_left.y + (field.rectangle.size.y - (mbi.font.ascent + mbi.font.descent)) * 0.5 + mbi.font.ascent
+	baseline := top_left.y + (field.rectangle.size.y - (font.ascent + font.descent)) * 0.5 + font.ascent
 	left     := top_left.x + TEXT_FIELD_PADDING
+
+	if len(field.label) > 0 {
+		color := field.label_color
+		if color == {0, 0, 0, 0} do color = TEXT_FIELD_LABEL
+
+		// Sitting on its own baseline directly above the box, which is what
+		// text_field_place left room for.
+		draw_text(font, field.label, top_left.x, top_left.y - TEXT_FIELD_LABEL_GAP - font.descent, color)
+	}
 
 	if field.focused do draw_rect_border(field.rectangle, TEXT_FIELD_FOCUS_RING, TEXT_FIELD_RING)
 
 	shown := text_field_shown(field, context.temp_allocator)
 
 	if len(shown) > 0 {
-		draw_text(&mbi.font, shown, left, baseline, WHITE)
+		draw_text(font, shown, left, baseline, WHITE)
 	} else if len(field.placeholder) > 0 {
-		draw_text(&mbi.font, field.placeholder, left, baseline, TEXT_FIELD_PLACEHOLDER)
+		draw_text(font, field.placeholder, left, baseline, TEXT_FIELD_PLACEHOLDER)
 	}
 
 	if !field.focused do return
@@ -546,8 +674,8 @@ draw_text_field :: proc(field:^Text_Field) {
 	before := shown[:text_field_shown_caret(field)]
 
 	draw_rect({
-		position = {left + measure_text(&mbi.font, before).x, baseline - mbi.font.ascent},
-		size     = {TEXT_FIELD_CARET_WIDTH, mbi.font.ascent + mbi.font.descent},
+		position = {left + measure_text(font, before).x, baseline - font.ascent},
+		size     = {TEXT_FIELD_CARET_WIDTH, font.ascent + font.descent},
 		pivot    = {0.5, 0.5}, // position is the top-left corner
 		color    = WHITE,
 	})
@@ -572,8 +700,302 @@ text_field_shown_caret :: proc(field:^Text_Field) -> int {
 }
 
 // -----------------------------------------------------------------------
-// Dropdown -- pick one of a list
+// Scroll_View -- a panel whose contents can be taller than it is
 // -----------------------------------------------------------------------
+
+/*
+	A panel whose contents can be taller than it is.
+
+	begin_clip went in saying, in its own words, that it exists "so a list can
+	scroll inside a panel rather than carrying on over whatever sits below it",
+	and then nothing used it for that. What games wrote instead was paging: a
+	page index, a page size, clamping, a pair of `< >` buttons and an `N / M`
+	indicator, per list -- and every view of the contents having to work out its
+	own per-page count, because how many things fit on a page is a different
+	question from how many things there are.
+
+	This is the same panel with none of that. The offset is a number of pixels
+	rather than an index, so nothing has to know how many items fit: the items
+	are laid out at their natural positions and the ones outside are cut off.
+
+		content := f32(len(items)) * ROW
+
+		origin := matchbox.begin_scroll(&view, panel, content)
+		defer matchbox.end_scroll(&view)
+
+		for item, i in items {
+			row := matchbox.Rectangle{
+				position = {origin.x, origin.y + f32(i) * ROW},
+				size     = {panel.size.x, ROW},
+				pivot    = {0.5, 0.5},
+			}
+			if matchbox.button(row, item.name) { pick(item) }
+		}
+
+	Rows outside the panel are still walked and still drawn -- they are cut by
+	the scissor rather than skipped. That is the right trade for a list of a few
+	hundred, which is what this is for. A list long enough for the drawing to
+	cost something can work out its own first and last visible row from
+	`view.offset` and the panel height, and loop over only those.
+*/
+
+SCROLLBAR_WIDTH   :: f32(8)
+SCROLLBAR_MIN     :: f32(24) // shortest the thumb is allowed to get
+SCROLLBAR_INSET   :: f32(2)  // gap between the bar and the panel edge
+SCROLL_WHEEL_STEP :: f32(48) // pixels per notch of the wheel
+
+SCROLLBAR_TRACK: [4]f32 = {1, 1, 1, 0.06}
+SCROLLBAR_THUMB: [4]f32 = {1, 1, 1, 0.28}
+SCROLLBAR_HOVER: [4]f32 = {1, 1, 1, 0.45}
+
+/*
+	Held by the caller, one per scrolling panel. The zero value is a view
+	scrolled to the top.
+
+	`offset` can be read and written: setting it to 0 jumps to the top. It is
+	clamped by the next begin_scroll rather than at the moment it is set, so a
+	caller does not need to know the content height to move it.
+*/
+Scroll_View :: struct {
+	offset:  f32, // how far the content has been pulled up, in pixels
+
+	// Filled in by begin_scroll, so end_scroll and the bar do not have to be
+	// handed the same two values a second time.
+	area:    Rectangle,
+	content: f32,
+
+	// Set while the thumb is being dragged, along with where inside the thumb it
+	// was taken hold of -- without that the thumb jumps so its middle lands
+	// under the pointer on the first frame of every drag.
+	dragging: bool,
+	grab:     f32,
+}
+
+/*
+	Starts a scrolling panel and returns the top-left to lay content out from.
+
+	Takes the wheel while the pointer is over the panel, clamps the offset to the
+	content, and clips to `area` until end_scroll. The point handed back is the
+	panel's top-left moved up by the current offset, so everything positioned
+	relative to it scrolls together.
+
+	`content_height` is how tall everything inside comes to. grid_height and
+	layout_height both hand that back, which is what they are for.
+*/
+begin_scroll :: proc(view: ^Scroll_View, area: Rectangle, content_height: f32) -> [2]f32 {
+	view.area    = area
+	view.content = max(content_height, 0)
+
+	max_offset := scroll_max(view)
+
+	// The wheel only counts over the panel, and only when nothing above has
+	// claimed the pointer -- scrolling the list under an open dropdown is the
+	// same mistake as clicking through it.
+	if max_offset > 0 && mouse_over_rect(area) && !mouse_captured() {
+		view.offset -= get_mouse_wheel().y * SCROLL_WHEEL_STEP
+	}
+
+	scroll_drag(view, max_offset)
+
+	// Clamped here rather than where it is written, so a caller can put any
+	// number in offset -- including one past the end after removing an item --
+	// and have it come right without knowing the content height.
+	view.offset = clamp(view.offset, 0, max_offset)
+
+	begin_clip(area)
+
+	top_left := rect_top_left(area)
+	return {top_left.x, top_left.y - view.offset}
+}
+
+/*
+	Ends the panel and draws the scrollbar.
+
+	The bar is drawn after the clip is lifted rather than inside it, so it sits
+	on the panel's edge instead of being cut in half by it.
+*/
+end_scroll :: proc(view: ^Scroll_View) {
+	end_clip()
+	draw_scrollbar(view)
+}
+
+// The furthest the content can be scrolled. Zero when everything already fits,
+// which is also what makes the bar go away.
+scroll_max :: proc(view: ^Scroll_View) -> f32 {
+	return max(0, view.content - view.area.size.y)
+}
+
+// Whether there is anything to scroll. For a caller deciding whether to leave
+// room for the bar.
+scroll_needed :: proc(view: ^Scroll_View) -> bool {
+	return scroll_max(view) > 0
+}
+
+/*
+	Brings a band of content into view, given in the coordinates it was laid out
+	in -- offsets from the top of the content, not from the top of the panel.
+
+	For a list following a selection moved by the keyboard, or a newly added item
+	that would otherwise appear below the fold. Does nothing when the band is
+	already visible, so it is safe to call every frame.
+*/
+scroll_to :: proc(view: ^Scroll_View, top: f32, height: f32) {
+	bottom := top + height
+
+	switch {
+	case top < view.offset:
+		view.offset = top
+	case bottom > view.offset + view.area.size.y:
+		view.offset = bottom - view.area.size.y
+	}
+}
+
+// -----------------------------------------------------------------------
+// Scroll_View -- the bar
+// -----------------------------------------------------------------------
+
+/*
+	The track the thumb runs in, down the panel's right edge.
+
+	Inside the panel rather than beside it. A bar hanging off the edge has to be
+	accounted for by whoever sized the panel, and forgetting is invisible until
+	the panel is put next to something.
+*/
+scrollbar_track_rect :: proc(view: ^Scroll_View) -> Rectangle {
+	top_left := rect_top_left(view.area)
+
+	return {
+		position = {
+			top_left.x + view.area.size.x - SCROLLBAR_WIDTH - SCROLLBAR_INSET,
+			top_left.y + SCROLLBAR_INSET,
+		},
+		size  = {SCROLLBAR_WIDTH, view.area.size.y - SCROLLBAR_INSET * 2},
+		pivot = {0.5, 0.5},
+	}
+}
+
+/*
+	The thumb, as long as the share of the content on screen and as far down as
+	the share already scrolled past.
+
+	Kept to SCROLLBAR_MIN however long the content is, because a thumb that
+	shrinks in proportion forever ends up two pixels tall and cannot be taken
+	hold of. That makes the thumb's travel shorter than the track on a long
+	list, which is why the position is worked out against the travel rather than
+	against the track.
+*/
+scrollbar_thumb_rect :: proc(view: ^Scroll_View) -> Rectangle {
+	track      := scrollbar_track_rect(view)
+	max_offset := scroll_max(view)
+	if max_offset <= 0 do return track
+
+	visible := clamp(view.area.size.y / max(view.content, 1), 0, 1)
+	height  := max(track.size.y * visible, min(SCROLLBAR_MIN, track.size.y))
+	travel  := track.size.y - height
+
+	top_left := rect_top_left(track)
+
+	return {
+		position = {top_left.x, top_left.y + travel * (view.offset / max_offset)},
+		size     = {track.size.x, height},
+		pivot    = {0.5, 0.5},
+	}
+}
+
+/*
+	The thumb, dragged.
+
+	The wheel was all this needed, and the bar had to be drawn either way to say
+	where in the list you are. Once it is on screen it looks draggable, so it is.
+*/
+@(private)
+scroll_drag :: proc(view: ^Scroll_View, max_offset: f32) {
+	if max_offset <= 0 || !is_mouse_held(.LEFT) {
+		view.dragging = false
+		return
+	}
+
+	thumb := scrollbar_thumb_rect(view)
+
+	// Only the press that lands on the thumb starts a drag. Held is what keeps
+	// it going, so the pointer may wander off the bar mid-drag and still be
+	// dragging it, which is what every scrollbar does.
+	if !view.dragging {
+		if !is_mouse_pressed(.LEFT) || mouse_captured() do return
+		if !mouse_over_rect(thumb) do return
+
+		view.dragging = true
+		view.grab     = get_mouse_position().y - rect_top_left(thumb).y
+	}
+
+	track  := scrollbar_track_rect(view)
+	travel := track.size.y - thumb.size.y
+	if travel <= 0 do return
+
+	// Where the top of the thumb has been dragged to, as a share of how far it
+	// can travel, put back onto the offset.
+	top := get_mouse_position().y - view.grab - rect_top_left(track).y
+	view.offset = clamp(top / travel, 0, 1) * max_offset
+}
+
+/*
+	Draws the track and thumb, and nothing at all when everything fits.
+
+	Nothing rather than a full-length thumb: a bar that is always there but only
+	sometimes means something is a worse signal than one that appears when there
+	is more to see.
+*/
+draw_scrollbar :: proc(view: ^Scroll_View) {
+	if scroll_max(view) <= 0 do return
+
+	draw_rect_in(scrollbar_track_rect(view), SCROLLBAR_TRACK)
+
+	thumb := scrollbar_thumb_rect(view)
+	color := SCROLLBAR_THUMB
+	if view.dragging || (mouse_over_rect(thumb) && !mouse_captured()) do color = SCROLLBAR_HOVER
+
+	draw_rect_in(thumb, color)
+}
+
+// draw_rect with the colour given separately, for the places that build a
+// Rectangle for its geometry and decide the colour afterwards.
+@(private)
+draw_rect_in :: proc(rectangle: Rectangle, color: [4]f32) {
+	rect := rectangle
+	rect.color = color
+	draw_rect(rect)
+}
+
+// -----------------------------------------------------------------------
+// Dropdown -- pick one of a list, at a box or at a point
+// -----------------------------------------------------------------------
+
+/*
+	A list of options that opens over the screen, hanging either from a box or
+	from a point.
+
+	Those two used to be different widgets. `dropdown` opened its list under a
+	box; a context menu opens the same list at the pointer, and because there
+	was no way to say that, a game needing one wrote a second nearly identical
+	widget of its own -- which then had to learn about capture, dismissal and
+	drawing late all over again. The only difference between them is where the
+	list hangs from, so that is what this takes: an anchor.
+
+	Drawing is immediate and an open list has to appear over things drawn after
+	it, so this comes in two halves:
+
+		matchbox.dropdown(&state, box, options)    // early: the closed box, and all the input
+		... the rest of the screen ...
+		matchbox.dropdown_overlay(&state, options) // late: the open list, over the top
+
+	All the input is in the first call, including the hit test on the open list,
+	so the caller learns about a change in time to act on it the same frame
+	rather than the next. The second call only draws.
+
+	While the list is open the pointer is captured, so whatever the list covers
+	can ask mouse_captured() and leave the click alone. That only works if this
+	is called before the things it covers.
+*/
 
 DROPDOWN_PADDING :: 8 // gap from the box edge to the label
 DROPDOWN_ROW_GAP :: 1 // hairline between options, so a long list reads as rows
@@ -605,34 +1027,42 @@ Dropdown_Style :: struct {
 }
 
 /*
-	A box that opens into a list and closes again on a choice.
+	What the list hangs from.
 
-	`selected` indexes whatever slice of options is passed in, and the caller
-	owns those strings -- nothing here copies them, so a dropdown over an enum
-	can be driven straight off a table of names.
+	BOX is a dropdown: there is a closed box on screen, the list opens under it,
+	and the option currently chosen is marked in the list because the box is
+	showing it.
 
-	Drawing here is immediate, and an open list has to appear over things that
-	are drawn after it. So this comes in two halves:
-
-		matchbox.dropdown(&state, box, options)   // early: the closed box, and all the input
-		... the rest of the screen ...
-		matchbox.dropdown_overlay(&state, options) // late: the open list, over the top
-
-	All the input is in the first call, including the hit test on the open
-	list, so the caller learns about a change in time to act on it the same
-	frame rather than the next. The second call only draws.
-
-	While the list is open the pointer is captured, so whatever the list covers
-	can ask mouse_captured() and leave the click alone. That only works if this
-	is called before the things it covers.
+	POINT is a context menu: nothing is on screen until it is opened, the list
+	hangs from wherever it was opened at, and nothing is marked -- a menu of
+	actions has no current one.
 */
-Dropdown :: struct {
-	open:      bool,
-	selected:  int,
+Dropdown_Anchor :: enum {
+	BOX,
+	POINT,
+}
 
-	// Where the closed box was last put, kept so the overlay knows where to
-	// hang the list without being handed the geometry twice.
+Dropdown :: struct {
+	open:     bool,
+	selected: int,
+
+	anchor: Dropdown_Anchor,
+
+	// What the list hangs from: the closed box for BOX, and a rectangle of no
+	// height sitting at the point for POINT. One field rather than two because
+	// the list is placed the same way from either -- under the bottom edge,
+	// which for a zero-height rectangle is the point itself.
 	rectangle: Rectangle,
+
+	// One row of the open list. Taken from the box for BOX, where the list is
+	// as wide as the thing it came out of, and given by the caller for POINT.
+	row: [2]f32,
+
+	// The frame open_context_menu ran on. The click that opens a menu is still
+	// a press for the rest of that frame, and the point it opens at is the top
+	// corner of the first row -- so without this the menu opens and chooses its
+	// own first entry in the same breath.
+	opened_on: u64,
 }
 
 /*
@@ -646,38 +1076,27 @@ dropdown :: proc(
 	rectangle: Rectangle,
 	options:   []string,
 	style:     Dropdown_Style = DROPDOWN_STYLE,
-) -> (changed:bool) {
+	font:      ^Font = nil,
+) -> (changed: bool) {
+	font := font if font != nil else &mbi.font
+
+	state.anchor    = .BOX
 	state.rectangle = rectangle
+	state.row       = rectangle.size
+
 	if len(options) == 0 {
 		state.open = false
 		return false
 	}
 	state.selected = clamp(state.selected, 0, len(options) - 1)
 
-	pressed := is_mouse_pressed(.LEFT)
-	over    := mouse_over_rect(rectangle)
+	over := mouse_over_rect(rectangle)
 
 	if state.open {
-		list := dropdown_list_rect(state, len(options))
-
-		// The list is on top, so it takes the pointer whether or not the click
-		// lands on a row -- otherwise closing the list by clicking away also
-		// presses whatever happened to be under that spot
-		if over || mouse_over_rect(list) do capture_mouse()
-
-		if pressed {
-			if hit := dropdown_row_at(state, len(options), get_mouse_position()); hit >= 0 {
-				changed        = hit != state.selected
-				state.selected = hit
-				state.open     = false
-			} else {
-				// Anywhere else, the box included, just puts it away
-				state.open = false
-			}
-		}
+		changed = dropdown_take_input(state, len(options), over)
 	} else if over {
 		capture_mouse()
-		if pressed do state.open = true
+		if is_mouse_pressed(.LEFT) do state.open = true
 	}
 
 	box := rectangle
@@ -686,30 +1105,134 @@ dropdown :: proc(
 	draw_rect_border(box, style.border, style.border_thickness)
 
 	top_left := rect_top_left(box)
-	baseline := top_left.y + (box.size.y - measure_text(&mbi.font, options[state.selected]).y) * 0.5 + mbi.font.ascent
+	baseline := top_left.y + (box.size.y - measure_text(font, options[state.selected]).y) * 0.5 + font.ascent
 
-	draw_text(&mbi.font, options[state.selected], top_left.x + style.padding, baseline, style.text_color)
+	draw_text(font, options[state.selected], top_left.x + style.padding, baseline, style.text_color)
 
-	// Which way it will open, in a character rather than a glyph nobody has
-	// drawn yet. The font is whatever the game loaded, so this stays ASCII
-	caret := "^" if state.open else "v"
-	draw_text(
-		&mbi.font, caret,
-		top_left.x + box.size.x - style.padding - measure_text(&mbi.font, caret).x, baseline,
-		style.text_color,
-	)
+	// Which way it will open. This was the ASCII characters `v` and `^` until
+	// there was a triangle to draw, which is a small thing that was visible on
+	// every dropdown on screen: the caret was whatever shape the game's font
+	// happened to give those two letters, at whatever size the text was.
+	dropdown_caret(box, style, state.open)
 
 	return changed
 }
 
 /*
-	The open list, drawn over whatever came after the box.
+	Opens the list at a point, with no box: a context menu.
 
-	Does nothing when closed, so it can be called unconditionally from the end
-	of a screen. No input: dropdown() already took it.
+	The caller decides what opens it, which is the whole difference between this
+	and a dropdown -- usually the right button over something:
+
+		if matchbox.is_mouse_pressed(.RIGHT) && matchbox.mouse_over_rect(deck) {
+			matchbox.open_context_menu(&menu, matchbox.get_mouse_position(), {160, 32})
+		}
+
+	`row_size` is one row: the width of the whole list, and the height of each
+	entry in it. There is no box to take that from the way a dropdown does.
 */
-dropdown_overlay :: proc(state:^Dropdown, options:[]string, style:Dropdown_Style = DROPDOWN_STYLE) {
+open_context_menu :: proc(state: ^Dropdown, point: [2]f32, row_size: [2]f32) {
+	state.anchor = .POINT
+
+	// No height, so the list hangs from the point itself -- dropdown_list_rect
+	// puts it under the bottom edge either way and does not need to know which
+	// of the two it is looking at.
+	state.rectangle = {position = point, size = {row_size.x, 0}, pivot = {0.5, 0.5}}
+	state.row       = row_size
+	state.selected  = -1
+	state.open      = true
+	state.opened_on = mbi.frame
+}
+
+/*
+	The input half of a context menu. Draws nothing; dropdown_overlay does that.
+
+	`picked` is true on the frame an entry is chosen, and `chosen` indexes
+	`options`. Unlike a dropdown this does not report a *change*: every pick off
+	a menu of actions is worth acting on, including picking the same one twice.
+
+		if choice, picked := matchbox.context_menu(&menu, ACTIONS); picked {
+			do_action(choice)
+		}
+*/
+context_menu :: proc(
+	state:   ^Dropdown,
+	options: []string,
+	style:   Dropdown_Style = DROPDOWN_STYLE,
+) -> (chosen: int, picked: bool) {
+	if !state.open do return -1, false
+
+	if len(options) == 0 {
+		state.open = false
+		return -1, false
+	}
+
+	// The frame it opened on is the frame the opening click happened on, and
+	// that click is not also a choice. The pointer is still taken, so whatever
+	// the menu landed on top of does not act on it either.
+	if state.opened_on == mbi.frame {
+		capture_mouse()
+		return -1, false
+	}
+
+	dropdown_take_input(state, len(options), false)
+
+	// selected is left at -1 by open_context_menu and only moves when a row is
+	// hit, so this is exactly "something was picked this frame".
+	if !state.open && state.selected >= 0 {
+		return state.selected, true
+	}
+
+	return -1, false
+}
+
+/*
+	The input an open list takes, whichever way it was opened.
+
+	The list is on top, so it takes the pointer whether or not the click lands
+	on a row -- otherwise closing the list by clicking away also presses
+	whatever happened to be under that spot.
+
+	`over_anchor` is whether the pointer is over the thing the list came out of,
+	which for a dropdown is its own box and needs capturing too. A context menu
+	has no box and passes false.
+*/
+@(private)
+dropdown_take_input :: proc(state: ^Dropdown, count: int, over_anchor: bool) -> (changed: bool) {
+	if over_anchor || mouse_over_rect(dropdown_list_rect(state, count)) do capture_mouse()
+
+	// Either button puts a menu away. Right-clicking somewhere else with a menu
+	// open means "open one there instead", and leaving the first one up would
+	// give two.
+	if !is_mouse_pressed(.LEFT) && !is_mouse_pressed(.RIGHT) do return false
+
+	if hit := dropdown_row_at(state, count, get_mouse_position()); hit >= 0 {
+		changed        = hit != state.selected
+		state.selected = hit
+		state.open     = false
+		return changed
+	}
+
+	// Anywhere else, the box included, just puts it away.
+	state.open = false
+	return false
+}
+
+/*
+	The open list, drawn over whatever came after it.
+
+	Does nothing when closed, so it can be called unconditionally from the end of
+	a screen. No input: dropdown() and context_menu() already took it.
+*/
+dropdown_overlay :: proc(
+	state:   ^Dropdown,
+	options: []string,
+	style:   Dropdown_Style = DROPDOWN_STYLE,
+	font:    ^Font = nil,
+) {
 	if !state.open || len(options) == 0 do return
+
+	font := font if font != nil else &mbi.font
 
 	list := dropdown_list_rect(state, len(options))
 	list.color = style.list_bg
@@ -717,71 +1240,539 @@ dropdown_overlay :: proc(state:^Dropdown, options:[]string, style:Dropdown_Style
 	draw_rect_border(list, style.border, style.border_thickness)
 
 	mouse := get_mouse_position()
+
 	for option, i in options {
-		row := dropdown_row_rect(state, i)
+		row := dropdown_row_rect(state, i, len(options))
 
 		if point_in_rect(mouse, row) {
 			row.color = style.hover
 			draw_rect(row)
 		}
 
-		top_left := rect_top_left(row)
-		baseline := top_left.y + (row.size.y - measure_text(&mbi.font, option).y) * 0.5 + mbi.font.ascent
+		// Only a dropdown marks a row. A context menu is a list of things to do
+		// and has no current one, so marking the last thing done would be
+		// saying something untrue.
+		color := style.text_color
+		if state.anchor == .BOX && i == state.selected do color = style.mark
 
-		draw_text(
-			&mbi.font, option,
-			top_left.x + style.padding, baseline,
-			style.mark if i == state.selected else style.text_color,
-		)
+		top_left := rect_top_left(row)
+		baseline := top_left.y + (row.size.y - measure_text(font, option).y) * 0.5 + font.ascent
+
+		draw_text(font, option, top_left.x + style.padding, baseline, color)
 	}
 }
 
-/*Whether a dropdown is showing its list, for a caller deciding what else to draw*/
-dropdown_is_open :: proc(state:^Dropdown) -> bool {
+// Whether a dropdown is showing its list, for a caller deciding what else to
+// draw.
+dropdown_is_open :: proc(state: ^Dropdown) -> bool {
 	return state.open
 }
 
-/*Shuts the list without changing the choice*/
-dropdown_close :: proc(state:^Dropdown) {
+// Shuts the list without changing the choice.
+dropdown_close :: proc(state: ^Dropdown) {
 	state.open = false
 }
 
 /*
-	The whole open list, hanging off the bottom of the box.
+	The whole open list.
 
-	Always downwards. Flipping it up when the box is near the bottom of the
-	window is the obvious next thing, and is left until something actually
-	sits there -- guessing at it now would be untested either way.
+	Hanging off the bottom of whatever it is anchored to, and turned back when
+	that would put it off the screen -- up when there is not room below and more
+	room above, and left when it would run off the right edge.
+
+	The flip is not a nicety here. It was left undone while the only anchor was
+	a box, on the grounds that nothing had been put near the bottom of a window
+	yet. A context menu opens wherever the pointer is, and the bottom of the
+	window is an ordinary place to right-click.
 */
-dropdown_list_rect :: proc(state:^Dropdown, count:int) -> Rectangle {
-	box := state.rectangle
-	top := rect_top_left(box)
+dropdown_list_rect :: proc(state: ^Dropdown, count: int) -> Rectangle {
+	anchor := rect_top_left(state.rectangle)
 
-	height := f32(count) * box.size.y + f32(max(0, count - 1)) * DROPDOWN_ROW_GAP
+	width  := state.row.x
+	height := f32(count) * state.row.y + f32(max(0, count - 1)) * DROPDOWN_ROW_GAP
+
+	x := anchor.x
+	y := anchor.y + state.rectangle.size.y // under the box, or at the point
+
+	// Measured against the logical size, which is what everything here is drawn
+	// in -- window pixels would be wrong under a letterbox.
+	screen_w := f32(mbi.width)
+	screen_h := f32(mbi.height)
+
+	// Up rather than down only when that is actually better. A list too tall for
+	// either side stays where it was, because flipping it would move the problem
+	// without fixing it and put the first row further from the pointer.
+	below := screen_h - y
+	above := anchor.y
+	if height > below && above > below do y = anchor.y - height
+
+	if x + width > screen_w do x = screen_w - width
+	if x < 0 do x = 0
+
+	return {position = {x, y}, size = {width, height}, pivot = {0.5, 0.5}}
+}
+
+/*
+	One row of the open list.
+
+	Derived from the list rather than from the anchor, so the two cannot
+	disagree about where the list ended up once it has been flipped -- which is
+	the bug this shape of code invites: a hit test that still believes the list
+	opened downwards.
+*/
+dropdown_row_rect :: proc(state: ^Dropdown, index: int, count: int) -> Rectangle {
+	list     := dropdown_list_rect(state, count)
+	top_left := rect_top_left(list)
 
 	return {
-		position = {top.x, top.y + box.size.y},
-		size     = {box.size.x, height},
+		position = {top_left.x, top_left.y + f32(index) * (state.row.y + DROPDOWN_ROW_GAP)},
+		size     = {list.size.x, state.row.y},
 		pivot    = {0.5, 0.5},
 	}
 }
 
-/*One row of the open list*/
-dropdown_row_rect :: proc(state:^Dropdown, index:int) -> Rectangle {
-	box := state.rectangle
-	top := rect_top_left(box)
-
-	return {
-		position = {top.x, top.y + box.size.y + f32(index) * (box.size.y + DROPDOWN_ROW_GAP)},
-		size     = box.size,
-		pivot    = {0.5, 0.5},
-	}
-}
-
-/*Which row a point is on, or -1 for none of them*/
-dropdown_row_at :: proc(state:^Dropdown, count:int, point:[2]f32) -> int {
-	for i in 0..<count {
-		if point_in_rect(point, dropdown_row_rect(state, i)) do return i
+// Which row a point is on, or -1 for none of them.
+dropdown_row_at :: proc(state: ^Dropdown, count: int, point: [2]f32) -> int {
+	for i in 0 ..< count {
+		if point_in_rect(point, dropdown_row_rect(state, i, count)) do return i
 	}
 	return -1
+}
+
+/*
+	The little triangle at the right-hand end of a closed box, pointing the way
+	the list will open.
+
+	Sized off the box rather than off the font, which is the point of drawing it
+	rather than writing it: it is the same shape at every text size, and it is
+	the same shape whatever font the game loaded.
+*/
+@(private)
+dropdown_caret :: proc(box: Rectangle, style: Dropdown_Style, open: bool) {
+	top_left := rect_top_left(box)
+
+	half   := min(box.size.y * 0.18, box.size.x * 0.25)
+	center := [2]f32{top_left.x + box.size.x - style.padding - half, top_left.y + box.size.y * 0.5}
+
+	// Pointing down when closed -- "there is more under here" -- and up when
+	// open, which is the direction it will fold back into.
+	tip  := center.y + half * 0.8
+	base := center.y - half * 0.6
+	if open do tip, base = base, tip
+
+	draw_triangle(
+		{center.x - half, base},
+		{center.x + half, base},
+		{center.x, tip},
+		style.text_color,
+	)
+}
+
+// -----------------------------------------------------------------------
+// Tooltip
+// -----------------------------------------------------------------------
+
+TOOLTIP_OFFSET:  [2]f32 = {16, 18} // from the pointer to the plate's near corner
+TOOLTIP_MARGIN:  f32    = 6        // closest the plate comes to a window edge
+TOOLTIP_MAX:     f32    = 260      // width it wraps at
+
+/*
+	Text on a plate beside the pointer, moved to the other side when it would
+	run off the screen.
+
+	The flipping is the part worth having. A plate that always hangs down and to
+	the right is fine until the pointer is near an edge, and then the thing you
+	asked to read is the thing that is off screen.
+
+	Wraps at `max_width`, so a sentence of explanation is as ordinary a thing to
+	pass as two words. Returns the plate, for a caller that wants to know what
+	got covered.
+
+		if matchbox.hover_dwell(&hint, card_rect) {
+			matchbox.draw_tooltip(rules_text)
+		}
+
+	Call it late. It is drawn where it is asked and nothing here reorders
+	anything, so a tooltip drawn in the middle of a screen is covered by the
+	rest of it.
+*/
+draw_tooltip :: proc(
+	text:      string,
+	font:      ^Font = nil,
+	max_width: f32 = TOOLTIP_MAX,
+	color:     [4]f32 = TEXT_PLATE_FG,
+	plate:     [4]f32 = TEXT_PLATE_BG,
+	padding:   [2]f32 = TEXT_PLATE_PADDING,
+) -> Rectangle {
+	font := font if font != nil else &mbi.font
+	if len(text) == 0 do return {}
+
+	measured := measure_text_wrapped(font, text, max_width)
+	size     := measured + padding * 2
+
+	at := tooltip_corner(get_mouse_position(), size)
+
+	draw_rect({position = at, size = size, color = plate, pivot = {0.5, 0.5}})
+	draw_text_wrapped(font, text, at + padding, max_width, color)
+
+	return {position = at, size = size, pivot = {0.5, 0.5}}
+}
+
+/*
+	Where a plate of `size` goes for a pointer at `mouse`.
+
+	Below and to the right by preference, because that is where the pointer is
+	not. Flipped to the other side of the pointer when there is no room, and only
+	then pushed back inside the window -- flipping first keeps the plate clear of
+	the cursor, and sliding is what is left when neither side fits.
+*/
+@(private)
+tooltip_corner :: proc(mouse: [2]f32, size: [2]f32) -> [2]f32 {
+	screen := [2]f32{f32(mbi.width), f32(mbi.height)}
+	at     := mouse + TOOLTIP_OFFSET
+
+	if at.x + size.x > screen.x - TOOLTIP_MARGIN do at.x = mouse.x - TOOLTIP_OFFSET.x - size.x
+	if at.y + size.y > screen.y - TOOLTIP_MARGIN do at.y = mouse.y - TOOLTIP_OFFSET.y - size.y
+
+	at.x = clamp(at.x, TOOLTIP_MARGIN, max(TOOLTIP_MARGIN, screen.x - TOOLTIP_MARGIN - size.x))
+	at.y = clamp(at.y, TOOLTIP_MARGIN, max(TOOLTIP_MARGIN, screen.y - TOOLTIP_MARGIN - size.y))
+
+	return at
+}
+
+// -----------------------------------------------------------------------
+// Status line
+// -----------------------------------------------------------------------
+
+/*
+	How much a message matters, which is the whole of what a status line adds
+	over drawing the string yourself.
+
+	Four rather than two because "it worked" and "here is what is happening" are
+	not the same message and should not be the same colour, and neither is a
+	warning the same as a refusal.
+*/
+Status_Level :: enum {
+	INFO, // what is happening
+	GOOD, // it worked
+	WARN, // it worked, but
+	BAD,  // it did not work
+}
+
+STATUS_COLOR := [Status_Level][4]f32{
+	.INFO = {0.80, 0.82, 0.88, 1},
+	.GOOD = {0.55, 0.80, 0.55, 1},
+	.WARN = {0.90, 0.75, 0.40, 1},
+	.BAD  = {0.90, 0.45, 0.45, 1},
+}
+
+STATUS_FADE :: f32(0.5) // seconds a timed message spends fading out
+
+// Longest message kept. A status line is one line on a screen somebody is
+// reading at a glance; anything longer wants a panel of its own.
+STATUS_MAX_BYTES :: 160
+
+/*
+	Held by the caller, one per screen. The zero value is a line with nothing on
+	it.
+
+	**The text is copied in.** That is what the fixed buffer is for: the message
+	is nearly always a temp-allocated `fmt.tprintf`, and a status line that kept
+	the pointer would be showing freed memory by the next frame -- which is the
+	sort of bug that looks like a rendering fault for an afternoon.
+*/
+Status_Line :: struct {
+	buffer: [STATUS_MAX_BYTES]u8,
+	length: int,
+	level:  Status_Level,
+
+	// When it was set, and how long it lasts. `seconds` of 0 means it stays
+	// until something replaces it, which is what a line reporting the state of
+	// things wants; a number is what an "it worked" wants.
+	set_at:  u64,
+	seconds: f32,
+}
+
+/*
+	Puts a message on the line, replacing whatever was there.
+
+		matchbox.set_status(&note, fmt.tprintf("saved %s", name), .GOOD, 3)
+		matchbox.set_status(&note, "deck needs 40 cards", .BAD)
+
+	Truncated at STATUS_MAX_BYTES on a character boundary, so a long message is
+	short rather than broken utf-8.
+*/
+set_status :: proc(status: ^Status_Line, text: string, level: Status_Level = .INFO, seconds: f32 = 0) {
+	cut := min(len(text), STATUS_MAX_BYTES)
+	for cut > 0 && cut < len(text) && text[cut] & 0xc0 == 0x80 do cut -= 1
+
+	copy(status.buffer[:], text[:cut])
+
+	status.length  = cut
+	status.level   = level
+	status.set_at  = mbi.now_ts
+	status.seconds = seconds
+}
+
+// Takes the message off the line.
+clear_status :: proc(status: ^Status_Line) {
+	status.length = 0
+	status.set_at = 0
+}
+
+// What is on the line. Points into the status line and changes when it is set
+// again.
+status_text :: proc(status: ^Status_Line) -> string {
+	return string(status.buffer[:status.length])
+}
+
+/*
+	How visible the line should be, 0 to 1.
+
+	1 for a message with no time limit, and for a timed one until its last half
+	second, which it spends fading. A message that vanishes between one frame and
+	the next reads as a glitch rather than as an answer expiring.
+*/
+status_alpha :: proc(status: ^Status_Line) -> f32 {
+	if status.length == 0 || status.set_at == 0 do return 0
+	if status.seconds <= 0 do return 1
+
+	left := status.seconds - seconds_since(status.set_at)
+
+	if left <= 0 do return 0
+	if left >= STATUS_FADE do return 1
+
+	return left / STATUS_FADE
+}
+
+/*
+	Draws the line at a top-left, in its level's colour, and returns the room it
+	took.
+
+	Nothing at all when the line is empty or has faded out, so this can be called
+	unconditionally from the bottom of a screen.
+*/
+draw_status :: proc(status: ^Status_Line, top_left: [2]f32, font: ^Font = nil) -> [2]f32 {
+	alpha := status_alpha(status)
+	if alpha <= 0 do return {}
+
+	font := font if font != nil else &mbi.font
+
+	color := STATUS_COLOR[status.level]
+	color.a *= alpha
+
+	text := status_text(status)
+	draw_text(font, text, top_left.x, top_left.y + font.ascent, color)
+
+	return measure_text(font, text)
+}
+
+// -----------------------------------------------------------------------
+// Modal
+// -----------------------------------------------------------------------
+
+MODAL_DIM: [4]f32 = {0, 0, 0, 0.6}
+
+/*
+	Held by the caller, one per thing that can be put up over a screen.
+
+	Like Dropdown, this is in two halves, and for the same reason: drawing is
+	immediate, so the dim has to be drawn last to be over everything, but the
+	pointer has to be taken first or the screen underneath answers the clicks
+	that were meant for the modal.
+
+		matchbox.modal_begin(&preview)      // early: takes the pointer
+		... the whole screen ...
+		if box, open := matchbox.modal_overlay(&preview, {480, 640}); open {
+			... draw the content in `box` ...
+		}
+
+	Capture only reaches widgets that run *after* it, which is why the first call
+	goes at the top of the frame. The second gives the pointer back before
+	handing over the box, so buttons drawn inside the modal answer normally --
+	they ask mouse_captured() like every other button and would otherwise be as
+	dead as the screen behind them.
+*/
+Modal :: struct {
+	open: bool,
+
+	// The frame open_modal ran on. The click that puts a modal up is still a
+	// press for the rest of that frame, and the modal is drawn during that same
+	// frame -- so without this it opens and is dismissed in one breath, which
+	// looks exactly like it never opened at all.
+	opened_on: u64,
+}
+
+// Puts the modal up. Whatever `modal_overlay` is next given is what it shows.
+open_modal :: proc(modal: ^Modal) {
+	modal.open      = true
+	modal.opened_on = mbi.frame
+}
+
+close_modal :: proc(modal: ^Modal) {
+	modal.open = false
+}
+
+modal_is_open :: proc(modal: ^Modal) -> bool {
+	return modal.open
+}
+
+/*
+	Takes the pointer for the frame while the modal is up. Call early, before
+	anything the modal will cover.
+
+	Returns whether it is open, so a screen that wants to skip its own update
+	work while a modal is up can do that off the same call.
+*/
+modal_begin :: proc(modal: ^Modal) -> bool {
+	if modal.open do capture_mouse()
+	return modal.open
+}
+
+/*
+	Draws the dim and hands back a centred box to put content in. Call late.
+
+	`open` is false when there is nothing up, in which case the box is not worth
+	looking at -- the usual shape is `if box, open := ...; open { }`.
+
+	The pointer is given back here, so anything drawn into the box behaves
+	normally.
+*/
+modal_overlay :: proc(modal: ^Modal, size: [2]f32, dim: [4]f32 = MODAL_DIM) -> (content: Rectangle, open: bool) {
+	if !modal.open do return {}, false
+
+	screen := [2]f32{f32(mbi.width), f32(mbi.height)}
+
+	draw_rect({position = {0, 0}, size = screen, color = dim, pivot = {0.5, 0.5}})
+
+	// The pointer is given back so that buttons drawn into the box behave
+	// normally -- except on the frame it opened, where the press that opened it
+	// is still live and belongs to whatever was clicked, not to the modal. Held
+	// rather than released, so that one press reaches nothing: not a button
+	// inside the box that happens to sit where the opening button was, and not
+	// modal_dismissed, which would otherwise shut it immediately.
+	if modal.opened_on == mbi.frame {
+		capture_mouse()
+	} else {
+		release_mouse()
+	}
+
+	return Rectangle{
+		position = (screen - size) * 0.5,
+		size     = size,
+		pivot    = {0.5, 0.5}, // position is the top-left corner
+	}, true
+}
+
+/*
+	Whether the click landed on the dim rather than on `content`, which is the
+	usual way a modal is dismissed.
+
+	Call after modal_overlay and after whatever went inside it, so a button in
+	the corner of the content gets the click first.
+
+		if matchbox.modal_dismissed(box) do matchbox.close_modal(&preview)
+
+	The `mouse_captured` test is what keeps the opening click from counting:
+	modal_overlay holds the pointer for that one frame rather than giving it
+	back. See there.
+*/
+modal_dismissed :: proc(content: Rectangle) -> bool {
+	return is_mouse_pressed(.LEFT) && !mouse_over_rect(content) && !mouse_captured()
+}
+
+// -----------------------------------------------------------------------
+// Progress bar
+// -----------------------------------------------------------------------
+
+PROGRESS_STYLE := Progress_Style{
+	track            = {1, 1, 1, 0.12},
+	fill             = {0.55, 0.80, 0.55, 1},
+	border           = {0, 0, 0, 0},
+	border_thickness = 0,
+}
+
+Progress_Style :: struct {
+	track:            [4]f32, // the empty part
+	fill:             [4]f32, // the full part
+	border:           [4]f32, // left transparent by default; a bar rarely needs one
+	border_thickness: f32,
+}
+
+/*
+	A bar from 0 to 1, filling left to right.
+
+	`hover_progress` already returned the number and matchbox's own examples/ui
+	drew the bar for it out of a hand-made rectangle, which is a fair sign this
+	belonged here.
+
+	`progress` is clamped, so a caller may hand over a ratio without checking
+	that its denominator was not zero.
+*/
+draw_progress :: proc(rectangle: Rectangle, progress: f32, style: Progress_Style = PROGRESS_STYLE) {
+	p := clamp(progress, 0, 1)
+
+	track := rectangle
+	track.color = style.track
+	draw_rect(track)
+
+	if p > 0 {
+		top_left := rect_top_left(rectangle)
+
+		// Grown from the left edge rather than scaled about the middle, which is
+		// what `pivot` here is for -- a rect scaled about its centre would empty
+		// from both ends at once.
+		draw_rect({
+			position = top_left,
+			size     = {rectangle.size.x * p, rectangle.size.y},
+			color    = style.fill,
+			pivot    = {0.5, 0.5},
+			rotation = rectangle.rotation,
+		})
+	}
+
+	if style.border_thickness > 0 do draw_rect_border(rectangle, style.border, style.border_thickness)
+}
+
+/*
+	The same bar with a label centred on it.
+
+	Split from draw_progress rather than being an empty string away from it,
+	because a bar six pixels tall is the common case and has nowhere to put
+	text.
+*/
+draw_progress_labelled :: proc(
+	rectangle: Rectangle,
+	progress:  f32,
+	text:      string,
+	style:     Progress_Style = PROGRESS_STYLE,
+	color:     [4]f32 = WHITE,
+	font:      ^Font = nil,
+) {
+	draw_progress(rectangle, progress, style)
+	if len(text) == 0 do return
+
+	font := font if font != nil else &mbi.font
+
+	top_left := rect_top_left(rectangle)
+	measured := measure_text(font, text)
+
+	draw_text(
+		font, text,
+		top_left.x + (rectangle.size.x - measured.x) * 0.5,
+		top_left.y + (rectangle.size.y - measured.y) * 0.5 + font.ascent,
+		color,
+	)
+}
+
+// Percentage text for a bar, as "42%". Rounded rather than truncated, so a bar
+// that has visibly reached the end does not read as 99%.
+progress_percent :: proc(progress: f32, allocator := context.allocator) -> string {
+	p := int(clamp(progress, 0, 1) * 100 + 0.5)
+
+	sb := strings.builder_make(allocator)
+	strings.write_int(&sb, p)
+	strings.write_rune(&sb, '%')
+
+	return strings.to_string(sb)
 }

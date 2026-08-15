@@ -8,6 +8,148 @@ areas of improvement while trying to create them.
 
 # Not Started
 
+## What The Card Game Built Because Matchbox Had Nothing
+
+Everything under this heading exists twice: once as the thing the game wrote for
+itself, and nowhere in matchbox. They are listed with where the game's copy
+lives, so each one can be read before it is replaced.
+
+Ordered by what they cost. The first four are each written more than once, or
+force a caller down to the low-level API.
+
+### A button that can be disabled
+
+`Button_Style` has hover, colour, alignment and padding, and no notion of a
+button that cannot be pressed. So the card game's action panel -- the column
+beside every card the player picks up, which is the most-used UI in the game --
+cannot use `button` at all. It drops to `Button` / `draw_button` /
+`mouse_over_button` and does it by hand:
+
+	cardgame/ui.odin, draw_card_actions
+
+	color = ACTION_ENABLED_COLOR if available else ACTION_DISABLED_COLOR
+	if available && matchbox.mouse_over_button(button) { ... }
+
+Which is worth noticing, because `button` was added to absorb exactly this --
+"what every hand-rolled wrapper around Button/draw_button/mouse_over_button
+ended up adding". It absorbed the size and the alignment and missed the
+disabled state, so the biggest wrapper in the game survived it.
+
+A `disabled: bool` in the style, drawn in a dimmed colour and never returning
+true, retires that whole procedure.
+
+### A scroll view, on the clipping that is already there
+
+`begin_clip` went in on 2026-08-13 saying, in its own words, that it exists "so
+a list can scroll inside a panel rather than carrying on over whatever sits
+below it". Nothing has used it for that yet.
+
+The card game's deck builder was written two days earlier and pages everything
+instead -- its file header still says matchbox has no scissor, which stopped
+being true and nobody went back. Paging is why it carries `list_page`,
+`pool_page`, `list_page_size`, page clamping, two sets of `< >` buttons and two
+`N / M` indicators, and why every one of its four contents views has to work
+out its own per-page count.
+
+	cardgame/decks.odin, deck_edit_foot     the deck panel's pager
+	cardgame/decks.odin, deck_edit_pool     the pool's pager, written again
+
+A `Scroll_View` holding an offset, clamping it to content height, taking the
+wheel, and wrapping `begin_clip`/`end_clip` would delete both pagers and most
+of the page arithmetic in `deck_layout`.
+
+### A context menu, which is a dropdown with a different anchor
+
+`Dropdown` opens a list under a box. The card game needed the same list opened
+at the pointer when a deck is right clicked, and there was no way to say that,
+so it has a second nearly identical widget of its own:
+
+	cardgame/ui.odin, Deck_Menu / draw_deck_menu
+
+Two widgets, one behaviour. The difference is entirely where the list hangs
+from -- a rectangle, or a point. Worth folding into `Dropdown` as an anchor
+rather than growing a second thing that has to learn about capture, dismissal
+and drawing late all over again.
+
+### A tooltip
+
+Text on a plate beside the cursor, flipping to the other side near the right or
+bottom edge so it does not run off screen. About twenty lines and nothing in it
+is about cards:
+
+	cardgame/ui.odin, draw_hint
+
+`draw_text_plate` is already here and is half of it.
+
+### A status line
+
+A short message with a severity colour -- what just happened, or what is wrong.
+The card game invented it three times, once per screen that needed one:
+
+	cardgame/decks.odin, decks_note
+	cardgame/menu.odin,  menu_note
+	cardgame/menu.odin,  menu_trouble
+
+### A labelled field
+
+A `Text_Field` with its label above it, positioned together. Every form field on
+the card game's menu goes through the game's own:
+
+	cardgame/decks.odin, menu_field_at
+
+### A modal overlay
+
+Full-screen dim, content centred on top, drawn last so it covers everything.
+The card game does it twice, and both have to remember to be drawn last by
+hand:
+
+	cardgame/decks.odin, deck_edit_preview     the full-size card
+	cardgame/ui.odin,    draw_revealed_card    the card held up to both players
+
+### A progress bar
+
+A 0-to-1 bar. `hover_progress` already returns the number, and matchbox's own
+`examples/ui` draws the bar for it with a hand-made rectangle -- which is a fair
+sign it belongs here.
+
+## Drawing Matchbox Cannot Do, And What The Game Did Instead
+
+Not components, but the same shape of problem: the game worked around them.
+
+### A tint on a sprite
+
+`Sprite` is a mesh and a body and carries no colour, so a sprite can only be
+drawn as it is. The card game dims a card it can take no more copies of by
+drawing a translucent rectangle over the top of it:
+
+	cardgame/decks.odin, deck_edit_contents, DECK_MAXED_DIM
+
+That works and is one extra draw per dimmed card, but it can only darken. A
+tint would also give desaturation, a highlight on hover, and a flash without a
+second sprite.
+
+### Any primitive that is not a rectangle
+
+`draw_rect`, `draw_rect_border`, `draw_text`, `draw_sprite`. No line, no
+triangle, no circle. The consequence is small but it is in matchbox's own code:
+`Dropdown` draws its open/closed caret as the ASCII characters `v` and `^`,
+because there is no triangle to draw and the font is whatever the game loaded.
+
+### Text at more than one size
+
+`init` bakes the default font at 32 pixels and the atlas is never rebuilt, so
+text is one size whatever the window is. The card game's deck editor works out
+every margin, panel, thumbnail and row height as a fraction of the window --
+and then has to treat the line height as a fixed constant and lay out around
+it. On a large display everything scales except the words.
+
+### Wrapped or multi-line text
+
+`draw_text` is one line. The card game reports a deck's problems as "the first
+one (and 3 more)" with the rest going to the console, partly because there is
+nowhere to put the rest.
+
+
 ## Remove / Reduce AI Code
 
 While I wrote a chunk of this, so did Claude. I'd like to

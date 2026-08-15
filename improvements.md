@@ -8,146 +8,44 @@ areas of improvement while trying to create them.
 
 # Not Started
 
-## What The Card Game Built Because Matchbox Had Nothing
+## A Hit Test That Knows About The Clip
 
-Everything under this heading exists twice: once as the thing the game wrote for
-itself, and nowhere in matchbox. They are listed with where the game's copy
-lives, so each one can be read before it is replaced.
+Found converting the card game's deck builder from paging to Scroll_View, which
+is the first thing to use a clip for what it was added for.
 
-Ordered by what they cost. The first four are each written more than once, or
-force a caller down to the low-level API.
+`mouse_over_rect` asks whether the pointer is inside a rectangle and nothing
+else. Inside a scrolling panel that is the wrong question: a row scrolled past
+the bottom edge is cut out of the picture by the scissor and still answers the
+mouse, because the scissor is a drawing state and the hit test never looks at
+it.
 
-### A button that can be disabled
+What that cost the game: the deck panel's Empty button sits in the panel's foot,
+below the scroll area. With the list scrolled, a content row lands underneath
+that button -- invisible, and still hit-testable -- so pressing Empty also
+pressed the `-` of whatever row happened to be there. Same shape as clicking
+through an open dropdown, which `mouse_captured` already solves, and the same
+answer is wanted here.
 
-`Button_Style` has hover, colour, alignment and padding, and no notion of a
-button that cannot be pressed. So the card game's action panel -- the column
-beside every card the player picks up, which is the most-used UI in the game --
-cannot use `button` at all. It drops to `Button` / `draw_button` /
-`mouse_over_button` and does it by hand:
+The game works around it by testing the panel as well as the row:
 
-	cardgame/ui.odin, draw_card_actions
+	inside := matchbox.mouse_over_rect(area) && !matchbox.mouse_captured()
+	...
+	over := inside && matchbox.mouse_over_rect(spot)
 
-	color = ACTION_ENABLED_COLOR if available else ACTION_DISABLED_COLOR
-	if available && matchbox.mouse_over_button(button) { ... }
+That is correct and it is a rule every caller has to know, which is what makes
+it worth moving. Two shapes suggest themselves:
 
-Which is worth noticing, because `button` was added to absorb exactly this --
-"what every hand-rolled wrapper around Button/draw_button/mouse_over_button
-ended up adding". It absorbed the size and the alignment and missed the
-disabled state, so the biggest wrapper in the game survived it.
+  - `mouse_over_rect` intersects against the current clip stack, so it is right
+    by default and nobody has to be told. Anything wanting the old behaviour
+    can still call `point_in_rect` with `get_mouse_position()`.
+  - or `scroll_contains(view, rect)` for the narrower case, which leaves
+    `mouse_over_rect` alone.
 
-A `disabled: bool` in the style, drawn in a dimmed colour and never returning
-true, retires that whole procedure.
+The first is the one that stops this being discovered again. `apply_clip`
+already keeps the current rectangle, so the test has something to ask.
 
-### A scroll view, on the clipping that is already there
-
-`begin_clip` went in on 2026-08-13 saying, in its own words, that it exists "so
-a list can scroll inside a panel rather than carrying on over whatever sits
-below it". Nothing has used it for that yet.
-
-The card game's deck builder was written two days earlier and pages everything
-instead -- its file header still says matchbox has no scissor, which stopped
-being true and nobody went back. Paging is why it carries `list_page`,
-`pool_page`, `list_page_size`, page clamping, two sets of `< >` buttons and two
-`N / M` indicators, and why every one of its four contents views has to work
-out its own per-page count.
-
-	cardgame/decks.odin, deck_edit_foot     the deck panel's pager
-	cardgame/decks.odin, deck_edit_pool     the pool's pager, written again
-
-A `Scroll_View` holding an offset, clamping it to content height, taking the
-wheel, and wrapping `begin_clip`/`end_clip` would delete both pagers and most
-of the page arithmetic in `deck_layout`.
-
-### A context menu, which is a dropdown with a different anchor
-
-`Dropdown` opens a list under a box. The card game needed the same list opened
-at the pointer when a deck is right clicked, and there was no way to say that,
-so it has a second nearly identical widget of its own:
-
-	cardgame/ui.odin, Deck_Menu / draw_deck_menu
-
-Two widgets, one behaviour. The difference is entirely where the list hangs
-from -- a rectangle, or a point. Worth folding into `Dropdown` as an anchor
-rather than growing a second thing that has to learn about capture, dismissal
-and drawing late all over again.
-
-### A tooltip
-
-Text on a plate beside the cursor, flipping to the other side near the right or
-bottom edge so it does not run off screen. About twenty lines and nothing in it
-is about cards:
-
-	cardgame/ui.odin, draw_hint
-
-`draw_text_plate` is already here and is half of it.
-
-### A status line
-
-A short message with a severity colour -- what just happened, or what is wrong.
-The card game invented it three times, once per screen that needed one:
-
-	cardgame/decks.odin, decks_note
-	cardgame/menu.odin,  menu_note
-	cardgame/menu.odin,  menu_trouble
-
-### A labelled field
-
-A `Text_Field` with its label above it, positioned together. Every form field on
-the card game's menu goes through the game's own:
-
-	cardgame/decks.odin, menu_field_at
-
-### A modal overlay
-
-Full-screen dim, content centred on top, drawn last so it covers everything.
-The card game does it twice, and both have to remember to be drawn last by
-hand:
-
-	cardgame/decks.odin, deck_edit_preview     the full-size card
-	cardgame/ui.odin,    draw_revealed_card    the card held up to both players
-
-### A progress bar
-
-A 0-to-1 bar. `hover_progress` already returns the number, and matchbox's own
-`examples/ui` draws the bar for it with a hand-made rectangle -- which is a fair
-sign it belongs here.
-
-## Drawing Matchbox Cannot Do, And What The Game Did Instead
-
-Not components, but the same shape of problem: the game worked around them.
-
-### A tint on a sprite
-
-`Sprite` is a mesh and a body and carries no colour, so a sprite can only be
-drawn as it is. The card game dims a card it can take no more copies of by
-drawing a translucent rectangle over the top of it:
-
-	cardgame/decks.odin, deck_edit_contents, DECK_MAXED_DIM
-
-That works and is one extra draw per dimmed card, but it can only darken. A
-tint would also give desaturation, a highlight on hover, and a flash without a
-second sprite.
-
-### Any primitive that is not a rectangle
-
-`draw_rect`, `draw_rect_border`, `draw_text`, `draw_sprite`. No line, no
-triangle, no circle. The consequence is small but it is in matchbox's own code:
-`Dropdown` draws its open/closed caret as the ASCII characters `v` and `^`,
-because there is no triangle to draw and the font is whatever the game loaded.
-
-### Text at more than one size
-
-`init` bakes the default font at 32 pixels and the atlas is never rebuilt, so
-text is one size whatever the window is. The card game's deck editor works out
-every margin, panel, thumbnail and row height as a fraction of the window --
-and then has to treat the line height as a fixed constant and lay out around
-it. On a large display everything scales except the words.
-
-### Wrapped or multi-line text
-
-`draw_text` is one line. The card game reports a deck's problems as "the first
-one (and 3 more)" with the rest going to the console, partly because there is
-nowhere to put the rest.
+Worth checking `hover_dwell` at the same time -- it has the same problem for the
+same reason, and the game resets the dwell state by hand for exactly that.
 
 
 ## Remove / Reduce AI Code
@@ -161,14 +59,283 @@ optimazations, etc
 Basic Init Window example uses about 53mb of ram.
 Need to compare to other frameworks to see if that's a lot?
 
-## Procedure Groups
-
-`destroy` procedure group so individual procedures do not need to be called
-
+Not started, but one thing did turn up while testing the font cache with a
+tracking allocator: a whole start-and-stop leaked exactly one allocation, the
+five bytes of the window title, which `init` cloned to a cstring and handed to
+SDL_CreateWindow without ever giving back. SDL copies the title, so it was ours
+to free. Fixed, and worth writing down mostly for the method -- a tracking
+allocator around `init` / `cleanup` is a two minute test and it now comes back
+clean, which makes the next leak easy to see. 53mb is not made of that sort of
+thing, though; the atlases and textures are where to look.
 
 ---
 
 # Completed
+
+## The Eight Things The Card Game Had Written For Itself
+
+All eight are in matchbox now, and the game's copies can go. Taken together
+they are one complaint rather than eight: matchbox had the *hard* half of each
+of these -- clipping, capture, plates, dwell -- and none of the twenty lines
+that turn it into something a screen can use.
+
+**A button that could not be pressed.** `Button_Style` grew `disabled`, and
+`button` draws a dimmed version of whatever colour it was handed, never
+highlights, and never returns true. The dim is a *factor* rather than a second
+colour, so it works against any palette without being told about it -- a colour
+would have meant every caller picking one, which is most of what the
+hand-rolled version was doing. `button_enabled_if(condition)` is the shape it
+is nearly always wanted in.
+
+Worth saying plainly, because it is the second time this has happened: `button`
+was added to absorb what every wrapper around Button/draw_button/
+mouse_over_button ended up adding, and it absorbed the size and the alignment
+and missed this -- so the biggest wrapper in the game survived it. The lesson is
+not "add a disabled flag", it is that a widget which cannot express *not now*
+is not finished.
+
+**A scroll view.** `Scroll_View` holds an offset in pixels, clamps it to the
+content, takes the wheel, and brackets `begin_clip`/`end_clip`. `begin_scroll`
+hands back the point to lay content out from, so items are positioned where
+they naturally go and the ones outside are cut off by the scissor.
+
+The offset being pixels rather than an index is the whole of why this deletes
+the pagers. Paging forced every view of the same list to work out its own
+per-page count, because how many things fit on a page is a different question
+from how many things there are -- and it is a question the *content* can answer
+and the *list* cannot. Nothing here asks it.
+
+The bar is drawn as well, and can be dragged, which the note did not ask for:
+the bar had to exist either way to say where in the list you are, and once it is
+on screen it looks draggable. `scroll_to` is there for a selection moved by the
+keyboard.
+
+**A context menu, folded into Dropdown.** `Dropdown` grew an anchor. A box, and
+the list opens under it as before; a point, and it opens there, which is a
+context menu. `open_context_menu` and `context_menu` are the point half; the
+list is drawn by the same `dropdown_overlay` as before.
+
+Two things came out of doing it this way rather than as a second widget. The
+list now flips **upwards** when there is not room below it, which was the item
+left undone on the grounds that nothing had been put near the bottom of a window
+yet -- a context menu opens wherever the pointer is, and the bottom of a window
+is an ordinary place to right-click. And it slides left off the right edge for
+the same reason. `dropdown_row_rect` is derived from the list rectangle rather
+than from the anchor, so the hit test cannot go on believing the list opened
+downwards after it has been flipped, which is exactly the bug this shape of code
+invites.
+
+One thing that had to be handled and is worth remembering: the click that opens
+a menu is still a press for the rest of that frame, and the point it opens at is
+the top corner of the first row. Without `opened_on`, every menu opened and
+chose its own first entry in the same breath.
+
+**A tooltip.** `draw_tooltip` puts wrapped text on a plate beside the pointer
+and moves it to the other side of the cursor when it would run off, then slides
+it inside the window if neither side fits. Flipping before sliding is deliberate
+-- it keeps the plate off the cursor, and sliding is what is left when there is
+nowhere good to go.
+
+**A status line.** `Status_Line` with four levels, and a fade for a message
+given a time limit. The text is **copied into a fixed buffer**, which is the one
+decision in it worth defending: these messages are nearly always
+`fmt.tprintf`, and a status line holding the pointer would be drawing freed
+memory by the next frame -- a bug that looks like a rendering fault for an
+afternoon.
+
+**A labelled field.** `Text_Field` grew `label`, drawn above the box.
+`rectangle` still means the box and nothing else, so the hit test, the focus
+ring and the caret are untouched; `text_field_place` and `text_field_height` are
+how a form lays one out, since a labelled field takes up more room than its
+rectangle says.
+
+**A modal.** `Modal`, in two halves like `Dropdown` and for the same reason:
+`modal_begin` takes the pointer at the top of the frame so the screen underneath
+does not answer clicks meant for the modal, and `modal_overlay` draws the dim
+last and hands back a centred box. The overlay *releases* the pointer as it
+draws -- without that, buttons inside the modal ask `mouse_captured()` like
+every other button and come out as dead as the screen behind them.
+
+It shipped broken, and the way it broke is worth keeping. A modal opened and
+vanished in the same frame: the click that opens one is still a press for the
+rest of that frame, `modal_overlay` handed the pointer back, and
+`modal_dismissed` then saw a live press outside the content box -- the button
+that opened it -- and shut it again. One frame of dim, which reads as nothing
+happening at all.
+
+This is the *same bug* that was found and guarded in `context_menu` a few hours
+earlier, in the same sitting, and it did not occur to me to look for it next
+door. Both widgets are opened by a click and both draw during the frame of that
+click, so both have to say "not this one". Anything else opened by a click and
+drawn immediately needs the same guard, and that is now three places worth
+checking rather than a quirk of dropdowns.
+
+The fix is a frame stamp, as it was for the menu, but applied differently:
+`modal_overlay` *holds* the pointer on the opening frame instead of giving it
+back. That way the one press reaches nothing -- not `modal_dismissed`, and not a
+button inside the box that happens to sit where the opening button was, which a
+guard on the dismissal alone would have missed.
+
+**A progress bar.** `draw_progress`, and `draw_progress_labelled` for one with
+room for text on it. `examples/ui` drew this out of a hand-made rectangle, which
+is where the case for it came from, and now calls it.
+
+
+## Drawing That Was Not A Rectangle
+
+**A tint on a sprite.** `Body` grew `tint` and `desaturate`, and `sprite.frag`
+grew the uniform block to take them. Dimming a card is now a property of the
+draw rather than a translucent rectangle drawn over the top of it -- which
+worked, and cost an extra draw, and could only ever darken.
+
+The zero value is the part that needed thinking about. An all-zero tint is read
+as "as it was painted" rather than "multiply by transparent black", because a
+Body nobody has filled in has to draw the picture: every sprite predating this
+has a zero there and the alternative is that all of them silently stop
+appearing. The two readings do not otherwise collide -- fading out is
+`{1,1,1,a}`, which stays non-zero all the way down to a = 0.
+
+`desaturate` is a separate number rather than another tint because a multiply
+cannot take colour away, only add or subtract it. It is applied *before* the
+tint, so tinting a greyed sprite gives a picture in the tint's hue; the other
+order washes the tint out along with everything else and there is no way back.
+
+**Lines, circles, ellipses and triangles.** `draw_line`, `draw_lines`,
+`draw_circle`, `draw_circle_outline`, `draw_ellipse`, `draw_ellipse_outline`,
+`draw_triangle`, `draw_triangle_outline`.
+
+A line is a rotated rect and goes through the rect pipeline, because that is
+genuinely all it is. The other three are cut out of the same unit quad by a
+distance field in a new `shape.frag`: the quad covers the shape's bounding box
+and each pixel is tested. The honest version is a second vertex format and a
+second pipeline layout, and this keeps the one shared quad, the one vertex
+shader and the one vertex format the whole renderer is built on -- a triangle
+costs what a rect costs.
+
+Every `thickness` is in **pixels**, and the shader converts using the
+screen-space gradient of the distance field. That is worth knowing because it is
+the thing `draw_rect_outline` spent years getting wrong: the quad may be
+stretched, rotated, scaled by the letterbox and zoomed by the camera, and all of
+it arrives already folded into that one number, so a ring is one thickness the
+whole way round whatever has been done to it. The edges are smoothed for free
+out of the same number.
+
+Two things this cost. The shapes are described in the quad's own uv space rather
+than inscribed in it, so the quad can be padded -- a shape drawn flush to the
+quad's border loses the outer half of its smoothed edge. And the triangle's
+winding is worked out from the third corner, which took one wrong sign to learn:
+getting it backwards does not draw a mirrored triangle, it draws **nothing at
+all**, because three half-planes all facing inwards have no overlap to fill.
+
+`Dropdown` draws its caret as a triangle now, sized off the box rather than off
+the font. It was the ASCII characters `v` and `^`, which meant the caret was
+whatever shape the game's font happened to give those two letters, at whatever
+size the text was.
+
+**Text at more than one size.** `get_font(size)` bakes the default font at any
+size and caches it, so a layout worked out as a fraction of the window can size
+its words the same way:
+
+	font := matchbox.get_font(f32(matchbox.mbi.height) * 0.03)
+
+Sizes are rounded to whole pixels, which is stb's resolution anyway, so dragging
+a window rebakes only when it crosses a pixel. The cache holds six, because each
+size is a 512x512 RGBA atlas -- a megabyte of texture apiece -- and six covers a
+title, a heading, body text, a caption and two odd ones.
+
+The limit needed a guard that is worth remembering, because it is the sort of
+thing that would have gone unnoticed for months: eviction never touches a size
+asked for during the current frame. A screen drawing seven sizes would otherwise
+free the atlas belonging to a pointer it handed out moments earlier and is still
+drawing through. Going one over the limit for a frame is much the cheaper
+mistake. `Clock` grew a `frame` counter to make that testable, which is useful
+on its own.
+
+And then the guard needed a guard, which a tracking-allocator test caught and
+nothing else would have. `mbi.frame` is 0 until the first `poll_events`, and so
+is every `used_on` recorded before then -- so sizes baked during setup all
+looked like they were in use by the frame that had not started yet, and the
+limit did nothing at exactly the moment a game is most likely to ask for a dozen
+sizes at once. Eight sizes stayed resident against a limit of six. The test asks
+for eight and expects six, which is the sort of thing worth keeping.
+
+`get_font(32)` hands back `mbi.font` rather than baking a second copy of it.
+`DEFAULT_FONT_BYTES` is exposed for a game that would rather keep its own set.
+
+**Wrapped and multi-line text.** `wrap_text`, `draw_text_wrapped`,
+`draw_text_lines`, `measure_text_wrapped`, `text_block_height`, `line_height`.
+
+These take a **top-left**, not a baseline, unlike `draw_text`. Text that wraps
+is being fitted into a box rather than typeset onto a line, and the box is what
+the caller has. Lines break at spaces and at any `\n` already there; a blank line
+in the source is a blank line on screen, since that is the only way to ask for a
+gap. A word wider than the whole column is broken where it runs out of room --
+there is nowhere else for it to go, and quietly overflowing is the one outcome
+somebody who passed a width did not want.
+
+
+## A destroy Procedure Group
+
+`destroy` takes any of Mesh, Sprite, AnimatedSprite, AnimationClip,
+ParallaxSprites, Font, Sound, Text_Field and Sprite_Cache. Every `destroy_`
+procedure is still there and still callable; this only saves remembering which
+one goes with which type, and saves changing the call when the type changes.
+Odin picks by argument type, so getting it wrong is a compile error rather than
+a leak, which is the whole point.
+
+`destroy_animated_sprite` is new and came out of writing the group: there was no
+such procedure, so a game holding an AnimatedSprite had to know the thing to
+free was the clip inside it and reach past the sprite to do it. Everything else
+in the group frees itself.
+
+`cleanup` is deliberately not in the group. It is called once, at the end, and
+it is not one more thing to free -- everything else in the group stops working
+after it.
+
+
+## The UI Was Spread Over Four Files And Should Have Been One
+
+`ui.odin` was getting long, so the new work went into new files: a
+`widgets.odin` for the tooltip, status line, modal and progress bar, a
+`scroll.odin`, and a `dropdown.odin`. Length is a real problem. That was not an
+answer to it.
+
+"Widgets" and "ui" are the same word. Somebody looking for a tooltip had no way
+to guess which of the four files it was in, and the boundary I would have had to
+defend -- the small ones together, the big ones apart -- is one nobody could
+have predicted from outside. A rule that has to be read before it can be
+followed is not doing the job a file layout is for.
+
+It is all in `ui.odin` now, about 1770 lines, and the header lists what is in
+it. One long file you can search beats four you have to choose between; the
+split was solving my problem reading it rather than a caller's problem finding
+things in it.
+
+`examples/widgets` went the same way and is part of `examples/ui`, which shows
+all fourteen on one screen -- and, more usefully than any single widget, shows
+the **order** they have to be called in. That ordering rule is the thing that is
+actually easy to get wrong here, and both bugs found while building this came
+straight out of it.
+
+`Layout` and `Grid` stay in `layout.odin`, and that one is defensible on a
+distinction a caller can see without being told: they draw nothing and answer no
+input. They hand back Rectangles, and everything in `ui.odin` takes one.
+
+
+## What The Game Has To Change
+
+Almost nothing. The additions above are additions, and the zero values were
+chosen so that code written before them keeps its behaviour.
+
+The one signature that changed is `dropdown_row_rect`, which now takes the
+option count as well, because the row is derived from the list rectangle rather
+than from the anchor -- that is what keeps the hit test right after the list has
+flipped upwards. Anything calling it directly needs the extra argument; nothing
+calling `dropdown`, `dropdown_overlay` or `dropdown_row_at` is affected.
+
+`button`, `dropdown`, `dropdown_overlay`, `draw_text_field`, `draw_tooltip`,
+`draw_status` and `draw_progress_labelled` all take an optional trailing
+`font`, defaulting to `mbi.font`. Existing calls are unchanged.
 
 ## There Was No Way To Draw Something Over Something Else, Or To Stop It Being Clicked Through
 
@@ -578,7 +745,7 @@ looked different after the move was the move's fault. `draw_animated_sprite`
 sidesteps it by folding the flip into the uv bounds it hands over, which is why
 this has not been noticed.
 
-### random-walk does not build
+### random-walk does not build -- fixed
 
 ```
 examples/random-walk/main.odin(29): Too few values in structure literal, expected 5, got 4
@@ -586,9 +753,10 @@ examples/random-walk/main.odin(29): Too few values in structure literal, expecte
 
 A positional `Rectangle` literal that was not updated when `pivot` was added. It
 has nothing to do with the backend and was already broken on main, so it was
-left out of that branch rather than folded into an unrelated diff. Switching it
-to a named-field literal is the fix, and is what stops it happening again the
-next time the struct grows.
+left out of that branch rather than folded into an unrelated diff.
+
+It is a named-field literal now, which is the fix and is also what stops it
+happening again the next time the struct grows. Every example builds.
 
 ## A Steam Controller In Mouse Mode Was Steam's Doing, Not The Controller's
 

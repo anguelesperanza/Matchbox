@@ -820,6 +820,39 @@ question, and a static device listing cannot answer it: a controller can be list
 typed, mapped and completely silent.
 
 `matchbox.steam_controller_mode` came out of this and lives on the unmerged
-`steam-controller-mode` branch. It enables SDL's driver unless Steam launched the
-game, which is right for the 2015 Steam Controller and for a Steam Deck's built-in
-controls. It does nothing for `0x1304` and was never merged as though it did.
+`steam-controller-mode` branch, at `89e9d89`. It enables SDL's driver unless Steam
+launched the game -- `AUTO` / `NATIVE` / `LEAVE`, deciding by whether `SteamAppId`
+is in the environment, and setting the hint before `SDL_Init` because a hint read
+at subsystem startup is worth nothing afterwards. That is right for the 2015 Steam
+Controller and for a Steam Deck's built-in controls. It does nothing for `0x1304`
+and was never merged as though it did.
+
+### The branch had to be recovered
+
+That paragraph said the branch existed for three days after it had stopped
+existing. Deleted at some point and not noticed, because nothing builds it and
+nothing points at it -- a note in a file is not a reference anything checks.
+
+It came back out of the reflog, which is the only reason it came back at all:
+reflog entries expire after ninety days by default, so an unmerged branch nobody
+has looked at for a quarter is gone for good and the note describing it stays
+exactly as confident as before. Worth remembering the next time something is
+parked on a branch rather than merged behind a flag.
+
+It rebases onto main cleanly and all fourteen examples build on top of it, so
+the parking is still cheap:
+
+	git rebase main steam-controller-mode
+
+### Where the actual answer is, for next time
+
+The question that keeps coming back is "how do I put the controller in gamepad
+mode rather than desktop mode", and the answer is that **there is no SDL setting
+for it.** Steam decides, before SDL sees the device. Launch the game through
+Steam as a non-Steam shortcut, which is what players get anyway, or turn the
+desktop configuration off under Steam -> Settings -> Controller.
+
+Upstream has the 2026 controller on its list -- libsdl-org/SDL issue 15471 -- so
+the thing to watch is an SDL past 3.4.2, which is still what is vendored here.
+Until then `0x1304` arrives as a generic HID gamepad: six axes, sixteen buttons,
+no trackpads, no gyro, no back buttons.

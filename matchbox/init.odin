@@ -280,8 +280,20 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.window = sdl.CreateWindow(title_cstring, width, height, mbi.flags)
 
 	if mbi.window == nil { panic("Could not create SDL3 window") }
+
+	// The size asked for was in points and the surface is in pixels, which on a
+	// scaled display are not the same number. Asked rather than assumed, so that
+	// anything reading mbi.window_width before the first begin_drawing gets the
+	// truth -- poll_events is the one that matters, since it converts the mouse.
+	mbi.pixel_density = 1
+	if density := sdl.GetWindowPixelDensity(mbi.window); density > 0 {
+		mbi.pixel_density = density
+	}
+
 	mbi.window_width  = width
 	mbi.window_height = height
+	sdl.GetWindowSizeInPixels(mbi.window, &mbi.window_width, &mbi.window_height)
+
 	mbi.draw_scale    = 1
 	mbi.draw_offset   = {0, 0}
 

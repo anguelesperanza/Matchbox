@@ -16,6 +16,11 @@ Clock :: struct {
 	max_delta_time:    f32, // delta_time ceiling, so a stalled frame can't teleport everything
 	target_frame_time: f32, // 0 = unlimited; set via set_target_fps
 
+	// The counter value the next frame is due to start at, advanced by exactly
+	// one frame period each time whatever the last one actually cost. That is
+	// what stops the limiter drifting -- see poll_events.
+	next_frame_ts:     u64,
+
 	// Frames since the program started, counted by poll_events. Anything caching
 	// something for the length of a frame compares against this -- get_font does,
 	// so a font handed out this frame cannot be evicted underneath its caller.

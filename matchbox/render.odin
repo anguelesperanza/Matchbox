@@ -71,7 +71,29 @@ Renderer :: struct {
 begin_drawing :: proc() {
 	ensure(mbi.initialized, "matchbox.init must be called before begin_drawing")
 
-	sdl.GetWindowSize(mbi.window, &mbi.window_width, &mbi.window_height)
+	/*
+		In pixels, not points.
+
+		The window is created with .HIGH_PIXEL_DENSITY, which asks the platform for
+		a backing surface at the display's real resolution -- so on a display at
+		125% a 640x480 window has an 800x600 swapchain. This used to read
+		GetWindowSize, which reports points, and window_width then disagreed with
+		the thing being drawn into.
+
+		Nothing looked broken, which is why it went unnoticed: screen_dims feeds
+		this to the vertex shader as the divisor, so a full-width rect still
+		reached the edge of the window. What was lost was the resolution that was
+		asked for -- the whole frame was composed at point resolution and stretched
+		over the pixels, so text baked at 32 was drawn across 40 and came out soft.
+		For a nearest-filtered pixel image it is worse than soft: one source pixel
+		lands on 1.25 screen pixels, and the seams fall in different places down
+		the image.
+	*/
+	sdl.GetWindowSizeInPixels(mbi.window, &mbi.window_width, &mbi.window_height)
+
+	if density := sdl.GetWindowPixelDensity(mbi.window); density > 0 {
+		mbi.pixel_density = density
+	}
 
 	if !mbi.fixed_res {
 		mbi.width  = mbi.window_width

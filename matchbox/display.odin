@@ -18,8 +18,14 @@ Display :: struct {
 	window:        ^sdl.Window,
 	title:         string,
 	flags:         sdl.WindowFlags,
-	window_width:  i32,      // real window size, in pixels
+	window_width:  i32,      // real window size, in pixels -- not points, see begin_drawing
 	window_height: i32,
+
+	// Window pixels per window point. 1 on an unscaled display, 1.25 or 1.5 or 2
+	// on a scaled one. The window is created with .HIGH_PIXEL_DENSITY, so its
+	// pixel size is its point size times this -- and SDL reports mouse positions
+	// in points, which is the one place the two have to be reconciled.
+	pixel_density: f32,
 	width:         i32,      // logical render size, what games draw against
 	height:        i32,
 	fixed_res:     bool,     // true = letterbox the logical size into the window

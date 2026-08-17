@@ -47,14 +47,12 @@ upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -
 	return buffer
 }
 
-// Creates a sampled RGBA8 texture and fills it from `pixels`, which must hold
-// width * height * 4 bytes.
+// An empty sampled RGBA8 texture. Split out because two things want one: a
+// sprite, which fills it once and never again, and a Pixel_Buffer, which is
+// created empty and rewritten every frame.
 @(private)
-upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
-	device := mbi.renderer.device
-	size   := u32(width) * u32(height) * 4
-
-	texture := sdl.CreateGPUTexture(device, {
+create_gpu_texture :: proc(width, height: i32) -> ^sdl.GPUTexture {
+	texture := sdl.CreateGPUTexture(mbi.renderer.device, {
 		type                 = .D2,
 		format               = .R8G8B8A8_UNORM,
 		usage                = {.SAMPLER},
@@ -64,6 +62,18 @@ upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
 		num_levels           = 1,
 	})
 	ensure(texture != nil, "could not create GPU texture")
+
+	return texture
+}
+
+// Creates a sampled RGBA8 texture and fills it from `pixels`, which must hold
+// width * height * 4 bytes.
+@(private)
+upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
+	device := mbi.renderer.device
+	size   := u32(width) * u32(height) * 4
+
+	texture := create_gpu_texture(width, height)
 
 	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
 	ensure(transfer != nil, "could not create transfer buffer")

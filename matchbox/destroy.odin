@@ -14,6 +14,7 @@ package matchbox
 		matchbox.destroy(&explosion)
 		matchbox.destroy(&name_field)
 		matchbox.destroy(&art_cache)
+		matchbox.destroy(&gameboy_screen)
 
 	Odin picks by the type of the argument, so getting it wrong is a compile
 	error rather than a leak, which is the whole point.
@@ -32,6 +33,7 @@ destroy :: proc {
 	destroy_parallax,
 	destroy_font,
 	destroy_sound,
+	destroy_pixel_buffer,
 	destroy_text_field,
 	sprite_cache_destroy,
 }

@@ -72,6 +72,136 @@ thing, though; the atlases and textures are where to look.
 
 # Completed
 
+## An Emulator Could Not Draw Its Screen
+
+Two emulators written against Raylib -- a Chip-8 and a Game Boy / Game Boy Colour
+-- were the test of whether matchbox could do this at all. Audio was out of
+scope; this is only the picture.
+
+The answer was one missing thing, and it was the whole of it. Every emulator ever
+written draws the same way: keep one texture the size of the machine's screen,
+rewrite its pixels once per emulated frame, and scale it up with
+nearest-neighbour filtering so the pixels stay square. The Game Boy backend does
+that with `UpdateTexture` in Raylib and `LockTexture`/`UnlockTexture` in SDL2.
+
+Matchbox could do neither half. Every texture it had came from a *file* --
+`create_sprite` takes encoded bytes and hands them to stb -- so there was no way
+to hand over a buffer you had filled in yourself, and no way at all to change one
+after it existed. `upload_texture` did the right upload and was private, made a
+new texture every call, and submitted its own command buffer.
+
+That last part is why "call create_sprite every frame" is not the answer even
+before counting the cost. It would allocate a texture and a staging buffer per
+frame, submit a second command buffer per frame, and leak the previous
+texture -- and releasing the previous one is not safe while the GPU may still be
+reading from it.
+
+`Pixel_Buffer` keeps one texture and one transfer buffer and records the copy onto
+the frame's **existing** command buffer. Both are cycled rather than
+double-buffered by hand, which SDL3 will do on request, so writing into the
+staging buffer never waits for last frame's copy to finish.
+
+	screen := matchbox.create_pixel_buffer(160, 144)
+	defer matchbox.destroy(&screen)
+
+	matchbox.begin_drawing()
+	matchbox.pixel_buffer_update(&screen, ppu.framebuffer[:])
+	matchbox.clear_background(matchbox.BLACK)
+	matchbox.draw_pixel_buffer(&screen, matchbox.pixel_buffer_fit(&screen))
+	matchbox.end_drawing()
+
+`pixel_buffer_update` takes a slice of anything four bytes wide -- `[]u8` four to
+a pixel, `[][4]u8`, `[]u32`, an emulator's own `[]COLOR` -- and checks the total
+against the buffer, so a mismatched stride is a panic rather than a picture that
+looks nearly right.
+
+A copy pass cannot be opened while a render pass is recording, so this closes one
+if it finds it open and the next draw reopens it with `load_op = .LOAD`. Calling
+it before `clear_background` avoids that entirely, which is what the example
+does. Being on the frame's own command buffer is also what orders the upload
+against the draw that reads it: Raylib's backend carries a comment about Windows
+drivers deferring uploads made outside the draw context and `DrawTexturePro` then
+reading stale pixels, and that is a problem this arrangement does not have.
+
+### The thing worth having beyond the texture
+
+`pixel_buffer_fit` returns the biggest box of the buffer's own shape that fits an
+area, centred. Both emulators stretch to fill the window instead, which distorts
+the picture whenever the window is not an exact multiple of the machine's aspect
+ratio, and both compute that rectangle by hand.
+
+`integer = true` snaps the scale down to a whole number so one source pixel is an
+exact block of screen pixels. That is not fussiness. At 3.972x some rows of a
+Game Boy screen are four screen pixels tall and others three, and on a dithered
+gradient the seams are visible and they wander. The cost is a margin, and it can
+be a large one -- a 723x611 window is four pixels short of 4x, so it drops to 3x
+and gives up a quarter of the image. That is the trade, and it is why this is a
+flag rather than the default.
+
+`examples/framebuffer` animates a Game Boy-sized buffer with a one-pixel
+checkerboard in the corners and a lit pixel every eighth, which is what makes an
+uneven scale visible rather than theoretical.
+
+### Two things found on the way, both older than this
+
+**The frame limiter drifted, and not for the reason it looked like.** It waited
+"the frame period minus however long this frame took", through `sdl.Delay`, which
+takes whole milliseconds. The truncation was the obvious suspect and was the
+smaller half: the real fault was that nothing ever made up for a wait that came
+back late, because the error was measured fresh each frame and any overshoot was
+simply kept.
+
+Measured over 180 frames at a Game Boy's 16.742706 ms, it ran **1.4 to 1.6
+percent fast** -- about 60.6 fps against 59.7275 -- and repeatable to within a
+fifth of a percent, so it was the model rather than noise. An absolute deadline
+that advances by exactly one period whatever the last frame cost, waited on with
+`DelayPrecise` in nanoseconds, comes in at **0.22 percent under**. Roughly seven
+times better, and the residual is close to what the measurement itself can see.
+
+Worth writing down that the first guess was wrong by a factor of three. Reasoning
+from "16.742706 truncates to 16" gives four percent; the sleep is only the
+*remainder* of the frame, so the truncation loses under a millisecond of a
+sixteen millisecond wait. The number came from measuring it, and there was no way
+to get it by thinking harder.
+
+There is now a catch-up limit as well: past four frames behind, the debt is
+written off. Without it a window dragged for two seconds leaves a hundred frames
+owed and the loop runs flat out with no wait at all trying to serve them.
+
+**The window size was in the wrong units on a scaled display.** `init` asks for
+`.HIGH_PIXEL_DENSITY`, which gets a surface at the display's real resolution --
+on a display at 125% a 640x480 window has an 800x600 swapchain -- and
+`begin_drawing` read `GetWindowSize`, which reports points.
+
+Nothing looked broken, which is why it lasted: `screen_dims` hands that number to
+the vertex shader as the divisor, so a full-width rectangle still reached the edge
+of the window. What was lost was the resolution that had been asked for. The whole
+frame was composed at point resolution and stretched over the pixels, so text
+baked at 32 was drawn across 40 and came out soft. For a nearest-filtered pixel
+image it is worse than soft: one source pixel lands on 1.25 screen pixels and the
+seams fall in different places down the image, which is exactly the artefact
+`integer` scaling exists to avoid.
+
+`GetWindowSizeInPixels` now, and the mouse converted by the window's pixel
+density, since SDL reports the pointer in points. Fixing only the first half
+would have traded a soft picture for hitboxes a quarter of the way out and
+getting worse further down the screen.
+
+**This is unverified at a scale other than 1.** The display here reports 1.00, so
+the two agree and the change is a no-op on it -- everything still builds and runs,
+which is all that can honestly be claimed. The evidence that it matters is
+second-hand and good: the Game Boy emulator's Raylib backend works around exactly
+this with `GetRenderWidth`/`GetRenderHeight` and leaves a comment naming the
+numbers, "125% DPI: 480x432 logical -> 600x540 physical".
+
+### Still missing, and deliberately
+
+Chip-8 draws up to 2048 rectangles a frame, and `draw_rect` rebinds the pipeline,
+the vertex buffer and the index buffer for every one of them. It would run, and
+the better port is the same one as the Game Boy: a 64x32 pixel buffer and one
+draw. Nothing in matchbox batches anything -- the same note already sits against
+text drawing one quad per glyph -- and that is still true and still not urgent.
+
 ## The Eight Things The Card Game Had Written For Itself
 
 All eight are in matchbox now, and the game's copies can go. Taken together

@@ -48,6 +48,70 @@ Worth checking `hover_dwell` at the same time -- it has the same problem for the
 same reason, and the game resets the dwell state by hand for exactly that.
 
 
+## Batching Quads Into One Draw
+
+**Not a requirement at this time.** Written down with its numbers so the case can
+be re-read rather than re-argued, and so the next person to notice "there is no
+batching" finds out what it is worth before spending a week on it.
+
+Every quad is its own draw call with its own vertex uniform push. Redundant binds
+are gone -- see the Completed entry -- and what is left is one
+PushGPUVertexUniformData and one DrawGPUIndexedPrimitives per quad, at about
+0.16 us each.
+
+### What it would take
+
+Per-quad data has to stop being a uniform block and become a per-instance vertex
+buffer: a second buffer on slot 1 at `input_rate = .INSTANCE` carrying position,
+size, uv bounds, rotation and colour, plus whatever each fragment shader needs on
+top -- the outline's per-axis border, the shape's three corners and kind and
+thickness, the sprite's desaturate. That is one instance format wide enough for
+all of them, around eighty bytes, and **all five fragment shaders rewritten** to
+read interpolators instead of a cbuffer.
+
+Then a flush discipline: accumulate while the pipeline and texture are unchanged,
+flush when either changes or the frame ends. Draw order survives that, because a
+flush happens exactly when the state that would have differed changes.
+
+### The trap in it
+
+`begin_clip` and `end_clip` change the scissor part-way through a frame, and the
+scissor is pass state, not per-draw state. A batch spanning a clip change would
+draw every quad in it under whichever scissor happened to be set when the batch
+was flushed. So `apply_clip` has to flush first, and so does anything else that
+ends a pass -- `pixel_buffer_update` does. Get that wrong and it does not fail
+loudly: it looks like "the scroll panel sometimes does not clip", found weeks
+later.
+
+### Why it is not needed yet
+
+Measured on this machine, 120 frames a point, drawing nothing but rects:
+
+	  rects   submit ms   frame ms   us/rect
+	    256       0.030      8.333     0.118
+	   1024       0.148      8.332     0.144
+	   2048       0.266      8.335     0.130
+	   8192       1.107      8.545     0.135
+	  32768       4.251      9.953     0.130
+	 131072      18.460     18.683     0.141
+
+Two things to read off that. The cost is **linear** -- there is no knee, it is
+pure per-call overhead, so nothing pathological is waiting further up. And frame
+time sits at 8.333 ms, which is this display's vsync, all the way to eight
+thousand quads: the GPU is not the bottleneck at any count that matters, and
+submission only *becomes* the frame past about thirty thousand quads at 120 Hz,
+or seventy thousand at 60 Hz.
+
+Against that, the worst real case in hand -- a full Chip-8 screen, 2048 rects --
+is 0.27 ms, which is **four percent of a frame**. Five thousand glyphs of text is
+0.32 ms. Neither is close.
+
+So the honest position is that this is an architecture improvement rather than a
+performance fix, and it is worth doing when something actually asks for tens of
+thousands of quads a frame -- a particle system, a tile map drawn per-tile
+without a spritesheet, a text editor rendering a whole file. None of those exist
+yet.
+
 ## Remove / Reduce AI Code
 
 While I wrote a chunk of this, so did Claude. I'd like to
@@ -71,6 +135,51 @@ thing, though; the atlases and textures are where to look.
 ---
 
 # Completed
+
+## The Same Pipeline, Described Two Thousand Times A Frame
+
+Every draw re-bound the pipeline, the vertex buffer and the index buffer, however
+many identical draws ran back to back. A Chip-8 screen is two thousand rects --
+one pipeline and one quad, described two thousand times -- and binding is pass
+state that the driver does not deduplicate for you.
+
+The renderer remembers what the current pass has bound and skips a bind that
+would change nothing. The quad's four vertices and six indices are the same for
+the life of the program, so those went from once per draw to once per pass.
+
+The risk in this is entirely in the invalidation, so it is worth saying where it
+lives: a new render pass starts with nothing bound, and a cache that outlived one
+would skip binds the GPU never received. `bind_cache_reset` runs after every
+`BeginGPURenderPass` and there are only two places that call it, which is what
+makes that checkable. The scissor is separate state and does not disturb
+bindings, which is why `apply_clip` needs nothing -- verified by eye on the
+scrolling panel in examples/ui, since a wrong answer there would have been a
+clipping fault rather than a crash.
+
+Text was also pushing its colour uniform once per glyph. A pushed block stays in
+force until something pushes over it, and the colour is the same for every
+character, so that was the same sixteen bytes handed over twenty times for a
+twenty character line. Once per string now.
+
+	2048 rects    ~0.24  ->  ~0.16 us each
+	glyphs         0.125 ->   0.057 us each
+	131072 rects   29.9  ->   18.7 ms/frame
+
+### Being wrong about how much it mattered
+
+The note that prompted this said 2048 rects rebinding per quad was a problem, and
+measuring it said that was overstated. It was 0.53 ms a frame before any of this,
+against a frame budget of 8.33 -- real, worth taking, and not the bottleneck it
+had been written up as.
+
+Two habits came out of that. Interleave the builds when comparing, because
+run-to-run variance here is about a fifth and three consecutive runs of the same
+binary spread wider than the change being measured. And time the submission loop
+rather than the frame, because the frame is vsync-locked and hides everything
+until it suddenly does not.
+
+What is left -- the actual batching -- is under Not Started with the numbers that
+say it can wait.
 
 ## An Emulator Could Not Draw Its Screen
 

@@ -23,6 +23,14 @@ package framebuffer_example
 	    two, and the seams wander. It costs a black margin, which is the trade
 	  - press G for a grid of single pixels, which is the honest test of whether
 	    one pixel is landing on one place
+	  - paint on it. Left button draws, right button erases, and the box follows
+	    whichever pixel is under the pointer. That is pixel_buffer_pick going the
+	    other way from drawing: pointer in, array index out
+	  - then turn integer scaling on, which leaves a black margin, and move the
+	    pointer into it. The box disappears and the readout says "outside" rather
+	    than sticking to the nearest edge pixel. At the default size the image
+	    fills the window exactly and there is no margin to try that in, which is
+	    the only reason it needs saying
 */
 
 import "core:fmt"
@@ -55,6 +63,10 @@ main :: proc() {
 	// one call that hands it over -- exactly where an emulator's framebuffer sits.
 	pixels: [W * H][4]u8
 
+	// What has been painted, over the top of the animation. Alpha 0 is untouched,
+	// which is why this is a colour per pixel rather than a bool.
+	paint: [W * H][4]u8
+
 	integer := false
 	grid    := false
 	elapsed: f32
@@ -69,7 +81,11 @@ main :: proc() {
 		// ---- draw into the buffer, a pixel at a time ---------------------
 		for y in 0 ..< H {
 			for x in 0 ..< W {
-				pixels[y * W + x] = shade_at(x, y, elapsed, grid)
+				if p := paint[y * W + x]; p.a != 0 {
+					pixels[y * W + x] = p
+				} else {
+					pixels[y * W + x] = shade_at(x, y, elapsed, grid)
+				}
 			}
 		}
 
@@ -87,6 +103,30 @@ main :: proc() {
 		dest := mb.pixel_buffer_fit(&screen, integer = integer)
 		mb.draw_pixel_buffer(&screen, dest)
 
+		// ---- which pixel is under the pointer ------------------------------
+		// The same `dest` that was just drawn with, not a fresh one: a pick that
+		// worked the destination out again could disagree with what is on screen,
+		// and the symptom would be a brush landing a pixel or two off the cursor.
+		hovered := "outside"
+
+		if px, py, ok := mb.pixel_buffer_pick_mouse(&screen, dest); ok {
+			hovered = fmt.tprintf("pixel %d, %d", px, py)
+
+			if mb.is_mouse_held(.LEFT)  do paint[py * W + px] = {0xff, 0x40, 0x60, 0xff}
+			if mb.is_mouse_held(.RIGHT) do paint[py * W + px] = {}
+
+			// A box round it, which is the inverse of the pick: index in, screen
+			// rectangle out. One source pixel is `scale` screen pixels across.
+			top := mb.rect_top_left(dest)
+			s   := dest.size.x / f32(W)
+
+			mb.draw_rect_border({
+				position = {top.x + f32(px) * s, top.y + f32(py) * s},
+				size     = {s, s},
+				pivot    = {0.5, 0.5},
+			}, mb.WHITE, max(1, s * 0.12))
+		}
+
 		// ---- what is on screen ---------------------------------------------
 		scale := dest.size.x / f32(W)
 
@@ -97,6 +137,8 @@ main :: proc() {
 			fmt.tprintf("I  integer scaling: %s", "on" if integer else "off"), {8, 44})
 		mb.draw_text_plate(font,
 			fmt.tprintf("G  pixel grid: %s", "on" if grid else "off"), {8, 76})
+		mb.draw_text_plate(font,
+			fmt.tprintf("%s   (drag to paint, right button erases)", hovered), {8, 108})
 
 		mb.end_drawing()
 		free_all(context.temp_allocator)

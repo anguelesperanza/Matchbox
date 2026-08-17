@@ -226,6 +226,71 @@ pixel_buffer_fit :: proc(buffer: ^Pixel_Buffer, area: Rectangle = {}, integer :=
 	}
 }
 
+/*
+	Which pixel of the buffer a point falls on. `ok` is false when it falls
+	outside, and then x and y mean nothing.
+
+	This is the other direction from drawing, and anything that paints needs it:
+	the pointer arrives in screen coordinates and the thing being edited is an
+	array index.
+
+	`dest` is the rectangle the buffer was *drawn* into -- pass the same one, do
+	not work it out again here. That is the entire reason it is a parameter: a
+	pick that recomputed the destination could disagree with what is on screen
+	the moment a caller draws somewhere other than pixel_buffer_fit's answer, and
+	the symptom would be a brush that paints a pixel or two away from the cursor.
+
+		dest := matchbox.pixel_buffer_fit(&canvas, integer = true)
+		matchbox.draw_pixel_buffer(&canvas, dest)
+
+		if x, y, ok := matchbox.pixel_buffer_pick_mouse(&canvas, dest); ok {
+			if matchbox.is_mouse_held(.LEFT) do pixels[y * WIDTH + x] = colour
+		}
+
+	Works in the space `get_mouse_position` reports, which is after the letterbox
+	and the display's pixel density have been taken off. It does **not** account
+	for a camera: draw_pixel_buffer runs `dest` through screen_pos and so is moved
+	by an active camera, while this is not. Panning a canvas with mbi.camera
+	rather than by moving `dest` wants get_mouse_world_pos as the point.
+*/
+pixel_buffer_pick :: proc(buffer: ^Pixel_Buffer, dest: Rectangle, point: [2]f32) -> (x, y: int, ok: bool) {
+	if buffer.width <= 0 || buffer.height <= 0 do return 0, 0, false
+	if dest.size.x <= 0 || dest.size.y <= 0    do return 0, 0, false
+
+	top_left := rect_top_left(dest)
+
+	// Per axis. pixel_buffer_fit never hands back a destination of a different
+	// shape to the buffer, but a caller is free to, and then the two scales are
+	// different numbers.
+	fx := (point.x - top_left.x) / (dest.size.x / f32(buffer.width))
+	fy := (point.y - top_left.y) / (dest.size.y / f32(buffer.height))
+
+	/*
+		Bounds-checked as floats, before the conversion, and that ordering is the
+		whole substance of this procedure.
+
+		`int()` in Odin truncates toward zero rather than flooring, so a point four
+		screen pixels to the left of a canvas drawn at 9x gives -0.44 and converts
+		to 0 -- a perfectly valid index. Checking the range afterwards lets that
+		through, and what you get is a brush that paints the leftmost column while
+		the pointer is outside the picture. Every hand-rolled version of this has
+		the bug, because the check looks right.
+
+		Once fx is known to be non-negative, int() and floor() agree, so nothing
+		further is needed.
+	*/
+	if fx < 0 || fy < 0 do return 0, 0, false
+	if fx >= f32(buffer.width) || fy >= f32(buffer.height) do return 0, 0, false
+
+	return int(fx), int(fy), true
+}
+
+// pixel_buffer_pick with the pointer already filled in, which is what almost
+// every caller wants -- the same shape as mouse_over_rect against point_in_rect.
+pixel_buffer_pick_mouse :: proc(buffer: ^Pixel_Buffer, dest: Rectangle) -> (x, y: int, ok: bool) {
+	return pixel_buffer_pick(buffer, dest, get_mouse_position())
+}
+
 // Gives back the texture and the staging buffer. Reachable through `destroy`.
 destroy_pixel_buffer :: proc(buffer: ^Pixel_Buffer) {
 	if buffer.transfer != nil && mbi.renderer.device != nil {

@@ -124,18 +124,38 @@ bind_quad_state :: proc(
 	ensure_pass()
 	if r.pass == nil do return false
 
-	sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
+	// Only what has actually changed. Binding is pass state and the driver does
+	// not check for you, so a run of identical draws was describing the same
+	// pipeline and the same two buffers over and over.
+	if r.bound_pipeline != pipeline {
+		sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
+		r.bound_pipeline = pipeline
+	}
 
-	vertex_binding := sdl.GPUBufferBinding{buffer = r.quad_verts, offset = 0}
-	sdl.BindGPUVertexBuffers(r.pass, 0, &vertex_binding, 1)
-	sdl.BindGPUIndexBuffer(r.pass, {buffer = r.quad_indices, offset = 0}, ._32BIT)
+	// The quad is the same four vertices and six indices for the life of the
+	// program, so this is once per pass rather than once per draw.
+	if !r.bound_quad {
+		vertex_binding := sdl.GPUBufferBinding{buffer = r.quad_verts, offset = 0}
+		sdl.BindGPUVertexBuffers(r.pass, 0, &vertex_binding, 1)
+		sdl.BindGPUIndexBuffer(r.pass, {buffer = r.quad_indices, offset = 0}, ._32BIT)
+		r.bound_quad = true
+	}
 
-	if texture != nil {
+	if texture != nil && (r.bound_texture != texture || r.bound_sampler != sampler) {
 		binding := sdl.GPUTextureSamplerBinding{texture = texture, sampler = sampler}
 		sdl.BindGPUFragmentSamplers(r.pass, 0, &binding, 1)
+		r.bound_texture = texture
+		r.bound_sampler = sampler
 	}
 
 	return true
+}
+
+// Hands a fragment uniform block over on its own, for a run of draws that all
+// want the same one. It stays in force until something pushes over it.
+@(private)
+push_frag_uniform :: proc(frag_data: rawptr, frag_size: u32) {
+	if frag_size > 0 do sdl.PushGPUFragmentUniformData(mbi.renderer.cmd, 0, frag_data, frag_size)
 }
 
 /*

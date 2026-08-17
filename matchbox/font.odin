@@ -92,6 +92,13 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 	// atlas are the same for every character in it -- only the uniforms differ.
 	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
 
+	// Once for the whole string, not once per glyph. A pushed uniform block stays
+	// in force for every draw after it until something pushes over it, and the
+	// colour is the same for every character -- so this was the same sixteen
+	// bytes handed over twenty times for a twenty character line.
+	frag_data := FontFragData{color = color}
+	push_frag_uniform(&frag_data, size_of(frag_data))
+
 	cursor_x := x
 	cursor_y := y
 
@@ -114,9 +121,7 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := FontFragData{color = color}
-
-		push_quad(&vert_data, &frag_data, size_of(frag_data))
+		push_quad(&vert_data, nil, 0)
 	}
 }
 
@@ -147,8 +152,12 @@ measure_text :: proc(font: ^Font, text: string) -> [2]f32 {
 // is active, so the font renders at its native baked size instead of being
 // upscaled by the logical-resolution multiplier.
 draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	// Bound once for the whole string, as in draw_text_string.
+	// Bound once for the whole string, as in draw_text_string, and the colour
+	// pushed once for the same reason.
 	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
+
+	frag_data := FontFragData{color = color}
+	push_frag_uniform(&frag_data, size_of(frag_data))
 
 	cursor_x := x
 	cursor_y := y
@@ -174,9 +183,7 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 			uv_max   = {q.s1, q.t1},
 		}
 
-		frag_data := FontFragData{color = color}
-
-		push_quad(&vert_data, &frag_data, size_of(frag_data))
+		push_quad(&vert_data, nil, 0)
 	}
 }
 

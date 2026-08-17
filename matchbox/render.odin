@@ -62,6 +62,29 @@ Renderer :: struct {
 	// clip.odin.
 	clip_stack: [MAX_CLIP_DEPTH]sdl.Rect,
 	clip_depth: int,
+
+	// What the current render pass already has bound. Binding is pass state, so
+	// all of this is void the moment a pass ends and bind_cache_reset says so.
+	//
+	// Every draw used to re-bind the pipeline, the vertex buffer and the index
+	// buffer, however many of them ran back to back with identical state. A
+	// screen of two thousand rects is one pipeline and one quad, described two
+	// thousand times.
+	bound_pipeline: ^sdl.GPUGraphicsPipeline,
+	bound_texture:  ^sdl.GPUTexture,
+	bound_sampler:  ^sdl.GPUSampler,
+	bound_quad:     bool, // the shared vertex and index buffers, which never change
+}
+
+// Called after every BeginGPURenderPass. A new pass starts with nothing bound,
+// so a cache that outlived one would skip binds the GPU never received.
+@(private)
+bind_cache_reset :: proc() {
+	r := &mbi.renderer
+	r.bound_pipeline = nil
+	r.bound_texture  = nil
+	r.bound_sampler  = nil
+	r.bound_quad     = false
 }
 
 // -----------------------------------------------------------------------
@@ -182,6 +205,7 @@ clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 		store_op    = .STORE,
 	}
 	r.pass = sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
+	bind_cache_reset()
 
 	// A fresh pass starts with the scissor covering the whole target, so an
 	// active clip has to be put back.
@@ -207,6 +231,7 @@ ensure_pass :: proc() {
 		store_op = .STORE,
 	}
 	r.pass = sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
+	bind_cache_reset()
 
 	apply_clip()
 }

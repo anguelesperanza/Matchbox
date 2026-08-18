@@ -1682,6 +1682,221 @@ modal_dismissed :: proc(content: Rectangle) -> bool {
 }
 
 // -----------------------------------------------------------------------
+// Slider -- pick a number by dragging
+// -----------------------------------------------------------------------
+
+SLIDER_HANDLE_WIDTH :: f32(14)
+
+SLIDER_STYLE := Slider_Style{
+	track        = {1, 1, 1, 0.12},
+	fill         = {0.45, 0.60, 0.85, 1},
+	handle       = {0.85, 0.87, 0.92, 1},
+	handle_hover = {1, 1, 1, 1},
+	handle_width = SLIDER_HANDLE_WIDTH,
+}
+
+Slider_Style :: struct {
+	track:        [4]f32, // the part not yet filled
+	fill:         [4]f32, // from the left edge up to the handle
+	handle:       [4]f32,
+	handle_hover: [4]f32,
+	handle_width: f32,    // SLIDER_HANDLE_WIDTH when left at zero
+}
+
+/*
+	Held by the caller, one per slider. The zero value is a slider nobody is
+	touching.
+
+	The value itself is not in here -- it is passed by pointer, because it belongs
+	to whatever is being adjusted and a slider that owned it would mean copying it
+	back and forth every frame.
+*/
+Slider :: struct {
+	dragging: bool,
+
+	// Where inside the handle it was taken hold of. Without it the handle jumps
+	// so its middle lands under the pointer on the first frame of every drag,
+	// which is the same thing the scrollbar's thumb needed.
+	grab: f32,
+}
+
+/*
+	A number picked by dragging, between `low` and `high`. True on any frame the
+	value changes.
+
+		if matchbox.slider(&opacity_bar, rect, &opacity, 0, 1) {
+			restroke()
+		}
+
+	`draw_progress` already drew this shape and would not take input -- it is
+	handed a number and renders it. This is the other half, and the reason it is
+	worth having is that a colour or a brush size is something you *sweep*: the
+	point is watching the result change as it moves, which a box you type a number
+	into cannot do.
+
+	`step` snaps the result, so a brush size can be whole numbers while the drag
+	stays smooth. Zero leaves it continuous.
+
+	Horizontal only. A vertical one is a transposition of everything below and is
+	left out until something wants it, rather than written untested.
+
+	Clicking the track away from the handle jumps to that point and starts
+	dragging from there, which is what every slider does and what makes a long
+	track usable without a drag at all.
+*/
+slider :: proc(
+	state:     ^Slider,
+	rectangle: Rectangle,
+	value:     ^f32,
+	low:       f32,
+	high:      f32,
+	step:      f32 = 0,
+	style:     Slider_Style = SLIDER_STYLE,
+) -> (changed: bool) {
+	before := value^
+
+	// Clamped on the way in as well as on the way out: the caller may have set
+	// it from a config file, a text field, or an undo, and a handle drawn off the
+	// end of its own track is a confusing way to find that out.
+	value^ = clamp(value^, low, high)
+
+	span   := high - low
+	width  := style.handle_width if style.handle_width > 0 else SLIDER_HANDLE_WIDTH
+	travel := rectangle.size.x - width
+
+	top_left := rect_top_left(rectangle)
+
+	// Nothing to drag along: a zero-width slider, or one whose ends are the same
+	// number. Drawn, so it does not silently vanish, but inert.
+	if travel <= 0 || span == 0 {
+		state.dragging = false
+		draw_slider(rectangle, value^, low, high, style, false)
+		return false
+	}
+
+	mouse  := get_mouse_position()
+	handle := slider_handle_rect(rectangle, value^, low, high, style)
+
+	switch {
+	case !is_mouse_held(.LEFT):
+		state.dragging = false
+
+	case state.dragging:
+		// Held is what keeps a drag alive, so the pointer may wander off the
+		// track -- above it, below it, out of the window -- and still be dragging.
+
+	case is_mouse_pressed(.LEFT) && !mouse_captured() && mouse_over_rect(handle):
+		state.dragging = true
+		state.grab     = mouse.x - rect_top_left(handle).x
+
+	case is_mouse_pressed(.LEFT) && !mouse_captured() && mouse_over_rect(rectangle):
+		// Anywhere else on the track: put the handle under the pointer and carry
+		// on as though the drag started there.
+		state.dragging = true
+		state.grab     = width * 0.5
+	}
+
+	if state.dragging {
+		t := clamp((mouse.x - state.grab - top_left.x) / travel, 0, 1)
+		value^ = slider_snap(low + t * span, low, high, step)
+	}
+
+	hot := state.dragging || (mouse_over_rect(handle) && !mouse_captured())
+	draw_slider(rectangle, value^, low, high, style, hot)
+
+	return value^ != before
+}
+
+/*
+	The same, over whole numbers.
+
+	Separate rather than "pass step = 1", because a caller with an `int` would
+	otherwise convert to f32 and back every frame and pick up the rounding on the
+	way through -- and because the range of an int slider is the two ends of a
+	count, which reads better as ints at the call site.
+*/
+slider_int :: proc(
+	state:     ^Slider,
+	rectangle: Rectangle,
+	value:     ^int,
+	low:       int,
+	high:      int,
+	style:     Slider_Style = SLIDER_STYLE,
+) -> (changed: bool) {
+	as_float := f32(value^)
+
+	slider(state, rectangle, &as_float, f32(low), f32(high), 1, style)
+
+	// Rounded rather than truncated: slider_snap has already put it on a whole
+	// number, and int() on 3.9999996 is 3.
+	snapped := int(math.round(as_float))
+	snapped  = clamp(snapped, low, high)
+
+	changed = snapped != value^
+	value^  = snapped
+
+	return changed
+}
+
+// Where the handle sits for a given value. Public because a caller wanting a
+// tick mark, a tooltip over the handle, or a second thing anchored to it needs
+// the same answer this uses.
+slider_handle_rect :: proc(rectangle: Rectangle, value, low, high: f32, style: Slider_Style = SLIDER_STYLE) -> Rectangle {
+	width  := style.handle_width if style.handle_width > 0 else SLIDER_HANDLE_WIDTH
+	travel := max(0, rectangle.size.x - width)
+	span   := high - low
+
+	t: f32
+	if span != 0 do t = clamp((value - low) / span, 0, 1)
+
+	top_left := rect_top_left(rectangle)
+
+	return Rectangle{
+		position = {top_left.x + travel * t, top_left.y},
+		size     = {width, rectangle.size.y},
+		pivot    = {0.5, 0.5}, // position is the top-left corner
+	}
+}
+
+/*
+	Puts a value on the nearest step.
+
+	Measured from `low` rather than from zero, so a slider running 3 to 11 in
+	twos gives 3, 5, 7 and not 4, 6, 8 -- the steps belong to the range, not to
+	the number line. The far end is kept reachable even when the span is not a
+	whole number of steps, since a slider dragged all the way right that stops
+	short of its own maximum is a bug every time.
+*/
+@(private)
+slider_snap :: proc(value, low, high: f32, step: f32) -> f32 {
+	if step <= 0 do return clamp(value, low, high)
+
+	snapped := low + math.round((value - low) / step) * step
+	return clamp(snapped, low, high)
+}
+
+@(private)
+draw_slider :: proc(rectangle: Rectangle, value, low, high: f32, style: Slider_Style, hot: bool) {
+	draw_rect_in(rectangle, style.track)
+
+	handle   := slider_handle_rect(rectangle, value, low, high, style)
+	top_left := rect_top_left(rectangle)
+
+	// Up to the middle of the handle, so the fill and the handle read as one
+	// object rather than as a bar with a block sitting next to it.
+	filled := rect_center(handle).x - top_left.x
+	if filled > 0 {
+		draw_rect_in({
+			position = top_left,
+			size     = {filled, rectangle.size.y},
+			pivot    = {0.5, 0.5},
+		}, style.fill)
+	}
+
+	draw_rect_in(handle, style.handle_hover if hot else style.handle)
+}
+
+// -----------------------------------------------------------------------
 // Progress bar
 // -----------------------------------------------------------------------
 

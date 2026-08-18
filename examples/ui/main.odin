@@ -15,6 +15,7 @@ package ui_example
 	  draw_tooltip        a plate beside the cursor, kept on screen
 	  Status_Line         a short message with a severity colour
 	  Modal               a full-screen dim with something centred on top
+	  Slider              pick a number by dragging, in f32 or whole numbers
 	  draw_progress       a bar from 0 to 1
 	  Sprite_Cache        art loaded on demand and evicted when it is not wanted
 
@@ -120,6 +121,8 @@ main :: proc() {
 	defer mb.destroy(&name)
 
 	list:    mb.Scroll_View
+	grey:    mb.Slider
+	fade:    mb.Slider
 	pick:    mb.Dropdown
 	menu:    mb.Dropdown
 	preview: mb.Modal
@@ -127,8 +130,10 @@ main :: proc() {
 	dwell:   mb.Hover
 	del:     mb.Confirm_Button
 
-	selected := Card.EMBER
-	loads    := 0
+	selected  := Card.EMBER
+	greyness  := f32(0)
+	opacity   := 100
+	loads     := 0
 	covered  := 0 // presses of the button the open list sits on top of
 	menu_on  := -1
 	hovered  := -1
@@ -311,6 +316,16 @@ main :: proc() {
 			mb.set_status(&note, fmt.tprintf("saved as %s", mb.text_field_string(&name)), .GOOD, 3)
 		}
 
+		// ---- sliders ----------------------------------------------------------
+		// Called here, drawn lower down the screen. In immediate mode the call
+		// order is the *input* order and the rectangle is only geometry, so
+		// taking these before the art is drawn means a drag shows up on the same
+		// frame rather than the next one.
+		mb.slider(&grey, {position = {COL_C, 524}, size = {240, 20}, pivot = {0.5, 0.5}},
+			&greyness, 0, 1)
+		mb.slider_int(&fade, {position = {COL_C, 588}, size = {240, 20}, pivot = {0.5, 0.5}},
+			&opacity, 0, 100)
+
 		// ---- cached art, with plates over it --------------------------------------
 		heading(font, "cached art, and plates over it", {COL_C, 24})
 
@@ -318,9 +333,11 @@ main :: proc() {
 
 		if sprite := mb.sprite_cache_get(&cache, selected, CARD_PATH[selected], 2); sprite != nil {
 			art := sprite^ // a copy: position is ours, the cache keeps its own
-			art.position = art_rect.position
-			art.size     = art_rect.size
-			art.pivot    = {0.5, 0.5}
+			art.position   = art_rect.position
+			art.size       = art_rect.size
+			art.pivot      = {0.5, 0.5}
+			art.desaturate = greyness
+			art.tint       = {1, 1, 1, f32(opacity) / 100}
 			mb.draw_sprite(art)
 
 			// Straight onto the art, which is the case the plate exists for.
@@ -345,6 +362,11 @@ main :: proc() {
 			"Preview top deck") {
 			mb.open_modal(&preview)
 		}
+
+		// The labels go where the sliders were placed. draw_progress drew this
+		// shape already and would not take input; these are the other half of it.
+		heading(font, fmt.tprintf("desaturate  %.2f", greyness), {COL_C, 500})
+		heading(font, fmt.tprintf("opacity  %d%%", opacity), {COL_C, 564})
 
 		// ---- the status line --------------------------------------------------------
 		mb.draw_status(&note, {COL_C, h - 58})

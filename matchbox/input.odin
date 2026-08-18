@@ -63,6 +63,12 @@ Mouse_Button :: enum {
 Input :: struct {
 	keys:       #sparse[sdl.Scancode]Key_State,
 	mouse:      Mouse,
+
+	// Fingers, and whether they are what is being used. See touch.odin -- most
+	// of a UI works on a touch screen without reading any of this, because SDL
+	// turns one finger into mouse events.
+	touches:      [MAX_TOUCHES]Touch,
+	touch_active: bool,
 	mouse_dx:   f32, // pixels/dpi (inches), right is positive
 	mouse_dy:   f32, // pixels/dpi (inches), up is positive
 	escape_key: sdl.Scancode, // closes the window when pressed
@@ -107,6 +113,7 @@ poll_events :: proc() {
 	mbi.input.mouse.wheel = {0, 0}
 	mbi.input.mouse.captured = false
 	gamepads_begin_frame()
+	touches_begin_frame()
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
 	{
@@ -123,8 +130,24 @@ poll_events :: proc() {
 		raw_y *= density
 
 		scale := mbi.draw_scale if mbi.draw_scale > 0 else 1
-		mbi.input.mouse.x = (raw_x - mbi.draw_offset[0]) / scale
-		mbi.input.mouse.y = (raw_y - mbi.draw_offset[1]) / scale
+		x := (raw_x - mbi.draw_offset[0]) / scale
+		y := (raw_y - mbi.draw_offset[1]) / scale
+
+		// A device may have both a touch screen and a mouse, so which is in use
+		// follows whichever moved last rather than being decided at startup.
+		// Compared after the transform, in the space the old value is already in
+		// -- against the raw window pixels it would differ every frame under a
+		// letterbox and say the mouse had moved when nothing had.
+		//
+		// Checked only with no finger down, because SDL's synthesised touch-mouse
+		// moves the pointer too and would otherwise cancel touch on every drag.
+		if (x != mbi.input.mouse.x || y != mbi.input.mouse.y) &&
+		   mbi.input.touch_active && get_touch_count() == 0 {
+			mbi.input.touch_active = false
+		}
+
+		mbi.input.mouse.x = x
+		mbi.input.mouse.y = y
 	}
 
 	event: sdl.Event
@@ -216,6 +239,8 @@ poll_events :: proc() {
 			}
 		case .GAMEPAD_ADDED, .GAMEPAD_REMOVED, .GAMEPAD_BUTTON_DOWN, .GAMEPAD_BUTTON_UP:
 			gamepad_handle_event(event)
+		case .FINGER_DOWN, .FINGER_UP, .FINGER_MOTION, .FINGER_CANCELED:
+			touch_handle_event(event)
 		}
 	}
 
@@ -263,6 +288,10 @@ poll_events :: proc() {
 			mbi.next_frame_ts += period
 		}
 	}
+
+	// After every event has been seen, so a tap that starts and ends inside one
+	// frame is still visible to the frame it happened in.
+	touches_end_frame()
 
 	last_ts := mbi.now_ts
 	mbi.now_ts = sdl.GetPerformanceCounter()

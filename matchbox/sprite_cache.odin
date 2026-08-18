@@ -24,7 +24,6 @@ package matchbox
 */
 
 import "core:log"
-import "core:os"
 
 /*
 	`limit` is how many sprites may be resident. Zero means no limit, which is
@@ -64,11 +63,11 @@ sprite_cache_get :: proc(cache: ^Sprite_Cache($Key), key: Key, path: string, sca
 		return existing
 	}
 
-	bytes, err := os.read_entire_file_from_path(path, context.allocator)
-	if err != nil {
-		log.errorf("sprite cache could not read %s: %v", path, err)
-		return nil
-	}
+	// Through SDL rather than core:os, so `path` reaches an apk's assets on
+	// Android as well as a file on a desktop. read_entire_file has already
+	// logged whatever went wrong.
+	bytes, ok := read_entire_file(path, context.allocator)
+	if !ok do return nil
 	defer delete(bytes)
 
 	sprite := new(Sprite)

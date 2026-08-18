@@ -34,7 +34,6 @@ package matchbox
 */
 
 import "core:log"
-import "core:os"
 
 import stbi "vendor:stb/image"
 
@@ -115,11 +114,8 @@ load_image :: proc(bytes: []byte, allocator := context.allocator) -> (image: Ima
 	wrong place.
 */
 load_image_from_file :: proc(path: string, allocator := context.allocator) -> (image: Image, ok: bool) {
-	bytes, err := os.read_entire_file_from_path(path, context.allocator)
-	if err != nil {
-		log.errorf("could not read image %s: %v", path, err)
-		return {}, false
-	}
+	bytes, read := read_entire_file(path, context.allocator)
+	if !read do return {}, false
 	defer delete(bytes)
 
 	return load_image(bytes, allocator)

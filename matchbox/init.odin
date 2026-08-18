@@ -72,22 +72,49 @@ write_gpu_report :: proc() {
 		mbi.title, strings.repeat("-", 60, context.temp_allocator),
 	)
 
+	/*
+		Beside the executable, because the person this has to reach double-clicked
+		the game and the folder they were given is the one place they will look.
+
+		Except where there is no such folder. On Android an apk's directory is not
+		writable and os.args[0] means nothing, so the fallback is the one place
+		the program is allowed to write -- which is also somewhere a bug report
+		can be fetched from. pref_path makes the directory if it is not there.
+	*/
 	path := "gpu-report.txt"
+
 	if exe := os.args[0]; exe != "" {
 		if cut := strings.last_index_any(exe, "/\\"); cut >= 0 {
 			path = fmt.tprintf("%s/gpu-report.txt", exe[:cut])
 		}
 	}
 
-	if err := os.write_entire_file(path, fmt.tprintf("%s%s", header, body)); err != nil {
-		// Nothing left to fall back on but the console, which is where this
-		// went before there was a file at all
-		log.errorf("could not write %s: %v", path, err)
-	} else {
-		log.errorf("wrote %s", path)
+	report := fmt.tprintf("%s%s", header, body)
+
+	if !write_report_file(path, report) {
+		if dir := pref_path("matchbox", mbi.title, context.temp_allocator); dir != "" {
+			path = fmt.tprintf("%sgpu-report.txt", dir)
+			if !write_report_file(path, report) {
+				// Nothing left to fall back on but the console, which is where
+				// this went before there was a file at all.
+				log.error("could not write a gpu report anywhere")
+			}
+		}
 	}
 
 	log.error(body)
+}
+
+// Writes the report and says whether it landed. Through SDL so it works
+// wherever SDL can write, which is not the same set of places core:os can.
+@(private)
+write_report_file :: proc(path: string, text: string) -> bool {
+	c_path := strings.clone_to_cstring(path, context.temp_allocator)
+
+	if !sdl.SaveFile(c_path, raw_data(text), len(text)) do return false
+
+	log.errorf("wrote %s", path)
+	return true
 }
 
 /*
@@ -451,9 +478,11 @@ load_shader :: proc(path: string, stage: sdl.GPUShaderStage, num_samplers: u32 =
 		panic("GPU backend accepts neither SPIR-V nor DXIL")
 	}
 
-	data, err := os.read_entire_file_from_path(full, context.allocator)
-	if err != nil {
-		log.errorf("could not read shader %s: %v", full, err)
+	// Through SDL, so a shader shipped inside an apk is reachable. Still a panic
+	// rather than a false, unlike the content loaders: a missing shader is a
+	// broken build rather than a broken file somebody chose.
+	data, read := read_entire_file(full, context.allocator)
+	if !read {
 		panic("Cannot read shader file")
 	}
 

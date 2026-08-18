@@ -312,7 +312,8 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	log.infof("gpu backend: %s", sdl.GetGPUDeviceDriver(mbi.renderer.device))
 
-	mbi.now_ts = sdl.GetPerformanceCounter()
+	mbi.now_ts   = sdl.GetPerformanceCounter()
+	mbi.start_ts = mbi.now_ts
 
 	mbi.renderer.shaders.quad = create_builtin_shader(
 		#load("shaders/quad.vert.spv"), #load("shaders/quad.vert.dxil"), .VERTEX, 0)

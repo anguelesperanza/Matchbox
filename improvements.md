@@ -200,6 +200,57 @@ thing, though; the atlases and textures are where to look.
 
 # Completed
 
+## There Was No Way To Ask What Time It Was
+
+`delta_time` and `frame_count` were the whole of the clock. Nothing answered
+"how long has this been running", which is what anything scheduling rather than
+moving needs -- and, it turns out, the first thing somebody reaches for when
+porting.
+
+Found in a Chip-8 emulator brought over from raylib, where nothing rendered. Two
+of the three faults were plain porting slips -- the main loop had lost the calls
+that run the CPU, so `display` stayed as declared and the loop faithfully drew
+two thousand blank cells; and a positional `Rectangle` literal ended `..., 0, 0}`
+where the last field is `pivot`, whose zero value means `position` is the centre,
+so every cell drew half a cell up and left.
+
+The third is the one worth a framework change:
+
+	current := matchbox.delta_time() * 1000   // a duration, not a time
+	elapsed := current - last                 // the *change* in frame length
+	last     = current                        // which is about zero
+
+raylib's `GetTime()` is a clock, so subtracting the previous reading gives the
+last frame's length. `delta_time()` **is** that length, so subtracting the
+previous reading gives the change in it, which is roughly nothing. The
+substitution compiles, reads correctly, and silently starves the accumulator it
+feeds. Instrumented, the accumulator sat at -7.5 from frame 60 to frame 360: the
+emulator ran one burst of instructions and then froze for good.
+
+Worth noticing how well it hid. The rom being tested was `ibm.ch8`, which draws
+its logo and halts -- so a frozen emulator and a working one look identical, and
+the failure only appears on a rom that keeps running. Choosing the test case is
+doing half the debugging.
+
+`get_time` returns seconds since init, sampled at the last `poll_events` so that
+every call within a frame agrees. With it the raylib shape above is correct as
+written, which is the point: the reason it went wrong was that the obvious
+translation had no obvious target.
+
+### What the test corrected
+
+The first version of its documentation claimed two readings differ by exactly
+`delta_time`. They do not. `delta_time` is clamped by `max_delta_time` so a
+stalled frame cannot teleport everything across the screen, and a clock does not
+get to lie about a stall. Over 120 ordinary frames the two parted by about
+fourteen milliseconds -- a single clamped frame -- and summing deltas gave 0.9806
+against the clock's 0.9950.
+
+So the honest rule is to pick one and stay with it: `delta_time` to move things,
+`get_time` to schedule them. Anything mixing the two drifts by however long it
+has spent stuttering. That went in the comment, replacing the tidier claim that
+was wrong.
+
 ## Opening A File Was The One Thing An Editor Could Not Do
 
 Every path here that read an image sent the pixels to the GPU and forgot them.

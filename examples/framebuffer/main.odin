@@ -31,6 +31,11 @@ package framebuffer_example
 	    than sticking to the nearest edge pixel. At the default size the image
 	    fills the window exactly and there is no margin to try that in, which is
 	    the only reason it needs saying
+	  - press O to open a PNG into the canvas and then paint over it, which is
+	    the whole shape of a pixel art editor. load_image is what makes that
+	    possible: every other way matchbox reads a file sends the pixels to the
+	    GPU and frees them on the next line, which is right for a sprite and
+	    useless for anything that wants to change one
 */
 
 import "core:fmt"
@@ -77,6 +82,32 @@ main :: proc() {
 
 		if mb.is_key_pressed(.I) do integer = !integer
 		if mb.is_key_pressed(.G) do grid    = !grid
+		if mb.is_key_pressed(.C) do paint = {}
+
+		// ---- open a real file into the canvas ------------------------------
+		if mb.is_key_pressed(.O) {
+			if img, ok := mb.load_image_from_file("art/ember.png"); ok {
+				defer mb.destroy(&img)
+
+				// Nearest-sampled to fit, keeping its shape. Sampling by hand
+				// rather than asking matchbox to scale it, because an editor
+				// resamples on its own terms -- and because it shows that what
+				// came back really is an addressable grid of colours.
+				fit := min(f32(W) / f32(img.width), f32(H) / f32(img.height))
+				dw  := int(f32(img.width)  * fit)
+				dh  := int(f32(img.height) * fit)
+				ox  := (W - dw) / 2
+				oy  := (H - dh) / 2
+
+				paint = {}
+				for y in 0 ..< dh {
+					for x in 0 ..< dw {
+						paint[(oy + y) * W + ox + x] =
+							mb.image_pixel(img, int(f32(x) / fit), int(f32(y) / fit))
+					}
+				}
+			}
+		}
 
 		// ---- draw into the buffer, a pixel at a time ---------------------
 		for y in 0 ..< H {
@@ -139,6 +170,7 @@ main :: proc() {
 			fmt.tprintf("G  pixel grid: %s", "on" if grid else "off"), {8, 76})
 		mb.draw_text_plate(font,
 			fmt.tprintf("%s   (drag to paint, right button erases)", hovered), {8, 108})
+		mb.draw_text_plate(font, "O  open a png into the canvas    C  clear", {8, 140})
 
 		mb.end_drawing()
 		free_all(context.temp_allocator)

@@ -112,6 +112,70 @@ thousands of quads a frame -- a particle system, a tile map drawn per-tile
 without a spritesheet, a text editor rendering a whole file. None of those exist
 yet.
 
+## Android
+
+**Not started, and mostly not matchbox's problem.** Written down with the one
+thing that was actually tested, because the interesting result is where the
+blockers are not.
+
+Matchbox's own Odin compiles clean for Android. Asked directly:
+
+	odin build examples/init-window -target:linux_arm64 -subtarget:android -build-mode:shared
+
+every error came out of Odin's *vendored C libraries*, and none out of this
+repository. Odin's support is first class -- `-subtarget:android`, and
+`odin bundle android` signs an APK -- and there is a working template for the
+toolchain in the android-native-example-odin project, which gets a `libmain.so`
+onto a device. That one is NativeActivity and EGL rather than SDL, so it proves
+the build and not the graphics.
+
+### What is actually in the way
+
+**stb is not built for Android.** `vendor/stb/lib` holds Windows `.lib` files, a
+darwin directory and wasm objects, and no ARM64 of anything. This is what stopped
+the build, before it ever reached SDL. `build_stb.sh` takes `CC` from the
+environment and the sources are single-file C, so NDK clang at
+`--target=aarch64-linux-android21` will produce them; the script simply has no
+Android case. Mechanical.
+
+**SDL3 is not built for Android either.** `vendor:sdl3` resolves to
+`foreign import lib { "system:SDL3" }` anywhere but Windows, so it wants a
+`libSDL3.so` for arm64-v8a on the linker path -- plus the SDLActivity Java glue
+and the SDL_main entry point, which is the part with the most fiddly detail in
+it.
+
+**Reading a file cannot work as written, and this is the one real change here.**
+`load_shader`, `sprite_cache_get` and `load_image_from_file` all go through
+`core:os`, which cannot see inside an APK. They need to route through SDL's
+IOStream, which on Android goes to the asset manager. The built-in font and the
+built-in shaders are safe because they are `#load`ed at compile time and never
+touch the filesystem at all.
+
+`write_gpu_report` also writes beside `os.args[0]`, which means nothing there.
+
+**There is no touch input.** Not one `FINGER_DOWN` in the package.
+
+That is less fatal than it sounds. SDL synthesises mouse events from single
+touches by default, so `get_mouse_position` and `is_mouse_pressed(.LEFT)` would
+answer and most of the UI would work as-is. What breaks is everything that
+assumes a pointer exists while nothing is pressed -- `hover_dwell`, the tooltip,
+every button's hover fill -- because on a touch screen there is no such state.
+And there is no multi-touch, so no pinch to zoom. "What does hover mean without a
+cursor" is a design question rather than a porting one, and it wants answering
+before the code is written.
+
+### What is already fine
+
+The renderer. Matchbox compiles both SPIR-V and DXIL and `create_builtin_shader`
+picks by asking `GetGPUShaderFormats`; Android is Vulkan, which takes SPIR-V, so
+the shader pipeline needs nothing at all. The DXIL rides along as a few unused
+kilobytes.
+
+**Unverified, and the whole thing rests on it:** whether SDL3's GPU API is
+actually enabled on Android in whatever version gets built. Vulkan is a supported
+backend, so it should be, but that is reasoning and not evidence, and it is the
+first thing to check rather than the last.
+
 ## Remove / Reduce AI Code
 
 While I wrote a chunk of this, so did Claude. I'd like to

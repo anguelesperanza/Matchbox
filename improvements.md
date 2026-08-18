@@ -112,69 +112,96 @@ thousands of quads a frame -- a particle system, a tile map drawn per-tile
 without a spritesheet, a text editor rendering a whole file. None of those exist
 yet.
 
-## Android
+## Android -- Blocked On Two Things, Neither Of Them Here
 
-**Not started, and mostly not matchbox's problem.** Written down with the one
-thing that was actually tested, because the interesting result is where the
-blockers are not.
+Attempted properly rather than surveyed. The matchbox half is **done** -- see the
+Completed entry -- and what is left is three layers, of which the framework owns
+none.
 
-Matchbox's own Odin compiles clean for Android. Asked directly:
+### Where it stops
 
-	odin build examples/init-window -target:linux_arm64 -subtarget:android -build-mode:shared
+	odin build examples/ui -target:linux_arm64 -subtarget:android -build-mode:shared
 
-every error came out of Odin's *vendored C libraries*, and none out of this
-repository. Odin's support is first class -- `-subtarget:android`, and
-`odin bundle android` signs an APK -- and there is a working template for the
-toolchain in the android-native-example-odin project, which gets a `libmain.so`
-onto a device. That one is NativeActivity and EGL rather than SDL, so it proves
-the build and not the graphics.
+	ld.lld: error: unable to find library -lSDL3
+	ld.lld: error: unable to find library -l:C:/.../stb_image.a
+	ld.lld: error: unable to find library -l:C:/.../stb_truetype.a
 
-### What is actually in the way
+**Layer 1 -- Odin emits a linker flag lld cannot use.** For a vendor library
+named by file path it emits `-l:<absolute path>`, and `-l:name` searches the `-L`
+directories for that literal *filename*; an absolute path never matches. Tested
+three ways to be sure:
 
-**stb is not built for Android.** `vendor/stb/lib` holds Windows `.lib` files, a
-darwin directory and wasm objects, and no ARM64 of anything. This is what stopped
-the build, before it ever reached SDL. `build_stb.sh` takes `CC` from the
-environment and the sources are single-file C, so NDK clang at
-`--target=aarch64-linux-android21` will produce them; the script simply has no
-Android case. Mechanical.
+	-l:C:/.../stb_truetype.a          fails
+	-L C:/.../lib -l:stb_truetype.a   links
+	C:/.../stb_truetype.a  (input)    links
 
-**SDL3 is not built for Android either.** `vendor:sdl3` resolves to
-`foreign import lib { "system:SDL3" }` anywhere but Windows, so it wants a
-`libSDL3.so` for arm64-v8a on the linker path -- plus the SDLActivity Java glue
-and the SDL_main entry point, which is the part with the most fiddly detail in
-it.
+So the archives are fine -- built with the NDK, verified `elf64-littleaarch64` --
+and only the flag form is wrong. This hits **stb only**: SDL3's binding says
+`system:SDL3`, which emits `-lSDL3` and resolves normally. Worth knowing which
+example you build, too -- `init-window` shows one missing archive and `ui` shows
+two, because Odin prunes the unused image import when nothing loads a sprite.
 
-**Reading a file cannot work as written, and this is the one real change here.**
-`load_shader`, `sprite_cache_get` and `load_image_from_file` all go through
-`core:os`, which cannot see inside an APK. They need to route through SDL's
-IOStream, which on Android goes to the asset manager. The built-in font and the
-built-in shaders are safe because they are `#load`ed at compile time and never
-touch the filesystem at all.
+Options, ascending in cost: gate the vendor stb `LIB` constants on
+`ODIN_PLATFORM_SUBTARGET != .Android` so they fall through to the `system:` form
+(verified: `-L<dir> -lstb_truetype` against a renamed `libstb_truetype.a` links);
+vendor stb into matchbox; patch the compiler. All are changes outside this
+repository, which is why none has been made.
 
-`write_gpu_report` also writes beside `os.args[0]`, which means nothing there.
+**Layer 2 -- there is no arm64 libSDL3.so here.** Much smaller than it looks:
+SDL releases ship `SDL3-devel-X.Y.Z-android.zip` containing an `.aar` with
+`libSDL3.so` already built for arm64-v8a and the rest. A download, not a build.
 
-**There is no touch input.** Not one `FINGER_DOWN` in the package.
+**Layer 3 -- the app models disagree, and this is the real unknown.** Odin's
+`-subtarget:android` compiles `android_native_app_glue.c` and forces
+`ANativeActivity_onCreate`; SDL3's Android port expects its own Java activity to
+load the `.so` and call `SDL_main`. The bindings do expose `SDL_main`, `RunApp`
+and `EnterAppMainCallbacks`, so the pieces exist, but whether SDL3 will run under
+Odin's NativeActivity subtarget -- or whether the apk must declare SDLActivity
+instead -- is not known. **Settle this first.** It decides whether the other two
+are worth doing at all.
 
-That is less fatal than it sounds. SDL synthesises mouse events from single
-touches by default, so `get_mouse_position` and `is_mouse_pressed(.LEFT)` would
-answer and most of the UI would work as-is. What breaks is everything that
-assumes a pointer exists while nothing is pressed -- `hover_dwell`, the tooltip,
-every button's hover fill -- because on a touch screen there is no such state.
-And there is no multi-touch, so no pinch to zoom. "What does hover mean without a
-cursor" is a design question rather than a porting one, and it wants answering
-before the code is written.
+### What would remove most of the friction
 
-### What is already fine
+stb is the only reason a developer needs a C cross-compiler, and the only thing
+that trips layer 1. Without it the Android build is: download an aar, point `-L`
+at it, package. With it, every developer also cross-compiles two archives and
+works around a compiler bug.
 
-The renderer. Matchbox compiles both SPIR-V and DXIL and `create_builtin_shader`
-picks by asking `GetGPUShaderFormats`; Android is Vulkan, which takes SPIR-V, so
-the shader pipeline needs nothing at all. The DXIL rides along as a few unused
-kilobytes.
+`stb_image` is replaceable on its own -- `core:image` is pure Odin with no foreign
+imports -- but replacing only that buys nothing, because `stb_truetype` drags both
+problems along regardless. It reduces to one question: **what rasterises glyphs on
+Android?** There is no TrueType anywhere in Odin outside `vendor:stb`.
 
-**Unverified, and the whole thing rests on it:** whether SDL3's GPU API is
-actually enabled on Android in whatever version gets built. Vulkan is a supported
-backend, so it should be, but that is reasoning and not evidence, and it is the
-first thing to check rather than the last.
+	port stb_truetype's baking path   ~1200-1800 lines: cmap, glyf/loca, simple
+	                                  and composite glyphs, bezier flattening,
+	                                  an AA rasteriser, the packer. GetBakedQuad
+	                                  is about twenty lines of arithmetic.
+
+	a pre-baked SDF atlas             no runtime rasteriser at all, and
+	                                  get_font(size) works from one atlas. Custom
+	                                  ttf then needs a build-time tool, which may
+	                                  use stb on a desktop. Changes the text
+	                                  shader and the look.
+
+	leave it, script the rest         an hour. Android buildable with a one-time
+	                                  setup per machine.
+
+The porting option has an unusually good safety net, worth writing down: **stb is
+available on the desktop, so a port's atlas can be diffed against it pixel for
+pixel.** That turns "is my font rendering correct" from a judgement call into a
+test, which is not normally true of rasterisers.
+
+Remember also that `core:image` was measured about five times slower than stb --
+89.0ms against 18.7ms for a card -- and going back to it costs roughly three
+seconds of the card game's startup. It could be conditional: stb on the desktop,
+`core:image` under `when ODIN_PLATFORM_SUBTARGET == .Android`.
+
+### Status
+
+	matchbox side          done, and worth having anyway
+	stb for arm64          built and installed, blocked by layer 1
+	libSDL3.so for arm64   not fetched; a download when wanted
+	app model              unknown, and the thing to settle first
 
 ## Remove / Reduce AI Code
 
@@ -199,6 +226,61 @@ thing, though; the atlases and textures are where to look.
 ---
 
 # Completed
+
+## Two Things Android Needed That Everything Else Wanted Anyway
+
+Both came out of the Android attempt and neither is Android-specific, which is
+why they are not parked with the rest of that work.
+
+**Files go through SDL now.** On Android the things a game ships with are not
+files -- they are entries in the apk, and nothing that opens a path can see them.
+`read_entire_file` goes through SDL's IOStream, which routes a relative path to
+the asset manager there and does an ordinary read everywhere else, so
+`load_shader`, `sprite_cache_get` and `load_image_from_file` work in both places
+without knowing which they are in.
+
+The part worth keeping is the distinction it forced. **Shipped with the game**
+wants `read_entire_file`, because it might be inside an apk. **Made by the
+player** -- a save, a config, a level -- wants `pref_path`, and `core:os` is
+perfectly good for it. That line is worth drawing on every platform, and the
+reason writing is a separate call that will not take an arbitrary path is that
+Android hands a program one directory and nothing else.
+
+`write_gpu_report` still tries beside the executable first, since that is the
+folder somebody who double-clicked the game will look in, and falls back to
+`pref_path` when there is no such place. That fallback is the honest fix on a
+desktop too: the working directory is wherever a shortcut happened to start the
+program.
+
+**And there is touch input.** Ten finger slots, `get_pinch`, and `touch_active`.
+
+Worth stating plainly, because it decides what any of it is for: **most of a
+matchbox program already worked on a touch screen without it.** SDL turns a single
+finger into mouse events, so every button, slider, scroll view and dropdown
+answers a tap as it answers a click. What this adds is what one synthesised mouse
+cannot say -- more than one finger, and *that touch is what is happening*.
+
+That second one is the design problem, and it is deliberately not solved here
+because a framework cannot solve it. `hover_dwell` means "the pointer has rested
+on this", which on a touch screen is a long press: it works, and it is a different
+gesture with different expectations. A button's hover fill only appears while a
+finger is down, which is correct and also means it can never preview what a tap
+would do. A dwell tooltip becomes a long-press tooltip covering the thing being
+pressed. None of those are broken -- they are decisions, and `touch_active` is how
+a screen makes them. It follows whichever of mouse or touch moved last, so a
+laptop with both is not decided at startup.
+
+The bookkeeping detail that matters: **a lifted finger keeps its slot until the
+end of the frame.** Freeing it on FINGER_UP would lose a tap that starts and ends
+between two `poll_events` -- which is exactly the tap somebody makes in a hurry.
+
+Its tests live inside the package, because the slot bookkeeping is private and
+because feeding events to the handler is the only way to test any of it without a
+touch screen. They set the window size and the letterbox transform directly
+instead of calling `init`, so seven tests run headless with no GPU in under nine
+milliseconds:
+
+	odin test matchbox -define:ODIN_TEST_THREADS=1
 
 ## There Was No Way To Ask What Time It Was
 

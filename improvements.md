@@ -136,6 +136,111 @@ thing, though; the atlases and textures are where to look.
 
 # Completed
 
+## Opening A File Was The One Thing An Editor Could Not Do
+
+Every path here that read an image sent the pixels to the GPU and forgot them.
+`create_mesh` decodes with stb, uploads, and calls `stbi.image_free` on the next
+line -- exactly right for a sprite, which is never looked at again once it is
+drawn, and the whole problem for anything that wants to *change* a picture. A
+pixel art editor could not open a file. Neither could anything reading a palette
+out of a PNG, or using one as a heightmap, a collision mask, or a tilemap's
+source data. The decode was already there; only the result was being thrown away.
+
+`load_image` is that decode with the pixels kept, plus `load_image_from_file`,
+`image_size` and `image_pixel`.
+
+Four decisions in it worth keeping:
+
+**The pixels are copied into an Odin allocation** rather than handing back stb's
+pointer with a rule about how to free it. That makes the result work with
+`destroy`, with a tracking allocator, and with `context.temp_allocator` when it
+is only read once. It costs a memcpy against a decode of tens of milliseconds.
+
+**`create_mesh` was left alone.** Routing it through `load_image` would add that
+memcpy to every sprite load for no gain, and the five-times-faster decode is
+already recorded above as something worth having.
+
+**`[][4]u8`, not `[]u8`.** What comes back is a grid of colours, and a flat byte
+slice makes every caller write the multiply by four themselves. It goes straight
+into `pixel_buffer_update`, which takes a slice of anything four bytes wide.
+
+**Failure returns `ok = false` and logs, rather than panicking.** A file that
+will not decode is a content problem -- somebody chose it out of a dialog -- and
+taking the program down is the wrong answer. Reading and decoding are reported
+separately, because an editor saying "could not open" for a corrupt PNG sends
+somebody looking in the wrong place.
+
+`image_size` reads the header alone, so a file browser can show dimensions beside
+a hundred thumbnails without decoding a hundred images.
+
+Writing is deliberately absent. `vendor:stb/image` already has `write_png` and
+`stb_image_write.lib` ships with Odin -- checked, not assumed -- so a save is one
+call to a package matchbox is not in the middle of:
+
+	stbi.write_png("out.png", w, h, 4, raw_data(pixels), w * 4)
+
+Fifteen cases, clean under a tracking allocator, including the paths that must
+not bring the program down: a text file renamed to .png, a missing file, empty
+bytes.
+
+
+## A Slider, Which Was Already Half Written
+
+`draw_progress` drew this exact shape and would not listen to anything -- it is
+handed a number and renders it. Nothing in matchbox returned a number from the
+mouse at all, which is fine until something wants a brush size, an opacity, a
+zoom or a colour channel. Those are things you *sweep*: the point is watching the
+result change while it moves, which a box you type into cannot do.
+
+The drag is the shape the scrollbar's thumb already needed. Press inside the
+handle to grab it, keeping the offset so it does not jump to centre itself under
+the pointer. *Held* rather than hovered keeps the drag alive, so the pointer can
+leave the track entirely and still be dragging. A press on the bare track jumps
+the handle there and carries on as though the drag began at that point, which is
+what makes a long track usable without a drag at all.
+
+Two details that are easy to get wrong and invisible when you do. The value is
+clamped on the way **in** as well as out, since it may have arrived from a config
+file, a text field or an undo, and a handle drawn off the end of its own track is
+a poor way to find that out. And steps are measured from `low` rather than from
+zero, so a slider running 3 to 11 in twos gives 3, 5, 7 and not 4, 6, 8 -- the
+steps belong to the range, not to the number line.
+
+`slider_int` is separate rather than "pass step = 1", because a caller holding an
+int would otherwise convert to f32 and back every frame and collect the rounding
+on the way through. Horizontal only, deliberately: a vertical one is a
+transposition of all of it and can wait until something wants it.
+
+### Two bugs that were not there
+
+Both cost more time than the widget did, and neither was in the widget.
+
+**Odin divides untyped integer constants as integers.** Three tests failed
+against expected values written as `(200 - 7 - 50) / 186`, which is 143/186,
+which is 0. The slider was returning 0.769, which was right. An expectation
+computed in the test is code too, and this one was wrong in a way that looked
+like a confident assertion about the thing under test.
+
+**A GUI harness that fails silently is indistinguishable from a broken widget.**
+The opacity slider would not move on screen while the one above it did, and the
+difference between them was `slider_int` against `slider` -- a completely
+plausible suspect, and one I had not covered, since the deterministic tests only
+checked the int variant's clamping and never dragged it. Dragging it
+deterministically showed it behaving identically to the f32 one, 100 to 50. The
+real cause was `SetForegroundWindow` quietly not taking, so the clicks never
+reached SDL at all. Re-run with the foreground asserted before touching anything,
+it worked and landed on 29%, which is exactly what the drag distance predicts.
+
+The technique worth keeping from that: **drive `mbi.input.mouse` directly.** The
+fields are public, so a test can set a position and a button state, call the
+widget, and check the value, with no window manager involved. Press, grab, drag,
+leaving the track, clamping at both ends, release, a captured pointer and step
+snapping are all deterministic that way. Use the real mouse only to confirm the
+wiring, and when you do, assert the foreground window first -- otherwise a failed
+click produces evidence that reads exactly like a bug.
+
+Twenty-seven cases across the two programs.
+
 ## The Same Pipeline, Described Two Thousand Times A Frame
 
 Every draw re-bound the pipeline, the vertex buffer and the index buffer, however

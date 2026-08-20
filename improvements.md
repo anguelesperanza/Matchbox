@@ -112,96 +112,279 @@ thousands of quads a frame -- a particle system, a tile map drawn per-tile
 without a spritesheet, a text editor rendering a whole file. None of those exist
 yet.
 
-## Android -- Blocked On Two Things, Neither Of Them Here
+## Android -- It Runs
 
-Attempted properly rather than surveyed. The matchbox half is **done** -- see the
-Completed entry -- and what is left is three layers, of which the framework owns
-none.
+examples\ui runs on a phone: SDL_GPU on Vulkan, stb_truetype text, a sprite read
+out of the apk, and a button that answers a finger. All fifteen examples build,
+TankMovement included.
 
-### Where it stops
+	android.bat                  cross-compile stb for arm64   once per machine
+	android_sdl.bat              fetch libSDL3.so + Java       once per machine
+	android_apk.bat ui           build examples\ui into an apk
+	android_apk.bat ui install   and push it to a device
 
-	odin build examples/ui -target:linux_arm64 -subtarget:android -build-mode:shared
+Three layers were supposed to be in the way. One was a compiler bug and is
+worked around, one was a download, and the third -- the one this file said to
+settle first -- turned out not to exist. Then four things that were not on the
+list at all had to be fixed, and every one of them built cleanly first.
 
-	ld.lld: error: unable to find library -lSDL3
-	ld.lld: error: unable to find library -l:C:/.../stb_image.a
-	ld.lld: error: unable to find library -l:C:/.../stb_truetype.a
+### Layer 3 dissolved, and it was the important one
 
-**Layer 1 -- Odin emits a linker flag lld cannot use.** For a vendor library
-named by file path it emits `-l:<absolute path>`, and `-l:name` searches the `-L`
-directories for that literal *filename*; an absolute path never matches. Tested
-three ways to be sure:
+The question was whether SDL3 could run under Odin's NativeActivity subtarget.
+Nothing has to be reconciled: stock SDLActivity, unsubclassed, straight out of
+the release's classes.jar, does this:
 
-	-l:C:/.../stb_truetype.a          fails
-	-L C:/.../lib -l:stb_truetype.a   links
-	C:/.../stb_truetype.a  (input)    links
+	getLibraries()         {"SDL3", "main"}   loads libSDL3.so, then libmain.so
+	getMainSharedObject()  "libmain.so"       the last of those
+	getMainFunction()      "SDL_main"         dlsym'd out of it and called
 
-So the archives are fine -- built with the NDK, verified `elf64-littleaarch64` --
-and only the flag form is wrong. This hits **stb only**: SDL3's binding says
-`system:SDL3`, which emits `-lSDL3` and resolves normally. Worth knowing which
-example you build, too -- `init-window` shows one missing archive and `ui` shows
-two, because Odin prunes the unused image import when nothing loads a sprite.
+So all that is needed is a symbol named `SDL_main`. No Java of ours is compiled,
+there is no Gradle project, and no example knows it is being built for Android.
+The reason `odin bundle android` is not used, incidentally, is that it runs aapt
+over a manifest, `res`, `assets` and `lib` and never produces a `classes.dex` --
+it is a packager for exactly the NativeActivity app Odin assumes, and cannot
+express an app whose entry point is Java. android_apk.bat drives the same
+build-tools by hand and adds the dex.
 
-Options, ascending in cost: gate the vendor stb `LIB` constants on
-`ODIN_PLATFORM_SUBTARGET != .Android` so they fall through to the `system:` form
-(verified: `-L<dir> -lstb_truetype` against a renamed `libstb_truetype.a` links);
-vendor stb into matchbox; patch the compiler. All are changes outside this
-repository, which is why none has been made.
+### Layer 1 is still a compiler bug, and still patched outside this repo
 
-**Layer 2 -- there is no arm64 libSDL3.so here.** Much smaller than it looks:
-SDL releases ship `SDL3-devel-X.Y.Z-android.zip` containing an `.aar` with
-`libSDL3.so` already built for arm64-v8a and the rest. A download, not a build.
+`linker.cpp:651`: a foreign import whose name ends in `.a`, `.o` or `.so` becomes
+`-l:"<absolute path>"`, and lld's `-l:name` searches the `-L` directories for
+that literal *filename*, which an absolute path can never match. Two branches
+above, Darwin gets it right -- there a `.a` is passed as an ordinary input file.
+That is the fix worth sending upstream.
 
-**Layer 3 -- the app models disagree, and this is the real unknown.** Odin's
-`-subtarget:android` compiles `android_native_app_glue.c` and forces
-`ANativeActivity_onCreate`; SDL3's Android port expects its own Java activity to
-load the `.so` and call `SDL_main`. The bindings do expose `SDL_main`, `RunApp`
-and `EnterAppMainCallbacks`, so the pieces exist, but whether SDL3 will run under
-Odin's NativeActivity subtarget -- or whether the apk must declare SDLActivity
-instead -- is not known. **Settle this first.** It decides whether the other two
-are worth doing at all.
+The workaround is three one-line edits in the Odin installation, gating
+vendor:stb's `LIB` so Android falls through to the `system:` form already written
+underneath it:
 
-### What would remove most of the friction
+	LIB :: (
+	         ""                          when ODIN_PLATFORM_SUBTARGET == .Android
+	    else "../lib/stb_image.lib"      when ODIN_OS == .Windows
+	    ...
 
-stb is the only reason a developer needs a C cross-compiler, and the only thing
-that trips layer 1. Without it the Android build is: download an aar, point `-L`
-at it, package. With it, every developer also cross-compiles two archives and
-works around a compiler bug.
+in `vendor/stb/image`, `vendor/stb/truetype` and `vendor/stb/rect_pack` --
+truetype imports rect_pack, so it comes along. That emits a plain `-lstb_image`,
+which resolves against `libs\android\libstb_image.a`, which is why android.bat
+writes the `lib` prefix. Desktop builds cannot be affected: the gate is on the
+subtarget, not the OS.
 
-`stb_image` is replaceable on its own -- `core:image` is pure Odin with no foreign
-imports -- but replacing only that buys nothing, because `stb_truetype` drags both
-problems along regardless. It reduces to one question: **what rasterises glyphs on
-Android?** There is no TrueType anywhere in Odin outside `vendor:stb`.
+**This is the one thing a fresh machine still needs done by hand**, and an Odin
+upgrade undoes it.
 
-	port stb_truetype's baking path   ~1200-1800 lines: cmap, glyf/loca, simple
-	                                  and composite glyphs, bezier flattening,
-	                                  an AA rasteriser, the packer. GetBakedQuad
-	                                  is about twenty lines of arithmetic.
+### Layer 2 was a download, as expected
 
-	a pre-baked SDF atlas             no runtime rasteriser at all, and
-	                                  get_font(size) works from one atlas. Custom
-	                                  ttf then needs a build-time tool, which may
-	                                  use stb on a desktop. Changes the text
-	                                  shader and the look.
+android_sdl.bat reads MAJOR/MINOR/MICRO out of vendor:sdl3's own
+`sdl3_version.odin` and fetches that release's android zip, so the arm64
+libSDL3.so cannot drift from the bindings the way the desktop SDL3.dll quietly
+did for months. Same argument as copy_sdl.bat, same reason.
 
-	leave it, script the rest         an hour. Android buildable with a one-time
-	                                  setup per machine.
+### The four that built cleanly and failed anyway
 
-The porting option has an unusually good safety net, worth writing down: **stb is
-available on the desktop, so a port's atlas can be diffed against it pixel for
-pixel.** That turns "is my font rendering correct" from a judgement call into a
-test, which is not normally true of rasterisers.
+This is the part worth keeping, because not one of them produced a compiler
+error, a linker error, or a failed install.
 
-Remember also that `core:image` was measured about five times slower than stb --
-89.0ms against 18.7ms for a card -- and going back to it costs roughly three
-seconds of the card game's startup. It could be conditional: stb on the desktop,
-`core:image` under `when ODIN_PLATFORM_SUBTARGET == .Android`.
+**1. `main` is a stub in a shared library, and aliasing to it looks like it
+works.** The first entry point was one linker flag, `--defsym=SDL_main=main`, on
+the reasoning that Odin already emits a `main(argc, argv)` which starts the
+runtime and calls yours. It does -- for executables. In `-build-mode:shared`
+that same `main` is:
 
-### Status
+	main:  mov w0, wzr    ; return 0
+	       ret
 
-	matchbox side          done, and worth having anyway
-	stb for arm64          built and installed, blocked by layer 1
-	libSDL3.so for arm64   not fetched; a download when wanted
-	app model              unknown, and the thing to settle first
+and the alias is real, exported, and points at nothing. The app installed,
+launched, and left two lines in the log one millisecond apart:
+
+	V SDL: Running main function SDL_main from library .../libmain.so
+	V SDL: Finished main function
+
+What actually starts an Odin shared library is `_odin_entry_point`, which Odin
+generates for `ODIN_BUILD_MODE == .Dynamic` and which does the context setup,
+`__$startup_runtime`, and the call to your `main`; teardown is
+`_odin_exit_point`, already in `.fini_array`. `matchbox/android.odin` now defines
+a real `SDL_main` that defers to it, so the build script has no magic flag left
+and the knowledge sits next to an explanation of itself.
+
+**2. An unused glue is still a linked glue.** `-subtarget:android` always
+compiles `android_native_app_glue.c` in and forces `ANativeActivity_onCreate`,
+and the glue references `android_main`. Nothing provided it. A shared library may
+link with undefined symbols, so the build said nothing -- and Android resolves
+every symbol when a library is *loaded* rather than on first call:
+
+	dlopen failed: cannot locate symbol "android_main"
+
+in a dialog at launch. `matchbox/android.odin` defines an empty one.
+
+**3. Odin builds for API 34 by default, and nothing says so.** That put a
+reference to `__register_atfork` in the binary -- present in API 24 and up,
+absent in 21 -- while the manifest advertised `minSdkVersion 21`. An apk claiming
+devices it could not load on, which survived only because the test phone is
+modern. android_apk.bat now sets one `APILEVEL` and spends it four times, on
+`-minimum-os-version`, `d8 --min-api`, `apksigner --min-sdk-version` and the
+manifest.
+
+**4. aapt writes the zip entry name exactly as given.** Passing
+`lib\arm64-v8a\libmain.so` on Windows puts a backslash in the entry, Android does
+not recognise that as a native library directory, and the apk installs and then
+dies in `System.loadLibrary`. Forward slashes, always.
+
+The general lesson, and the reason the last three were each caught in seconds
+once it was applied: **on Android, "it linked" says nothing about whether it will
+load.** `llvm-nm -D -u` over the .so, diffed against what libSDL3.so and the
+API-level sysroot's libc/libm/libandroid/liblog actually export, answers that on
+the desktop before the phone is involved at all. An empty diff is the goal.
+
+### Getting anything out of the phone
+
+Worth writing down separately, because it cost more time than any of the bugs.
+This ZTE/nubia ROM ships with
+
+	[log.tag]: [S]
+
+set globally, which silences logcat completely -- not filtered, *empty*, from
+`adb logcat` and from a shell on the device alike, with logd running normally.
+Every diagnostic above was invisible until
+
+	adb shell setprop log.tag V
+
+which is not persistent and has to be redone after a reboot. Before that the only
+signals available were `pidof` and a screenshot, which is how the first failure
+got narrowed down at all: the process existed, held 137MB, and had accumulated
+0.17 seconds of CPU, which is not what a running game looks like.
+
+### What is known to work, and what is next
+
+Verified on the device, by screenshot and by tapping it:
+
+	SDL_GPU on Vulkan     the whole UI example renders
+	stb_truetype          text, from the embedded Silver font
+	stb_image + assets    art\ember.png read back as "art/ember.png" out of the
+	                      apk, through read_entire_file and SDL's IOStream
+	touch                 a tap on a button incremented its counter, so SDL's
+	                      finger-to-mouse synthesis reaches the hit testing
+
+Not yet looked at: audio, gamepads, and what happens on pause and resume when the
+surface is destroyed and recreated -- which is the one that tends to matter,
+since a GPU device outliving its window is exactly what Android does to a game
+when a call arrives.
+
+The other thing a screenshot makes obvious: `init` asks for 1080x720 and Android
+gives the whole screen, 1116x2480 here, so the UI example lays out for a wide
+window and gets a tall one. Nothing is broken; it simply has no idea what shape
+it is on. That is a display-model question rather than an Android one, and it has
+its own entry below.
+
+## The Window Is Either A Shape The Game Chose Or One It Was Handed
+
+Undecided, and worth deciding once rather than per platform. Android forced the
+question but did not create it: a maximised desktop window and a DeX window ask
+exactly the same thing.
+
+### What already exists
+
+More than it looks like. `fixed_res` off means the logical size follows the
+window; on means the logical size is pinned and letterboxed into it, and
+`draw_scale` / `draw_offset` are already applied by `screen_pos`, `screen_size`,
+the mouse conversion in `poll_events`, `get_touch_pos`, the sprite culling and
+the shape path. The machinery is done and tested -- Pong uses it. What is
+undecided is only which side of that switch a platform starts on, and how a game
+says otherwise.
+
+Worth noticing before inventing anything: **if the answer is "the same switch
+desktop games already use", then desktop mode needs no Android branch at all.**
+In DeX the window is desktop-shaped and resizable, so a fluid game behaves as it
+does on a desktop and a pinned game letterboxes into it exactly as it letterboxes
+into a resized desktop window. A toggle that turns out to be the existing one is
+a good sign; an Android-only mode flag would be a bad one.
+
+### Orientation is the bigger lever, and it is nearly free
+
+The UI example looks cramped mostly because a landscape design is running in
+portrait, not because letterboxing is wrong. Same math, same game, on the test
+phone's 1116x2480 with `init(..., 1080, 720)`:
+
+	portrait      scale 1.03    drawn 1116x744    30% of the height, bars above
+	                                             and below
+	landscape     scale 1.55    drawn 1674x1116   full height, bars at the sides
+
+The number needed to choose is already in the `init` call -- width greater than
+height means landscape. `HINT_ORIENTATIONS` ("SDL_ORIENTATIONS") is in the
+bindings and would avoid editing the manifest template per game.
+
+**To check:** whether that hint has to be set before video init or can be changed
+later; whether SDL delivers an orientation change as an ordinary window resize
+(if so, nothing else has to know about it); and what a foldable does across a
+fold, which is the same event or a completely different one depending on the
+answer.
+
+### The four candidates
+
+	A  follow the window    logical = physical. What happens today.
+	                        No waste, native resolution, DeX free.
+	                        Every fixed-layout game breaks, and init(1080, 720)
+	                        becomes a pair of numbers that mean nothing there.
+
+	B  letterbox            pin the requested size, scale and centre it.
+	                        Every existing game runs unchanged and looks like the
+	                        desktop; init(w,h) keeps one meaning everywhere.
+	                        Costs bars, and without orientation costs that 30%.
+
+	C  fit one axis         keep the requested width, let height fall out of the
+	                        screen aspect. Fills the screen, no bars, stable unit
+	                        scale. But the game gets a *variable* vertical
+	                        extent, so anything bottom-anchored or vertically
+	                        centred has to be written for it. A third layout
+	                        contract, which no example currently speaks.
+
+	D  density scaling      one logical pixel = a fixed physical size. Right for
+	                        a text app, wrong here: the logical extent then
+	                        varies per device, which is the problem being
+	                        avoided.
+
+### Leaning
+
+**B as the Android default, with orientation taken from the same numbers.** C
+opt-in later, A the explicit opt-in for responsive and desktop-mode games.
+
+The argument is not that B looks best -- often it will not. It is about which
+default can be **wrong silently**. B cannot: a game keeps the contract it already
+had, and where the fit is poor there are visible bars and a decision to make. A
+and C both change the size of the layout region under code that never agreed to
+it, and C in particular invents a contract, which is a thing to adopt per game on
+purpose rather than have imposed by a platform.
+
+The direction of travel is also easier. B to C later is a game asking for more
+screen. A to B later means finding out which games quietly broke.
+
+### The actual gap
+
+`set_logical_size` turns letterboxing **on** and nothing turns it **off**. So
+under a letterboxing default an Android game that wants the whole screen has no
+call to make. That is the real addition, and there are two shapes for it:
+
+	follow_window()                       a second procedure, minimal
+	set_presentation(.Follow/.Letterbox)  one named knob
+
+Leaning towards the enum: it names the contracts, makes C arriving later a value
+rather than a fourth procedure, and gives `fixed_res` -- currently a bool that
+has to be explained every time -- a name that says what it means. The letterbox
+maths underneath would not change.
+
+### Still open
+
+	safe areas        GetWindowSafeArea is in the bindings. Barely matters for B,
+	                  since centring already keeps content off the edges. Matters
+	                  a lot for C, and for anything drawn hard against a corner.
+	pause / resume    the surface is destroyed and recreated when a call arrives.
+	                  A correctness problem rather than a layout one, and
+	                  probably the more urgent of the two.
+	what DeX reports  whether it looks like an ordinary resizable window from
+	                  SDL's side, which is what the "no Android branch" claim
+	                  above depends on. Untested -- there is no DeX device here.
+	the examples      most were written at a fixed size against a desktop window.
+	                  Whichever default is chosen, it is worth knowing how many
+	                  of them actually care.
 
 ## Remove / Reduce AI Code
 
@@ -226,6 +409,43 @@ thing, though; the atlases and textures are where to look.
 ---
 
 # Completed
+
+## A Sprite Could Only Come From A File
+
+Found building the card game's card assembly: it composites a card out of a
+frame, an illustration, icons and text into a block of RGBA and then wants to
+draw it. Matchbox had no way to take those pixels.
+
+`create_sprite` takes *encoded* bytes, because a sprite has always been
+something loaded off disk, and hands them to stb to decode. A game that has made
+an image itself -- composited one, rendered one, filled a buffer -- would have
+had to encode it to a PNG so that stb could immediately decode it back again.
+The GPU path underneath was already right there: `upload_texture` takes a raw
+pointer and a size, and is what `load_font` uses for its atlas.
+
+So there are now two doors into the same place:
+
+	create_mesh_from_pixels   :: proc(pixels: []byte, width, height: i32) -> Mesh
+	create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> Sprite
+
+RGBA8, `width * height * 4` bytes, copied on the way to the GPU -- so the buffer
+belongs to the caller both before and after, and may be temp allocated and gone
+by the next frame. The body a sprite gets is shared with `create_sprite` rather
+than written twice, which is what `sprite_of` is.
+
+**And the cache needed both doors.** `sprite_cache_get` loads from a path,
+which is most of what a cache is for and is no use at all to a sprite that was
+never on disk. `sprite_cache_put(cache, key, sprite)` hands one over: the cache
+owns it from then on, and the limit, the eviction order and the teardown all
+work as they do for a loaded one. It replaces whatever was under that key, which
+is also how a game redraws something that has changed -- which is exactly what a
+card whose stats have been modified mid-match is.
+
+`sprite_cache_find(cache, key)` is the read half, added a day later when the
+card game stopped loading card images altogether: it hands back what is resident
+or nil, and takes no path, because a game that fills its own cache has no file
+to name and should not have to invent one to look inside. It counts as a use, so
+asking for something does not make it the next thing evicted.
 
 ## Two Things Android Needed That Everything Else Wanted Anyway
 

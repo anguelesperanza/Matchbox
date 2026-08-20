@@ -38,9 +38,43 @@ create_mesh :: proc(bytes: []byte) -> Mesh {
 	}
 }
 
+/*
+	The same, from pixels that have already been decoded.
+
+	create_mesh takes an encoded image because that is what a sprite loaded off
+	disk is. A game that has *made* an image -- composited one, rendered one,
+	read one out of a buffer -- would otherwise have to encode it to a PNG so
+	that stb could decode it straight back again.
+
+	`pixels` is RGBA8, `width * height * 4` bytes, and is copied on the way to
+	the GPU: it belongs to the caller both before and after.
+*/
+create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh {
+	ensure(width > 0 && height > 0, "a texture needs a size")
+	ensure(len(pixels) >= int(width) * int(height) * 4, "not enough pixels for that size")
+
+	return Mesh{
+		texture = upload_texture(raw_data(pixels), width, height),
+		sampler = mbi.renderer.sprite_sampler,
+		width   = width,
+		height  = height,
+	}
+}
+
 create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 	mesh := create_mesh(bytes)
+	return sprite_of(mesh, scale)
+}
 
+/*A sprite around pixels the game already holds. See create_mesh_from_pixels*/
+create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> Sprite {
+	mesh := create_mesh_from_pixels(pixels, width, height)
+	return sprite_of(mesh, scale)
+}
+
+/*The body every sprite gets, whichever way its texture arrived*/
+@(private)
+sprite_of :: proc(mesh: Mesh, scale: f32) -> Sprite {
 	final_scale := scale
 	if scale <= 0 {
 		final_scale = 1

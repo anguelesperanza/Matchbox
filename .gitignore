@@ -3,3 +3,17 @@
 # carried SDL 3.3.0 while vendor:sdl3's bindings were generated against 3.4.2.
 SDL3.dll
 libSDL3.so
+
+# Android. Everything under libs/android is fetched or cross-compiled by
+# android_sdl.bat and android.bat, so none of it is committed -- same reasoning
+# as SDL3.dll above, and libSDL3.so is already covered by the rule at the top.
+libs/android/*.a
+libs/android/SDL3-classes.jar
+
+# Build output, and the self-signed debug key android_apk.bat makes on demand.
+# The key is regenerated if missing; a lost one only means the next install has
+# to be an uninstall first, since Android will not replace an apk signed by a
+# different key.
+build/
+android/debug.keystore
+*.apk

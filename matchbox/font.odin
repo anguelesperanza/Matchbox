@@ -14,15 +14,21 @@ import stbtt "vendor:stb/truetype"
 // The font init bakes as mbi.font, and the one get_font bakes at other sizes.
 // Exposed so a game can build its own set out of it, or measure against it
 // without going through the cache.
-DEFAULT_FONT_BYTES :: #load("fonts/Silver.ttf")
+DEFAULT_FONT_BYTES :: #load("fonts/Adapa.ttf")
 
 // What mbi.font is baked at. get_font hands that one back rather than baking a
 // second copy of it.
-DEFAULT_FONT_SIZE :: f32(32)
+//
+// A multiple of 13, and not the rounder 32, because the default font is a pixel
+// font drawn on a 13-pixel em: at 26 every one of its design pixels covers
+// exactly two screen pixels, and at anything between two multiples the stems
+// come out as an uneven mix of two and three pixels with grey down one side.
+// The same holds for any size asked of get_font -- 13, 26, 39, 52.
+DEFAULT_FONT_SIZE :: f32(26)
 
 Font :: struct {
 	using mesh:  Mesh,
-	baked_chars: [96]stbtt.bakedchar,
+	baked_chars: [FONT_GLYPH_COUNT]stbtt.bakedchar,
 	atlas_size:  i32,
 
 	size:        f32, // pixel size the glyphs were baked at
@@ -37,7 +43,7 @@ load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	// Bake all printable ASCII glyphs into a grayscale bitmap
 	bitmap := make([]u8, FONT_ATLAS_SIZE * FONT_ATLAS_SIZE)
 	defer delete(bitmap)
-	stbtt.BakeFontBitmap(raw_data(bytes), 0, font_size, raw_data(bitmap), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE, 32, 96, raw_data(font.baked_chars[:]))
+	stbtt.BakeFontBitmap(raw_data(bytes), 0, font_size, raw_data(bitmap), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE, FONT_FIRST_GLYPH, FONT_GLYPH_COUNT, raw_data(font.baked_chars[:]))
 
 	// draw_text takes a baseline for its y, so anything positioning text against
 	// the top of a box needs the ascent to shift by. Measured off the glyphs that
@@ -103,12 +109,12 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 	cursor_y := y
 
 	for ch in text {
-		if ch < 32 || ch >= 128 {
+		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
 			continue
 		}
 
 		q: stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - 32, &cursor_x, &cursor_y, &q, true)
+		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - FONT_FIRST_GLYPH, &cursor_x, &cursor_y, &q, true)
 
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
@@ -139,10 +145,10 @@ draw_text :: proc {
 measure_text :: proc(font: ^Font, text: string) -> [2]f32 {
 	width: f32
 	for ch in text {
-		if ch < 32 || ch >= 128 {
+		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
 			continue
 		}
-		width += font.baked_chars[cast(int)ch - 32].xadvance
+		width += font.baked_chars[cast(int)ch - FONT_FIRST_GLYPH].xadvance
 	}
 	return {width, font.ascent + font.descent}
 }
@@ -163,12 +169,12 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 	cursor_y := y
 
 	for ch in text {
-		if ch < 32 || ch >= 128 {
+		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
 			continue
 		}
 
 		q: stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - 32, &cursor_x, &cursor_y, &q, true)
+		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - FONT_FIRST_GLYPH, &cursor_x, &cursor_y, &q, true)
 
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
@@ -253,6 +259,15 @@ font_cache_order: [dynamic]i32 // least recently used first
 	Sizes are rounded to whole pixels, since that is the resolution stb bakes
 	at, so a window being dragged rebakes only when it crosses a pixel and not
 	on every frame of the drag.
+
+	A size worked out off the window like that lands wherever it lands, which is
+	fine for a face with curves in it and less fine for the default one -- Adapa
+	is a pixel font on a 13-pixel em, and only multiples of 13 put its design
+	pixels on whole screen pixels. Snapping to the nearest one keeps it crisp
+	while still growing with the window:
+
+		size := f32(matchbox.mbi.height) * 0.03
+		font := matchbox.get_font(math.round(size / 13) * 13)
 
 	**The pointer is good for the frame it was asked in.** It is a cache with a
 	limit, and something has to be given up when the limit is reached -- but

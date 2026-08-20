@@ -83,6 +83,49 @@ sprite_cache_get :: proc(cache: ^Sprite_Cache($Key), key: Key, path: string, sca
 	return sprite
 }
 
+/*
+	Puts a sprite the game made itself into the cache, under a key.
+
+	sprite_cache_get loads from a path, which is most of what a cache is for and
+	is no use to a sprite that was composited rather than loaded -- there is no
+	file to name. This is the other door into the same cache: the sprite is
+	handed over, the cache owns it from then on, and everything else -- the
+	limit, the eviction order, the teardown -- works as it does for a loaded one.
+
+	Replaces whatever was under that key, destroying it, so this is also how a
+	game redraws something that has changed.
+*/
+sprite_cache_put :: proc(cache: ^Sprite_Cache($Key), key: Key, sprite: Sprite) -> ^Sprite {
+	sprite_cache_evict(cache, key)
+
+	held := new(Sprite)
+	held^ = sprite
+
+	cache.sprites[key] = held
+	append(&cache.order, key)
+
+	sprite_cache_trim(cache)
+	return held
+}
+
+/*
+	The sprite under a key, or nil, without loading anything.
+
+	sprite_cache_get takes a path because a cache was originally a way of not
+	loading the same file twice. A game that fills its cache with
+	sprite_cache_put has no path to offer and no file to fall back on -- asking
+	for one it made itself should not require naming a file that does not exist.
+
+	Counts as a use, so what is asked for is not what gets evicted.
+*/
+sprite_cache_find :: proc(cache: ^Sprite_Cache($Key), key: Key) -> ^Sprite {
+	existing, found := cache.sprites[key]
+	if !found do return nil
+
+	sprite_cache_touch(cache, key)
+	return existing
+}
+
 // Whether a key is resident, without loading it.
 sprite_cache_has :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool {
 	return key in cache.sprites

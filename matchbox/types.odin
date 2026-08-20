@@ -196,6 +196,17 @@ mbi: MatchboxInfo
 
 FONT_ATLAS_SIZE :: 512
 
+// The glyphs an atlas holds: printable ASCII, space through '~'.
+//
+// DEL is left out on purpose, which is why the count is 95 rather than the
+// round 96. A font with no glyph at that codepoint -- most of them, the default
+// one included -- gets stb's .notdef box baked there instead, and that box is
+// drawn taller than any real letter. A font's ascent is a max over the glyphs
+// that were baked, so taking DEL in would let a character nothing ever draws
+// set the baseline for everything that does.
+FONT_FIRST_GLYPH :: 32
+FONT_GLYPH_COUNT :: 95
+
 // -----------------------------------------------------------------------
 // Colors
 // -----------------------------------------------------------------------

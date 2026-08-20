@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+	Template. android.bat substitutes __PACKAGE__ and __LABEL__ and writes the
+	result into build/android/.
+
+	The activity is SDL's own, unsubclassed, which is the whole trick: stock
+	SDLActivity loads {"SDL3", "main"} and calls "SDL_main" in the last of them,
+	and the Odin build is made to match those names rather than the other way
+	round. No Java of ours is compiled, so there is nothing here to keep in sync.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	package="__PACKAGE__"
+	android:versionCode="1"
+	android:versionName="1.0">
+
+	<uses-sdk android:minSdkVersion="__MINSDK__" android:targetSdkVersion="34" />
+
+	<!-- A game, not a phone app: a touchscreen is expected but not demanded,
+	     so this still installs on a device driven by a gamepad. -->
+	<uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+	<uses-feature android:name="android.hardware.vulkan.version" android:required="false" />
+
+	<application
+		android:label="__LABEL__"
+		android:hasCode="true"
+		android:allowBackup="true">
+
+		<activity
+			android:name="org.libsdl.app.SDLActivity"
+			android:label="__LABEL__"
+			android:exported="true"
+			android:alwaysRetainTaskState="true"
+			android:launchMode="singleInstance"
+			android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.LAUNCHER" />
+			</intent-filter>
+		</activity>
+
+	</application>
+</manifest>

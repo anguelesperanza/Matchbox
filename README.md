@@ -289,8 +289,79 @@ call `make -C {path to Odin/vendor/stb/src}` to build stb on linux
 Nothing needs copying: matchbox links `system:SDL3` on Linux, so the package
 manager's copy is the one that matters. `copy_sdl.sh` says as much and exits.
 
+### Android
+Runs. The `ui` example draws on a phone -- GPU rendering on Vulkan, text, a
+sprite loaded out of the apk, and buttons that answer a finger. Audio, gamepads
+and pause/resume have not been exercised yet, and a game still has to cope with
+being handed the whole screen rather than the window size it asked for, so treat
+this as early rather than shipped.
+
+Set `ODIN_ANDROID_NDK` and `ODIN_ANDROID_SDK`, then once per machine:
+
+```
+android.bat        cross-compiles stb for arm64 into libs\android
+android_sdl.bat    downloads the arm64 libSDL3.so and SDL's Java classes
+```
+
+`android_sdl.bat` reads the version out of `vendor:sdl3` itself, so the library
+matches the bindings for the same reason `copy_sdl.bat` exists.
+
+One patch is needed in your Odin installation and is not optional. Odin turns
+vendor:stb's path-named foreign imports into `-l:<absolute path>`, which lld
+cannot resolve, so add an Android case to the `LIB` constant in
+`vendor/stb/image`, `vendor/stb/truetype` and `vendor/stb/rect_pack`:
+
+```odin
+LIB :: (
+         ""                          when ODIN_PLATFORM_SUBTARGET == .Android
+    else "../lib/stb_image.lib"      when ODIN_OS == .Windows
+    ...
+```
+
+That drops them through to the `system:` form already written below it. Desktop
+builds are unaffected -- the gate is on the subtarget. The Android section of
+`improvements.md` has the full account.
+
+Then:
+
+```
+android_apk.bat                    build examples\init-window
+android_apk.bat ui                 build examples\ui
+android_apk.bat ui install         build it, install it, launch it
+```
+
+Your own game needs no Android-specific code. SDL's own Java activity is the
+entry point and looks for a symbol called `SDL_main`, and `matchbox/android.odin`
+provides one that hands over to Odin's `_odin_entry_point`, so an ordinary
+`main :: proc()` is all there is.
+
+Three things to know when writing a game that will run there. Anything you ship
+with the game must be read with `read_entire_file`, not `core:os`, because inside
+an apk it is not a file; anything the player creates belongs under `pref_path`,
+which is the one directory Android gives you; and the window size you pass to
+`init` is a request the desktop honours and Android ignores, so read
+`window_width` and `window_height` rather than assuming what you asked for. The
+first two are already true on the desktop -- Android is just where ignoring them
+stops working.
+
+If nothing appears in `adb logcat`, check `adb shell getprop log.tag`. Some ROMs
+ship it set to `S`, which silences the log completely; `adb shell setprop log.tag
+V` fixes it until the next reboot.
+
 ## Font
-The default font for Matchbox is called Silver and can be found here: https://poppyworks.itch.io/silver
+The default font for Matchbox is called Adapa, and is embedded from
+`matchbox/fonts/Adapa.ttf`. It is a pixel font drawn on a 13-pixel em, so use
+**multiples of 13** -- 13, 26, 39, 52 -- and each of its design pixels lands on a
+whole number of screen pixels. `DEFAULT_FONT_SIZE` is 26 for that reason.
+`get_font` will bake any size you ask for, but a size between two multiples
+gives you stems that are two pixels wide in places and three in others.
+
+Adapa is a wider face than the Silver font it replaced: the same sentence set at
+the same nominal size is about half again as long. A layout carried over from
+before wants measuring rather than assuming.
+
+The atlas holds printable ASCII, space through `~`. Anything outside that range
+is skipped by `draw_text` and takes no room in `measure_text`.
 
 If you want to load your own font; it needs to be a TTF. You can check the examples folder on how to load your own font.
 

@@ -132,8 +132,8 @@ wrap_paragraph :: proc(font: ^Font, paragraph: string, max_width: f32, lines: ^[
 // hold are skipped by draw_text, so they take no room here either.
 @(private)
 rune_advance :: proc(font: ^Font, ch: rune) -> f32 {
-	if ch < 32 || ch >= 128 do return 0
-	return font.baked_chars[int(ch) - 32].xadvance
+	if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT do return 0
+	return font.baked_chars[int(ch) - FONT_FIRST_GLYPH].xadvance
 }
 
 // The height of one line, baseline to baseline.

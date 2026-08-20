@@ -162,23 +162,63 @@ create_builtin_shader :: proc(
 	return shader
 }
 
-/*
-	Builds one pipeline: the shared vertex shader, the given fragment shader,
-	and the alpha blend every draw in Matchbox uses.
+// Which geometry a pipeline reads: the shared quad, or a model's own vertices.
+@(private)
+Vertex_Layout :: enum {
+	QUAD, // Vertex   -- position and uv, the four corners every 2D draw uses
+	MESH, // Vertex3D -- position, normal and uv, a model's own buffer
+}
 
-	Culling is off. The quad's winding flips with the y negation in the vertex
-	shader, and nothing here is a closed solid, so there is nothing to gain by
-	being careful about it.
+/*
+	Builds one pipeline: a vertex shader, a fragment shader, and the alpha blend
+	every draw in Matchbox uses.
+
+	The defaults are what every 2D pipeline wants, so the five calls that came
+	before 3D pass a fragment shader alone and are unchanged by its arrival.
+
+	Culling is off by default. The quad's winding flips with the y negation in
+	quad.vert, and nothing 2D is a closed solid, so there is nothing to gain by
+	being careful about it. A model is a closed solid and does gain, which is
+	why `cull` is a parameter now.
+
+	`depth` is what makes a pipeline usable in the 3D pass and unusable outside
+	it: SDL3 bakes the target formats in here, and a pipeline whose targets
+	disagree with the pass it is bound in is a validation failure. That is the
+	whole reason 3D gets a pass of its own -- see render3d.odin.
 */
 @(private)
-create_pipeline :: proc(fragment: ^sdl.GPUShader) -> ^sdl.GPUGraphicsPipeline {
+create_pipeline :: proc(
+	fragment: ^sdl.GPUShader,
+	vertex:   ^sdl.GPUShader = nil, // nil means the shared quad shader
+	layout:   Vertex_Layout  = .QUAD,
+	depth:    bool           = false,
+	cull:     sdl.GPUCullMode = .NONE,
+	lines:    bool           = false,
+) -> ^sdl.GPUGraphicsPipeline {
+	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
+
+	pitch: u32 = size_of(Vertex) if layout == .QUAD else size_of(Vertex3D)
+
 	vertex_buffers := [1]sdl.GPUVertexBufferDescription{
-		{slot = 0, pitch = size_of(Vertex), input_rate = .VERTEX},
+		{slot = 0, pitch = pitch, input_rate = .VERTEX},
 	}
 
-	attributes := [2]sdl.GPUVertexAttribute{
+	// Three attributes for a mesh, two for the quad. The mesh's third is the
+	// one the quad has no room for: a normal.
+	attributes := [3]sdl.GPUVertexAttribute{
 		{location = 0, buffer_slot = 0, format = .FLOAT3, offset = 0},
 		{location = 1, buffer_slot = 0, format = .FLOAT2, offset = size_of([3]f32)},
+		{},
+	}
+	num_attributes: u32 = 2
+
+	if layout == .MESH {
+		attributes = {
+			{location = 0, buffer_slot = 0, format = .FLOAT3, offset = 0},
+			{location = 1, buffer_slot = 0, format = .FLOAT3, offset = size_of([3]f32)},
+			{location = 2, buffer_slot = 0, format = .FLOAT2, offset = size_of([3]f32) * 2},
+		}
+		num_attributes = 3
 	}
 
 	color_targets := [1]sdl.GPUColorTargetDescription{
@@ -199,19 +239,49 @@ create_pipeline :: proc(fragment: ^sdl.GPUShader) -> ^sdl.GPUGraphicsPipeline {
 	}
 
 	pipeline := sdl.CreateGPUGraphicsPipeline(mbi.renderer.device, {
-		vertex_shader   = mbi.renderer.shaders.quad,
+		vertex_shader   = vertex_shader,
 		fragment_shader = fragment,
-		primitive_type  = .TRIANGLELIST,
+		primitive_type  = .LINELIST if lines else .TRIANGLELIST,
 		vertex_input_state = {
 			vertex_buffer_descriptions = raw_data(vertex_buffers[:]),
 			num_vertex_buffers         = 1,
 			vertex_attributes          = raw_data(attributes[:]),
-			num_vertex_attributes      = 2,
+			num_vertex_attributes      = num_attributes,
 		},
-		rasterizer_state = {fill_mode = .FILL, cull_mode = .NONE},
+		rasterizer_state = {
+			fill_mode  = .FILL,
+			cull_mode  = cull,
+
+			// Counter-clockwise is front, which is what glTF produces and what
+			// cube_model is wound to match.
+			front_face = .COUNTER_CLOCKWISE,
+
+			// Clip, do not clamp. SDL3 reads this field the way it is named --
+			// false means depth *clamp*, where geometry outside the near and far
+			// planes is squashed onto them and drawn anyway instead of being
+			// discarded. Leaving it at the zero value gives you a near plane
+			// that does not cut, which hides a whole class of projection bug
+			// behind a picture that looks almost right.
+			enable_depth_clip = true,
+
+			// No depth bias, though a wireframe drawn over the surface it
+			// outlines badly needs one. This state is specified for polygons and
+			// a line list is not one, so setting it here is accepted and then
+			// ignored -- which was tried, and cost an afternoon. The offset that
+			// does work is in mesh_line.frag, which writes SV_Depth.
+		},
+		depth_stencil_state = {
+			// Nearer wins, and nearer is the smaller number: the projections in
+			// math3d.odin put the near plane at 0 and the far plane at 1.
+			compare_op         = .LESS if depth else .INVALID,
+			enable_depth_test  = depth,
+			enable_depth_write = depth,
+		},
 		target_info = {
 			color_target_descriptions = raw_data(color_targets[:]),
 			num_color_targets         = 1,
+			depth_stencil_format      = mbi.renderer.depth_format,
+			has_depth_stencil_target  = depth,
 		},
 	})
 
@@ -264,6 +334,12 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(OutlineFragData) == 32)
 	#assert(size_of(FontFragData)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
+	#assert(size_of(Vertex3D)        == 32)
+	#assert(size_of(Mesh_Vert_Data)  == 192)
+	#assert(size_of(Mesh_Frag_Data)  == 16)
+	#assert(size_of(Light_Uniform)   == 48)
+	#assert(size_of(Lighting_Data)   == 272)
+	#assert(size_of(Post_Frag_Data)  == 32)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
 	// database along -- which is what lets a game ask for `.NORTH` rather than
@@ -356,11 +432,70 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.shape = create_builtin_shader(
 		#load("shaders/shape.frag.spv"), #load("shaders/shape.frag.dxil"), .FRAGMENT, 0)
 
+	// 3D. One uniform buffer each: three matrices going in, a tint coming out.
+	mbi.renderer.shaders.mesh = create_builtin_shader(
+		#load("shaders/mesh.vert.spv"), #load("shaders/mesh.vert.dxil"), .VERTEX, 0)
+	// Two uniform buffers, not one: slot 0 is the per-draw tint and slot 1 is
+	// the lighting, which is pushed once for a whole pass.
+	mbi.renderer.shaders.mesh_flat = create_builtin_shader(
+		#load("shaders/mesh_flat.frag.spv"), #load("shaders/mesh_flat.frag.dxil"), .FRAGMENT, 0, 2)
+	mbi.renderer.shaders.mesh_line = create_builtin_shader(
+		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
+
+	// Post-processing. One sampler -- the render target -- and one uniform
+	// block shared by all three, so an effect that ignores a field ignores it.
+	mbi.renderer.shaders.post = create_builtin_shader(
+		#load("shaders/post.frag.spv"), #load("shaders/post.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.psx = create_builtin_shader(
+		#load("shaders/psx.frag.spv"), #load("shaders/psx.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.vhs = create_builtin_shader(
+		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
+	// One sampler: the model's base colour. Two uniform buffers, as above.
+	mbi.renderer.shaders.mesh_textured = create_builtin_shader(
+		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 1, 2)
+
+	// Asked before any pipeline is built, because a depth-testing pipeline has
+	// to name the format it will be used with and the answer cannot change
+	// afterwards. It is a capability query and allocates nothing, so a game
+	// that never draws 3D pays a function call for it and no memory.
+	mbi.renderer.depth_format = pick_depth_format()
+
 	mbi.renderer.pipelines.sprite  = create_pipeline(mbi.renderer.shaders.sprite)
 	mbi.renderer.pipelines.rect    = create_pipeline(mbi.renderer.shaders.rect)
 	mbi.renderer.pipelines.outline = create_pipeline(mbi.renderer.shaders.outline)
 	mbi.renderer.pipelines.font    = create_pipeline(mbi.renderer.shaders.font)
 	mbi.renderer.pipelines.shape   = create_pipeline(mbi.renderer.shaders.shape)
+
+	mbi.renderer.pipelines.mesh = create_pipeline(
+		mbi.renderer.shaders.mesh_flat,
+		vertex = mbi.renderer.shaders.mesh,
+		layout = .MESH,
+		depth  = true,
+		cull   = .BACK,
+	)
+
+	mbi.renderer.pipelines.post = create_pipeline(mbi.renderer.shaders.post)
+	mbi.renderer.pipelines.psx  = create_pipeline(mbi.renderer.shaders.psx)
+	mbi.renderer.pipelines.vhs  = create_pipeline(mbi.renderer.shaders.vhs)
+
+	mbi.renderer.pipelines.mesh_textured = create_pipeline(
+		mbi.renderer.shaders.mesh_textured,
+		vertex = mbi.renderer.shaders.mesh,
+		layout = .MESH,
+		depth  = true,
+		cull   = .BACK,
+	)
+
+	// Lines are never culled -- an edge has no facing -- and they are biased
+	// towards the camera. See `lines` in create_pipeline for why.
+	mbi.renderer.pipelines.line = create_pipeline(
+		mbi.renderer.shaders.mesh_line,
+		vertex = mbi.renderer.shaders.mesh,
+		layout = .MESH,
+		depth  = true,
+		cull   = .NONE,
+		lines  = true,
+	)
 
 	// Every sprite wants the same filtering, and the font wants smoothing, so
 	// two samplers serve the whole program.
@@ -432,6 +567,12 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.outline != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.outline)
 	if mbi.renderer.pipelines.font    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.font)
 	if mbi.renderer.pipelines.shape   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shape)
+	if mbi.renderer.pipelines.mesh    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh)
+	if mbi.renderer.pipelines.line    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.line)
+	if mbi.renderer.pipelines.mesh_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_textured)
+	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
+	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
+	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
 
 	if mbi.renderer.shaders.quad    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.quad)
 	if mbi.renderer.shaders.sprite  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.sprite)
@@ -439,6 +580,22 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.outline != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.outline)
 	if mbi.renderer.shaders.font    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.font)
 	if mbi.renderer.shaders.shape   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.shape)
+	if mbi.renderer.shaders.mesh      != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh)
+	if mbi.renderer.shaders.mesh_flat != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_flat)
+	if mbi.renderer.shaders.mesh_line != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_line)
+	if mbi.renderer.shaders.mesh_textured != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_textured)
+	if mbi.renderer.shaders.post != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.post)
+	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
+	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
+
+	// The generated shapes, if anything ever asked for one.
+	shapes3d_destroy()
+
+	// Only ever made if the game asked for a 3D pass.
+	if mbi.renderer.depth_texture != nil {
+		sdl.ReleaseGPUTexture(device, mbi.renderer.depth_texture)
+		mbi.renderer.depth_texture = nil
+	}
 
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
 	sdl.DestroyGPUDevice(device)

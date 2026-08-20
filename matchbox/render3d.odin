@@ -1,0 +1,274 @@
+package matchbox
+
+/*
+	Render -- 3D
+	------------
+	The second render pass, and everything that only exists inside it.
+
+	**3D is a pass of its own rather than a change to the 2D one.** SDL3 bakes
+	the target formats into a pipeline when it is created, so a pipeline built
+	without a depth-stencil target cannot be used in a pass that has one. The
+	five 2D pipelines were all built that way. Giving them depth would mean
+	rebuilding every one of them and handing a game that draws nothing but
+	sprites an 8MB depth buffer to go with it.
+
+	So `begin_drawing_3d` closes whatever pass is open and starts one with depth
+	attached; `end_drawing_3d` closes that, and the next 2D draw opens a
+	colour-only pass through `ensure_pass` exactly as it always did. A frame is
+	two or three passes instead of one, which costs nothing worth measuring.
+
+	What it does mean is that the two cannot interleave for free. Scene, then
+	HUD, pays one switch. Alternating them twenty times pays twenty.
+
+	The depth buffer is created the first time a game asks for 3D, so a 2D-only
+	program never allocates one.
+*/
+
+import "core:log"
+import "core:math/linalg"
+
+import sdl "vendor:sdl3"
+
+// -----------------------------------------------------------------------
+// Depth
+// -----------------------------------------------------------------------
+
+/*
+	Makes sure there is a depth texture the size of the window.
+
+	Recreated on resize rather than resized, because a GPU texture has no resize
+	-- and released before the new one is made, since a window dragged from a
+	corner produces one of these per frame of the drag.
+
+	The format is asked for rather than assumed. `D24_UNORM_S8_UINT` is the one
+	desktop drivers all have, `D32_FLOAT` is the usual fallback, and
+	`D16_UNORM` is the one guaranteed everywhere -- which is the one an Android
+	device may leave you with.
+*/
+@(private)
+ensure_depth_texture :: proc() -> bool {
+	r := &mbi.renderer
+	if r.device == nil do return false
+
+	width  := mbi.window_width
+	height := mbi.window_height
+	if width <= 0 || height <= 0 do return false
+
+	if r.depth_texture != nil && r.depth_width == width && r.depth_height == height {
+		return true
+	}
+
+	if r.depth_texture != nil {
+		sdl.ReleaseGPUTexture(r.device, r.depth_texture)
+		r.depth_texture = nil
+	}
+
+	if r.depth_format == .INVALID {
+		r.depth_format = pick_depth_format()
+	}
+
+	r.depth_texture = sdl.CreateGPUTexture(r.device, {
+		type                 = .D2,
+		format               = r.depth_format,
+		usage                = {.DEPTH_STENCIL_TARGET},
+		width                = u32(width),
+		height               = u32(height),
+		layer_count_or_depth = 1,
+		num_levels           = 1,
+	})
+
+	if r.depth_texture == nil {
+		log.errorf("could not create a depth texture: %s", sdl.GetError())
+		return false
+	}
+
+	r.depth_width  = width
+	r.depth_height = height
+
+	return true
+}
+
+// The best depth format this device will take. Settled once and remembered,
+// because the pipeline has to be built against the same answer.
+@(private)
+pick_depth_format :: proc() -> sdl.GPUTextureFormat {
+	candidates := [3]sdl.GPUTextureFormat{.D24_UNORM_S8_UINT, .D32_FLOAT, .D16_UNORM}
+
+	for format in candidates {
+		if sdl.GPUTextureSupportsFormat(mbi.renderer.device, format, .D2, {.DEPTH_STENCIL_TARGET}) {
+			return format
+		}
+	}
+
+	// Every backend SDL offers supports at least D16, so reaching this means
+	// something is wrong enough that failing loudly is the kindness.
+	log.error("no depth format is supported by this device")
+	return .D16_UNORM
+}
+
+// -----------------------------------------------------------------------
+// The 3D pass
+// -----------------------------------------------------------------------
+
+/*
+	Opens the 3D pass and fixes the camera for everything drawn until
+	`end_drawing_3d`.
+
+	The colour target is loaded rather than cleared, so whatever
+	`clear_background` put there is still underneath. Depth is cleared to 1 --
+	the far plane -- every time, because last frame's depth is meaningless and
+	keeping it would make this frame's geometry lose to it.
+
+	Draw 2D after `end_drawing_3d`, not inside. A sprite drawn between these two
+	would be handed to a pipeline that does not match the pass it is in, which
+	is a validation error rather than a wrong picture.
+*/
+begin_drawing_3d :: proc(camera: Camera3D) {
+	r := &mbi.renderer
+	if !r.frame_active do return
+
+	if r.pass != nil {
+		sdl.EndGPURenderPass(r.pass)
+		r.pass = nil
+	}
+
+	depth_texture := current_depth_texture()
+	if depth_texture == nil do return
+
+	color := sdl.GPUColorTargetInfo{
+		texture  = current_color_texture(),
+		load_op  = .LOAD,
+		store_op = .STORE,
+	}
+
+	depth := sdl.GPUDepthStencilTargetInfo{
+		texture     = depth_texture,
+		clear_depth = 1,
+		load_op     = .CLEAR,
+		store_op    = .DONT_CARE, // nothing reads it after the pass ends
+		stencil_load_op  = .DONT_CARE,
+		stencil_store_op = .DONT_CARE,
+	}
+
+	r.pass = sdl.BeginGPURenderPass(r.cmd, &color, 1, &depth)
+	if r.pass == nil do return
+
+	bind_cache_reset()
+	apply_clip()
+
+	r.mode_3d        = true
+	r.view_projection = camera3d_view_projection(camera)
+	r.camera3d        = camera
+
+	// Once for the pass. The lights do not change between draws, and the camera
+	// the shader needs for specular and fog is the one this pass was opened
+	// with -- which the game should not have to hand over separately.
+	push_lighting(camera)
+}
+
+// Closes the 3D pass. Anything drawn after this is 2D again, on top.
+end_drawing_3d :: proc() {
+	r := &mbi.renderer
+	if !r.mode_3d do return
+
+	if r.pass != nil {
+		sdl.EndGPURenderPass(r.pass)
+		r.pass = nil
+	}
+
+	r.mode_3d = false
+}
+
+// Whether a 3D pass is open. `draw_model` checks it so that a model drawn
+// outside one does nothing rather than recording into a pass that has no depth.
+in_drawing_3d :: proc() -> bool {
+	return mbi.renderer.mode_3d
+}
+
+// The camera the open 3D pass was started with.
+current_camera3d :: proc() -> Camera3D {
+	return mbi.renderer.camera3d
+}
+
+// -----------------------------------------------------------------------
+// Drawing
+// -----------------------------------------------------------------------
+
+/*
+	Draws every part of a model, placed by `transform` and multiplied by `tint`.
+
+	One uniform push per part rather than per model, because a part is a draw
+	call and the uniforms travel with it. The matrices are worked out once for
+	the whole model, since all its parts share a transform.
+*/
+draw_model :: proc(model: Model, transform: Transform, tint: [4]f32 = WHITE) {
+	r := &mbi.renderer
+	if !r.frame_active || r.pass == nil do return
+
+	ensure(r.mode_3d, "draw_model must be called between begin_drawing_3d and end_drawing_3d")
+
+	model_matrix := transform_matrix(transform)
+
+	vert_data := Mesh_Vert_Data{
+		mvp           = r.view_projection * model_matrix,
+		model         = model_matrix,
+
+		// Inverse transpose, so that a model scaled unevenly keeps its normals
+		// square to its surfaces. For a uniform scale this is the model matrix
+		// again and the work is wasted; for any other it is the difference
+		// between lighting that follows the shape and lighting that slides off
+		// it.
+		normal_matrix = linalg.matrix4_inverse_transpose_f32(model_matrix),
+	}
+
+	frag_data := Mesh_Frag_Data{tint = tint}
+
+	for part in model.parts {
+		if part.vertices == nil || part.indices == nil do continue
+
+		// Per part rather than per model: a part says whether it is lines or
+		// triangles and whether it has a texture, and between them those decide
+		// the pipeline. One loaded file routinely holds parts that differ.
+		pipeline := r.pipelines.mesh
+		switch {
+		case part.topology == .LINES: pipeline = r.pipelines.line
+		case part.texture != nil:     pipeline = r.pipelines.mesh_textured
+		}
+
+		if r.bound_pipeline != pipeline {
+			sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
+			r.bound_pipeline = pipeline
+		}
+
+		if part.texture != nil {
+			sampler := part.sampler if part.sampler != nil else r.sprite_sampler
+
+			if r.bound_texture != part.texture || r.bound_sampler != sampler {
+				texture_binding := sdl.GPUTextureSamplerBinding{texture = part.texture, sampler = sampler}
+				sdl.BindGPUFragmentSamplers(r.pass, 0, &texture_binding, 1)
+				r.bound_texture = part.texture
+				r.bound_sampler = sampler
+			}
+		}
+
+		binding := sdl.GPUBufferBinding{buffer = part.vertices, offset = 0}
+		sdl.BindGPUVertexBuffers(r.pass, 0, &binding, 1)
+		sdl.BindGPUIndexBuffer(r.pass, {buffer = part.indices, offset = 0}, ._32BIT)
+
+		// The shared quad is no longer what is bound, so the 2D cache has to be
+		// told. Without this a sprite drawn in a later pass would skip its own
+		// bind and draw a model's vertices through the sprite shader.
+		r.bound_quad = false
+
+		sdl.PushGPUVertexUniformData(r.cmd, 0, &vert_data, size_of(vert_data))
+		sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
+
+		sdl.DrawGPUIndexedPrimitives(r.pass, part.index_count, 1, 0, 0, 0)
+	}
+}
+
+// A model at a position, at one scale on every axis and unturned. What most
+// draws want, and the reason a game rarely has to build a Transform by hand.
+draw_model_at :: proc(model: Model, position: [3]f32, scale: f32 = 1, tint: [4]f32 = WHITE) {
+	draw_model(model, transform_at(position, scale = scale), tint)
+}

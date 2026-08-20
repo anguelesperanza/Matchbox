@@ -35,6 +35,8 @@ destroy :: proc {
 	destroy_font,
 	destroy_sound,
 	destroy_pixel_buffer,
+	destroy_model,
+	destroy_render_target,
 	destroy_image,
 	destroy_text_field,
 	sprite_cache_destroy,

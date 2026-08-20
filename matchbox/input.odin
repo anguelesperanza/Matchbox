@@ -6,6 +6,7 @@ package matchbox
 	This file contains all input related information.
 */
 
+import "core:log"
 import "core:strings"
 
 import sdl "vendor:sdl3"
@@ -69,8 +70,8 @@ Input :: struct {
 	// turns one finger into mouse events.
 	touches:      [MAX_TOUCHES]Touch,
 	touch_active: bool,
-	mouse_dx:   f32, // pixels/dpi (inches), right is positive
-	mouse_dy:   f32, // pixels/dpi (inches), up is positive
+	mouse_dx:   f32, // relative motion since the last poll, right is positive
+	mouse_dy:   f32, // relative motion since the last poll, up is positive
 	escape_key: sdl.Scancode, // closes the window when pressed
 
 	// What was typed during this poll_events, as utf-8. Per-frame like
@@ -317,6 +318,50 @@ get_mouse_position :: proc() -> [2]f32 {
 // Horizontal scroll, from tilt wheels and trackpads, is in `.x`.
 get_mouse_wheel :: proc() -> [2]f32 {
 	return mbi.input.mouse.wheel
+}
+
+/*
+	How far the pointer moved since the last `poll_events`, rather than where it
+	is now.
+
+	**Y is positive upward here**, which is the opposite of `get_mouse_position`
+	and of everything drawn. That is deliberate and it is the older of the two
+	conventions in this file: this is a look delta, and a look delta reading
+	"up is up" is what a camera wants. `get_gamepad_stick` says the same thing
+	from the other side.
+
+	The units are whatever SDL reports for relative motion, which is not the
+	same as the pixels `get_mouse_position` is converted into -- so this is a
+	number to multiply by a sensitivity, not one to add to a position.
+
+	Useful mostly with `set_cursor_locked`, since a pointer against the edge of
+	the screen stops producing motion while a locked one never runs out of room.
+*/
+get_mouse_delta :: proc() -> [2]f32 {
+	return {mbi.input.mouse_dx, mbi.input.mouse_dy}
+}
+
+/*
+	Hides the pointer and keeps it in the window, reporting only how far it
+	moved. What every first-person camera wants, and raylib's `DisableCursor`.
+
+	`get_mouse_delta` keeps working and is the only thing that does:
+	`get_mouse_position` freezes where the pointer was, because there is no
+	longer a pointer position to report. Unlock before drawing a menu.
+
+	Not to be confused with `capture_mouse`, which is a UI notion -- one widget
+	claiming the pointer for a frame so the things underneath do not also answer
+	the click. This one is the operating system's cursor.
+*/
+set_cursor_locked :: proc(locked: bool) {
+	if !sdl.SetWindowRelativeMouseMode(mbi.window, locked) {
+		log.errorf("could not %s the cursor: %s", "lock" if locked else "unlock", sdl.GetError())
+	}
+}
+
+// Whether the pointer is currently locked to the window.
+cursor_locked :: proc() -> bool {
+	return sdl.GetWindowRelativeMouseMode(mbi.window)
 }
 
 set_escape_key :: proc(key:sdl.Scancode) {

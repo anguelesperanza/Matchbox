@@ -222,8 +222,21 @@ uri_parse :: proc(uri: Uri, gltf_dir: string, allocator: runtime.Allocator) -> U
 
         switch encoding {
         case "base64":
-            data: []u8
-            if data, err := base64.decode(str_data[encoding_end_idx + 1:]); err != nil {
+            // MATCHBOX PATCH. This read:
+            //
+            //     data: []u8
+            //     if data, err := base64.decode(...); err != nil { return uri }
+            //     return data
+            //
+            // The `if` declared a *second* `data` scoped to itself, so a decode
+            // that succeeded returned the outer one, which is nil. Every
+            // embedded buffer and every embedded texture came back as zero
+            // bytes -- and silently, because the empty slice is a valid Uri.
+            //
+            // The allocator is passed through as well, so what `uri_free`
+            // deletes came from where it thinks it did.
+            data, decode_err := base64.decode(str_data[encoding_end_idx + 1:], allocator = allocator)
+            if decode_err != nil {
                 return uri
             }
             return data

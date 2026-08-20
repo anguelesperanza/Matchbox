@@ -13,6 +13,18 @@ Shaders :: struct {
 	outline: ^sdl.GPUShader,
 	font:    ^sdl.GPUShader,
 	shape:   ^sdl.GPUShader,
+
+	// 3D. The first vertex shader that is not `quad`, because it is the first
+	// thing that reads geometry instead of building it from a uniform block.
+	mesh:      ^sdl.GPUShader,
+	mesh_flat: ^sdl.GPUShader,
+	mesh_line: ^sdl.GPUShader,
+	mesh_textured: ^sdl.GPUShader,
+
+	// Post-processing. All three take the shared quad vertex shader.
+	post: ^sdl.GPUShader,
+	psx:  ^sdl.GPUShader,
+	vhs:  ^sdl.GPUShader,
 }
 
 /*
@@ -32,6 +44,26 @@ Pipelines :: struct {
 	outline: ^sdl.GPUGraphicsPipeline,
 	font:    ^sdl.GPUGraphicsPipeline,
 	shape:   ^sdl.GPUGraphicsPipeline, // ellipses and triangles, cut out in the fragment stage
+
+	// The odd one out, and the reason create_pipeline takes arguments now: it
+	// has its own vertex shader, a third vertex attribute, depth testing on,
+	// back faces culled, and a depth-stencil target the others do not have.
+	mesh:    ^sdl.GPUGraphicsPipeline,
+
+	// The same vertex shader and vertex layout as `mesh`, drawing line lists
+	// instead of triangles and shading them flat. Wireframes, bounding boxes
+	// and the ground grid.
+	line:    ^sdl.GPUGraphicsPipeline,
+
+	// The same again with a sampler, for a part that came out of a file with a
+	// base colour texture on it.
+	mesh_textured: ^sdl.GPUGraphicsPipeline,
+
+	// A render target drawn back over the window, with or without an effect on
+	// the way. Colour-only and depthless, like every other 2D pipeline.
+	post: ^sdl.GPUGraphicsPipeline,
+	psx:  ^sdl.GPUGraphicsPipeline,
+	vhs:  ^sdl.GPUGraphicsPipeline,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -74,6 +106,41 @@ Renderer :: struct {
 	bound_texture:  ^sdl.GPUTexture,
 	bound_sampler:  ^sdl.GPUSampler,
 	bound_quad:     bool, // the shared vertex and index buffers, which never change
+
+	// 3D. The depth texture is made the first time a game asks for a 3D pass
+	// and remade when the window changes size, so a program that never draws
+	// 3D never pays for one. See render3d.odin.
+	depth_texture: ^sdl.GPUTexture,
+	depth_format:  sdl.GPUTextureFormat, // .INVALID until the first one is made
+	depth_width:   i32,
+	depth_height:  i32,
+
+	// Where drawing is going: nil is the window, anything else is a texture the
+	// game is building. See render_target.odin.
+	target: ^Render_Target,
+
+	// Lights and fog, as the game last set them. Pushed to the GPU by
+	// begin_drawing_3d rather than when they are changed, so a game may set
+	// them anywhere -- including in the middle of building a frame. See
+	// light.odin.
+	lighting: Lighting_Data,
+
+	mode_3d:         bool, // true between begin_drawing_3d and end_drawing_3d
+	view_projection: matrix[4, 4]f32,
+	camera3d:        Camera3D,
+
+	// The shapes draw_cube and friends draw, built the first time one is asked
+	// for. Same reasoning as the depth texture: a game that draws no 3D should
+	// not be carrying a sphere it never uses. See shapes3d.odin.
+	unit_cube:       Model,
+	unit_cube_wires: Model,
+	unit_plane:      Model,
+	unit_sphere:     Model,
+
+	// draw_grid's one grid, rebuilt when the numbers it was asked for change.
+	grid:         Model,
+	grid_slices:  int,
+	grid_spacing: f32,
 }
 
 // Called after every BeginGPURenderPass. A new pass starts with nothing bound,
@@ -199,7 +266,7 @@ clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 	}
 
 	target := sdl.GPUColorTargetInfo{
-		texture     = r.swapchain,
+		texture     = current_color_texture(),
 		clear_color = {color[0], color[1], color[2], color[3]},
 		load_op     = .CLEAR,
 		store_op    = .STORE,
@@ -226,7 +293,7 @@ ensure_pass :: proc() {
 	if !r.frame_active || r.pass != nil do return
 
 	target := sdl.GPUColorTargetInfo{
-		texture  = r.swapchain,
+		texture  = current_color_texture(),
 		load_op  = .LOAD,
 		store_op = .STORE,
 	}

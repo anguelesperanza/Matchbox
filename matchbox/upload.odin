@@ -121,6 +121,11 @@ bind_quad_state :: proc(
 	r := &mbi.renderer
 	if !r.frame_active do return false
 
+	// A 2D pipeline declares no depth-stencil target and the 3D pass has one,
+	// so binding it here is a validation failure rather than a wrong picture.
+	// Draw the HUD after end_drawing_3d, which is the order both games use.
+	ensure(!r.mode_3d, "2D drawing cannot go between begin_drawing_3d and end_drawing_3d")
+
 	ensure_pass()
 	if r.pass == nil do return false
 

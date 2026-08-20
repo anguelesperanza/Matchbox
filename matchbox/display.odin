@@ -77,5 +77,8 @@ screen_size :: proc(size: [2]f32) -> [2]f32 {
 }
 
 screen_dims :: proc() -> [2]f32 {
-	return {cast(f32)mbi.window_width, cast(f32)mbi.window_height}
+	// The render target when one is bound, so that 2D drawn into a texture of
+	// a different size than the window lands inside it rather than off the
+	// edge. The window otherwise, which is every frame that has no target.
+	return current_target_size()
 }

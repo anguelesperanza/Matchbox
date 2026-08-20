@@ -90,6 +90,80 @@ Rect_Frag_Data :: struct #align(16) {
 	color: [4]f32,
 }
 
+// -----------------------------------------------------------------------
+// Types -- GPU data, 3D
+// -----------------------------------------------------------------------
+
+/*
+	A vertex of a real mesh, as opposed to a corner of the shared quad.
+
+	32 bytes, and the three attributes are the three every glTF primitive in
+	either game carries: POSITION, NORMAL, TEXCOORD_0. Nothing here is optional
+	-- a file that omits normals gets them generated at load rather than a
+	second vertex layout and a second pipeline to go with it.
+*/
+Vertex3D :: struct {
+	pos:    [3]f32,
+	normal: [3]f32,
+	uv:     [2]f32,
+}
+
+// 192 bytes: three whole matrices, one after another.
+//
+// The normal matrix is 4x4 rather than the 3x3 it mathematically is, because a
+// float3x3 in a cbuffer is three separate 16-byte rows with padding between
+// them -- which is the packing trap this file exists to warn about, for the
+// sake of saving 28 bytes once per draw.
+Mesh_Vert_Data :: struct #align(16) {
+	mvp:           matrix[4, 4]f32,
+	model:         matrix[4, 4]f32,
+	normal_matrix: matrix[4, 4]f32,
+}
+
+// 16 bytes.
+Mesh_Frag_Data :: struct #align(16) {
+	tint: [4]f32,
+}
+
+// 32 bytes. Shared by every post-processing shader, so one block serves all of
+// them and an effect that ignores a field simply ignores it.
+Post_Frag_Data :: struct #align(16) {
+	resolution: [2]f32, // the target, in pixels
+	grid:       [2]f32, // PSX: the coarse pixel grid
+	time:       f32,    // VHS: everything animated is driven from this
+	_pad:       [3]f32,
+}
+
+/*
+	One light, as the shader reads it. 48 bytes.
+
+	Everything is a [4]f32 and nothing is a [3]f32, which is the whole trick.
+	HLSL refuses to let a vector straddle a 16-byte boundary and silently pads
+	to avoid it, so a float3 followed by a float is 16 bytes or 32 depending on
+	rules that are easy to misremember -- and getting it wrong gives wrong
+	lighting rather than an error. Four floats everywhere means the two sides
+	agree by construction.
+
+	The spare components are not spare: `position.w` is whether the light is on,
+	and `target.w` is which kind it is.
+*/
+Light_Uniform :: struct #align(16) {
+	position: [4]f32, // xyz where it is,       w 1 when enabled
+	target:   [4]f32, // xyz what it points at, w 0 directional / 1 point
+	color:    [4]f32,
+}
+
+// 272 bytes: four lights and five more registers. Pushed to fragment slot 1
+// once per 3D pass, where the per-draw tint is slot 0.
+Lighting_Data :: struct #align(16) {
+	lights:    [MAX_LIGHTS]Light_Uniform,
+	ambient:   [4]f32, // rgb
+	view_pos:  [4]f32, // xyz, filled in from the active camera
+	fog_color: [4]f32, // rgb
+	fog_range: [4]f32, // x near, y far
+	flags:     [4]f32, // x how many lights are set, y 1 when fog is on
+}
+
 // GPU handle bundle — shared by Sprite, AnimationClip, and Font.
 //
 // The quad's vertices and indices used to live here, one identical copy per

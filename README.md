@@ -296,11 +296,17 @@ and pause/resume have not been exercised yet, and a game still has to cope with
 being handed the whole screen rather than the window size it asked for, so treat
 this as early rather than shipped.
 
-Set `ODIN_ANDROID_NDK` and `ODIN_ANDROID_SDK`, then once per machine:
+The Android build lives *inside* the `matchbox` folder, so dropping matchbox into
+a project brings it along -- there is nothing to copy separately and nothing at
+the root of this repository to point at.
+
+Set `ODIN_ANDROID_NDK` and `ODIN_ANDROID_SDK`, then run these once per copy of
+matchbox -- the binaries they produce live in the folder, so a matchbox copied
+into a new project needs them again:
 
 ```
-android.bat        cross-compiles stb for arm64 into libs\android
-android_sdl.bat    downloads the arm64 libSDL3.so and SDL's Java classes
+matchbox\android.bat        cross-compiles stb for arm64 into matchbox\android\libs
+matchbox\android_sdl.bat    downloads the arm64 libSDL3.so and SDL's Java classes
 ```
 
 `android_sdl.bat` reads the version out of `vendor:sdl3` itself, so the library
@@ -322,13 +328,29 @@ That drops them through to the `system:` form already written below it. Desktop
 builds are unaffected -- the gate is on the subtarget. The Android section of
 `improvements.md` has the full account.
 
-Then:
+Then, from your own project -- matchbox builds whatever directory it was dropped
+into, so there is no path to pass:
 
 ```
-android_apk.bat                    build examples\init-window
-android_apk.bat ui                 build examples\ui
-android_apk.bat ui install         build it, install it, launch it
+matchbox\android_apk.bat            builds the project, writes build\android\<name>.apk
+matchbox\android_apk.bat install    and installs and launches it over adb
 ```
+
+Give it a path to build something else. That is how this repository builds its
+own examples, since they sit beside matchbox rather than above it:
+
+```
+matchbox\android_apk.bat examples\ui
+matchbox\android_apk.bat examples\ui install
+matchbox\android_apk.bat C:\path\to\game install
+```
+
+The package name defaults to `org.matchbox.<folder>`, which is fine for a debug
+build and wrong for anything published -- set `MATCHBOX_ANDROID_PACKAGE` for
+that. Everything in the project that is not source is packaged as an asset,
+keeping its path, so `art\coin.png` is still read as `"art/coin.png"`; matchbox
+itself is excluded, since its fonts and shaders are already `#load`-ed into the
+binary.
 
 Your own game needs no Android-specific code. SDL's own Java activity is the
 entry point and looks for a symbol called `SDL_main`, and `matchbox/android.odin`

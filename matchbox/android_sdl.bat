@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Puts the Android arm64 libSDL3.so and SDL's Java classes into libs\android,
+REM Puts the Android arm64 libSDL3.so and SDL's Java classes into android\libs,
 REM taken from the official SDL release rather than from a copy kept here.
 REM
 REM Same argument as copy_sdl.bat, for the same reason: a checked-in binary goes
@@ -43,7 +43,7 @@ if not defined MIC (
 
 set "SDLVER=%MAJ%.%MIN%.%MIC%"
 set "URL=https://github.com/libsdl-org/SDL/releases/download/release-%SDLVER%/SDL3-devel-%SDLVER%-android.zip"
-set "DEST=%~dp0libs\android"
+set "DEST=%~dp0android\libs"
 set "WORK=%TEMP%\matchbox_sdl_android"
 
 echo === Fetching SDL %SDLVER% for Android ===
@@ -77,10 +77,10 @@ if not exist "%SO%" (
 )
 
 copy /y "%SO%" "%DEST%\libSDL3.so" >nul || exit /b 1
-echo -- libs\android\libSDL3.so
+echo -- android\libs\libSDL3.so
 
 copy /y "%WORK%\aar\classes.jar" "%DEST%\SDL3-classes.jar" >nul || exit /b 1
-echo -- libs\android\SDL3-classes.jar
+echo -- android\libs\SDL3-classes.jar
 
 rmdir /s /q "%WORK%"
 

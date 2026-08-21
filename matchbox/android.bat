@@ -1,7 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Cross-compiles vendor:stb for Android arm64 into libs\android.
+REM Cross-compiles vendor:stb for Android arm64 into android\libs, beside this
+REM script, so the archives travel with the matchbox folder they belong to.
 REM
 REM stb is the one dependency with no prebuilt Android binary anywhere, so this
 REM is a real cross-compile with the NDK's clang -- unlike SDL3, which ships an
@@ -59,7 +60,7 @@ if not exist "%SRC%" (
     exit /b 1
 )
 
-set "OUT=%~dp0libs\android"
+set "OUT=%~dp0android\libs"
 set "OBJ=%TEMP%\stb_android_obj"
 
 if not exist "%OUT%" mkdir "%OUT%"
@@ -86,5 +87,5 @@ for %%m in (
     call "%AR%" rcs "%OUT%\lib%%m.a" "%OBJ%\%%m.o" || exit /b 1
 )
 
-echo === Done: libs\android\libstb_*.a ===
+echo === Done: android\libs\libstb_*.a ===
 endlocal

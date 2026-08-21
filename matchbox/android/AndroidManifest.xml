@@ -25,10 +25,13 @@
 		android:hasCode="true"
 		android:allowBackup="true">
 
+		<!-- The theme matters: without one Android shows an ActionBar with the SDL
+		     window title in it, which silently eats the top of the screen. -->
 		<activity
 			android:name="org.libsdl.app.SDLActivity"
 			android:label="__LABEL__"
 			android:exported="true"
+			android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
 			android:alwaysRetainTaskState="true"
 			android:launchMode="singleInstance"
 			android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">

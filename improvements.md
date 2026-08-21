@@ -114,14 +114,14 @@ yet.
 
 ## Android -- It Runs
 
-examples\ui runs on a phone: SDL_GPU on Vulkan, stb_truetype text, a sprite read
-out of the apk, and a button that answers a finger. All fifteen examples build,
-TankMovement included.
+examples\ui runs on a phone, and so does a real game outside this repository:
+SDL_GPU on Vulkan, stb_truetype text, a sprite read out of the apk, and buttons
+that answer a finger. All fifteen examples build, TankMovement included.
 
-	android.bat                  cross-compile stb for arm64   once per machine
-	android_sdl.bat              fetch libSDL3.so + Java       once per machine
-	android_apk.bat ui           build examples\ui into an apk
-	android_apk.bat ui install   and push it to a device
+	matchbox\android.bat                  cross-compile stb, once per copy
+	matchbox\android_sdl.bat              fetch libSDL3.so + Java, once ditto
+	matchbox\android_apk.bat              build the project matchbox sits in
+	matchbox\android_apk.bat examples\ui  build something else, by path
 
 Three layers were supposed to be in the way. One was a compiler bug and is
 worked around, one was a download, and the third -- the one this file said to
@@ -165,9 +165,9 @@ underneath it:
 
 in `vendor/stb/image`, `vendor/stb/truetype` and `vendor/stb/rect_pack` --
 truetype imports rect_pack, so it comes along. That emits a plain `-lstb_image`,
-which resolves against `libs\android\libstb_image.a`, which is why android.bat
-writes the `lib` prefix. Desktop builds cannot be affected: the gate is on the
-subtarget, not the OS.
+which resolves against `matchbox\android\libs\libstb_image.a`, which is why
+android.bat writes the `lib` prefix. Desktop builds cannot be affected: the gate
+is on the subtarget, not the OS.
 
 **This is the one thing a fresh machine still needs done by hand**, and an Odin
 upgrade undoes it.
@@ -235,6 +235,48 @@ load.** `llvm-nm -D -u` over the .so, diffed against what libSDL3.so and the
 API-level sysroot's libc/libm/libandroid/liblog actually export, answers that on
 the desktop before the phone is involved at all. An empty diff is the goal.
 
+### And one that ran, and still looked wrong
+
+Worth its own note because nothing anywhere reported a problem. With no `theme`
+on the activity, Android gives it the default one -- which has an ActionBar, and
+puts the SDL window title in it. So every game started with a couple of hundred
+pixels of system chrome across the top, in a colour it did not choose, and the
+surface simply began underneath. It reads as "the game is drawing a title bar"
+until you notice the colour survives `clear_background`.
+
+`@android:style/Theme.NoTitleBar.Fullscreen` on the activity, which is a built-in
+theme and so costs no `res` directory of our own.
+
+### Where the build lives, and why it moved
+
+All of this started at the repository root, which was wrong the moment a game
+outside the repository wanted it: matchbox is meant to be a folder you drop into
+a project, and half its Android support was sitting somewhere you could not drop.
+
+It is all inside `matchbox\` now -- the three scripts, the manifest, the debug
+key, and `android\libs` for the stb archives and libSDL3.so. Copy the folder,
+get Android with it.
+
+The argument that follows is what the default target should be, and the answer
+is the directory matchbox was dropped into:
+
+	some_game\matchbox\android_apk.bat      builds some_game
+
+which reads correctly at the call site and needs no configuration file to say
+where the project is. This repository is the awkward case rather than the normal
+one -- its examples sit *beside* matchbox instead of above it -- so a path
+argument overrides the default, and `matchbox\android_apk.bat examples\ui` is how
+the examples are built. Output goes to the game's own `build\android`, since it
+belongs to the game and not to the framework.
+
+Two details that only show up once the framework is inside the project it builds:
+matchbox has to be excluded when staging assets, or every game ships a second
+copy of the fonts and shaders that are already `#load`-ed into its binary; and
+the package name has to come from somewhere, which is `org.matchbox.<folder>`
+unless `MATCHBOX_ANDROID_PACKAGE` says otherwise. That default is fine for a
+debug build and wrong for anything published, which is worth remembering before
+the first store upload rather than after.
+
 ### Getting anything out of the phone
 
 Worth writing down separately, because it cost more time than any of the bugs.
@@ -258,11 +300,14 @@ got narrowed down at all: the process existed, held 137MB, and had accumulated
 Verified on the device, by screenshot and by tapping it:
 
 	SDL_GPU on Vulkan     the whole UI example renders
-	stb_truetype          text, from the embedded Silver font
+	stb_truetype          text, from the embedded default font
 	stb_image + assets    art\ember.png read back as "art/ember.png" out of the
 	                      apk, through read_entire_file and SDL's IOStream
 	touch                 a tap on a button incremented its counter, so SDL's
 	                      finger-to-mouse synthesis reaches the hit testing
+	a real game           ClickCoin, which lives outside this repository and
+	                      knows nothing about Android: tapping the coin moved it
+	                      and took the counter from 0 to 1
 
 Not yet looked at: audio, gamepads, and what happens on pause and resume when the
 surface is destroyed and recreated -- which is the one that tends to matter,

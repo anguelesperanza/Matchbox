@@ -431,6 +431,89 @@ maths underneath would not change.
 	                  Whichever default is chosen, it is worth knowing how many
 	                  of them actually care.
 
+## [do not do] Volumes, Which Means NanoVDB And Not OpenVDB
+
+Parked deliberately. Asked as a theory question, answered as one, and written
+down so the answer does not have to be re-derived -- not because anything here
+is planned. **Do not start this.**
+
+### OpenVDB itself is out, and that is the useful half of the answer
+
+OpenVDB is C++: templates, TBB, Blosc, zlib, Half. Odin has no C++ ABI, so using
+it means hand-writing a C shim and then cross-compiling that whole dependency
+stack for every target. stb is one archive and it already costs a compiler patch
+and a per-machine setup step; this would be several libraries, and arm64 builds
+of all of them. That is the end of that road.
+
+### NanoVDB is a different proposition
+
+The ASWF's own GPU-oriented subset. A `.nvdb` grid is one flat, pointer-free,
+self-contained buffer, built to be copied to a GPU and read there. Two things
+follow, and they are what make this worth writing down at all:
+
+**Nothing parses it.** `read_entire_file`, upload, done. No foreign import, no
+new archive, nothing to cross-compile -- so Android would be exactly as easy as
+the desktop, which is not true of any other way of getting volumes in.
+
+**The conversion is offline.** `nanovdb_convert`, or a Houdini or Blender export,
+turns `.vdb` into `.nvdb` on a workstation. The heavy C++ never ships.
+
+### SDL3 already has the pieces
+
+Checked in the bindings rather than assumed:
+
+	CreateGPUComputePipeline        compute pipelines exist
+	BeginGPUComputePass             and passes for them
+	DispatchGPUCompute
+	BindGPUFragmentStorageBuffers   read-only storage buffers, bindable to
+	BindGPUComputeStorageBuffers    either stage
+	GRAPHICS_STORAGE_READ           the buffer usage flags to match
+	COMPUTE_STORAGE_READ
+
+So the grid binds as a read-only storage buffer and is read from a fragment or a
+compute shader. Nothing is missing at the SDL level.
+
+### The part that fits unusually well
+
+NanoVDB ships **PNanoVDB**, a reader header that compiles *as HLSL*. Shaders here
+are already HLSL through dxc to SPIR-V and DXIL, and `lighting.hlsli` proves
+includes work, so it would be `#include` and a ray-march loop. Most engines have
+to port PNanoVDB to whatever dialect they use; this one would not.
+
+### What would actually have to be built
+
+	storage buffers      create, upload, bind. Matchbox has none -- no
+	                     StorageBuffer, no ComputePipeline, nothing. This is the
+	                     real new surface, and it is worth more than volumes are:
+	                     it is what anything data-driven on the GPU needs.
+
+	a compute stage      build_shaders.bat globs *.vert.hlsl and *.frag.hlsl and
+	                     nothing else. A *.comp.hlsl arm with -T cs_6_0 is a few
+	                     lines. Skippable at first by ray-marching in a fragment
+	                     shader over a proxy box.
+
+	depth                begin_drawing_3d owns a depth buffer already, so a proxy
+	                     box depth-tests against meshes for free. Volume and
+	                     geometry actually intersecting needs the depth buffer
+	                     read inside the shader, which is a step past that.
+
+### Why it is parked
+
+Two reasons, and the second is the one that decides it.
+
+**Size.** Production clouds run to hundreds of megabytes. That is a GPU
+allocation and an apk that cannot ship. Volumes for a phone would have to be
+authored small on purpose, which makes this an art-pipeline commitment and not
+just a rendering one.
+
+**Cost.** Ray-marching a sparse volume is many samples per pixel with dependent
+memory reads -- the shape of effect that is fine at 1080p on a desktop GPU and
+brutal on a phone. Having just made Android real, adding the one feature least
+likely to run there is the wrong order.
+
+If any of this gets picked up, **the storage buffer work is the part to do
+first**, on its own merits, with volumes as a thing it might later allow.
+
 ## Remove / Reduce AI Code
 
 While I wrote a chunk of this, so did Claude. I'd like to

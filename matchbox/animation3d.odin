@@ -22,6 +22,7 @@ package matchbox
 	unrelated to any of this.
 */
 
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -203,6 +204,73 @@ animation_index :: proc(model: Model, name: string) -> (index: int, found: bool)
 		if clip.name == name do return i, true
 	}
 	return -1, false
+}
+
+/*
+	What the clips in a model are called, in the order `play_animation_index`
+	numbers them.
+
+	For building something out of them -- a menu, a debug list, a test that
+	plays each in turn. To *see* them while working out what an export
+	contains, `print_animations` is the one to reach for.
+
+	The slice is temp-allocated and lasts until the next `free_all` on the temp
+	allocator, which for a game is the end of the frame. The strings inside it
+	are the model's own and live as long as the model does, so keeping one past
+	the frame is fine and keeping the slice is not.
+*/
+animation_names :: proc(model: Model, allocator := context.temp_allocator) -> []string {
+	names := make([]string, len(model.animations), allocator)
+	for clip, i in model.animations do names[i] = clip.name
+	return names
+}
+
+/*
+	Prints what a model's skeleton and clips are, to stdout.
+
+	A working tool rather than something to ship: exporters name clips whatever
+	they feel like, and the alternative to this is guessing at
+	`play_animation("Walk")` and reading the error when it misses.
+
+	Reports the skeleton first, because "no animations" and "no skeleton at all"
+	are different problems with the same symptom -- the second one usually means
+	the mesh was exported without its armature.
+*/
+print_animations :: proc(model: Model) {
+	if !model_is_skinned(model) {
+		fmt.println("model has no skeleton: nothing here can be animated")
+
+		// A file can carry clips with no skin to drive -- they would move nodes
+		// that no vertex is weighted to. Saying so is more use than silence,
+		// because it means the armature was exported and the weights were not.
+		if len(model.animations) > 0 {
+			fmt.printfln("  (it does carry %v animation(s), with nothing skinned for them to move)",
+				len(model.animations))
+		}
+		return
+	}
+
+	joints := 0
+	for skin in model.skeleton.skins do joints = max(joints, len(skin.joints))
+
+	fmt.printfln("model: %v nodes, %v skin(s), %v joints in the largest, %v part(s)",
+		len(model.skeleton.rest), len(model.skeleton.skins), joints, len(model.parts))
+
+	if len(model.animations) == 0 {
+		fmt.println("no animations: the file has a skeleton but no clips to move it")
+		return
+	}
+
+	fmt.printfln("%v animation(s):", len(model.animations))
+
+	for clip, i in model.animations {
+		// glTF lets an animation go unnamed, and Matchbox keeps the empty
+		// string rather than inventing one. `play_animation` cannot find a clip
+		// with no name, so the index is the only way in and the line says so.
+		name := clip.name if clip.name != "" else "(unnamed -- use play_animation_index)"
+
+		fmt.printfln("  [%v] %-32s %6.2fs  %v tracks", i, name, clip.duration, len(clip.tracks))
+	}
 }
 
 /*

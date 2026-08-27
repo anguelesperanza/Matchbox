@@ -1426,7 +1426,36 @@ mesh_primitives_parse :: proc(array: json.Array) -> (res: []Mesh_Primitive, err:
                 res[idx].mode = Mesh_Primitive_Mode(val.(f64))
 
             case "targets":
-                res[idx].targets = mesh_targets_parse(val.(json.Object)) or_return
+                // MATCHBOX PATCH. This read:
+                //
+                //     res[idx].targets = mesh_targets_parse(val.(json.Object)) or_return
+                //
+                // Two things wrong with it, and either one is a crash on any
+                // file that has morph targets -- which is every character
+                // exported from VRoid, because its facial expressions are
+                // blend shapes.
+                //
+                // `targets` is a JSON *array* of objects, one per morph
+                // target, not an object -- so the assertion above panics with
+                // "Invalid type assertion from Value to Object, actual type:
+                // Array" before the parse is even attempted. And
+                // `mesh_targets_parse` is `unimplemented`, so a file that got
+                // past the assertion would panic one line later. The
+                // `Mesh_Target` type it would fill in is marked "TODO: Verify
+                // if this is correct" in types.odin and does not match the
+                // shape the spec describes, which is a plain map of attribute
+                // name to accessor index exactly like `attributes`.
+                //
+                // Skipped rather than parsed, because Matchbox has nothing to
+                // do with the answer: morph targets are blend shapes, blend
+                // shapes need a shader that interpolates between them, and
+                // that is the same feature as skeletal animation, which 3d.md
+                // lists under "Not doing". The mesh still loads -- its base
+                // POSITION and NORMAL are what `model_load.odin` reads -- and
+                // arrives in its neutral pose, which is the right answer for
+                // an engine that cannot blend it into any other.
+                //
+                // `res[idx].targets` is left nil. Nothing in Matchbox reads it.
 
             case EXTENSIONS_KEY:
                 res[idx].extensions = val

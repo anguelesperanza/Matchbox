@@ -21,6 +21,10 @@ Shaders :: struct {
 	mesh_line: ^sdl.GPUShader,
 	mesh_textured: ^sdl.GPUShader,
 
+	// mesh.vert with a skeleton in front of it. Shares every fragment shader
+	// the unskinned one uses -- only the vertex stage differs.
+	mesh_skinned: ^sdl.GPUShader,
+
 	// Post-processing. All three take the shared quad vertex shader.
 	post: ^sdl.GPUShader,
 	psx:  ^sdl.GPUShader,
@@ -58,6 +62,12 @@ Pipelines :: struct {
 	// The same again with a sampler, for a part that came out of a file with a
 	// base colour texture on it.
 	mesh_textured: ^sdl.GPUGraphicsPipeline,
+
+	// The two above again, for parts a skeleton deforms. Two rather than one for
+	// the same reason there are two unskinned ones: a part with a texture and a
+	// part without want different fragment shaders, and that is a pipeline.
+	mesh_skinned:          ^sdl.GPUGraphicsPipeline,
+	mesh_skinned_textured: ^sdl.GPUGraphicsPipeline,
 
 	// A render target drawn back over the window, with or without an effect on
 	// the way. Colour-only and depthless, like every other 2D pipeline.

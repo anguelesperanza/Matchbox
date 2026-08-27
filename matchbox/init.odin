@@ -165,8 +165,9 @@ create_builtin_shader :: proc(
 // Which geometry a pipeline reads: the shared quad, or a model's own vertices.
 @(private)
 Vertex_Layout :: enum {
-	QUAD, // Vertex   -- position and uv, the four corners every 2D draw uses
-	MESH, // Vertex3D -- position, normal and uv, a model's own buffer
+	QUAD,    // Vertex           -- position and uv, the four corners every 2D draw uses
+	MESH,    // Vertex3D         -- position, normal and uv, a model's own buffer
+	SKINNED, // Vertex3D_Skinned -- the same three, plus four joints and their weights
 }
 
 /*
@@ -197,28 +198,55 @@ create_pipeline :: proc(
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
-	pitch: u32 = size_of(Vertex) if layout == .QUAD else size_of(Vertex3D)
+	pitch: u32
+	switch layout {
+	case .QUAD:    pitch = size_of(Vertex)
+	case .SKINNED: pitch = size_of(Vertex3D_Skinned)
+	case .MESH:    fallthrough
+	case:          pitch = size_of(Vertex3D)
+	}
 
 	vertex_buffers := [1]sdl.GPUVertexBufferDescription{
 		{slot = 0, pitch = pitch, input_rate = .VERTEX},
 	}
 
-	// Three attributes for a mesh, two for the quad. The mesh's third is the
-	// one the quad has no room for: a normal.
-	attributes := [3]sdl.GPUVertexAttribute{
+	// Five attributes for a skinned mesh, three for a plain one, two for the
+	// quad. The mesh's third is the one the quad has no room for -- a normal --
+	// and the skinned pair after that are the joints and their weights.
+	attributes := [5]sdl.GPUVertexAttribute{
 		{location = 0, buffer_slot = 0, format = .FLOAT3, offset = 0},
 		{location = 1, buffer_slot = 0, format = .FLOAT2, offset = size_of([3]f32)},
-		{},
+		{}, {}, {},
 	}
 	num_attributes: u32 = 2
 
-	if layout == .MESH {
+	switch layout {
+	case .MESH:
 		attributes = {
 			{location = 0, buffer_slot = 0, format = .FLOAT3, offset = 0},
 			{location = 1, buffer_slot = 0, format = .FLOAT3, offset = size_of([3]f32)},
 			{location = 2, buffer_slot = 0, format = .FLOAT2, offset = size_of([3]f32) * 2},
+			{}, {},
 		}
 		num_attributes = 3
+
+	case .SKINNED:
+		// Offsets taken from the type rather than written out, because the two
+		// have to agree exactly and a hand-counted byte is a silent
+		// misreading of every vertex rather than an error.
+		attributes = {
+			{location = 0, buffer_slot = 0, format = .FLOAT3,  offset = u32(offset_of(Vertex3D_Skinned, pos))},
+			{location = 1, buffer_slot = 0, format = .FLOAT3,  offset = u32(offset_of(Vertex3D_Skinned, normal))},
+			{location = 2, buffer_slot = 0, format = .FLOAT2,  offset = u32(offset_of(Vertex3D_Skinned, uv))},
+			{location = 3, buffer_slot = 0, format = .USHORT4, offset = u32(offset_of(Vertex3D_Skinned, joints))},
+			{location = 4, buffer_slot = 0, format = .FLOAT4,  offset = u32(offset_of(Vertex3D_Skinned, weights))},
+		}
+		num_attributes = 5
+
+	case .QUAD:
+		fallthrough
+	case:
+		// Already filled in above.
 	}
 
 	color_targets := [1]sdl.GPUColorTargetDescription{
@@ -454,6 +482,11 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.mesh_textured = create_builtin_shader(
 		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 1, 2)
 
+	// Two uniform buffers rather than one: the three matrices every mesh vertex
+	// shader takes, and the joint palette behind them.
+	mbi.renderer.shaders.mesh_skinned = create_builtin_shader(
+		#load("shaders/mesh_skinned.vert.spv"), #load("shaders/mesh_skinned.vert.dxil"), .VERTEX, 0, 2)
+
 	// Asked before any pipeline is built, because a depth-testing pipeline has
 	// to name the format it will be used with and the answer cannot change
 	// afterwards. It is a capability query and allocates nothing, so a game
@@ -482,6 +515,22 @@ init :: proc(title: string, width: i32, height: i32) {
 		mbi.renderer.shaders.mesh_textured,
 		vertex = mbi.renderer.shaders.mesh,
 		layout = .MESH,
+		depth  = true,
+		cull   = .BACK,
+	)
+
+	mbi.renderer.pipelines.mesh_skinned = create_pipeline(
+		mbi.renderer.shaders.mesh_flat,
+		vertex = mbi.renderer.shaders.mesh_skinned,
+		layout = .SKINNED,
+		depth  = true,
+		cull   = .BACK,
+	)
+
+	mbi.renderer.pipelines.mesh_skinned_textured = create_pipeline(
+		mbi.renderer.shaders.mesh_textured,
+		vertex = mbi.renderer.shaders.mesh_skinned,
+		layout = .SKINNED,
 		depth  = true,
 		cull   = .BACK,
 	)
@@ -570,6 +619,8 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.mesh    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh)
 	if mbi.renderer.pipelines.line    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.line)
 	if mbi.renderer.pipelines.mesh_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_textured)
+	if mbi.renderer.pipelines.mesh_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned)
+	if mbi.renderer.pipelines.mesh_skinned_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned_textured)
 	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
@@ -584,6 +635,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.mesh_flat != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_flat)
 	if mbi.renderer.shaders.mesh_line != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_line)
 	if mbi.renderer.shaders.mesh_textured != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_textured)
+	if mbi.renderer.shaders.mesh_skinned != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_skinned)
 	if mbi.renderer.shaders.post != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.post)
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)

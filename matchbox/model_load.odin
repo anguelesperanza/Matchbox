@@ -115,7 +115,7 @@ model_from_gltf :: proc(data: ^gltf.Data) -> Model {
 		}
 	} else {
 		for _, mesh_index in data.meshes {
-			gather_mesh(data, gltf.Integer(mesh_index), linalg.MATRIX4F32_IDENTITY, &parts, &uploaded, &low, &high)
+			gather_mesh(data, gltf.Integer(mesh_index), linalg.MATRIX4F32_IDENTITY, &parts, &uploaded, &low, &high, 0, nil)
 		}
 	}
 
@@ -124,7 +124,13 @@ model_from_gltf :: proc(data: ^gltf.Data) -> Model {
 		return {}
 	}
 
-	return Model{parts = parts[:], bounds_min = low, bounds_max = high}
+	return Model{
+		parts      = parts[:],
+		bounds_min = low,
+		bounds_max = high,
+		skeleton   = build_skeleton(data),
+		animations = build_animations(data),
+	}
 }
 
 /*
@@ -154,7 +160,7 @@ gather_node :: proc(
 	})
 
 	if mesh, has_mesh := node.mesh.?; has_mesh {
-		gather_mesh(data, mesh, world, parts, uploaded, low, high)
+		gather_mesh(data, mesh, world, parts, uploaded, low, high, index, node.skin)
 	}
 
 	for child in node.children {
@@ -171,6 +177,8 @@ gather_mesh :: proc(
 	parts:    ^[dynamic]Model_Part,
 	uploaded: ^map[gltf.Integer]^sdl.GPUTexture,
 	low, high: ^[3]f32,
+	node:     gltf.Integer,
+	skin:     Maybe(gltf.Integer),
 ) {
 	if int(index) >= len(data.meshes) do return
 
@@ -183,6 +191,30 @@ gather_mesh :: proc(
 		// Triangles only. A file may hold line or point primitives and they are
 		// skipped rather than drawn wrongly.
 		if primitive.mode != .Triangles do continue
+
+		/*
+			A skinned primitive takes the other path entirely. Its vertices
+			belong to the skin's space and the joint matrices are what put them
+			anywhere, so baking this node's transform into them -- which is what
+			`primitive_part` exists to do -- would apply the arrangement twice.
+
+			glTF says as much: the transform of a node with a skinned mesh is
+			not applied to the mesh. `animator_resolve` divides it back out.
+		*/
+		skin_index, has_skin := skin.?
+		if has_skin && "JOINTS_0" in primitive.attributes {
+			part, vertices, made := skinned_primitive_part(
+				data, primitive, int(skin_index), u32(node), uploaded)
+			if !made do continue
+
+			for v in vertices {
+				low^  = {min(low.x,  v.pos.x), min(low.y,  v.pos.y), min(low.z,  v.pos.z)}
+				high^ = {max(high.x, v.pos.x), max(high.y, v.pos.y), max(high.z, v.pos.z)}
+			}
+
+			append(parts, part)
+			continue
+		}
 
 		part, vertices, made := primitive_part(data, primitive, world, normal_matrix, uploaded)
 		if !made do continue
@@ -240,6 +272,89 @@ primitive_part :: proc(
 	indices := read_indices(data, primitive, count)
 
 	part = upload_mesh(vertices, indices)
+	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
+
+	return part, vertices, true
+}
+
+/*
+	One skinned primitive: the same three attributes, plus the joints and
+	weights, and no node transform baked in.
+
+	The bounds measured off these are the bind pose -- the shape the character
+	was modelled in, arms out. That is the right answer for the thing bounds are
+	for here, which is standing a model on the ground: a walk cycle moves the
+	feet a few centimetres and a bounding box that breathed with the animation
+	would make the model bob.
+*/
+@(private)
+skinned_primitive_part :: proc(
+	data:      ^gltf.Data,
+	primitive: gltf.Mesh_Primitive,
+	skin:      int,
+	node:      u32,
+	uploaded:  ^map[gltf.Integer]^sdl.GPUTexture,
+) -> (part: Model_Part, vertices: []Vertex3D_Skinned, ok: bool) {
+	position_accessor, has_position := primitive.attributes["POSITION"]
+	if !has_position {
+		log.error("skinned primitive has no POSITION, skipped")
+		return {}, nil, false
+	}
+
+	positions := read_vec3(data, position_accessor) or_return
+	count     := len(positions)
+
+	normals := read_vec3_optional(data, primitive.attributes, "NORMAL", count)
+	uvs     := read_vec2_optional(data, primitive.attributes, "TEXCOORD_0", count)
+	joints  := read_joints(data, primitive.attributes, count)
+	weights := read_weights(data, primitive.attributes, count)
+
+	/*
+		How many joints the palette this part will be drawn with actually holds.
+		A vertex naming a joint past that reads off the end of a cbuffer array,
+		which is not a crash and not a validation error -- it is whatever the
+		last draw left there, so the character has one limb somewhere else
+		entirely and nothing says why.
+
+		Out of range is either a file whose skin and mesh disagree or a misread
+		accessor on this side. Clamped to zero and reported once, because a
+		vertex pinned to the root joint is a visible seam rather than a
+		character stretched across the map.
+	*/
+	joint_limit := u16(MAX_JOINTS)
+	if skin >= 0 && skin < len(data.skins) {
+		joint_limit = u16(min(len(data.skins[skin].joints), MAX_JOINTS))
+	}
+
+	out_of_range := 0
+
+	vertices = make([]Vertex3D_Skinned, count, context.temp_allocator)
+	for i in 0 ..< count {
+		joint := joints[i]
+		for k in 0 ..< 4 {
+			if joint[k] >= joint_limit {
+				joint[k] = 0
+				out_of_range += 1
+			}
+		}
+
+		vertices[i] = Vertex3D_Skinned{
+			pos     = positions[i],
+			normal  = normals[i],
+			uv      = uvs[i],
+			joints  = joint,
+			weights = weights[i],
+		}
+	}
+
+	if out_of_range > 0 {
+		log.errorf("skinned primitive names %v joint indices past the skin's %v joints; those weights were dropped",
+			out_of_range, joint_limit)
+	}
+
+	indices := read_indices(data, primitive, count)
+
+	part = upload_skinned_mesh(vertices, indices, skin, node)
 	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
 
 	return part, vertices, true

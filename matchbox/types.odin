@@ -108,6 +108,51 @@ Vertex3D :: struct {
 	uv:     [2]f32,
 }
 
+/*
+	A vertex of a skinned mesh: the same three attributes, plus the four joints
+	that move it and how much each of them gets a say.
+
+	56 bytes, against Vertex3D's 32. A separate type and a separate pipeline
+	rather than two more fields on Vertex3D, because every cube, plane, sphere
+	and unskinned model in every game would otherwise carry twenty-four bytes of
+	zeroes per vertex for a feature it does not use. The line pipeline set the
+	precedent: a part knows what it is and the draw call picks accordingly.
+
+	`joints` indexes the *skin's joint list*, not the node list -- see
+	`Model_Skin`. u16 because glTF allows either byte or short and a short is
+	what an exporter reaches for past 255 joints; the shader takes them as
+	floats either way, since a cbuffer array cannot be indexed by anything else.
+*/
+Vertex3D_Skinned :: struct {
+	pos:     [3]f32,
+	normal:  [3]f32,
+	uv:      [2]f32,
+	joints:  [4]u16,
+	weights: [4]f32,
+}
+
+/*
+	How many joints one skinned draw can name.
+
+	128 is 8KB of matrices, which fits inside the 16KB uniform block Vulkan
+	guarantees with room to spare, and is comfortably past what a character rig
+	needs -- the VRoid model this was written against has 66, and that is a
+	humanoid skeleton plus hair and skirt bones.
+
+	A skin with more than this loads with the excess joints dropped and says so,
+	rather than writing past the block and corrupting whatever follows it.
+*/
+MAX_JOINTS :: 128
+
+// 8192 bytes: the joint matrix palette, pushed once per skinned part.
+//
+// A fixed array rather than a storage buffer, for the same reason the lighting
+// block is fixed: it keeps the backend requirements to what SDL guarantees
+// everywhere, and 8KB a part is nothing next to the vertex data it deforms.
+Skin_Vert_Data :: struct #align(16) {
+	joints: [MAX_JOINTS]matrix[4, 4]f32,
+}
+
 // 192 bytes: three whole matrices, one after another.
 //
 // The normal matrix is 4x4 rather than the 3x3 it mathematically is, because a

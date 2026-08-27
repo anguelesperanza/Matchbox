@@ -52,6 +52,19 @@ Model_Part :: struct {
 	// the flat pipeline in its tint alone.
 	texture:     ^sdl.GPUTexture,
 	sampler:     ^sdl.GPUSampler,
+
+	/*
+		Which skin deforms this part, and which node its mesh hangs off. `skin`
+		is -1 for everything that is not skinned, which is every cube, every
+		plane, and every part of every model that has no skeleton.
+
+		A skinned part's vertices are `Vertex3D_Skinned` rather than `Vertex3D`
+		and go through their own pipeline, so this is what the draw call
+		switches on. `node` is only read to complete glTF's joint matrix
+		formula -- see `animator_resolve`.
+	*/
+	skin:        int,
+	node:        u32,
 }
 
 /*
@@ -67,6 +80,12 @@ Model :: struct {
 	parts:      []Model_Part,
 	bounds_min: [3]f32,
 	bounds_max: [3]f32,
+
+	// Empty unless the file carried a skin. See `animation3d.odin` -- the
+	// skeleton is the rest pose and the hierarchy, the animations are the
+	// clips, and neither changes once loaded. What moves is an `Animator`.
+	skeleton:   Skeleton,
+	animations: []Model_Animation,
 }
 
 // The middle of the model's own bounds, and how big it is. What a game hands to
@@ -95,6 +114,7 @@ upload_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topol
 		indices     = upload_buffer(raw_data(indices),  u32(len(indices)  * size_of(u32)),      {.INDEX}),
 		index_count = u32(len(indices)),
 		topology    = topology,
+		skin        = -1,
 	}
 }
 
@@ -115,6 +135,12 @@ model_from_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_T
 }
 
 destroy_model :: proc(model: ^Model) {
+	// Freed before the early return below, because a skeleton is plain memory
+	// and does not care whether there is still a GPU to give buffers back to.
+	destroy_skeleton(&model.skeleton)
+	destroy_animations(model.animations)
+	model.animations = nil
+
 	device := mbi.renderer.device
 	if device == nil do return
 

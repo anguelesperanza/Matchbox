@@ -200,8 +200,19 @@ current_camera3d :: proc() -> Camera3D {
 	One uniform push per part rather than per model, because a part is a draw
 	call and the uniforms travel with it. The matrices are worked out once for
 	the whole model, since all its parts share a transform.
+
+	`animator` is the pose to draw a skinned model in, and is ignored by a model
+	with no skeleton. Passing nil for one that has a skeleton draws it in its
+	bind pose -- arms out, which is a legible "you forgot the animator" rather
+	than a crash or an empty screen. A game with two characters sharing a model
+	passes a different animator for each; see `animation3d.odin`.
 */
-draw_model :: proc(model: Model, transform: Transform, tint: [4]f32 = WHITE) {
+draw_model :: proc(
+	model:     Model,
+	transform: Transform,
+	tint:      [4]f32 = WHITE,
+	animator:  ^Animator = nil,
+) {
 	r := &mbi.renderer
 	if !r.frame_active || r.pass == nil do return
 
@@ -223,16 +234,26 @@ draw_model :: proc(model: Model, transform: Transform, tint: [4]f32 = WHITE) {
 
 	frag_data := Mesh_Frag_Data{tint = tint}
 
-	for part in model.parts {
+	// Reused across the parts rather than declared inside the loop: it is eight
+	// kilobytes, and a fresh one per part would be eight kilobytes of stack
+	// zeroed thirteen times for a character.
+	skin_data: Skin_Vert_Data
+
+	for part, part_index in model.parts {
 		if part.vertices == nil || part.indices == nil do continue
 
+		skinned := part.skin >= 0
+
 		// Per part rather than per model: a part says whether it is lines or
-		// triangles and whether it has a texture, and between them those decide
-		// the pipeline. One loaded file routinely holds parts that differ.
+		// triangles, whether it has a texture, and whether a skeleton deforms
+		// it, and between them those decide the pipeline. One loaded file
+		// routinely holds parts that differ.
 		pipeline := r.pipelines.mesh
 		switch {
-		case part.topology == .LINES: pipeline = r.pipelines.line
-		case part.texture != nil:     pipeline = r.pipelines.mesh_textured
+		case part.topology == .LINES:      pipeline = r.pipelines.line
+		case skinned && part.texture != nil: pipeline = r.pipelines.mesh_skinned_textured
+		case skinned:                      pipeline = r.pipelines.mesh_skinned
+		case part.texture != nil:          pipeline = r.pipelines.mesh_textured
 		}
 
 		if r.bound_pipeline != pipeline {
@@ -263,12 +284,45 @@ draw_model :: proc(model: Model, transform: Transform, tint: [4]f32 = WHITE) {
 		sdl.PushGPUVertexUniformData(r.cmd, 0, &vert_data, size_of(vert_data))
 		sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
 
+		if skinned {
+			/*
+				The palette this part's shader reads. Identity for every joint
+				unless an animator was passed with one worked out for this part,
+				which is what makes a skinned model drawn without an animator
+				come out in its bind pose: a joint matrix of identity leaves the
+				vertex exactly where the file put it.
+
+				The whole block is pushed, used entries or not. A cbuffer array
+				is a fixed size to the shader, and a short push leaves whatever
+				the last one wrote in the entries past the end -- which is a
+				character stretched across the map the moment two models with
+				different joint counts are drawn in the same frame.
+			*/
+			for i in 0 ..< MAX_JOINTS do skin_data.joints[i] = linalg.MATRIX4F32_IDENTITY
+
+			if animator != nil && part_index < len(animator.palettes) {
+				palette := animator.palettes[part_index]
+				for m, i in palette {
+					if i >= MAX_JOINTS do break
+					skin_data.joints[i] = m
+				}
+			}
+
+			sdl.PushGPUVertexUniformData(r.cmd, 1, &skin_data, size_of(skin_data))
+		}
+
 		sdl.DrawGPUIndexedPrimitives(r.pass, part.index_count, 1, 0, 0, 0)
 	}
 }
 
 // A model at a position, at one scale on every axis and unturned. What most
 // draws want, and the reason a game rarely has to build a Transform by hand.
-draw_model_at :: proc(model: Model, position: [3]f32, scale: f32 = 1, tint: [4]f32 = WHITE) {
-	draw_model(model, transform_at(position, scale = scale), tint)
+draw_model_at :: proc(
+	model:    Model,
+	position: [3]f32,
+	scale:    f32 = 1,
+	tint:     [4]f32 = WHITE,
+	animator: ^Animator = nil,
+) {
+	draw_model(model, transform_at(position, scale = scale), tint, animator)
 }

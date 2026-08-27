@@ -199,13 +199,24 @@ camera3d_angles :: proc(camera: Camera3D) -> (yaw, pitch: f32) {
 	Pitch is clamped; yaw is not, and is free to wind past a full turn. Nothing
 	downstream cares -- sin and cos do not -- and clamping it would put an
 	invisible wall in the middle of turning around.
+
+	The clamp is a pair of arguments rather than the constant, because a
+	third-person camera wants a different one: its pitch swings the camera
+	above and below the character instead of tilting a head, so straight down
+	is useful and straight up puts the camera under the floor. See
+	`ORBIT_PITCH_MIN` and `ORBIT_PITCH_MAX`.
 */
-camera3d_look :: proc(yaw, pitch: ^f32, sensitivity: f32 = MOUSE_SENSITIVITY) {
+camera3d_look :: proc(
+	yaw, pitch:  ^f32,
+	sensitivity: f32 = MOUSE_SENSITIVITY,
+	pitch_min:   f32 = -PITCH_LIMIT,
+	pitch_max:   f32 =  PITCH_LIMIT,
+) {
 	delta := get_mouse_delta()
 
 	yaw^   += delta.x * sensitivity
 	pitch^ += delta.y * sensitivity // mouse_dy is already up-positive
-	pitch^  = clamp(pitch^, -PITCH_LIMIT, PITCH_LIMIT)
+	pitch^  = clamp(pitch^, pitch_min, pitch_max)
 }
 
 // Points the camera along `yaw` and `pitch` from wherever it currently is.
@@ -268,4 +279,301 @@ camera3d_first_person :: proc(
 	camera.position += walk_direction(yaw^) * speed * delta_time
 
 	camera3d_aim(camera, yaw^, pitch^)
+}
+
+// -----------------------------------------------------------------------
+// Third person
+// -----------------------------------------------------------------------
+
+/*
+	The same split again, for a camera that orbits something instead of sitting
+	inside it.
+
+	A third-person camera is a first-person camera that has been pushed
+	backwards along its own view direction. That is the whole difference, and it
+	is why the yaw and pitch are the same two numbers produced by the same
+	`camera3d_look`: an orbit camera looking north-east from twenty degrees up
+	is a head looking north-east from twenty degrees up, moved back six units.
+
+	So the pieces are `camera3d_look` again for the angles, `camera3d_zoom` for
+	the distance, `Camera3D_Shoulder` for which side of the character to sit on,
+	`camera3d_orbit_position` for where all of that puts the camera, and
+	`camera3d_follow` to seat it there looking at the focus.
+	`camera3d_third_person` is the lot.
+
+	**The composite moves no character**, unlike `camera3d_first_person`, which
+	moves its camera. There is nothing here for it to move: the thing being
+	orbited belongs to the game, and by the time the camera is placed the solver
+	has already decided where it is. That makes the composite the one a real
+	game *can* use -- pass it the character's position each frame and it is
+	correct, physics or no physics.
+
+	What is still the game's to do is stopping the camera going through a wall.
+	`camera3d_orbit_position` is the piece for it: cast from the focus to the
+	position it returns, and if something is in the way, call `camera3d_follow`
+	with the shorter distance instead. Matchbox does not cast rays (see D7).
+*/
+
+// A distance to start at, and how close and how far the wheel may take it.
+// Six units behind a character shows the character and enough of what is
+// around it; under about one and a half the near plane starts eating the
+// model.
+ORBIT_DISTANCE     :: f32(6)
+ORBIT_DISTANCE_MIN :: f32(1.5)
+ORBIT_DISTANCE_MAX :: f32(20)
+
+// World units of distance per notch of wheel.
+ORBIT_ZOOM_SPEED :: f32(1)
+
+/*
+	How far the camera may swing above and below what it is orbiting.
+
+	Not `PITCH_LIMIT`, and not symmetric, because the two ends are not the same
+	thing here. Looking down means the camera is overhead, which is a view a
+	game actually wants -- so the bottom end goes most of the way to straight
+	down. Looking up means the camera is *below* the character, and a few
+	degrees of that is a glance up at them while more of it is a camera under
+	the floor. Hence the short top end.
+*/
+ORBIT_PITCH_MIN :: f32(-1.30) // camera high above, looking down
+ORBIT_PITCH_MAX :: f32( 0.30) // camera a little below, looking up
+
+// Turns this frame's wheel into a change in distance. Wheel up pulls the
+// camera in, which is the direction every game scrolls.
+//
+// Touches no camera, for the same reason `camera3d_look` does not: a game that
+// shortens the distance itself to stay out of a wall still wants the wheel
+// read for it.
+camera3d_zoom :: proc(
+	distance:     ^f32,
+	min_distance: f32 = ORBIT_DISTANCE_MIN,
+	max_distance: f32 = ORBIT_DISTANCE_MAX,
+	speed:        f32 = ORBIT_ZOOM_SPEED,
+) {
+	wheel := get_mouse_wheel()
+	if wheel.y == 0 do return
+
+	distance^ = clamp(distance^ - wheel.y * speed, min_distance, max_distance)
+}
+
+/*
+	Where the camera sits relative to the character: behind it, or off one
+	shoulder.
+
+	Over the shoulder is not a different camera. It is the same rig slid
+	sideways -- position and target together, by the same vector -- so the view
+	direction is unchanged and the character simply stops being in the middle of
+	it. Turning the camera instead would point it away from what the player is
+	walking toward, which is the mistake this enum exists to make impossible.
+
+	Which shoulder is a real choice rather than a preference: it decides which
+	side of the character the player can see past, so a game that lets you lean
+	round a corner needs both, and a game that puts a weapon in one hand usually
+	picks the other.
+*/
+Camera3D_Shoulder :: enum {
+	CENTER, // directly behind, the character in the middle of the screen
+	LEFT,   // camera off the character's left, character to the right of centre
+	RIGHT,  // camera off the character's right, character to the left of centre
+}
+
+/*
+	How far sideways an over-the-shoulder camera slides, in world units.
+
+	Small, because this is measured at the character and read at the far end of
+	the distance: three quarters of a unit off a camera six units back moves the
+	character about seven degrees across the frame, which is enough to see past
+	them and not enough to look like the camera is pointed wrong.
+
+	The offset does not scale with distance on purpose. It is a step to one side
+	of the character, not a fraction of the screen, so pulling the camera in
+	makes the framing more over-the-shoulder rather than less -- which is what a
+	game does when it raises a weapon.
+*/
+SHOULDER_OFFSET :: f32(0.75)
+
+/*
+	The signed sideways step a shoulder setting asks for. Positive is to the
+	camera's right.
+
+	Exposed because it is the number to interpolate. Switching shoulders by
+	swapping the enum snaps the view across the character; a game that wants the
+	swap to slide keeps its own f32, moves it toward this, and feeds the result
+	through `camera3d_side_offset`.
+*/
+camera3d_shoulder_amount :: proc(shoulder: Camera3D_Shoulder, offset: f32 = SHOULDER_OFFSET) -> f32 {
+	switch shoulder {
+	case .LEFT:  return -offset
+	case .RIGHT: return  offset
+	case .CENTER: fallthrough
+	case:        return 0
+	}
+}
+
+/*
+	The world-space slide, for a signed amount.
+
+	Sideways from the camera and flat, which for a camera with +y up is the same
+	thing: `cross(forward, up)` for the direction `yaw` and `pitch` describe
+	comes out as `{-sin(yaw), 0, cos(yaw)}` with the pitch cancelling, so the
+	step does not shorten as you look down.
+
+	The general form of the shoulder, and the one to reach for when the setting
+	is being interpolated rather than switched. It also means a game never needs
+	the enum at all: add this to your own focus point and pass `.CENTER`, which
+	is the same rig by a different route.
+*/
+camera3d_side_offset :: proc(yaw: f32, amount: f32) -> [3]f32 {
+	return [3]f32{-math.sin(yaw), 0, math.cos(yaw)} * amount
+}
+
+// The point an orbit camera actually looks at: the focus, stepped sideways by
+// the shoulder setting. What `camera3d_follow` puts in `camera.target`, and
+// what a wall-avoiding ray cast starts from -- not the character's own centre,
+// which is no longer where the camera is aimed.
+camera3d_orbit_focus :: proc(
+	focus:           [3]f32,
+	yaw:             f32,
+	shoulder:        Camera3D_Shoulder = .CENTER,
+	shoulder_offset: f32 = SHOULDER_OFFSET,
+) -> [3]f32 {
+	if shoulder == .CENTER do return focus
+	return focus + camera3d_side_offset(yaw, camera3d_shoulder_amount(shoulder, shoulder_offset))
+}
+
+/*
+	Where an orbit camera wants to be: `distance` back from the focus, along the
+	direction the angles describe, off whichever shoulder was asked for.
+
+	The one to cast a ray at. A game with collision casts from
+	`camera3d_orbit_focus` to this and follows at whatever shorter distance the
+	cast comes back with, which is what keeps the camera out of the wall behind
+	the player.
+*/
+camera3d_orbit_position :: proc(
+	focus:                [3]f32,
+	yaw, pitch, distance: f32,
+	shoulder:             Camera3D_Shoulder = .CENTER,
+	shoulder_offset:      f32 = SHOULDER_OFFSET,
+) -> [3]f32 {
+	aim := camera3d_orbit_focus(focus, yaw, shoulder, shoulder_offset)
+	return aim - direction_from_angles(yaw, pitch) * distance
+}
+
+// Seats the camera behind `focus` and points it at it. The third-person
+// counterpart of `camera3d_aim`, and the call to make after physics has moved
+// whatever is being followed.
+//
+// `focus` is a point, not a character: pass the head or the shoulders rather
+// than the feet, or the character sits at the bottom edge of the screen. With a
+// shoulder set it is still the character's point -- the step to one side is
+// taken here, so the game keeps passing the same thing either way.
+camera3d_follow :: proc(
+	camera:               ^Camera3D,
+	focus:                [3]f32,
+	yaw, pitch, distance: f32,
+	shoulder:             Camera3D_Shoulder = .CENTER,
+	shoulder_offset:      f32 = SHOULDER_OFFSET,
+) {
+	camera.position = camera3d_orbit_position(focus, yaw, pitch, distance, shoulder, shoulder_offset)
+	camera.target   = camera3d_orbit_focus(focus, yaw, shoulder, shoulder_offset)
+}
+
+// The angles and distance an orbit camera is already at. What to seed yaw,
+// pitch and distance with, for the same reason `camera3d_angles` exists: a
+// camera placed by `camera3d_at` and then driven from zeroed angles jumps on
+// the first frame.
+camera3d_orbit_angles :: proc(camera: Camera3D) -> (yaw, pitch, distance: f32) {
+	yaw, pitch = camera3d_angles(camera)
+	return yaw, pitch, linalg.length(camera.target - camera.position)
+}
+
+/*
+	Mouse look, wheel zoom, and the camera placed behind `focus`.
+
+	The whole third-person camera, and safe for a game with a solver -- see the
+	note at the top of this section. Call it after the character has been moved,
+	with the point on the character the camera should look at.
+
+	`walk_direction(yaw)` is what the character moves along: in third person the
+	keys are read relative to the camera, so W walks away from it, which is what
+	makes turning the camera turn the character. That stays true off a shoulder
+	-- the slide moves where the camera is, not which way it faces -- so a game
+	swapping shoulders mid-stride does not swap which way W goes.
+*/
+camera3d_third_person :: proc(
+	camera:               ^Camera3D,
+	focus:                [3]f32,
+	yaw, pitch, distance: ^f32,
+	shoulder:             Camera3D_Shoulder = .CENTER,
+	shoulder_offset:      f32 = SHOULDER_OFFSET,
+	sensitivity:          f32 = MOUSE_SENSITIVITY,
+	pitch_min:            f32 = ORBIT_PITCH_MIN,
+	pitch_max:            f32 = ORBIT_PITCH_MAX,
+) {
+	camera3d_look(yaw, pitch, sensitivity, pitch_min, pitch_max)
+	camera3d_zoom(distance)
+	camera3d_follow(camera, focus, yaw^, pitch^, distance^, shoulder, shoulder_offset)
+}
+
+// -----------------------------------------------------------------------
+// Facing
+// -----------------------------------------------------------------------
+
+/*
+	Which way a flat direction points, as a yaw. The inverse of the horizontal
+	half of `direction_from_angles`, and what a third-person game turns its
+	character to face after reading `walk_direction`.
+
+	The y component is ignored rather than being an error: `walk_direction`
+	returns a vector already flattened onto the ground, and the answer for one
+	that is not is the direction of its shadow, which is the useful one.
+
+	Zero for a zero direction, which is a caller's cue to leave the character
+	facing where it was rather than snapping it east.
+*/
+yaw_from_direction :: proc(direction: [3]f32) -> f32 {
+	if direction.x == 0 && direction.z == 0 do return 0
+	return math.atan2(direction.z, direction.x)
+}
+
+/*
+	Turns `angle` toward `target` the short way round, at most `speed` radians
+	per second, and lands exactly on it.
+
+	The short way is the point. A character running east and turning to run
+	north-east has a target that may be written as -6.0 or as 0.28, and
+	subtracting the two gives a spin most of the way round the compass. This
+	takes the difference across the wrap, so the turn is the few degrees it
+	looks like.
+*/
+turn_toward :: proc(angle: ^f32, target: f32, speed: f32, delta_time: f32) {
+	// Signed difference in (-pi, pi], which is what makes the turn the short
+	// one.
+	difference := math.mod(target - angle^ + math.PI, math.TAU)
+	if difference < 0 do difference += math.TAU
+	difference -= math.PI
+
+	step := speed * delta_time
+
+	if abs(difference) <= step {
+		angle^ = target
+		return
+	}
+
+	angle^ += math.sign(difference) * step
+}
+
+/*
+	The rotation that turns a model to face `yaw`.
+
+	For a model whose own forward is +x, which is the direction yaw 0 points and
+	so the one the rest of this file is written in. The negation is not a typo:
+	a rotation of `t` about +y takes +x to `{cos t, 0, -sin t}`, and the
+	direction wanted is `{cos yaw, 0, sin yaw}`, so the angle to rotate by is
+	`-yaw`. Getting this backwards gives a character that turns the wrong way,
+	which on a symmetrical model takes a while to notice.
+*/
+facing_rotation :: proc(yaw: f32) -> quaternion128 {
+	return transform_rotation({0, 1, 0}, -yaw)
 }

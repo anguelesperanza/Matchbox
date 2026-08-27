@@ -577,3 +577,259 @@ turn_toward :: proc(angle: ^f32, target: f32, speed: f32, delta_time: f32) {
 facing_rotation :: proc(yaw: f32) -> quaternion128 {
 	return transform_rotation({0, 1, 0}, -yaw)
 }
+
+// -----------------------------------------------------------------------
+// Third person -- the whole thing in one struct
+// -----------------------------------------------------------------------
+
+/*
+	Who the keys are relative to.
+
+	The two settings differ in one thing: whether turning the camera turns the
+	run. Everything else about the camera is the same either way -- the same
+	orbit, the same shoulder, the same zoom.
+*/
+Camera3D_Steering :: enum {
+	/*
+		The camera steers. W goes away from the camera, so turning the camera
+		while walking curves the run, and the character is turned to face
+		wherever it ends up going.
+
+		What most third-person games do, and what `examples/third-person` does
+		unless you press F.
+	*/
+	CAMERA,
+
+	/*
+		The character steers. W goes along the character's own heading, so the
+		camera can look wherever it likes and the run carries straight on --
+		look left while walking forward and you keep walking forward, looking
+		left.
+
+		Nothing turns the character in this setting. That is the point of it,
+		and it means turning is the game's: write `facing` from your own turn
+		keys, or put the steering back to `.CAMERA` -- which is what a game
+		does when free look is a key you hold rather than a mode you are in.
+	*/
+	CHARACTER,
+}
+
+// Where the camera looks on the character, added to the position you follow.
+// Head height on a person-sized one; the feet are the wrong point to aim at,
+// because aiming there puts the character on the bottom edge of the screen.
+FOCUS_OFFSET :: [3]f32{0, 1.6, 0}
+
+// Radians per second the character pivots at under `.CAMERA` steering. Fast
+// enough that a tap of A is not a handbrake turn, slow enough to be visible.
+TURN_SPEED :: f32(12)
+
+// A little above level, looking slightly down, which is where a third-person
+// camera sits before anybody touches the mouse.
+ORBIT_PITCH :: f32(-0.3)
+
+/*
+	Everything a third-person camera needs, in one place.
+
+	The loose procedures above are the pieces, and a game that already keeps its
+	own yaw and pitch should keep using them. This is for the other case: five
+	numbers, a framing, a steering setting and a `Camera3D` all have to agree
+	with each other every frame, and a game that holds them as eight separate
+	variables is a game that will one day update seven of them.
+
+	What is *not* in here is the character's position. That is deliberate and it
+	is the same line drawn everywhere else in this file: the position comes from
+	the game -- from a solver, usually -- so it is an argument to
+	`third_person_follow` rather than a field somebody has to remember to write.
+	Matchbox still moves nothing (D7).
+
+	The fields are public and meant to be written. `shoulder` and `steering` are
+	settings a game changes on a keypress; `facing` is the character's heading,
+	which the rig turns under `.CAMERA` steering and the game turns under
+	`.CHARACTER`; `distance` is the wheel's, and a game is free to overwrite it.
+*/
+Third_Person_Camera :: struct {
+	// What `begin_drawing_3d` takes. Written by `third_person_follow`; there is
+	// nothing to set here by hand.
+	camera: Camera3D,
+
+	// The orbit. Yaw and pitch are the same two angles the first-person camera
+	// uses, and `distance` is how far back the rig sits from what it follows.
+	yaw:      f32,
+	pitch:    f32,
+	distance: f32,
+
+	// Which way the character is turned. Read it to draw them --
+	// `facing_rotation(rig.facing)` is the quaternion.
+	facing: f32,
+
+	// Which way the keys asked to go this frame, flattened and normalised, and
+	// zero when nothing is pressed. What to multiply by a speed, or to hand a
+	// solver as a velocity. Written by `third_person_input`.
+	move: [3]f32,
+
+	// The framing. See `Camera3D_Shoulder`.
+	shoulder:        Camera3D_Shoulder,
+	shoulder_offset: f32,
+
+	// Added to the position being followed to get the point the camera looks
+	// at. See `FOCUS_OFFSET`.
+	focus_offset: [3]f32,
+
+	// Whether turning the camera turns the run. See `Camera3D_Steering`.
+	steering:   Camera3D_Steering,
+	turn_speed: f32,
+
+	// Tuning, all of it defaulted by `third_person_camera` and none of it
+	// looked at again unless a game changes it.
+	sensitivity:  f32,
+	pitch_min:    f32,
+	pitch_max:    f32,
+	zoom_speed:   f32,
+	distance_min: f32,
+	distance_max: f32,
+}
+
+/*
+	A third-person camera, set up and already pointed at the character.
+
+	Every argument has a default, so `third_person_camera()` is a working camera
+	behind a character standing at the origin. Name the ones you care about:
+
+		rig := mb.third_person_camera(position = spawn, facing = spawn_facing,
+			shoulder = .RIGHT)
+
+	`yaw` is not an argument. It is seeded from `facing`, which puts the camera
+	behind the character rather than side-on to them -- the same reasoning as
+	`camera3d_angles`, one step earlier. A game wanting to start it elsewhere
+	writes `rig.yaw` after this returns.
+
+	The camera is seated before this returns, so the rig may be drawn with on
+	the same frame it was made -- which matters for a loading screen, and for
+	anything that reads `rig.camera` before the first `third_person_follow`.
+*/
+third_person_camera :: proc(
+	position:        [3]f32 = {0, 0, 0},
+	facing:          f32 = 0,
+	focus_offset:    [3]f32 = FOCUS_OFFSET,
+	distance:        f32 = ORBIT_DISTANCE,
+	pitch:           f32 = ORBIT_PITCH,
+	shoulder:        Camera3D_Shoulder = .CENTER,
+	shoulder_offset: f32 = SHOULDER_OFFSET,
+	steering:        Camera3D_Steering = .CAMERA,
+	turn_speed:      f32 = TURN_SPEED,
+	fov:             f32 = 70,
+	near:            f32 = 0.1,
+	far:             f32 = 1000,
+	sensitivity:     f32 = MOUSE_SENSITIVITY,
+	pitch_min:       f32 = ORBIT_PITCH_MIN,
+	pitch_max:       f32 = ORBIT_PITCH_MAX,
+	zoom_speed:      f32 = ORBIT_ZOOM_SPEED,
+	distance_min:    f32 = ORBIT_DISTANCE_MIN,
+	distance_max:    f32 = ORBIT_DISTANCE_MAX,
+) -> Third_Person_Camera {
+	rig := Third_Person_Camera{
+		camera = Camera3D{
+			up         = {0, 1, 0},
+			fov        = fov,
+			projection = .PERSPECTIVE,
+			near       = near,
+			far        = far,
+		},
+
+		yaw      = facing, // behind the character, not beside them
+		pitch    = clamp(pitch, pitch_min, pitch_max),
+		distance = clamp(distance, distance_min, distance_max),
+
+		facing = facing,
+
+		shoulder        = shoulder,
+		shoulder_offset = shoulder_offset,
+		focus_offset    = focus_offset,
+
+		steering   = steering,
+		turn_speed = turn_speed,
+
+		sensitivity  = sensitivity,
+		pitch_min    = pitch_min,
+		pitch_max    = pitch_max,
+		zoom_speed   = zoom_speed,
+		distance_min = distance_min,
+		distance_max = distance_max,
+	}
+
+	camera3d_follow(&rig.camera, position + rig.focus_offset,
+		rig.yaw, rig.pitch, rig.distance, rig.shoulder, rig.shoulder_offset)
+
+	return rig
+}
+
+/*
+	Reads the mouse, the wheel and the keys into the rig.
+
+	Afterwards `yaw`, `pitch` and `distance` are this frame's, and `move` is
+	which way the keys are asking to go -- against the camera under `.CAMERA`
+	steering, against the character's own heading under `.CHARACTER`.
+
+	Moves nothing and touches no position, so what happens next is the game's:
+	step a solver with `move` as a velocity, or add it to a position yourself.
+	`third_person_follow` comes after that.
+*/
+third_person_input :: proc(rig: ^Third_Person_Camera) {
+	camera3d_look(&rig.yaw, &rig.pitch, rig.sensitivity, rig.pitch_min, rig.pitch_max)
+	camera3d_zoom(&rig.distance, rig.distance_min, rig.distance_max, rig.zoom_speed)
+
+	switch rig.steering {
+	case .CHARACTER:
+		rig.move = walk_direction(rig.facing)
+	case .CAMERA:
+		fallthrough
+	case:
+		rig.move = walk_direction(rig.yaw)
+	}
+}
+
+/*
+	Turns the character and seats the camera behind them, at wherever they
+	actually ended up.
+
+	The second half of the frame, and the one that takes the position: call it
+	after the solver has run, or after you have added `move` to a position
+	yourself.
+
+	The turn happens only under `.CAMERA` steering and only while the keys are
+	asking for something -- a character standing still keeps the heading it had
+	rather than snapping back to face the camera.
+*/
+third_person_follow :: proc(rig: ^Third_Person_Camera, position: [3]f32, delta_time: f32) {
+	if rig.steering == .CAMERA && rig.move != {0, 0, 0} {
+		turn_toward(&rig.facing, yaw_from_direction(rig.move), rig.turn_speed, delta_time)
+	}
+
+	camera3d_follow(&rig.camera, position + rig.focus_offset,
+		rig.yaw, rig.pitch, rig.distance, rig.shoulder, rig.shoulder_offset)
+}
+
+/*
+	Input, the move, and the follow -- the whole frame, for a character nothing
+	else is driving.
+
+	The counterpart of `camera3d_first_person`, and the same warning applies: it
+	writes `position`, which a game with a solver cannot allow. Such a game
+	calls `third_person_input`, gives `move` to the solver, reads the body back
+	out, and calls `third_person_follow` with it. Those are the two halves this
+	is made of.
+
+	`speed` is units per second.
+*/
+third_person_walk :: proc(
+	rig:        ^Third_Person_Camera,
+	position:   ^[3]f32,
+	speed:      f32,
+	delta_time: f32,
+) {
+	third_person_input(rig)
+
+	position^ += rig.move * speed * delta_time
+
+	third_person_follow(rig, position^, delta_time)
+}

@@ -7,42 +7,43 @@ package third_person_example
 	yaw, the same pitch, the same `camera3d_look` producing both, and then a
 	distance that seats the camera that far back along the direction those two
 	describe. What is new is that something is standing in front of it, and the
-	something has to be turned to face the way it is running -- which is
-	`yaw_from_direction` for the angle, `turn_toward` to get there smoothly, and
-	`facing_rotation` to hand it to a draw call.
+	something has to be turned to face the way it is running.
 
-	The split from stage 2 survives intact, and is worth more here than it was
-	there. `camera3d_third_person` moves no character -- there is nothing here
-	for it to move, because the character is the game's. So unlike
-	`camera3d_first_person`, the composite is the one a real game *can* call:
-	move your body in the solver, read its position back, pass it as the focus.
+	All of that lives in a `Third_Person_Camera`, which is what this example
+	uses: one struct, one call to set it up, one call a frame. The loose
+	procedures it is built out of are still there and still the right thing for
+	a game that keeps its own yaw and pitch -- `camera3d_look`, `camera3d_zoom`,
+	`camera3d_follow`, `walk_direction`, `turn_toward` -- and the physics block
+	further down shows the two halves the one call is made of.
 
 	Things to try:
 
 	  - **walk in a circle.** The character turns to face where it is going
 	    rather than snapping, which is `turn_toward` -- and it turns the short
 	    way even when the two angles are written a full turn apart
-	  - **strafe with A and D.** The keys are read relative to the camera, so
-	    the character runs sideways across the screen and pivots to face that
-	    way. Turn the camera while holding one and it curves
+	  - **press F.** Switches who the keys are relative to. Under the default
+	    `.CAMERA` steering, W goes away from the camera, so turning the camera
+	    while walking curves the run. Under `.CHARACTER` it goes along the
+	    character's own heading instead: hold W, look left, and you carry
+	    straight on while the camera swings round to watch you from the side.
+	    **Q and E** turn the character in that setting, because nothing else
+	    does -- which is the point of it
 	  - **press 1, 2 and 3.** Centred, over the left shoulder, over the right.
 	    The rig slides sideways rather than turning, so the view direction is
-	    unchanged and the character just stops being in the middle of it -- keep
-	    walking while you press them and W still goes the same way
+	    unchanged and the character just stops being in the middle of it
 	  - **stand behind the tall white box and lean out.** Which shoulder you are
 	    on decides which side of it you can see past, which is the whole reason
 	    a game offers both
 	  - **scroll.** The wheel pulls the camera in and out between 1.5 and 20
 	    units. Keep going in and it becomes first person with a body in the way,
-	    which is the same thing this always was. Over a shoulder it is worth
-	    coming in close, and this example does that for you when you pick one
+	    which is the same thing this always was
 	  - **look up.** It stops early -- `ORBIT_PITCH_MAX` is 0.30, not
 	    `PITCH_LIMIT` -- because pitching up on an orbit camera swings it
 	    *under* the character rather than tilting a head, and the floor is down
 	    there
 	  - **press C.** Toggles the camera keeping out of the floor. With it off,
 	    look up at full pitch and the ground swallows the view. With it on, the
-	    distance is shortened until the camera clears it -- which is the
+	    rig is seated a second time at a shorter distance -- which is the
 	    hand-rolled stand-in for the ray cast a game with Box3D would do against
 	    `camera3d_orbit_position`. Matchbox does not cast rays
 	  - **hold shift** to run
@@ -58,16 +59,13 @@ import "core:math"
 
 import mb "../../matchbox"
 
-// The point the camera looks at. Shoulder height rather than the feet, or the
-// character sits on the bottom edge of the screen with the sky above it.
-SHOULDER_HEIGHT :: 1.6
-
 WALK_SPEED :: 6.0
 RUN_SPEED  :: 11.0
 
-// Radians per second the character pivots at. Fast enough that a tap of A does
-// not look like a handbrake turn, slow enough to be visible.
-TURN_SPEED :: 12.0
+// Radians per second Q and E turn the character at, under `.CHARACTER`
+// steering. Slower than the rig's own `TURN_SPEED`, because that one is
+// catching up with a direction already chosen and this one *is* the choosing.
+TURN_KEY_SPEED :: 2.5
 
 // How far above the ground the camera is kept when C is on.
 CAMERA_FLOOR :: 0.4
@@ -105,30 +103,31 @@ main :: proc() {
 	// the same first line every mouse-look game in Matchbox needs.
 	mb.set_escape_key(.UNKNOWN)
 
-	// Where the character is and which way it is turned. Both belong to the
-	// game: Matchbox places the camera and says which way the keys point, and
-	// that is all it does.
+	// Where the character is. This stays the game's: the rig follows a position
+	// it is handed and never writes one of its own, which is what lets a solver
+	// have the last word on it.
 	player_position := [3]f32{0, 0, 0}
-	player_facing:   f32
 
-	// Placed like any other camera, then read back into the three numbers that
-	// actually drive it. That read-back is what `camera3d_orbit_angles` is for:
-	// starting yaw, pitch and distance at zero instead would swing the camera
-	// across the scene on the first frame of mouse motion.
-	camera := mb.camera3d_at(position = {0, 4, 7}, target = {0, SHOULDER_HEIGHT, 0})
-	yaw, pitch, distance := mb.camera3d_orbit_angles(camera)
-
-	// So the character starts with its back to the camera rather than side-on.
-	player_facing = yaw
+	// Everything else -- the angles, the distance, the framing, the steering,
+	// the character's heading and the Camera3D itself. One call, and the camera
+	// is already seated behind the character before the loop starts.
+	//
+	// The arguments not named here are the defaults: centred, six units back,
+	// looking slightly down, camera-steered, looking at head height. Facing
+	// -pi/2 is along -z, so the character starts with its back to the camera
+	// and the blocks in front of it.
+	rig := mb.third_person_camera(
+		position = player_position,
+		facing   = -math.PI * 0.5,
+	)
 
 	keep_off_floor := true
-	shoulder       := mb.Camera3D_Shoulder.CENTER
 
 	// Where the wheel was left while centred. Picking a shoulder pulls the
 	// camera in, and going back to centred should give you back the distance
 	// you chose rather than the default -- which needs remembering, because
-	// `distance` itself is about to be overwritten with the closer framing.
-	centred_distance := distance
+	// `rig.distance` is about to be overwritten with the closer framing.
+	centred_distance := rig.distance
 
 	mb.set_cursor_locked(true)
 
@@ -150,95 +149,88 @@ main :: proc() {
 
 		if mb.is_key_pressed(.C) do keep_off_floor = !keep_off_floor
 
+		// Whether turning the camera turns the run. The one field, and nothing
+		// else about the camera changes with it.
+		if mb.is_key_pressed(.F) {
+			rig.steering = .CHARACTER if rig.steering == .CAMERA else .CAMERA
+		}
+
 		// Where the camera sits relative to the character. Three settings, and
-		// nothing else about the camera changes with them -- same yaw, same
-		// pitch, same keys.
-		if mb.is_key_pressed(._1) do shoulder = .CENTER
-		if mb.is_key_pressed(._2) do shoulder = .LEFT
-		if mb.is_key_pressed(._3) do shoulder = .RIGHT
+		// nothing else about the camera changes with them either.
+		if mb.is_key_pressed(._1) do rig.shoulder = .CENTER
+		if mb.is_key_pressed(._2) do rig.shoulder = .LEFT
+		if mb.is_key_pressed(._3) do rig.shoulder = .RIGHT
 
 		// The distance that goes with the framing, which is the game's to
 		// decide and not something the camera does for you. See
 		// SHOULDER_DISTANCE. `min` rather than an assignment, so picking a
 		// shoulder while already close does not push the camera back out.
 		if mb.is_key_pressed(._1) || mb.is_key_pressed(._2) || mb.is_key_pressed(._3) {
-			distance = centred_distance if shoulder == .CENTER else min(centred_distance, SHOULDER_DISTANCE)
+			rig.distance = centred_distance if rig.shoulder == .CENTER else min(centred_distance, SHOULDER_DISTANCE)
 		}
 
 		// Only while the pointer belongs to us, for the same reason the
 		// first-person example checks: the frame after ESC still carries the
 		// motion that arrived before the pointer was released.
 		if mb.cursor_locked() {
-			// Camera-relative, which is what makes this third person rather
-			// than tank controls: W is away from the camera, not along the
-			// character's nose, so turning the camera turns the run.
-			direction := mb.walk_direction(yaw)
-			speed: f32 = RUN_SPEED if mb.is_key_held(.LSHIFT) else WALK_SPEED
-
-			if direction != {0, 0, 0} {
-				player_position += direction * speed * dt
-
-				// Face where the keys are asking to go. Separate from the move
-				// on purpose -- the character arrives instantly and turns to
-				// suit, which is what it looks like when a run changes
-				// direction.
-				mb.turn_toward(&player_facing, mb.yaw_from_direction(direction), TURN_SPEED, dt)
+			// Under `.CHARACTER` steering nothing turns the character -- that
+			// is what the setting means -- so the turn keys are the game's to
+			// provide. `facing` is a plain field and this is all it takes.
+			if rig.steering == .CHARACTER {
+				if mb.is_key_held(.Q) do rig.facing -= TURN_KEY_SPEED * dt
+				if mb.is_key_held(.E) do rig.facing += TURN_KEY_SPEED * dt
 			}
 
-			focus := player_position + {0, SHOULDER_HEIGHT, 0}
+			speed: f32 = RUN_SPEED if mb.is_key_held(.LSHIFT) else WALK_SPEED
 
-			if keep_off_floor {
-				// The long way round, and the shape a game with collision has:
-				// take the angles, take the distance, decide for yourself how
-				// much of that distance you actually get, and only then seat
-				// the camera. Box3D would cast from `focus` to
-				// `camera3d_orbit_position(focus, yaw, pitch, distance)` and
-				// use the hit; there is no physics here, so the floor is the
-				// only thing in the way and trigonometry is enough.
-				mb.camera3d_look(&yaw, &pitch, mb.MOUSE_SENSITIVITY, mb.ORBIT_PITCH_MIN, mb.ORBIT_PITCH_MAX)
-				mb.camera3d_zoom(&distance)
-				mb.camera3d_follow(&camera, focus, yaw, pitch,
-					clear_of_floor(focus, pitch, distance), shoulder)
-			} else {
-				// The short way: those same calls, in one.
-				mb.camera3d_third_person(&camera, focus, &yaw, &pitch, &distance, shoulder)
+			// Mouse, wheel, keys, the move, the turn and the camera, for a
+			// character nothing else is driving.
+			mb.third_person_walk(&rig, &player_position, speed, dt)
+
+			// Something is between the camera and the character -- the floor,
+			// here -- so the rig is seated a second time, shorter. This is the
+			// shape of the real thing: follow, find out what is in the way,
+			// follow again. A game with physics casts from the focus to
+			// `camera3d_orbit_position` instead of looking at one coordinate.
+			if keep_off_floor && rig.camera.position.y < CAMERA_FLOOR {
+				focus := player_position + rig.focus_offset
+				mb.camera3d_follow(&rig.camera, focus, rig.yaw, rig.pitch,
+					clear_of_floor(focus, rig.pitch, rig.distance),
+					rig.shoulder, rig.shoulder_offset)
 			}
 
 			// After the zoom, because the zoom is what there is to remember.
 			// Only while centred: the wheel over a shoulder is adjusting the
 			// close framing, which is not the distance to come back to.
-			if shoulder == .CENTER do centred_distance = distance
+			if rig.shoulder == .CENTER do centred_distance = rig.distance
 		}
 
 		/*
-			What this looks like with physics, which is the point of the split:
+			What `third_person_walk` is, for a game whose character is a body in
+			a solver:
 
-				mb.camera3d_look(&yaw, &pitch, mb.MOUSE_SENSITIVITY,
-					mb.ORBIT_PITCH_MIN, mb.ORBIT_PITCH_MAX)
-				mb.camera3d_zoom(&distance)
+				mb.third_person_input(&rig)
 
-				velocity := mb.walk_direction(yaw) * WALK_SPEED
+				velocity := rig.move * speed
 				b3.Body_SetLinearVelocity(body, {velocity.x, 0, velocity.z})
 				b3.World_Step(world, 1.0 / 60.0, 4)
 
 				body_pos := b3.Body_GetPosition(body)
 				player_position = {body_pos.x, body_pos.y, body_pos.z}
-				mb.turn_toward(&player_facing,
-					mb.yaw_from_direction(velocity), TURN_SPEED, dt)
 
-				mb.camera3d_follow(&camera,
-					player_position + {0, SHOULDER_HEIGHT, 0}, yaw, pitch, distance,
-					shoulder)
+				mb.third_person_follow(&rig, player_position, dt)
 
-			Note that this is the *whole* difference. Nothing above needed
-			rewriting to make room for a solver, because nothing above was moved
-			by Matchbox in the first place.
+			Two halves with the solver between them, which is why they are two
+			procedures. `third_person_input` reads the mouse and the keys and
+			writes `rig.move`; `third_person_follow` turns the character and
+			seats the camera at wherever the solver decided they ended up.
+			Matchbox moves nothing either way.
 		*/
 
 		mb.begin_drawing()
 		mb.clear_background(mb.CORNFLOWER_BLUE)
 
-		mb.begin_drawing_3d(camera)
+		mb.begin_drawing_3d(rig.camera)
 
 		mb.draw_plane({0, 0, 0}, {60, 60}, {0.42, 0.47, 0.40, 1})
 		mb.draw_grid(slices = 30, spacing = 2, color = {1, 1, 1, 0.20})
@@ -248,13 +240,12 @@ main :: proc() {
 			mb.draw_cube_wires(block.position, block.size, mb.BLACK)
 		}
 
-		draw_character(player_position, player_facing)
+		draw_character(player_position, rig.facing)
 
 		mb.end_drawing_3d()
 
 		font := &mb.mbi.font
 		mb.draw_text(font, "WASD to run, mouse to orbit, wheel to zoom, shift to sprint", 20, 40, mb.WHITE)
-		mb.draw_text(font, "1 centred   2 over the left shoulder   3 over the right", 20, 240, mb.WHITE)
 
 		if mb.cursor_locked() {
 			mb.draw_text(font, "ESC releases the pointer", 20, 70, mb.WHITE)
@@ -262,16 +253,21 @@ main :: proc() {
 			mb.draw_text(font, "click to look again, ESC again to quit", 20, 70, mb.WHITE)
 		}
 
-		mb.draw_text(font, fmt.tprintf("yaw %.2f  pitch %.2f  distance %.1f", yaw, pitch, distance),
-			20, 110, mb.WHITE)
-		mb.draw_text(font, fmt.tprintf("shoulder %v", shoulder), 20, 270, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("yaw %.2f  pitch %.2f  distance %.1f",
+			rig.yaw, rig.pitch, rig.distance), 20, 110, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("player at %.1f, %.1f  facing %.2f",
-			player_position.x, player_position.z, player_facing), 20, 140, mb.WHITE)
+			player_position.x, player_position.z, rig.facing), 20, 140, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("camera at %.1f, %.1f, %.1f",
-			camera.position.x, camera.position.y, camera.position.z), 20, 170, mb.WHITE)
+			rig.camera.position.x, rig.camera.position.y, rig.camera.position.z), 20, 170, mb.WHITE)
 
 		floor_note := "C: camera kept off the floor" if keep_off_floor else "C: camera free to sink"
 		mb.draw_text(font, floor_note, 20, 210, mb.WHITE)
+
+		mb.draw_text(font, "1 centred   2 over the left shoulder   3 over the right", 20, 240, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("shoulder %v", rig.shoulder), 20, 270, mb.WHITE)
+
+		steer_note := "F: steering CAMERA -- W goes away from the camera" if rig.steering == .CAMERA else "F: steering CHARACTER -- W goes along the heading, Q and E turn"
+		mb.draw_text(font, steer_note, 20, 310, mb.WHITE)
 
 		mb.end_drawing()
 	}

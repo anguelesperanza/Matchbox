@@ -168,6 +168,11 @@ Vertex_Layout :: enum {
 	QUAD,    // Vertex           -- position and uv, the four corners every 2D draw uses
 	MESH,    // Vertex3D         -- position, normal and uv, a model's own buffer
 	SKINNED, // Vertex3D_Skinned -- the same three, plus four joints and their weights
+
+	// Nothing at all. The vertex shader builds its own positions from
+	// SV_VertexID, which is what the skybox does -- one triangle over the whole
+	// screen, and no buffer to bind or upload.
+	NONE,
 }
 
 /*
@@ -195,6 +200,15 @@ create_pipeline :: proc(
 	depth:    bool           = false,
 	cull:     sdl.GPUCullMode = .NONE,
 	lines:    bool           = false,
+
+	/*
+		The pass has a depth buffer, but this pipeline neither tests nor writes
+		it. Not the same as `depth = false`, which says the pass has no depth
+		attachment at all -- a pipeline has to agree with the pass it is used
+		in, so a skybox drawn inside the 3D pass must declare the attachment
+		even though it ignores every value in it.
+	*/
+	depth_ignore: bool = false,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -202,6 +216,7 @@ create_pipeline :: proc(
 	switch layout {
 	case .QUAD:    pitch = size_of(Vertex)
 	case .SKINNED: pitch = size_of(Vertex3D_Skinned)
+	case .NONE:    pitch = 0
 	case .MESH:    fallthrough
 	case:          pitch = size_of(Vertex3D)
 	}
@@ -209,6 +224,9 @@ create_pipeline :: proc(
 	vertex_buffers := [1]sdl.GPUVertexBufferDescription{
 		{slot = 0, pitch = pitch, input_rate = .VERTEX},
 	}
+
+	num_vertex_buffers: u32 = 1
+	if layout == .NONE do num_vertex_buffers = 0
 
 	// Five attributes for a skinned mesh, three for a plain one, two for the
 	// quad. The mesh's third is the one the quad has no room for -- a normal --
@@ -243,6 +261,9 @@ create_pipeline :: proc(
 		}
 		num_attributes = 5
 
+	case .NONE:
+		num_attributes = 0
+
 	case .QUAD:
 		fallthrough
 	case:
@@ -272,7 +293,7 @@ create_pipeline :: proc(
 		primitive_type  = .LINELIST if lines else .TRIANGLELIST,
 		vertex_input_state = {
 			vertex_buffer_descriptions = raw_data(vertex_buffers[:]),
-			num_vertex_buffers         = 1,
+			num_vertex_buffers         = num_vertex_buffers,
 			vertex_attributes          = raw_data(attributes[:]),
 			num_vertex_attributes      = num_attributes,
 		},
@@ -309,7 +330,7 @@ create_pipeline :: proc(
 			color_target_descriptions = raw_data(color_targets[:]),
 			num_color_targets         = 1,
 			depth_stencil_format      = mbi.renderer.depth_format,
-			has_depth_stencil_target  = depth,
+			has_depth_stencil_target  = depth || depth_ignore,
 		},
 	})
 
@@ -346,11 +367,23 @@ init :: proc(title: string, width: i32, height: i32) {
 	// it cannot start by logging -- so without this, a machine that cannot run
 	// the game says "could not initialize gpu library" and nothing else.
 	//
-	// Only when the caller has not set one. A game with its own logger wants
-	// its own logger.
-	if context.logger.procedure == nil {
+	/*
+		Only when the caller has not set one. A game with its own logger wants
+		its own logger.
+
+		Testing the procedure against nil is not enough, and testing only that
+		is why this did not work for a long time: Odin's default context does
+		not leave the logger empty, it fills it with `nil_logger_proc`, which is
+		a real procedure that discards what it is given. So the check was always
+		false, the console logger was never made, and every `log.error` in
+		Matchbox went nowhere -- including the ones the comment above is about.
+		`core:log` makes the same two-part test internally.
+	*/
+	if context.logger.procedure == nil || context.logger.procedure == log.nil_logger_proc {
 		mbi.logger     = log.create_console_logger()
 		context.logger = mbi.logger
+	} else {
+		mbi.logger = context.logger
 	}
 
 	// The uniform structs are pushed straight at shader cbuffers, and a
@@ -487,6 +520,13 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.mesh_skinned = create_builtin_shader(
 		#load("shaders/mesh_skinned.vert.spv"), #load("shaders/mesh_skinned.vert.dxil"), .VERTEX, 0, 2)
 
+	mbi.renderer.shaders.skybox = create_builtin_shader(
+		#load("shaders/skybox.vert.spv"), #load("shaders/skybox.vert.dxil"), .VERTEX, 0)
+	mbi.renderer.shaders.skybox_panorama = create_builtin_shader(
+		#load("shaders/skybox_panorama.frag.spv"), #load("shaders/skybox_panorama.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.skybox_cubemap = create_builtin_shader(
+		#load("shaders/skybox_cubemap.frag.spv"), #load("shaders/skybox_cubemap.frag.dxil"), .FRAGMENT, 1)
+
 	// Asked before any pipeline is built, because a depth-testing pipeline has
 	// to name the format it will be used with and the answer cannot change
 	// afterwards. It is a capability query and allocates nothing, so a game
@@ -535,6 +575,26 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull   = .BACK,
 	)
 
+	// No geometry, no culling and no depth. Drawn first, so everything after it
+	// covers it; see draw_skybox.
+	mbi.renderer.pipelines.skybox_panorama = create_pipeline(
+		mbi.renderer.shaders.skybox_panorama,
+		vertex       = mbi.renderer.shaders.skybox,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		depth_ignore = true,
+	)
+
+	mbi.renderer.pipelines.skybox_cubemap = create_pipeline(
+		mbi.renderer.shaders.skybox_cubemap,
+		vertex       = mbi.renderer.shaders.skybox,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		depth_ignore = true,
+	)
+
 	// Lines are never culled -- an edge has no facing -- and they are biased
 	// towards the camera. See `lines` in create_pipeline for why.
 	mbi.renderer.pipelines.line = create_pipeline(
@@ -553,6 +613,27 @@ init :: proc(title: string, width: i32, height: i32) {
 	})
 	mbi.renderer.font_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
 		min_filter = .LINEAR, mag_filter = .LINEAR,
+	})
+
+	// A panorama wraps in u and clamps in v: longitude comes back round to
+	// itself, latitude stops at the poles. Without the wrap there is a seam
+	// line down the sky where the filter runs off the edge of the image.
+	mbi.renderer.skybox_wrap_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter    = .LINEAR,
+		mag_filter    = .LINEAR,
+		address_mode_u = .REPEAT,
+		address_mode_v = .CLAMP_TO_EDGE,
+		address_mode_w = .CLAMP_TO_EDGE,
+	})
+
+	// A cube map clamps on all three. The hardware filters across the seams
+	// between faces itself, and a wrapping address mode fights it.
+	mbi.renderer.skybox_clamp_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter    = .LINEAR,
+		mag_filter    = .LINEAR,
+		address_mode_u = .CLAMP_TO_EDGE,
+		address_mode_v = .CLAMP_TO_EDGE,
+		address_mode_w = .CLAMP_TO_EDGE,
 	})
 	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil,
 		"could not create samplers")
@@ -621,6 +702,8 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.mesh_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_textured)
 	if mbi.renderer.pipelines.mesh_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned)
 	if mbi.renderer.pipelines.mesh_skinned_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned_textured)
+	if mbi.renderer.pipelines.skybox_panorama != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.skybox_panorama)
+	if mbi.renderer.pipelines.skybox_cubemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.skybox_cubemap)
 	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
@@ -636,6 +719,9 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.mesh_line != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_line)
 	if mbi.renderer.shaders.mesh_textured != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_textured)
 	if mbi.renderer.shaders.mesh_skinned != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_skinned)
+	if mbi.renderer.shaders.skybox != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox)
+	if mbi.renderer.shaders.skybox_panorama != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox_panorama)
+	if mbi.renderer.shaders.skybox_cubemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox_cubemap)
 	if mbi.renderer.shaders.post != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.post)
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)

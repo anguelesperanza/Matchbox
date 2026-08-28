@@ -37,6 +37,7 @@ destroy :: proc {
 	destroy_pixel_buffer,
 	destroy_model,
 	destroy_animator,
+	destroy_skybox,
 	destroy_render_target,
 	destroy_image,
 	destroy_text_field,

@@ -170,6 +170,21 @@ Mesh_Frag_Data :: struct #align(16) {
 	tint: [4]f32,
 }
 
+/*
+	48 bytes: the camera's basis, ready to turn a screen position into a
+	direction.
+
+	`right` and `up` arrive already scaled by the field of view and the aspect,
+	so the skybox vertex shader adds three vectors and is done -- no projection
+	matrix, and no inverting one. Each is a [4]f32 rather than the [3]f32 it
+	is, for the packing reason the top of this file exists to warn about.
+*/
+Skybox_Vert_Data :: struct #align(16) {
+	right:   [4]f32,
+	up:      [4]f32,
+	forward: [4]f32,
+}
+
 // 32 bytes. Shared by every post-processing shader, so one block serves all of
 // them and an effect that ignores a field simply ignores it.
 Post_Frag_Data :: struct #align(16) {

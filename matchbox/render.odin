@@ -25,6 +25,12 @@ Shaders :: struct {
 	// the unskinned one uses -- only the vertex stage differs.
 	mesh_skinned: ^sdl.GPUShader,
 
+	// The sky. One vertex shader making a triangle out of nothing, and a
+	// fragment shader per source format.
+	skybox:          ^sdl.GPUShader,
+	skybox_panorama: ^sdl.GPUShader,
+	skybox_cubemap:  ^sdl.GPUShader,
+
 	// Post-processing. All three take the shared quad vertex shader.
 	post: ^sdl.GPUShader,
 	psx:  ^sdl.GPUShader,
@@ -69,6 +75,11 @@ Pipelines :: struct {
 	mesh_skinned:          ^sdl.GPUGraphicsPipeline,
 	mesh_skinned_textured: ^sdl.GPUGraphicsPipeline,
 
+	// Depth attached but neither tested nor written, so the sky is a background
+	// rather than very distant geometry.
+	skybox_panorama: ^sdl.GPUGraphicsPipeline,
+	skybox_cubemap:  ^sdl.GPUGraphicsPipeline,
+
 	// A render target drawn back over the window, with or without an effect on
 	// the way. Colour-only and depthless, like every other 2D pipeline.
 	post: ^sdl.GPUGraphicsPipeline,
@@ -98,6 +109,13 @@ Renderer :: struct {
 	// font atlas. The old backend allocated these out of a descriptor pool with
 	// room for 32, which put a ceiling of about two dozen sprites on a program.
 	sprite_sampler: ^sdl.GPUSampler,
+
+	// Linear, and wrapping across the seam where a panorama's longitude comes
+	// back round to itself. Clamped in v, so the poles do not bleed into each
+	// other. The cube map wants clamping on both, because the hardware filters
+	// across its own face seams and wrapping would fight it.
+	skybox_wrap_sampler:  ^sdl.GPUSampler,
+	skybox_clamp_sampler: ^sdl.GPUSampler,
 	font_sampler:   ^sdl.GPUSampler,
 
 	// Nested clip rectangles, in window pixels and already intersected. See

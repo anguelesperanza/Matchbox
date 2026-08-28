@@ -21,13 +21,23 @@ package third_person_example
 	  - **walk in a circle.** The character turns to face where it is going
 	    rather than snapping, which is `turn_toward` -- and it turns the short
 	    way even when the two angles are written a full turn apart
-	  - **press F.** Switches who the keys are relative to. Under the default
-	    `.CAMERA` steering, W goes away from the camera, so turning the camera
-	    while walking curves the run. Under `.CHARACTER` it goes along the
-	    character's own heading instead: hold W, look left, and you carry
-	    straight on while the camera swings round to watch you from the side.
-	    **Q and E** turn the character in that setting, because nothing else
-	    does -- which is the point of it
+	  - **press F.** Cycles the three steering settings, which differ in what the
+	    body does rather than in where the camera is.
+
+	    `.CAMERA` is the default: W goes away from the camera and the character
+	    turns to face wherever the keys sent it, so holding D swings it a
+	    quarter turn and it runs off that way.
+
+	    `.STRAFE` reads the keys the same but keeps the body facing the camera,
+	    so A and D side-step instead of turning into the step. Try it over a
+	    shoulder -- press 3 first -- which is the pair every third-person
+	    shooter offers. Standing still and turning the camera still turns the
+	    body, because aiming does not stop when the feet do.
+
+	    `.CHARACTER` reads them against the character's own heading instead:
+	    hold W, look left, and you carry straight on while the camera swings
+	    round to watch from the side. **Q and E** turn the character in that
+	    setting, because nothing else does -- which is the point of it
 	  - **press 1, 2 and 3.** Centred, over the left shoulder, over the right.
 	    The rig slides sideways rather than turning, so the view direction is
 	    unchanged and the character just stops being in the middle of it
@@ -149,10 +159,14 @@ main :: proc() {
 
 		if mb.is_key_pressed(.C) do keep_off_floor = !keep_off_floor
 
-		// Whether turning the camera turns the run. The one field, and nothing
-		// else about the camera changes with it.
+		// What the body does. The one field, and nothing else about the camera
+		// changes with it.
 		if mb.is_key_pressed(.F) {
-			rig.steering = .CHARACTER if rig.steering == .CAMERA else .CAMERA
+			switch rig.steering {
+			case .CAMERA:    rig.steering = .STRAFE
+			case .STRAFE:    rig.steering = .CHARACTER
+			case .CHARACTER: rig.steering = .CAMERA
+			}
 		}
 
 		// Where the camera sits relative to the character. Three settings, and
@@ -266,7 +280,12 @@ main :: proc() {
 		mb.draw_text(font, "1 centred   2 over the left shoulder   3 over the right", 20, 240, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("shoulder %v", rig.shoulder), 20, 270, mb.WHITE)
 
-		steer_note := "F: steering CAMERA -- W goes away from the camera" if rig.steering == .CAMERA else "F: steering CHARACTER -- W goes along the heading, Q and E turn"
+		steer_note: string
+		switch rig.steering {
+		case .CAMERA:    steer_note = "F: steering CAMERA -- the body turns to face where it runs"
+		case .STRAFE:    steer_note = "F: steering STRAFE -- the body faces the camera, A and D side-step"
+		case .CHARACTER: steer_note = "F: steering CHARACTER -- W follows the heading, Q and E turn"
+		}
 		mb.draw_text(font, steer_note, 20, 310, mb.WHITE)
 
 		mb.end_drawing()

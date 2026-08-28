@@ -495,9 +495,10 @@ camera3d_orbit_angles :: proc(camera: Camera3D) -> (yaw, pitch, distance: f32) {
 	note at the top of this section. Call it after the character has been moved,
 	with the point on the character the camera should look at.
 
-	`walk_direction(yaw)` is what the character moves along: in third person the
-	keys are read relative to the camera, so W walks away from it, which is what
-	makes turning the camera turn the character. That stays true off a shoulder
+	`walk_direction(yaw)` is what the character moves along: under the two
+	camera-steered settings the keys are read relative to the camera, so W walks
+	away from it, which is what makes turning the camera turn the run. That stays
+	true off a shoulder
 	-- the slide moves where the camera is, not which way it faces -- so a game
 	swapping shoulders mid-stride does not swap which way W goes.
 */
@@ -612,6 +613,30 @@ Camera3D_Steering :: enum {
 		does when free look is a key you hold rather than a mode you are in.
 	*/
 	CHARACTER,
+
+	/*
+		The camera steers, and the character faces the camera rather than its
+		own direction of travel. A and D then step sideways instead of turning
+		into the step: the body stays pointed where you are looking and the feet
+		go left or right underneath it, which is strafing.
+
+		The difference from `.CAMERA` is only what the body does -- the keys are
+		read against the camera in both. Under `.CAMERA` the character turns to
+		face wherever the keys sent it, so holding D swings it a quarter turn and
+		it runs off facing that way. Here it keeps facing forward and side-steps.
+
+		What a game does while a weapon is up, and the setting `Camera3D_Shoulder`
+		was made for: over the shoulder and strafing is the same pair every
+		third-person shooter offers. The body turns at `turn_speed` rather than
+		snapping, so whipping the camera round leaves it a moment behind, which
+		is what stops the character looking welded to the lens. A game that wants
+		it welded sets `turn_speed` high.
+
+		Unlike `.CAMERA`, the turn happens whether or not the character is
+		moving. Standing still and turning the camera turns the body: it is
+		facing where you are aiming, and aiming does not stop when you do.
+	*/
+	STRAFE,
 }
 
 // Where the camera looks on the character, added to the position you follow.
@@ -781,7 +806,11 @@ third_person_input :: proc(rig: ^Third_Person_Camera) {
 	switch rig.steering {
 	case .CHARACTER:
 		rig.move = walk_direction(rig.facing)
-	case .CAMERA:
+
+	// Both of the others read the keys against the camera. What separates them
+	// is which way the body ends up pointing, which is `third_person_follow`'s
+	// half of the job rather than this one's.
+	case .CAMERA, .STRAFE:
 		fallthrough
 	case:
 		rig.move = walk_direction(rig.yaw)
@@ -801,8 +830,22 @@ third_person_input :: proc(rig: ^Third_Person_Camera) {
 	rather than snapping back to face the camera.
 */
 third_person_follow :: proc(rig: ^Third_Person_Camera, position: [3]f32, delta_time: f32) {
-	if rig.steering == .CAMERA && rig.move != {0, 0, 0} {
-		turn_toward(&rig.facing, yaw_from_direction(rig.move), rig.turn_speed, delta_time)
+	switch rig.steering {
+	case .CAMERA:
+		// Face the way the keys sent us, and only while they are sending us
+		// somewhere -- a character standing still keeps the heading it had
+		// rather than drifting round to the camera.
+		if rig.move != {0, 0, 0} {
+			turn_toward(&rig.facing, yaw_from_direction(rig.move), rig.turn_speed, delta_time)
+		}
+
+	case .STRAFE:
+		// Face the camera, moving or not. Not clamped to the move, because
+		// aiming does not stop when the feet do.
+		turn_toward(&rig.facing, rig.yaw, rig.turn_speed, delta_time)
+
+	case .CHARACTER:
+		// Nothing. The heading is the game's under this setting.
 	}
 
 	camera3d_follow(&rig.camera, position + rig.focus_offset,

@@ -300,8 +300,8 @@ draw_model :: proc(
 			*/
 			for i in 0 ..< MAX_JOINTS do skin_data.joints[i] = linalg.MATRIX4F32_IDENTITY
 
-			if animator != nil && part_index < len(animator.palettes) {
-				palette := animator.palettes[part_index]
+			if animator != nil && part_index < len(animator.pose.palettes) {
+				palette := animator.pose.palettes[part_index]
 				for m, i in palette {
 					if i >= MAX_JOINTS do break
 					skin_data.joints[i] = m

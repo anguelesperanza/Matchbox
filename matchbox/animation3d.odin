@@ -124,27 +124,88 @@ model_is_skinned :: proc(model: Model) -> bool {
 // -----------------------------------------------------------------------
 
 /*
-	Where one character is in one clip, and the matrices that come out of it.
+	One clip being played, and how far into it.
 
-	`clip` indexes `model.animations` and is -1 when nothing is playing, which
-	is what `create_animator` starts at: a character stands in its bind pose
-	until the game asks for something.
+	Its own type because there are two of them during a blend: the clip being
+	faded out is a playback exactly like the clip being faded in, and giving
+	them the same shape is what keeps the two halves of `update_animator` from
+	drifting apart.
 
-	The three arrays are working space, sized once. `locals` is this frame's
-	pose before the hierarchy is applied, `globals` after, and `palettes` is
-	what the shader reads -- one per part, because a skinned part's palette
-	depends on the node the mesh hangs off as well as on the skin.
+	`clip` indexes `model.animations` and is -1 when there is nothing to play.
 */
-Animator :: struct {
+Animation_Playback :: struct {
 	clip:    int,
 	time:    f32,
 	speed:   f32,
 	looping: bool,
 	playing: bool,
+}
 
+/*
+	How a change of clip is smoothed over.
+
+	Without this, `play_animation` snaps: the character is mid-stride in a walk
+	on one frame and standing in an idle's first frame on the next, and the leg
+	teleports. With it the two poses are mixed over `duration`, which is the
+	whole of what a person means by animation blending.
+
+	Settings first, then the state the blend keeps while it runs. `enabled` and
+	`duration` are a game's to set -- and the rest is not, though nothing stops
+	a game reading it to find out whether a transition is still going.
+
+	The outgoing clip keeps playing while it fades. A walk faded into a run has
+	both cycles advancing, so the legs of the one being left behind are still
+	moving when they are handed over -- which is what makes the join invisible.
+	The exception is a blend interrupted by another: there is no third pose to
+	keep, so the mix at that instant is frozen and faded from instead, and
+	`from.clip` is -1 to say so.
+*/
+Animation_Blend :: struct {
+	// Whether a change of clip is faded at all. On by default; a game wanting
+	// the old hard cut sets it false, and one wanting a hard cut just this once
+	// sets `duration` to zero.
+	enabled: bool,
+
+	// Seconds the fade takes. Long enough to see, short enough that the
+	// character is not visibly in two poses at once.
+	duration: f32,
+
+	// State, from here down.
+	active:  bool,
+	elapsed: f32,
+	from:    Animation_Playback,
+}
+
+/*
+	One character's working space, sized once and rewritten every frame.
+
+	`locals` is this frame's pose before the hierarchy is applied and `globals`
+	after; `from` is the same as `locals` for whatever is being faded out, and
+	is untouched when nothing is. `palettes` is what the shader reads -- one per
+	part, because a skinned part's palette depends on the node its mesh hangs
+	off as well as on the skin.
+*/
+Animation_Pose :: struct {
 	locals:   []Transform,
+	from:     []Transform,
 	globals:  []matrix[4, 4]f32,
 	palettes: [][]matrix[4, 4]f32,
+}
+
+/*
+	One character's playback: what is playing, what it is fading from, and the
+	matrices that come out of both.
+
+	The playback is `using`, so `animator.playing` and `animator.time` are
+	reachable without going through a second name -- a game asks whether the
+	animator is playing, not whether its playback is. The other two are grouped
+	because a game has no reason to reach into either.
+*/
+Animator :: struct {
+	using playback: Animation_Playback,
+
+	blend: Animation_Blend,
+	pose:  Animation_Pose,
 }
 
 /*
@@ -158,43 +219,60 @@ Animator :: struct {
 	makes `create_animator` safe to call on whatever `load_model` returned, and
 	`update_animator` on the result does nothing.
 */
-create_animator :: proc(model: Model) -> Animator {
+create_animator :: proc(
+	model: Model,
+
+	// Blending on, over a fifth of a second. Passed as one value rather than as
+	// loose arguments so that the setting and its duration travel together, and
+	// so there is no package-level constant for either.
+	blend := Animation_Blend{enabled = true, duration = 0.2},
+) -> Animator {
+	idle := Animation_Playback{clip = -1, speed = 1, looping = true}
+
 	if !model_is_skinned(model) {
 		log.info("model has no skeleton; animator will do nothing")
-		return Animator{clip = -1, speed = 1, looping = true}
+		return Animator{playback = idle, blend = blend}
 	}
 
 	node_count := len(model.skeleton.rest)
 
 	animator := Animator{
-		clip     = -1,
-		speed    = 1,
-		looping  = true,
-		locals   = make([]Transform, node_count),
-		globals  = make([]matrix[4, 4]f32, node_count),
-		palettes = make([][]matrix[4, 4]f32, len(model.parts)),
+		playback = idle,
+		blend    = blend,
+		pose = Animation_Pose{
+			locals   = make([]Transform, node_count),
+			from     = make([]Transform, node_count),
+			globals  = make([]matrix[4, 4]f32, node_count),
+			palettes = make([][]matrix[4, 4]f32, len(model.parts)),
+		},
 	}
+
+	// The state half of the blend is this animator's, whatever was passed in.
+	animator.blend.active  = false
+	animator.blend.elapsed = 0
+	animator.blend.from    = Animation_Playback{clip = -1}
 
 	for part, i in model.parts {
 		if part.skin < 0 || part.skin >= len(model.skeleton.skins) do continue
-		animator.palettes[i] = make([]matrix[4, 4]f32, len(model.skeleton.skins[part.skin].joints))
+		animator.pose.palettes[i] = make([]matrix[4, 4]f32, len(model.skeleton.skins[part.skin].joints))
 	}
 
-	// The bind pose, so a character drawn before its first `update_animator`
-	// is a character rather than a heap of triangles at the origin.
-	copy(animator.locals, model.skeleton.rest)
+	// The bind pose, so a character drawn before its first `update_animator` is
+	// a character rather than a heap of triangles at the origin.
+	copy(animator.pose.locals, model.skeleton.rest)
 	animator_resolve(&animator, model)
 
 	return animator
 }
 
 destroy_animator :: proc(animator: ^Animator) {
-	for palette in animator.palettes do delete(palette)
-	delete(animator.palettes)
-	delete(animator.globals)
-	delete(animator.locals)
+	for palette in animator.pose.palettes do delete(palette)
+	delete(animator.pose.palettes)
+	delete(animator.pose.globals)
+	delete(animator.pose.from)
+	delete(animator.pose.locals)
 
-	animator^ = Animator{clip = -1, speed = 1, looping = true}
+	animator^ = Animator{playback = {clip = -1, speed = 1, looping = true}}
 }
 
 // The index of a clip by name, for a game that would rather write "Walk" than
@@ -295,6 +373,34 @@ play_animation :: proc(animator: ^Animator, model: Model, name: string, looping:
 play_animation_index :: proc(animator: ^Animator, model: Model, index: int, looping: bool = true) {
 	if index < 0 || index >= len(model.animations) do return
 
+	/*
+		Start a fade, unless there is nothing to fade from or the game has asked
+		for none. Re-playing the clip already running is left alone: it is how a
+		one-shot is retriggered, and fading a clip into itself would cross-fade
+		its end with its beginning for no reason.
+	*/
+	if animator.blend.enabled && animator.blend.duration > 0 &&
+	   animator.playing && animator.clip >= 0 && animator.clip != index {
+
+		if animator.blend.active {
+			/*
+				Already fading. There is no third pose to keep and no sensible
+				way to fade from two clips at once, so the mix as it stands this
+				instant is frozen and faded from. `from.clip` of -1 is what
+				`update_animator` reads as "the source is a still pose, do not
+				advance it".
+			*/
+			copy(animator.pose.from, animator.pose.locals)
+			animator.blend.from = Animation_Playback{clip = -1}
+		} else {
+			// The outgoing clip carries on playing while it fades out.
+			animator.blend.from = animator.playback
+		}
+
+		animator.blend.active  = true
+		animator.blend.elapsed = 0
+	}
+
 	animator.clip    = index
 	animator.time    = 0
 	animator.looping = looping
@@ -319,40 +425,129 @@ stop_animation :: proc(animator: ^Animator) {
 */
 update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32) {
 	if !model_is_skinned(model) do return
-	if len(animator.locals) != len(model.skeleton.rest) do return
+	if len(animator.pose.locals) != len(model.skeleton.rest) do return
 
-	if animator.playing && animator.clip >= 0 && animator.clip < len(model.animations) {
-		clip := model.animations[animator.clip]
+	// The clip being faded out, first, because the fade's own clock decides
+	// whether it is still wanted.
+	if animator.blend.active {
+		animator.blend.elapsed += delta_time
 
-		animator.time += delta_time * animator.speed
-
-		if animator.looping {
-			// `mod` rather than a subtract, so a long stall or a big speed does
-			// not leave the time several clips past the end.
-			if clip.duration > 0 {
-				animator.time = math.mod(animator.time, clip.duration)
-				if animator.time < 0 do animator.time += clip.duration
-			}
-		} else if animator.time >= clip.duration {
-			animator.time   = clip.duration
-			animator.playing = false
-		} else if animator.time < 0 {
-			animator.time   = 0
-			animator.playing = false
-		}
-
-		// From the rest pose every frame, not from last frame's. A clip drives
-		// some joints and not others, and the ones it leaves alone belong where
-		// the file put them -- accumulating instead would let them drift.
-		copy(animator.locals, model.skeleton.rest)
-
-		for track in clip.tracks {
-			if int(track.node) >= len(animator.locals) do continue
-			sample_track(track, animator.time, &animator.locals[track.node])
+		// Keep the outgoing clip running, so what is being faded out is still
+		// moving while it goes. A `from.clip` of -1 is a frozen pose that is
+		// already sitting in pose.from, and there is nothing to advance.
+		if animator.blend.from.clip >= 0 && animator.blend.elapsed < animator.blend.duration {
+			advance_playback(&animator.blend.from, model, delta_time)
+			sample_pose(model, animator.blend.from, animator.pose.from)
 		}
 	}
 
+	advance_playback(&animator.playback, model, delta_time)
+	sample_pose(model, animator.playback, animator.pose.locals)
+
+	if animator.blend.active {
+		t: f32 = 1
+		if animator.blend.duration > 0 {
+			t = clamp(animator.blend.elapsed / animator.blend.duration, 0, 1)
+		}
+
+		/*
+			Eased rather than linear, and it is worth the multiply.
+
+			A straight ramp leaves the pose moving at full blend speed right up
+			to the last frame and then stopping dead, which measures as the pose
+			travelling 0.49 units in the final frame of the fade and 0.15 in the
+			one after -- a velocity step, not a position one, so it reads as a
+			flinch rather than a jump. Smoothstep starts and ends at zero rate,
+			so the fade joins both clips smoothly at each end.
+		*/
+		t = t * t * (3 - 2 * t)
+
+		for i in 0 ..< len(animator.pose.locals) {
+			animator.pose.locals[i] = transform_mix(animator.pose.from[i], animator.pose.locals[i], t)
+		}
+
+		/*
+			Retired after the mix, not before it. Dropping out on the frame the
+			clock runs over would skip the last step of the fade and land on the
+			destination in one go -- a small snap, but the exact one this whole
+			procedure exists to remove, and it hid at the end of the blend where
+			nobody would look for it.
+		*/
+		if t >= 1 do animator.blend.active = false
+	}
+
 	animator_resolve(animator, model)
+}
+
+/*
+	Moves one playback's clock on, wrapping a looping clip and stopping a
+	one-shot at its last frame.
+
+	Shared by the clip playing and the clip fading out, which is the reason
+	`Animation_Playback` is a type rather than five fields: the outgoing clip
+	has to advance exactly as the incoming one does, and two copies of this
+	would be two chances to make them differ.
+*/
+@(private)
+advance_playback :: proc(playback: ^Animation_Playback, model: Model, delta_time: f32) {
+	if !playback.playing do return
+	if playback.clip < 0 || playback.clip >= len(model.animations) do return
+
+	duration := model.animations[playback.clip].duration
+
+	playback.time += delta_time * playback.speed
+
+	if playback.looping {
+		// `mod` rather than a subtract, so a long stall or a big speed does not
+		// leave the time several clips past the end.
+		if duration > 0 {
+			playback.time = math.mod(playback.time, duration)
+			if playback.time < 0 do playback.time += duration
+		}
+	} else if playback.time >= duration {
+		playback.time    = duration
+		playback.playing = false
+	} else if playback.time < 0 {
+		playback.time    = 0
+		playback.playing = false
+	}
+}
+
+/*
+	Writes one playback's pose into `into`.
+
+	From the rest pose every time, not from what was there before. A clip drives
+	some joints and not others, and the ones it leaves alone belong where the
+	file put them -- accumulating instead would let them drift, and during a
+	blend would let the outgoing clip leak into the incoming one.
+*/
+@(private)
+sample_pose :: proc(model: Model, playback: Animation_Playback, into: []Transform) {
+	copy(into, model.skeleton.rest)
+
+	if playback.clip < 0 || playback.clip >= len(model.animations) do return
+
+	for track in model.animations[playback.clip].tracks {
+		if int(track.node) >= len(into) do continue
+		sample_track(track, playback.time, &into[track.node])
+	}
+}
+
+/*
+	One transform part-way between two others.
+
+	Rotation by slerp and the other two by a straight lerp, for the reason the
+	tracks keep their rotations in a separate array: a quaternion interpolated
+	component-wise takes the chord rather than the arc, and a joint doing that
+	over ninety degrees visibly shortens the limb it is on.
+*/
+@(private)
+transform_mix :: proc(a, b: Transform, t: f32) -> Transform {
+	return Transform{
+		position = linalg.lerp(a.position, b.position, t),
+		rotation = linalg.quaternion_slerp_f32(a.rotation, b.rotation, t),
+		scale    = linalg.lerp(a.scale, b.scale, t),
+	}
 }
 
 /*
@@ -373,30 +568,30 @@ animator_resolve :: proc(animator: ^Animator, model: Model) {
 
 	// Parents before children, which is what `order` is for.
 	for node in skeleton.order {
-		local  := transform_matrix(animator.locals[node])
+		local  := transform_matrix(animator.pose.locals[node])
 		parent := skeleton.parents[node]
 
 		if parent < 0 {
-			animator.globals[node] = local
+			animator.pose.globals[node] = local
 		} else {
-			animator.globals[node] = animator.globals[parent] * local
+			animator.pose.globals[node] = animator.pose.globals[parent] * local
 		}
 	}
 
 	for part, i in model.parts {
 		if part.skin < 0 || part.skin >= len(skeleton.skins) do continue
-		if len(animator.palettes[i]) == 0 do continue
+		if len(animator.pose.palettes[i]) == 0 do continue
 
 		skin := skeleton.skins[part.skin]
 
 		mesh_inverse := linalg.MATRIX4F32_IDENTITY
-		if int(part.node) < len(animator.globals) {
-			mesh_inverse = linalg.inverse(animator.globals[part.node])
+		if int(part.node) < len(animator.pose.globals) {
+			mesh_inverse = linalg.inverse(animator.pose.globals[part.node])
 		}
 
 		for joint, j in skin.joints {
-			if int(joint) >= len(animator.globals) do continue
-			animator.palettes[i][j] = mesh_inverse * animator.globals[joint] * skin.inverse_bind[j]
+			if int(joint) >= len(animator.pose.globals) do continue
+			animator.pose.palettes[i][j] = mesh_inverse * animator.pose.globals[joint] * skin.inverse_bind[j]
 		}
 	}
 }

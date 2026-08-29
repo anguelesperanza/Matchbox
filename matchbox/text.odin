@@ -25,7 +25,7 @@ import "core:strings"
 
 // Extra room between one baseline and the next, as a share of the line height.
 // A little over single spacing, which is what a paragraph of body text wants.
-LINE_SPACING :: f32(0.15)
+
 
 /*
 	Splits `text` into lines that each fit within `max_width`.
@@ -137,7 +137,7 @@ rune_advance :: proc(font: ^Font, ch: rune) -> f32 {
 }
 
 // The height of one line, baseline to baseline.
-line_height :: proc(font: ^Font, spacing: f32 = LINE_SPACING) -> f32 {
+line_height :: proc(font: ^Font, spacing: f32 = FONT_DEFAULTS.line_spacing) -> f32 {
 	return (font.ascent + font.descent) * (1 + spacing)
 }
 
@@ -160,7 +160,7 @@ draw_text_wrapped :: proc(
 	top_left:  [2]f32,
 	max_width: f32,
 	color:     [4]f32 = WHITE,
-	spacing:   f32 = LINE_SPACING,
+	spacing:   f32 = FONT_DEFAULTS.line_spacing,
 ) -> [2]f32 {
 	lines := wrap_text(font, text, max_width, context.temp_allocator)
 	return draw_text_lines(font, lines, top_left, color, spacing)
@@ -177,7 +177,7 @@ draw_text_lines :: proc(
 	lines:    []string,
 	top_left: [2]f32,
 	color:    [4]f32 = WHITE,
-	spacing:  f32 = LINE_SPACING,
+	spacing:  f32 = FONT_DEFAULTS.line_spacing,
 ) -> [2]f32 {
 	step  := line_height(font, spacing)
 	width: f32
@@ -197,7 +197,7 @@ draw_text_lines :: proc(
 	For laying a panel out before anything goes in it -- a tooltip sizing its
 	plate, a dialog sizing itself to its message.
 */
-measure_text_wrapped :: proc(font: ^Font, text: string, max_width: f32, spacing: f32 = LINE_SPACING) -> [2]f32 {
+measure_text_wrapped :: proc(font: ^Font, text: string, max_width: f32, spacing: f32 = FONT_DEFAULTS.line_spacing) -> [2]f32 {
 	lines := wrap_text(font, text, max_width, context.temp_allocator)
 
 	width: f32
@@ -213,7 +213,7 @@ measure_text_wrapped :: proc(font: ^Font, text: string, max_width: f32, spacing:
 	a one line block is exactly as tall as a one line measure_text and a block
 	sits flush against whatever is put under it.
 */
-text_block_height :: proc(font: ^Font, count: int, spacing: f32 = LINE_SPACING) -> f32 {
+text_block_height :: proc(font: ^Font, count: int, spacing: f32 = FONT_DEFAULTS.line_spacing) -> f32 {
 	if count <= 0 do return 0
 
 	line := font.ascent + font.descent

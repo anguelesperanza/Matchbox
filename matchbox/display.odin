@@ -48,6 +48,8 @@ set_logical_size :: proc(width: i32, height: i32) {
     mbi.fixed_res = true
 }
 
+// A world position as the shader wants it, with the camera and the letterbox
+// applied. What every 2D draw runs its position through.
 screen_pos :: proc(pos: [2]f32) -> [2]f32 {
 	if mbi.camera.active {
 		screen_center := [2]f32{cast(f32)mbi.width * 0.5, cast(f32)mbi.height * 0.5}
@@ -76,6 +78,7 @@ screen_size :: proc(size: [2]f32) -> [2]f32 {
 	return size * mbi.draw_scale
 }
 
+// The size everything 2D is measured against this frame.
 screen_dims :: proc() -> [2]f32 {
 	// The render target when one is bound, so that 2D drawn into a texture of
 	// a different size than the window lands inside it rather than off the

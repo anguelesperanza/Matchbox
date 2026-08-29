@@ -186,6 +186,14 @@ bind_cache_reset :: proc() {
 // Frame loop
 // -----------------------------------------------------------------------
 
+/*
+	Starts a frame: acquires a command buffer and the swapchain image.
+
+	Everything drawn goes between this and `end_drawing`. A frame that cannot
+	get a swapchain image -- a minimised window is the usual reason -- is
+	skipped rather than failed, and every draw between the two quietly becomes
+	a no-op.
+*/
 begin_drawing :: proc() {
 	ensure(mbi.initialized, "matchbox.init must be called before begin_drawing")
 
@@ -268,6 +276,8 @@ begin_drawing :: proc() {
 	// resize the old backend needed here is gone.
 }
 
+// Ends the frame and hands it to the GPU. Nothing appears on screen until this
+// is called.
 end_drawing :: proc() {
 	r := &mbi.renderer
 	if r.cmd == nil do return
@@ -284,6 +294,8 @@ end_drawing :: proc() {
 	r.frame_active = false
 }
 
+// Fills the frame with one colour. Call it just after `begin_drawing`: it
+// starts a fresh render pass, so anything drawn before it is thrown away.
 clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 	r := &mbi.renderer
 	if !r.frame_active do return
@@ -369,6 +381,8 @@ point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool {
 	       point.y >= top_left.y && point.y <= top_left.y + size.y
 }
 
+// A filled rectangle, rotated about its own pivot. The 2D primitive most of
+// `ui.odin` is built from.
 draw_rect :: proc(rectangle: Rectangle) {
 	ensure_pass()
 

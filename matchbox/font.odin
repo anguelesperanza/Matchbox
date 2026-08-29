@@ -24,7 +24,11 @@ DEFAULT_FONT_BYTES :: #load("fonts/Adapa.ttf")
 // exactly two screen pixels, and at anything between two multiples the stems
 // come out as an uneven mix of two and three pixels with grey down one side.
 // The same holds for any size asked of get_font -- 13, 26, 39, 52.
-DEFAULT_FONT_SIZE :: f32(26)
+FONT_DEFAULTS :: Font_Defaults{
+	size         = 26,
+	line_spacing = 0.15,
+	cache_limit  = 6,
+}
 
 Font :: struct {
 	using mesh:  Mesh,
@@ -36,6 +40,16 @@ Font :: struct {
 	descent:     f32, // baseline down to the lowest glyph
 }
 
+/*
+	Bakes a TTF into an atlas at one pixel size.
+
+	One size per atlas, because stb bakes glyphs at a fixed size rather than
+	scaling them -- drawing a 26px atlas at 64px is a blurry 26px atlas. A game
+	wanting several sizes calls `get_font`, which keeps a small cache of them.
+
+	`bytes` is the file's contents, so `#load` works and the font ships inside
+	the executable.
+*/
 load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	font: Font
 	font.atlas_size = FONT_ATLAS_SIZE
@@ -75,10 +89,13 @@ load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	return font
 }
 
+// Gives the font's atlas texture and vertex buffer back to the GPU.
 destroy_font :: proc(font: ^Font) {
 	destroy_mesh(&font.mesh)
 }
 
+// An integer, without the caller building a string for it. Part of the
+// `draw_text` group.
 draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_int(buf[:], integer, 10)
@@ -86,6 +103,8 @@ draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) 
 }
 
 
+// A float at two decimal places, without the caller building a string. Part of
+// the `draw_text` group.
 draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) where intrinsics.type_is_float(T) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
@@ -93,6 +112,10 @@ draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) w
 }
 
 
+// A string at a position, in world coordinates -- so it moves with the camera
+// and scales with the letterbox. `draw_text_ui` is the one that does not.
+//
+// `x` and `y` are the left end of the baseline, not the top-left corner.
 draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
 	// Bound once for the whole string. The pipeline, the shared quad and the
 	// atlas are the same for every character in it -- only the uniforms differ.
@@ -131,6 +154,8 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 	}
 }
 
+// Draws a string, an integer or a float, so a game does not build a string for
+// a number it wants on screen.
 draw_text :: proc {
 	draw_text_string,
 	draw_text_i64,
@@ -193,18 +218,23 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 	}
 }
 
+// An integer in screen coordinates. Part of the `draw_text_ui` group.
 draw_text_ui_int :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_int(buf[:], integer, 10)
     draw_text_ui_string(font, result[:], x, y, color)
 }
 
+// A float in screen coordinates, two decimal places. Part of the
+// `draw_text_ui` group.
 draw_text_ui_f32 :: proc(font: ^Font, float: f32, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
     draw_text_ui_string(font, result[1:], x, y, color)
 }
 
+// `draw_text`, but in screen coordinates: fixed to the window and untouched by
+// the camera. What a HUD, a score or a debug readout wants.
 draw_text_ui :: proc {
     draw_text_ui_string,
     draw_text_ui_int,
@@ -228,7 +258,10 @@ draw_text_ui :: proc {
 	Eviction is least-recently-used, and never touches a size that has been
 	asked for during the current frame -- see font_cache_trim.
 */
-FONT_CACHE_LIMIT :: 6
+// Kept as a name rather than reached for through FONT_DEFAULTS at every use,
+// because this one is compared against a length in a loop.
+@(private)
+font_cache_limit :: proc() -> int { return FONT_DEFAULTS.cache_limit }
 
 @(private)
 Cached_Font :: struct {
@@ -236,11 +269,20 @@ Cached_Font :: struct {
 	used_on: u64, // the frame it was last handed out
 }
 
-@(private)
-font_cache: map[i32]Cached_Font
+/*
+	Every baked size of the default font, and the order they were last asked
+	for.
 
+	The two are one thing: the map answers "have we got this size", the slice
+	answers "which size goes first when we are over the limit", and neither is
+	meaningful without the other. They lived at package scope until the cleanup
+	in `cleanup.md`; they are state belonging to `mbi` like everything else.
+*/
 @(private)
-font_cache_order: [dynamic]i32 // least recently used first
+Font_Cache :: struct {
+	sizes: map[i32]Cached_Font,
+	order: [dynamic]i32, // least recently used first
+}
 
 /*
 	The default font baked at `size` pixels.
@@ -281,11 +323,11 @@ get_font :: proc(size: f32) -> ^Font {
 
 	// The one init already baked. Handing back a second copy of it would be a
 	// megabyte of atlas to say the same thing.
-	if f32(px) == DEFAULT_FONT_SIZE do return &mbi.font
+	if f32(px) == FONT_DEFAULTS.size do return &mbi.font
 
-	if cached, found := font_cache[px]; found {
+	if cached, found := mbi.font_cache.sizes[px]; found {
 		cached.used_on = mbi.frame
-		font_cache[px] = cached
+		mbi.font_cache.sizes[px] = cached
 		font_cache_touch(px)
 		return cached.font
 	}
@@ -293,8 +335,8 @@ get_font :: proc(size: f32) -> ^Font {
 	font  := new(Font)
 	font^ = load_font(DEFAULT_FONT_BYTES, f32(px))
 
-	font_cache[px] = Cached_Font{font = font, used_on = mbi.frame}
-	append(&font_cache_order, px)
+	mbi.font_cache.sizes[px] = Cached_Font{font = font, used_on = mbi.frame}
+	append(&mbi.font_cache.order, px)
 
 	// After inserting rather than before, so nothing is thrown out to make room
 	// for something that then turns out to be resident already.
@@ -306,15 +348,15 @@ get_font :: proc(size: f32) -> ^Font {
 // How many extra sizes are resident, not counting the default one. For an
 // example or a debug overlay that wants to show the cache doing its job.
 font_cache_len :: proc() -> int {
-	return len(font_cache)
+	return len(mbi.font_cache.sizes)
 }
 
 @(private)
 font_cache_touch :: proc(px: i32) {
-	for k, i in font_cache_order {
+	for k, i in mbi.font_cache.order {
 		if k == px {
-			ordered_remove(&font_cache_order, i)
-			append(&font_cache_order, px)
+			ordered_remove(&mbi.font_cache.order, i)
+			append(&mbi.font_cache.order, px)
 			return
 		}
 	}
@@ -332,10 +374,10 @@ font_cache_touch :: proc(px: i32) {
 */
 @(private)
 font_cache_trim :: proc() {
-	for len(font_cache_order) > FONT_CACHE_LIMIT {
-		oldest := font_cache_order[0]
+	for len(mbi.font_cache.order) > font_cache_limit() {
+		oldest := mbi.font_cache.order[0]
 
-		if cached, found := font_cache[oldest]; found {
+		if cached, found := mbi.font_cache.sizes[oldest]; found {
 			// `mbi.frame > 0` matters: it is 0 until the first poll_events, and
 			// so is every used_on recorded before then. Without it, sizes baked
 			// during setup all look like they are in use by the frame that has
@@ -345,24 +387,23 @@ font_cache_trim :: proc() {
 
 			destroy_font(cached.font)
 			free(cached.font)
-			delete_key(&font_cache, oldest)
+			delete_key(&mbi.font_cache.sizes, oldest)
 		}
 
-		ordered_remove(&font_cache_order, 0)
+		ordered_remove(&mbi.font_cache.order, 0)
 	}
 }
 
 // Frees every cached size. Called by cleanup; a game does not need to.
 @(private)
 font_cache_destroy :: proc() {
-	for _, cached in font_cache {
+	for _, cached in mbi.font_cache.sizes {
 		destroy_font(cached.font)
 		free(cached.font)
 	}
 
-	delete(font_cache)
-	delete(font_cache_order)
+	delete(mbi.font_cache.sizes)
+	delete(mbi.font_cache.order)
 
-	font_cache       = nil
-	font_cache_order = nil
+	mbi.font_cache = {}
 }

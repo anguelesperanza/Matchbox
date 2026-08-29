@@ -39,6 +39,7 @@ package skybox_example
 */
 
 import "core:fmt"
+import "core:math"
 
 import mb "../../matchbox"
 
@@ -72,8 +73,14 @@ main :: proc() {
 	cube := mb.cube_model(1)
 	defer mb.destroy(&cube)
 
-	camera := mb.camera3d_at(position = {0, EYE_HEIGHT, 6}, target = {0, EYE_HEIGHT, 0})
-	yaw, pitch := mb.camera3d_angles(camera)
+	// Six back, level, looking along -z.
+	player := [3]f32{0, 0, 6}
+
+	rig := mb.first_person_camera(
+		position   = player,
+		facing     = -math.PI * 0.5,
+		eye_offset = {0, EYE_HEIGHT, 0},
+	)
 
 	showing_cubemap := !panorama_ok
 	tint            := mb.WHITE
@@ -102,7 +109,7 @@ main :: proc() {
 		if mb.is_key_pressed(._2) do tint = {0.45, 0.35, 0.55, 1}
 
 		if mb.cursor_locked() {
-			mb.camera3d_first_person(&camera, &yaw, &pitch, WALK_SPEED, dt)
+			mb.first_person_walk(&rig, &player, WALK_SPEED, dt)
 		}
 
 		sky := cubemap if showing_cubemap else panorama
@@ -111,7 +118,7 @@ main :: proc() {
 		mb.begin_drawing()
 		mb.clear_background(mb.BLACK)
 
-		mb.begin_drawing_3d(camera)
+		mb.begin_drawing_3d(rig.camera)
 
 		// First, before anything else in the pass. It writes every pixel and
 		// touches no depth, so what follows draws straight over it.
@@ -135,7 +142,7 @@ main :: proc() {
 			"CUBEMAP (a 4x3 cross)" if showing_cubemap else "PANORAMA (2:1 equirectangular)"),
 			20, 70, mb.WHITE)
 		mb.draw_text(font, "1 and 2 tint it", 20, 100, mb.WHITE)
-		mb.draw_text(font, fmt.tprintf("looking %.2f, %.2f", yaw, pitch), 20, 140, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("looking %.2f, %.2f", rig.yaw, rig.pitch), 20, 140, mb.WHITE)
 
 		mb.end_drawing()
 	}

@@ -38,6 +38,14 @@ Sprite_Cache :: struct($Key: typeid) {
 	limit:   int,
 }
 
+/*
+	A cache that loads each image once and hands the same sprite to everyone who
+	asks for it, keyed by whatever a game already identifies its art by.
+
+	`limit` of zero means no eviction: the cache grows to hold every image asked
+	for and frees them together. A non-zero limit evicts least-recently-used,
+	which is what a game streaming a large atlas set wants.
+*/
 sprite_cache_make :: proc($Key: typeid, limit: int = 0, allocator := context.allocator) -> Sprite_Cache(Key) {
 	return Sprite_Cache(Key){
 		sprites = make(map[Key]^Sprite, allocator = allocator),

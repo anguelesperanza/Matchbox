@@ -165,13 +165,75 @@ camera3d_right :: proc(camera: Camera3D) -> [3]f32 {
 	would be storing the same fact twice and inviting them to disagree.
 */
 
-// Radians per unit of mouse motion. CoffeeGame's number, which felt right.
-MOUSE_SENSITIVITY :: f32(0.003)
+/*
+	Every number the camera constructors start from, in one place.
 
-// Just short of straight up or straight down. Exactly vertical is where the
-// forward direction becomes parallel to `up`, the cross product that makes the
-// view matrix collapses, and the picture rolls over.
-PITCH_LIMIT :: f32(1.56) // a little under pi/2
+	One struct rather than the eleven loose constants this used to be. They are
+	the same kind of thing -- the value a camera field takes when nobody said
+	otherwise -- and they were scattered across four hundred lines of this file
+	in the order each was needed. A game overriding one of them still passes an
+	argument; this is only where the argument's default comes from.
+
+	Every field below is reachable as a default parameter value, because Odin
+	folds a constant struct's field at compile time: `pitch_max: f32 =
+	CAMERA3D_DEFAULTS.pitch_limit` is as valid as a bare constant was.
+*/
+Camera3D_Defaults :: struct {
+	// Radians per unit of mouse motion. CoffeeGame's number, which felt right.
+	sensitivity: f32,
+
+	/*
+		Just short of straight up or straight down, for a camera that tilts like
+		a head. Exactly vertical is where the forward direction becomes parallel
+		to `up`, the cross product that makes the view matrix collapses, and the
+		picture rolls over.
+	*/
+	pitch_limit: f32,
+
+	// How far above the position it is following each rig looks from. Eye
+	// height for first person; the point on the character third person aims at,
+	// which is head height rather than the feet.
+	eye_offset:   [3]f32,
+	focus_offset: [3]f32,
+
+	// Where an orbit camera sits before anybody touches the mouse, and how far
+	// it may swing either side of that. Not `pitch_limit` and not symmetric --
+	// see the note on `camera3d_look`.
+	orbit_pitch:     f32,
+	orbit_pitch_min: f32,
+	orbit_pitch_max: f32,
+
+	// How far back the orbit sits, what the wheel may take it to, and how fast.
+	distance:     f32,
+	distance_min: f32,
+	distance_max: f32,
+	zoom_speed:   f32,
+
+	// How far sideways an over-the-shoulder camera slides, and how fast the
+	// character pivots to face where it is going.
+	shoulder_offset: f32,
+	turn_speed:      f32,
+}
+
+CAMERA3D_DEFAULTS :: Camera3D_Defaults{
+	sensitivity = 0.003,
+	pitch_limit = 1.56, // a little under pi/2
+
+	eye_offset   = {0, 1.7, 0},
+	focus_offset = {0, 1.6, 0},
+
+	orbit_pitch     = -0.3,
+	orbit_pitch_min = -1.30, // camera high above, looking down
+	orbit_pitch_max =  0.30, // camera a little below, looking up
+
+	distance     = 6,
+	distance_min = 1.5,
+	distance_max = 20,
+	zoom_speed   = 1,
+
+	shoulder_offset = 0.75,
+	turn_speed      = 12,
+}
 
 // Which way you are facing, from the two angles. Yaw 0 looks along +x.
 direction_from_angles :: proc(yaw, pitch: f32) -> [3]f32 {
@@ -204,13 +266,13 @@ camera3d_angles :: proc(camera: Camera3D) -> (yaw, pitch: f32) {
 	third-person camera wants a different one: its pitch swings the camera
 	above and below the character instead of tilting a head, so straight down
 	is useful and straight up puts the camera under the floor. See
-	`ORBIT_PITCH_MIN` and `ORBIT_PITCH_MAX`.
+	`CAMERA3D_DEFAULTS.orbit_pitch_min` and `CAMERA3D_DEFAULTS.orbit_pitch_max`.
 */
 camera3d_look :: proc(
 	yaw, pitch:  ^f32,
-	sensitivity: f32 = MOUSE_SENSITIVITY,
-	pitch_min:   f32 = -PITCH_LIMIT,
-	pitch_max:   f32 =  PITCH_LIMIT,
+	sensitivity: f32 = CAMERA3D_DEFAULTS.sensitivity,
+	pitch_min:   f32 = -CAMERA3D_DEFAULTS.pitch_limit,
+	pitch_max:   f32 =  CAMERA3D_DEFAULTS.pitch_limit,
 ) {
 	delta := get_mouse_delta()
 
@@ -272,7 +334,7 @@ camera3d_first_person :: proc(
 	yaw, pitch:  ^f32,
 	speed:       f32,
 	delta_time:  f32,
-	sensitivity: f32 = MOUSE_SENSITIVITY,
+	sensitivity: f32 = CAMERA3D_DEFAULTS.sensitivity,
 ) {
 	camera3d_look(yaw, pitch, sensitivity)
 
@@ -314,17 +376,6 @@ camera3d_first_person :: proc(
 	with the shorter distance instead. Matchbox does not cast rays (see D7).
 */
 
-// A distance to start at, and how close and how far the wheel may take it.
-// Six units behind a character shows the character and enough of what is
-// around it; under about one and a half the near plane starts eating the
-// model.
-ORBIT_DISTANCE     :: f32(6)
-ORBIT_DISTANCE_MIN :: f32(1.5)
-ORBIT_DISTANCE_MAX :: f32(20)
-
-// World units of distance per notch of wheel.
-ORBIT_ZOOM_SPEED :: f32(1)
-
 /*
 	How far the camera may swing above and below what it is orbiting.
 
@@ -335,9 +386,6 @@ ORBIT_ZOOM_SPEED :: f32(1)
 	degrees of that is a glance up at them while more of it is a camera under
 	the floor. Hence the short top end.
 */
-ORBIT_PITCH_MIN :: f32(-1.30) // camera high above, looking down
-ORBIT_PITCH_MAX :: f32( 0.30) // camera a little below, looking up
-
 // Turns this frame's wheel into a change in distance. Wheel up pulls the
 // camera in, which is the direction every game scrolls.
 //
@@ -346,9 +394,9 @@ ORBIT_PITCH_MAX :: f32( 0.30) // camera a little below, looking up
 // read for it.
 camera3d_zoom :: proc(
 	distance:     ^f32,
-	min_distance: f32 = ORBIT_DISTANCE_MIN,
-	max_distance: f32 = ORBIT_DISTANCE_MAX,
-	speed:        f32 = ORBIT_ZOOM_SPEED,
+	min_distance: f32 = CAMERA3D_DEFAULTS.distance_min,
+	max_distance: f32 = CAMERA3D_DEFAULTS.distance_max,
+	speed:        f32 = CAMERA3D_DEFAULTS.zoom_speed,
 ) {
 	wheel := get_mouse_wheel()
 	if wheel.y == 0 do return
@@ -390,8 +438,6 @@ Camera3D_Shoulder :: enum {
 	makes the framing more over-the-shoulder rather than less -- which is what a
 	game does when it raises a weapon.
 */
-SHOULDER_OFFSET :: f32(0.75)
-
 /*
 	The signed sideways step a shoulder setting asks for. Positive is to the
 	camera's right.
@@ -401,7 +447,7 @@ SHOULDER_OFFSET :: f32(0.75)
 	swap to slide keeps its own f32, moves it toward this, and feeds the result
 	through `camera3d_side_offset`.
 */
-camera3d_shoulder_amount :: proc(shoulder: Camera3D_Shoulder, offset: f32 = SHOULDER_OFFSET) -> f32 {
+camera3d_shoulder_amount :: proc(shoulder: Camera3D_Shoulder, offset: f32 = CAMERA3D_DEFAULTS.shoulder_offset) -> f32 {
 	switch shoulder {
 	case .LEFT:  return -offset
 	case .RIGHT: return  offset
@@ -435,7 +481,7 @@ camera3d_orbit_focus :: proc(
 	focus:           [3]f32,
 	yaw:             f32,
 	shoulder:        Camera3D_Shoulder = .CENTER,
-	shoulder_offset: f32 = SHOULDER_OFFSET,
+	shoulder_offset: f32 = CAMERA3D_DEFAULTS.shoulder_offset,
 ) -> [3]f32 {
 	if shoulder == .CENTER do return focus
 	return focus + camera3d_side_offset(yaw, camera3d_shoulder_amount(shoulder, shoulder_offset))
@@ -454,7 +500,7 @@ camera3d_orbit_position :: proc(
 	focus:                [3]f32,
 	yaw, pitch, distance: f32,
 	shoulder:             Camera3D_Shoulder = .CENTER,
-	shoulder_offset:      f32 = SHOULDER_OFFSET,
+	shoulder_offset:      f32 = CAMERA3D_DEFAULTS.shoulder_offset,
 ) -> [3]f32 {
 	aim := camera3d_orbit_focus(focus, yaw, shoulder, shoulder_offset)
 	return aim - direction_from_angles(yaw, pitch) * distance
@@ -473,7 +519,7 @@ camera3d_follow :: proc(
 	focus:                [3]f32,
 	yaw, pitch, distance: f32,
 	shoulder:             Camera3D_Shoulder = .CENTER,
-	shoulder_offset:      f32 = SHOULDER_OFFSET,
+	shoulder_offset:      f32 = CAMERA3D_DEFAULTS.shoulder_offset,
 ) {
 	camera.position = camera3d_orbit_position(focus, yaw, pitch, distance, shoulder, shoulder_offset)
 	camera.target   = camera3d_orbit_focus(focus, yaw, shoulder, shoulder_offset)
@@ -507,10 +553,10 @@ camera3d_third_person :: proc(
 	focus:                [3]f32,
 	yaw, pitch, distance: ^f32,
 	shoulder:             Camera3D_Shoulder = .CENTER,
-	shoulder_offset:      f32 = SHOULDER_OFFSET,
-	sensitivity:          f32 = MOUSE_SENSITIVITY,
-	pitch_min:            f32 = ORBIT_PITCH_MIN,
-	pitch_max:            f32 = ORBIT_PITCH_MAX,
+	shoulder_offset:      f32 = CAMERA3D_DEFAULTS.shoulder_offset,
+	sensitivity:          f32 = CAMERA3D_DEFAULTS.sensitivity,
+	pitch_min:            f32 = CAMERA3D_DEFAULTS.orbit_pitch_min,
+	pitch_max:            f32 = CAMERA3D_DEFAULTS.orbit_pitch_max,
 ) {
 	camera3d_look(yaw, pitch, sensitivity, pitch_min, pitch_max)
 	camera3d_zoom(distance)
@@ -644,14 +690,14 @@ First_Person_Camera :: struct {
 first_person_camera :: proc(
 	position:    [3]f32 = {0, 0, 0},
 	facing:      f32 = 0,
-	eye_offset:  [3]f32 = {0, 1.7, 0},
+	eye_offset:  [3]f32 = CAMERA3D_DEFAULTS.eye_offset,
 	pitch:       f32 = 0,
 	fov:         f32 = 70,
 	near:        f32 = 0.1,
 	far:         f32 = 1000,
-	sensitivity: f32 = MOUSE_SENSITIVITY,
-	pitch_min:   f32 = -PITCH_LIMIT,
-	pitch_max:   f32 =  PITCH_LIMIT,
+	sensitivity: f32 = CAMERA3D_DEFAULTS.sensitivity,
+	pitch_min:   f32 = -CAMERA3D_DEFAULTS.pitch_limit,
+	pitch_max:   f32 =  CAMERA3D_DEFAULTS.pitch_limit,
 ) -> First_Person_Camera {
 	rig := First_Person_Camera{
 		camera = Camera3D{
@@ -792,19 +838,6 @@ Camera3D_Steering :: enum {
 	STRAFE,
 }
 
-// Where the camera looks on the character, added to the position you follow.
-// Head height on a person-sized one; the feet are the wrong point to aim at,
-// because aiming there puts the character on the bottom edge of the screen.
-FOCUS_OFFSET :: [3]f32{0, 1.6, 0}
-
-// Radians per second the character pivots at under `.CAMERA` steering. Fast
-// enough that a tap of A is not a handbrake turn, slow enough to be visible.
-TURN_SPEED :: f32(12)
-
-// A little above level, looking slightly down, which is where a third-person
-// camera sits before anybody touches the mouse.
-ORBIT_PITCH :: f32(-0.3)
-
 /*
 	Everything a third-person camera needs, in one place.
 
@@ -850,7 +883,7 @@ Third_Person_Camera :: struct {
 	shoulder_offset: f32,
 
 	// Added to the position being followed to get the point the camera looks
-	// at. See `FOCUS_OFFSET`.
+	// at. See `CAMERA3D_DEFAULTS.focus_offset`.
 	focus_offset: [3]f32,
 
 	// Whether turning the camera turns the run. See `Camera3D_Steering`.
@@ -888,22 +921,22 @@ Third_Person_Camera :: struct {
 third_person_camera :: proc(
 	position:        [3]f32 = {0, 0, 0},
 	facing:          f32 = 0,
-	focus_offset:    [3]f32 = FOCUS_OFFSET,
-	distance:        f32 = ORBIT_DISTANCE,
-	pitch:           f32 = ORBIT_PITCH,
+	focus_offset:    [3]f32 = CAMERA3D_DEFAULTS.focus_offset,
+	distance:        f32 = CAMERA3D_DEFAULTS.distance,
+	pitch:           f32 = CAMERA3D_DEFAULTS.orbit_pitch,
 	shoulder:        Camera3D_Shoulder = .CENTER,
-	shoulder_offset: f32 = SHOULDER_OFFSET,
+	shoulder_offset: f32 = CAMERA3D_DEFAULTS.shoulder_offset,
 	steering:        Camera3D_Steering = .CAMERA,
-	turn_speed:      f32 = TURN_SPEED,
+	turn_speed:      f32 = CAMERA3D_DEFAULTS.turn_speed,
 	fov:             f32 = 70,
 	near:            f32 = 0.1,
 	far:             f32 = 1000,
-	sensitivity:     f32 = MOUSE_SENSITIVITY,
-	pitch_min:       f32 = ORBIT_PITCH_MIN,
-	pitch_max:       f32 = ORBIT_PITCH_MAX,
-	zoom_speed:      f32 = ORBIT_ZOOM_SPEED,
-	distance_min:    f32 = ORBIT_DISTANCE_MIN,
-	distance_max:    f32 = ORBIT_DISTANCE_MAX,
+	sensitivity:     f32 = CAMERA3D_DEFAULTS.sensitivity,
+	pitch_min:       f32 = CAMERA3D_DEFAULTS.orbit_pitch_min,
+	pitch_max:       f32 = CAMERA3D_DEFAULTS.orbit_pitch_max,
+	zoom_speed:      f32 = CAMERA3D_DEFAULTS.zoom_speed,
+	distance_min:    f32 = CAMERA3D_DEFAULTS.distance_min,
+	distance_max:    f32 = CAMERA3D_DEFAULTS.distance_max,
 ) -> Third_Person_Camera {
 	rig := Third_Person_Camera{
 		camera = Camera3D{

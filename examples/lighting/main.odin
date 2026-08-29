@@ -72,8 +72,16 @@ main :: proc() {
 		if prop.loaded do mb.destroy(&prop.model)
 	}
 
-	camera := mb.camera3d_at(position = {0, 1.8, 5}, target = {0, 0.8, 0})
-	yaw, pitch := mb.camera3d_angles(camera)
+	// Standing five back with the eye 1.8 up, looking down at the campfire --
+	// the same opening view this had before the rig existed.
+	player := [3]f32{0, 0, 5}
+
+	rig := mb.first_person_camera(
+		position   = player,
+		facing     = -math.PI * 0.5,
+		pitch      = math.atan2(f32(-1.0), f32(5.0)),
+		eye_offset = {0, 1.8, 0},
+	)
 
 	lights_on := true
 	fog_on    := true
@@ -104,7 +112,7 @@ main :: proc() {
 		}
 
 		if mb.cursor_locked() {
-			mb.camera3d_first_person(&camera, &yaw, &pitch, 4, mb.delta_time())
+			mb.first_person_walk(&rig, &player, 4, mb.delta_time())
 		}
 
 		if lights_on {
@@ -136,7 +144,7 @@ main :: proc() {
 		mb.begin_drawing()
 		mb.clear_background(FOG_COLOR if fog_on else {0.02, 0.02, 0.05, 1})
 
-		mb.begin_drawing_3d(camera)
+		mb.begin_drawing_3d(rig.camera)
 
 		mb.draw_plane({0, 0, 0}, {60, 60}, {0.30, 0.26, 0.22, 1})
 

@@ -364,18 +364,31 @@ cursor_locked :: proc() -> bool {
 	return sdl.GetWindowRelativeMouseMode(mbi.window)
 }
 
+/*
+	Which key closes the window, or `.UNKNOWN` for none.
+
+	ESC by default, which is wrong for any game where ESC is how you get the
+	mouse pointer back -- every mouse-look game in Matchbox calls this with
+	`.UNKNOWN` as its first line and handles ESC itself.
+*/
 set_escape_key :: proc(key:sdl.Scancode) {
 	mbi.input.escape_key = key
 }
 
+// True only on the frame the key went down. What a jump or a menu choice
+// wants: it fires once however long the key is held.
 is_key_pressed :: proc(key:sdl.Scancode) -> bool {
 	return mbi.input.keys[key].pressed
 }
 
+// True every frame the key is down, including the first. What movement wants,
+// and what to multiply by `delta_time`.
 is_key_held :: proc(key:sdl.Scancode) -> bool {
 	return mbi.input.keys[key].pressing
 }
 
+// True only on the frame the key came back up. The pair of `is_key_pressed`,
+// for a charge-and-release or anything that acts on let-go.
 is_key_released :: proc(key:sdl.Scancode) -> bool {
 	return mbi.input.keys[key].released
 }
@@ -415,6 +428,8 @@ begin_text_input :: proc() {
 	mbi.input.text_open = true
 }
 
+// Stops accepting typing, and takes down the on-screen keyboard a phone put
+// up. Safe to call when text input was never started.
 end_text_input :: proc() {
 	if !mbi.input.text_open do return
 
@@ -422,6 +437,8 @@ end_text_input :: proc() {
 	mbi.input.text_open = false
 }
 
+// Whether typing is being accepted. What a game checks before treating a
+// keypress as a game control rather than as a character someone typed.
 is_text_input_open :: proc() -> bool {
 	return mbi.input.text_open
 }
@@ -456,14 +473,18 @@ get_clipboard_text :: proc(allocator := context.allocator) -> string {
 	return strings.clone(string(cstring(rawptr(raw))), allocator)
 }
 
+// True only on the frame the button went down. The mouse's `is_key_pressed`.
 is_mouse_pressed :: proc(button:Mouse_Button) -> bool {
 	return mbi.input.mouse.buttons[button].pressed
 }
 
+// True every frame the button is down. What a drag reads.
 is_mouse_held :: proc(button:Mouse_Button) -> bool {
 	return mbi.input.mouse.buttons[button].pressing
 }
 
+// True only on the frame the button came back up. What ends a drag, and what
+// a click-to-place wants rather than the press.
 is_mouse_released :: proc(button:Mouse_Button) -> bool {
 	return mbi.input.mouse.buttons[button].released
 }

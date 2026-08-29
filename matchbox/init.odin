@@ -360,8 +360,8 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.max_delta_time   = 1.0 / 60
 	mbi.input.escape_key = .ESCAPE
 
-	mbi.input.gamepad_deadzone          = GAMEPAD_STICK_DEADZONE
-	mbi.input.gamepad_trigger_threshold = GAMEPAD_TRIGGER_THRESHOLD
+	mbi.input.gamepad_deadzone          = GAMEPAD_DEFAULTS.stick_deadzone
+	mbi.input.gamepad_trigger_threshold = GAMEPAD_DEFAULTS.trigger_threshold
 
 	// Odin's default logger discards everything, and the renderer reports why
 	// it cannot start by logging -- so without this, a machine that cannot run
@@ -652,7 +652,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		mbi.renderer.quad_indices = upload_buffer(&indices, size_of(indices), {.INDEX})
 	}
 
-	mbi.font = load_font(DEFAULT_FONT_BYTES, DEFAULT_FONT_SIZE)
+	mbi.font = load_font(DEFAULT_FONT_BYTES, FONT_DEFAULTS.size)
 
 	mbi.camera = Camera{
 		position = {f32(width) * 0.5, f32(height) * 0.5},

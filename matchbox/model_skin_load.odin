@@ -272,7 +272,8 @@ build_animations :: proc(data: ^gltf.Data) -> []Model_Animation {
 				if !ok do continue
 				track.quats = values
 			} else {
-				values, ok := read_vec3_owned(data, sampler.output)
+				// A real allocator, not temp: a clip outlives the load.
+				values, ok := read_vec3(data, sampler.output, context.allocator)
 				if !ok do continue
 				track.vectors = values
 			}
@@ -311,24 +312,6 @@ read_scalars :: proc(data: ^gltf.Data, index: gltf.Integer) -> (out: []f32, ok: 
 
 	out = make([]f32, count)
 	for i in 0 ..< count do out[i] = (cast(^f32)&bytes[i * stride])^
-
-	return out, true
-}
-
-// Translations and scales, and the tangents either side of them under a cubic
-// sampler. Owned, unlike `read_vec3`, which is temp because a vertex buffer
-// takes a copy immediately.
-@(private)
-read_vec3_owned :: proc(data: ^gltf.Data, index: gltf.Integer) -> (out: [][3]f32, ok: bool) {
-	bytes, stride, count := accessor_span(data, index) or_return
-
-	if data.accessors[index].component_type != .Float {
-		log.error("expected float animation values")
-		return nil, false
-	}
-
-	out = make([][3]f32, count)
-	for i in 0 ..< count do out[i] = (cast(^[3]f32)&bytes[i * stride])^
 
 	return out, true
 }

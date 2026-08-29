@@ -27,11 +27,15 @@ package primitives_example
 	    has no bounding box type and is not getting one
 	  - **press G** to turn the grid off, **B** for the bounds outline
 
-	Movement is stage 2's `camera3d_first_person`, which a real game replaces
-	with a physics body. See examples/first-person for the split.
+	Movement is a `First_Person_Camera`, which is one struct holding the camera,
+	the two angles and the eye height. `first_person_walk` moves the player
+	itself; a game with collision calls `first_person_input` and
+	`first_person_aim` either side of its solver instead. See
+	examples/first-person for that split written out.
 */
 
 import "core:fmt"
+import "core:math"
 
 import mb "../../matchbox"
 
@@ -60,8 +64,14 @@ main :: proc() {
 
 	mb.set_escape_key(.UNKNOWN)
 
-	camera := mb.camera3d_at(position = {0, EYE_HEIGHT, 10}, target = {0, EYE_HEIGHT, 0})
-	yaw, pitch := mb.camera3d_angles(camera)
+	// Ten back, level, looking along -z at the boxes.
+	player := [3]f32{0, 0, 10}
+
+	rig := mb.first_person_camera(
+		position   = player,
+		facing     = -math.PI * 0.5,
+		eye_offset = {0, EYE_HEIGHT, 0},
+	)
 
 	show_grid   := true
 	show_bounds := true
@@ -81,13 +91,13 @@ main :: proc() {
 		if mb.is_key_pressed(.B) do show_bounds = !show_bounds
 
 		if mb.cursor_locked() {
-			mb.camera3d_first_person(&camera, &yaw, &pitch, WALK_SPEED, mb.delta_time())
+			mb.first_person_walk(&rig, &player, WALK_SPEED, mb.delta_time())
 		}
 
 		mb.begin_drawing()
 		mb.clear_background({0.53, 0.68, 0.85, 1})
 
-		mb.begin_drawing_3d(camera)
+		mb.begin_drawing_3d(rig.camera)
 
 		// Ground first, then the grid just above it. A plane and a grid at the
 		// same height would fight over every pixel of every line, and the depth
@@ -119,7 +129,7 @@ main :: proc() {
 		mb.draw_text(font, "cubes, wires, a plane, spheres and a grid", 20, 40, mb.WHITE)
 		mb.draw_text(font, "G grid, B bounds, ESC pointer", 20, 70, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("at %.1f, %.1f, %.1f",
-			camera.position.x, camera.position.y, camera.position.z), 20, 110, mb.WHITE)
+			rig.camera.position.x, rig.camera.position.y, rig.camera.position.z), 20, 110, mb.WHITE)
 
 		cx := f32(mb.mbi.width) * 0.5
 		cy := f32(mb.mbi.height) * 0.5

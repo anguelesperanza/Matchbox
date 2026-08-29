@@ -36,4 +36,6 @@ look_at_sprite :: proc(sprite: Sprite, target: [2]f32, forward: SpriteForward = 
 	return look_at_point(center, target, forward)
 }
 
+// The angle that points something at a target, given either a plain position
+// or a sprite -- see the two procedures above for which side counts as forward.
 look_at :: proc { look_at_point, look_at_sprite }

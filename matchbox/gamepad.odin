@@ -38,13 +38,26 @@ Gamepad_Trigger :: enum {
 }
 
 /*
+	How far a stick or trigger must move before Matchbox believes it.
+
+	Both are on `mbi.input` as live values -- `set_gamepad_deadzone` and
+	`set_gamepad_trigger_threshold` change them at runtime -- and this is only
+	where they start.
+
 	Defaults lifted from XInput, which is where the numbers everyone else uses
 	came from: 7849/32767 for a stick and 30/255 for a trigger. They are a
 	starting point rather than a truth -- a worn thumbstick needs more, and a
 	twin-stick shooter often wants less.
 */
-GAMEPAD_STICK_DEADZONE    :: 0.24
-GAMEPAD_TRIGGER_THRESHOLD :: 0.12
+Gamepad_Defaults :: struct {
+	stick_deadzone:    f32,
+	trigger_threshold: f32,
+}
+
+GAMEPAD_DEFAULTS :: Gamepad_Defaults{
+	stick_deadzone    = 0.24,
+	trigger_threshold = 0.12,
+}
 
 Gamepad :: struct {
 	handle:    ^sdl.Gamepad,
@@ -217,16 +230,20 @@ get_gamepad_name :: proc(pad: int) -> string {
 	return string(name)
 }
 
+// True only on the frame the button went down, and false for a pad nobody is
+// holding -- so a game may ask about slot 3 whether or not anyone is in it.
 is_gamepad_button_pressed :: proc(pad: int, button: sdl.GamepadButton) -> bool {
 	if !is_gamepad_connected(pad) do return false
 	return mbi.input.gamepads[pad].buttons[button].pressed
 }
 
+// True every frame the button is down. False for a disconnected pad.
 is_gamepad_button_held :: proc(pad: int, button: sdl.GamepadButton) -> bool {
 	if !is_gamepad_connected(pad) do return false
 	return mbi.input.gamepads[pad].buttons[button].pressing
 }
 
+// True only on the frame the button came back up. False for a disconnected pad.
 is_gamepad_button_released :: proc(pad: int, button: sdl.GamepadButton) -> bool {
 	if !is_gamepad_connected(pad) do return false
 	return mbi.input.gamepads[pad].buttons[button].released
@@ -316,6 +333,8 @@ set_gamepad_deadzone :: proc(deadzone: f32) {
 	mbi.input.gamepad_deadzone = clamp(deadzone, 0, 0.95)
 }
 
+// How far a trigger must be pulled before it counts as pressed. Clamped to
+// 0.95, because a threshold of 1 is a trigger that can never fire.
 set_gamepad_trigger_threshold :: proc(threshold: f32) {
 	mbi.input.gamepad_trigger_threshold = clamp(threshold, 0, 0.95)
 }

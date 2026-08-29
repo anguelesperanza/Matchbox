@@ -15,6 +15,8 @@ sprite_to_index_by_sprite :: proc(player:Sprite) -> (index:int) {
 	index = int(player.position.y * player.size.x + player.position.x)
 	return
 }
+// A grid coordinate as an index into a row-major array of `width` columns.
+// The tile a position falls in, for a game keeping its level as a flat slice.
 sprite_to_index_by_value :: proc(x:f32, y:f32, width:f32) -> (index:int) {
 	index = int(y * width + x)
 	return

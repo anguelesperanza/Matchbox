@@ -67,8 +67,20 @@ Shape_Frag_Data :: struct #align(16) {
 	thickness: f32,
 }
 
-SHAPE_ELLIPSE  :: f32(0)
-SHAPE_TRIANGLE :: f32(1)
+/*
+	Which shape `shape.frag` should draw, in the one uniform it has room for.
+
+	An enum rather than the two bare floats it used to be. The cbuffer field is
+	a `float` and has to stay one, so the value is converted at the call site --
+	but the conversion is the only place a raw number appears, and nothing else
+	can be passed by accident. The shader's own numbering is the enum's order,
+	so adding a third shape means adding it here and to the switch in the
+	fragment shader, in that order.
+*/
+Shape_Kind :: enum {
+	ELLIPSE,
+	TRIANGLE,
+}
 
 // 32 bytes: (color) (border, pad).
 //
@@ -302,6 +314,7 @@ MatchboxInfo :: struct {
 	input:         Input,    // keyboard + mouse
 	camera:        Camera,
 	font:          Font,     // default font, loaded by init
+	font_cache:    Font_Cache, // the default font baked at other sizes
 	running:       bool,     // false once the window is closed or escape is hit
 	initialized:   bool,     // set by init; guards against using a zeroed mbi
 
@@ -313,6 +326,12 @@ MatchboxInfo :: struct {
 
 // The one and only Matchbox state, filled in by init. Everything in the
 // package reads and writes this directly rather than taking it as an argument.
+//
+// **This is the only package-level global in Matchbox, and deliberately so.**
+// The API is immediate-mode: `draw_rect` cannot take a renderer without every
+// call site carrying one, and a game would be threading the same pointer
+// through every draw it makes. Anything that needs to outlive a frame belongs
+// in here as a field rather than beside it as a second global -- see CLAUDE.md.
 //
 // Games are free to read it -- `matchbox.mbi.delta_time`, `matchbox.mbi.running`
 // -- or go through the accessors where one exists. A local alias also works if
@@ -327,6 +346,24 @@ mbi: MatchboxInfo
 // -----------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------
+
+/*
+	The font numbers a game may reasonably want different.
+
+	`size` is what `get_font` bakes when nobody asks for a size, `line_spacing`
+	is the gap between wrapped lines as a fraction of the line height, and
+	`cache_limit` is how many baked sizes are kept before the least recently
+	used is evicted.
+
+	The three atlas constants below are **not** here and cannot be: they size
+	fixed arrays and index the baked glyph range, and Odin needs a compile-time
+	constant for both. See CLAUDE.md.
+*/
+Font_Defaults :: struct {
+	size:         f32,
+	line_spacing: f32,
+	cache_limit:  int,
+}
 
 FONT_ATLAS_SIZE :: 512
 

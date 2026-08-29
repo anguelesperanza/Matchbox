@@ -107,3 +107,7 @@ is a useful sentence.
 - **Vendored code.** Patches to `matchbox/gltf2` are marked `MATCHBOX PATCH` so a
   package refresh can find them
 - **Check everything.** `odin check matchbox -no-entry-point`, then the examples
+- **`cheatsheet.md` is generated**, by `python tools/gen_cheatsheet.py` from the
+  repository root. Regenerate it after adding or changing a public procedure
+  rather than editing it. Each entry's description is the first sentence of that
+  procedure's doc comment, so a bad line there is a bad comment at the source

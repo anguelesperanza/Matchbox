@@ -302,6 +302,7 @@ MatchboxInfo :: struct {
 	input:         Input,    // keyboard + mouse
 	camera:        Camera,
 	font:          Font,     // default font, loaded by init
+	font_cache:    Font_Cache, // the default font baked at other sizes
 	running:       bool,     // false once the window is closed or escape is hit
 	initialized:   bool,     // set by init; guards against using a zeroed mbi
 
@@ -313,6 +314,12 @@ MatchboxInfo :: struct {
 
 // The one and only Matchbox state, filled in by init. Everything in the
 // package reads and writes this directly rather than taking it as an argument.
+//
+// **This is the only package-level global in Matchbox, and deliberately so.**
+// The API is immediate-mode: `draw_rect` cannot take a renderer without every
+// call site carrying one, and a game would be threading the same pointer
+// through every draw it makes. Anything that needs to outlive a frame belongs
+// in here as a field rather than beside it as a second global -- see CLAUDE.md.
 //
 // Games are free to read it -- `matchbox.mbi.delta_time`, `matchbox.mbi.running`
 // -- or go through the accessors where one exists. A local alias also works if

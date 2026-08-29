@@ -236,11 +236,20 @@ Cached_Font :: struct {
 	used_on: u64, // the frame it was last handed out
 }
 
-@(private)
-font_cache: map[i32]Cached_Font
+/*
+	Every baked size of the default font, and the order they were last asked
+	for.
 
+	The two are one thing: the map answers "have we got this size", the slice
+	answers "which size goes first when we are over the limit", and neither is
+	meaningful without the other. They lived at package scope until the cleanup
+	in `cleanup.md`; they are state belonging to `mbi` like everything else.
+*/
 @(private)
-font_cache_order: [dynamic]i32 // least recently used first
+Font_Cache :: struct {
+	sizes: map[i32]Cached_Font,
+	order: [dynamic]i32, // least recently used first
+}
 
 /*
 	The default font baked at `size` pixels.
@@ -283,9 +292,9 @@ get_font :: proc(size: f32) -> ^Font {
 	// megabyte of atlas to say the same thing.
 	if f32(px) == DEFAULT_FONT_SIZE do return &mbi.font
 
-	if cached, found := font_cache[px]; found {
+	if cached, found := mbi.font_cache.sizes[px]; found {
 		cached.used_on = mbi.frame
-		font_cache[px] = cached
+		mbi.font_cache.sizes[px] = cached
 		font_cache_touch(px)
 		return cached.font
 	}
@@ -293,8 +302,8 @@ get_font :: proc(size: f32) -> ^Font {
 	font  := new(Font)
 	font^ = load_font(DEFAULT_FONT_BYTES, f32(px))
 
-	font_cache[px] = Cached_Font{font = font, used_on = mbi.frame}
-	append(&font_cache_order, px)
+	mbi.font_cache.sizes[px] = Cached_Font{font = font, used_on = mbi.frame}
+	append(&mbi.font_cache.order, px)
 
 	// After inserting rather than before, so nothing is thrown out to make room
 	// for something that then turns out to be resident already.
@@ -306,15 +315,15 @@ get_font :: proc(size: f32) -> ^Font {
 // How many extra sizes are resident, not counting the default one. For an
 // example or a debug overlay that wants to show the cache doing its job.
 font_cache_len :: proc() -> int {
-	return len(font_cache)
+	return len(mbi.font_cache.sizes)
 }
 
 @(private)
 font_cache_touch :: proc(px: i32) {
-	for k, i in font_cache_order {
+	for k, i in mbi.font_cache.order {
 		if k == px {
-			ordered_remove(&font_cache_order, i)
-			append(&font_cache_order, px)
+			ordered_remove(&mbi.font_cache.order, i)
+			append(&mbi.font_cache.order, px)
 			return
 		}
 	}
@@ -332,10 +341,10 @@ font_cache_touch :: proc(px: i32) {
 */
 @(private)
 font_cache_trim :: proc() {
-	for len(font_cache_order) > FONT_CACHE_LIMIT {
-		oldest := font_cache_order[0]
+	for len(mbi.font_cache.order) > FONT_CACHE_LIMIT {
+		oldest := mbi.font_cache.order[0]
 
-		if cached, found := font_cache[oldest]; found {
+		if cached, found := mbi.font_cache.sizes[oldest]; found {
 			// `mbi.frame > 0` matters: it is 0 until the first poll_events, and
 			// so is every used_on recorded before then. Without it, sizes baked
 			// during setup all look like they are in use by the frame that has
@@ -345,24 +354,23 @@ font_cache_trim :: proc() {
 
 			destroy_font(cached.font)
 			free(cached.font)
-			delete_key(&font_cache, oldest)
+			delete_key(&mbi.font_cache.sizes, oldest)
 		}
 
-		ordered_remove(&font_cache_order, 0)
+		ordered_remove(&mbi.font_cache.order, 0)
 	}
 }
 
 // Frees every cached size. Called by cleanup; a game does not need to.
 @(private)
 font_cache_destroy :: proc() {
-	for _, cached in font_cache {
+	for _, cached in mbi.font_cache.sizes {
 		destroy_font(cached.font)
 		free(cached.font)
 	}
 
-	delete(font_cache)
-	delete(font_cache_order)
+	delete(mbi.font_cache.sizes)
+	delete(mbi.font_cache.order)
 
-	font_cache       = nil
-	font_cache_order = nil
+	mbi.font_cache = {}
 }

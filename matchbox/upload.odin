@@ -14,8 +14,6 @@ package matchbox
 
 import "base:runtime"
 
-import "core:log"
-
 import sdl "vendor:sdl3"
 
 // Creates a device-local buffer and fills it from `data`.
@@ -53,55 +51,51 @@ upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -
 // sprite, which fills it once and never again, and a Pixel_Buffer, which is
 // created empty and rewritten every frame.
 @(private)
-create_gpu_texture :: proc(width, height: i32) -> ^sdl.GPUTexture {
+create_gpu_texture :: proc(width, height: i32, cube := false) -> ^sdl.GPUTexture {
 	texture := sdl.CreateGPUTexture(mbi.renderer.device, {
-		type                 = .D2,
+		type                 = .CUBE if cube else .D2,
 		format               = .R8G8B8A8_UNORM,
 		usage                = {.SAMPLER},
 		width                = u32(width),
 		height               = u32(height),
-		layer_count_or_depth = 1,
+
+		// A cube map is six layers of the same square; everything else is one.
+		layer_count_or_depth = 6 if cube else 1,
 		num_levels           = 1,
 	})
+
+	// `ensure` rather than a nil return, for both kinds. A texture the driver
+	// will not allocate is a dead program either way, and returning nil only
+	// moves the crash somewhere with less to say about it. The cube path used
+	// to log and return nil, which was drift rather than a decision.
 	ensure(texture != nil, "could not create GPU texture")
 
 	return texture
 }
 
 /*
-	An empty cube texture: six square faces, filled one at a time by
-	`upload_texture_layer`.
+	Copies `pixels` into one layer of an existing texture, through a staging
+	buffer created and thrown away for the copy.
 
-	Six layers of a `.CUBE` texture rather than six separate textures, because
-	the hardware's cube sampling -- picking a face from a direction and
-	filtering across the seam between two of them -- only exists for this type.
-	Six 2D textures would mean doing the face selection in the shader and
-	getting a visible seam for the trouble.
+	The whole of the transfer-buffer dance lives here: create, map, copy, unmap,
+	open a copy pass on a command buffer of its own, submit. It was written out
+	twice -- once for a whole 2D texture and once for one face of a cube -- and
+	the two differed only in whether a layer was named.
+
+	`pixel_buffer.odin` looks like a third copy and is not one, deliberately: it
+	keeps its staging buffer alive across frames and records onto the frame's own
+	command buffer, which is what orders the upload against the draw that reads
+	it. Do not fold it in here.
 */
 @(private)
-create_gpu_cube_texture :: proc(face: i32) -> ^sdl.GPUTexture {
-	texture := sdl.CreateGPUTexture(mbi.renderer.device, {
-		type                 = .CUBE,
-		format               = .R8G8B8A8_UNORM,
-		usage                = {.SAMPLER},
-		width                = u32(face),
-		height               = u32(face),
-		layer_count_or_depth = 6,
-		num_levels           = 1,
-	})
-
-	if texture == nil do log.errorf("could not create cube texture: %s", sdl.GetError())
-
-	return texture
-}
-
-// Fills one layer of an existing texture. `pixels` must hold face * face * 4
-// bytes, and `layer` is which of the six faces -- +X, -X, +Y, -Y, +Z, -Z, in
-// that order, which is the order every API numbers them in.
-@(private)
-upload_texture_layer :: proc(texture: ^sdl.GPUTexture, pixels: rawptr, face: i32, layer: u32) {
+upload_texture_region :: proc(
+	texture: ^sdl.GPUTexture,
+	pixels:  rawptr,
+	width, height: i32,
+	layer:   u32 = 0,
+) {
 	device := mbi.renderer.device
-	size   := u32(face) * u32(face) * 4
+	size   := u32(width) * u32(height) * 4
 
 	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
 	ensure(transfer != nil, "could not create transfer buffer")
@@ -116,43 +110,20 @@ upload_texture_layer :: proc(texture: ^sdl.GPUTexture, pixels: rawptr, face: i32
 	pass := sdl.BeginGPUCopyPass(cmd)
 	sdl.UploadToGPUTexture(
 		pass,
-		{transfer_buffer = transfer, offset = 0, pixels_per_row = u32(face), rows_per_layer = u32(face)},
-		{texture = texture, layer = layer, w = u32(face), h = u32(face), d = 1},
+		{transfer_buffer = transfer, offset = 0, pixels_per_row = u32(width), rows_per_layer = u32(height)},
+		{texture = texture, layer = layer, w = u32(width), h = u32(height), d = 1},
 		false,
 	)
 	sdl.EndGPUCopyPass(pass)
-	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit cube face upload")
+	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit texture upload")
 }
 
 // Creates a sampled RGBA8 texture and fills it from `pixels`, which must hold
 // width * height * 4 bytes.
 @(private)
 upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
-	device := mbi.renderer.device
-	size   := u32(width) * u32(height) * 4
-
 	texture := create_gpu_texture(width, height)
-
-	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
-	ensure(transfer != nil, "could not create transfer buffer")
-	defer sdl.ReleaseGPUTransferBuffer(device, transfer)
-
-	dst := sdl.MapGPUTransferBuffer(device, transfer, false)
-	ensure(dst != nil, "could not map transfer buffer")
-	runtime.mem_copy(dst, pixels, int(size))
-	sdl.UnmapGPUTransferBuffer(device, transfer)
-
-	cmd := sdl.AcquireGPUCommandBuffer(device)
-	pass := sdl.BeginGPUCopyPass(cmd)
-	sdl.UploadToGPUTexture(
-		pass,
-		{transfer_buffer = transfer, offset = 0, pixels_per_row = u32(width), rows_per_layer = u32(height)},
-		{texture = texture, w = u32(width), h = u32(height), d = 1},
-		false,
-	)
-	sdl.EndGPUCopyPass(pass)
-	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit texture upload")
-
+	upload_texture_region(texture, pixels, width, height)
 	return texture
 }
 

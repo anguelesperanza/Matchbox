@@ -123,8 +123,7 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 		{3, 1}, // -Z
 	}
 
-	texture := create_gpu_cube_texture(i32(face))
-	if texture == nil do return {}, false
+	texture := create_gpu_texture(i32(face), i32(face), cube = true)
 
 	// One scratch face, refilled six times, rather than six allocations.
 	pixels := make([][4]u8, face * face, context.temp_allocator)
@@ -138,7 +137,7 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 			copy(pixels[y * face:][:face], image.pixels[source:][:face])
 		}
 
-		upload_texture_layer(texture, raw_data(pixels), i32(face), u32(layer))
+		upload_texture_region(texture, raw_data(pixels), i32(face), i32(face), u32(layer))
 	}
 
 	skybox = Skybox{

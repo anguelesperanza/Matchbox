@@ -535,17 +535,30 @@ component_count :: proc(type: gltf.Accessor_Type) -> int {
 	return 0
 }
 
-// Positions and normals, which glTF requires to be floats.
+/*
+	Three floats per element, which is what glTF requires for positions,
+	normals, translations and scales alike.
+
+	The allocator is an argument because the two callers want different answers
+	and nothing else about them differs. Vertex data is copied to the GPU
+	immediately and never looked at again, so it takes the temp allocator;
+	animation keyframes outlive the load and take a real one. This was two
+	procedures that differed in that one word and in an error string.
+*/
 @(private)
-read_vec3 :: proc(data: ^gltf.Data, index: gltf.Integer) -> (out: [][3]f32, ok: bool) {
+read_vec3 :: proc(
+	data: ^gltf.Data,
+	index: gltf.Integer,
+	allocator := context.temp_allocator,
+) -> (out: [][3]f32, ok: bool) {
 	bytes, stride, count := accessor_span(data, index) or_return
 
 	if data.accessors[index].component_type != .Float {
-		log.error("expected float positions or normals, primitive skipped")
+		log.error("expected float vec3 data, skipped")
 		return nil, false
 	}
 
-	out = make([][3]f32, count, context.temp_allocator)
+	out = make([][3]f32, count, allocator)
 	for i in 0 ..< count {
 		out[i] = (cast(^[3]f32)&bytes[i * stride])^
 	}

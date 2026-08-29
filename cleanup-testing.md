@@ -58,9 +58,25 @@ right number in the wrong place, which compiles fine.
 
 ---
 
-## 4. Cameras
+## 4. Cameras -- and five ported examples
 
-Values were moved into `CAMERA3D_DEFAULTS`, not changed.
+Values were moved into `CAMERA3D_DEFAULTS`, not changed. Separately, five
+examples were ported from the loose `camera3d_first_person` to
+`First_Person_Camera`.
+
+Each keeps its original opening view, worked out from the old
+position-and-target pair, so **any change in where an example starts looking is
+a bug**:
+
+| example | stands at | eye | opening pitch |
+|---|---|---|---|
+| `lighting`, `post` | `{0, 0, 5}` | 1.8 | -0.197, looking down at the fire |
+| `model` | `{-2, 0, 18}` | 5 | -0.192, down the line of props |
+| `primitives` | `{0, 0, 10}` | 1.7 | level |
+| `skybox` | `{0, 0, 6}` | 1.7 | level |
+
+- [ ] each of the five opens on the same view it used to
+- [ ] walking and looking behave as before in all five
 
 - [ ] `examples/first-person` -- walking and looking feel the same, pitch still
       stops just short of vertical
@@ -104,6 +120,7 @@ call site.
 
 - **Android.** Nothing here is platform-specific, but nothing was built for it
   either
-- **The five examples still on the old camera API** -- `lighting`, `model`,
-  `post`, `primitives`, `skybox` -- are unchanged and still compile. Bringing
-  them onto the rigs is Stage 6 of `cleanup.md` and was not started
+- **`camera3d_first_person` and `camera3d_third_person` now have no callers
+  anywhere.** Porting the examples was the last thing using them. They are still
+  exported and still work; deleting them is the deferred decision in
+  `cleanup.md`, which stays deferred while the camera API is being worked on

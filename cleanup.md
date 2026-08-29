@@ -19,7 +19,7 @@ checking by hand -- none of it was run, since the machine was in use.
 | 3 -- constants into structs | **done**, all four areas |
 | 4 -- merge overlapping procedures | **done**, the three clear-cut ones |
 | 5 -- complexity | **measured, no action needed** -- see below |
-| 6 -- the examples | not started |
+| 6 -- the examples | **done**, five ported to `First_Person_Camera` |
 
 Results against the starting numbers:
 

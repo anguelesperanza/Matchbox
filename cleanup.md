@@ -7,6 +7,50 @@ duplication that has built up removed.
 Ordered so the cheap, zero-risk work lands first and nothing later depends on a
 judgement call made earlier.
 
+## Progress
+
+Done on the `cleanup` branch, 2026-08-29. `cleanup-testing.md` lists what needs
+checking by hand -- none of it was run, since the machine was in use.
+
+| stage | state |
+|---|---|
+| 1 -- delete the dead copies | **done**, 855 lines |
+| 2 -- the stray globals | **done**, `mbi` is the only one left |
+| 3 -- constants into structs | **done**, all four areas |
+| 4 -- merge overlapping procedures | **done**, the three clear-cut ones |
+| 5 -- complexity | **measured, no action needed** -- see below |
+| 6 -- the examples | not started |
+
+Results against the starting numbers:
+
+| | before | after |
+|---|---|---|
+| lines | 13,751 | 13,040 |
+| procedures | 439 | 437 |
+| package constants | 60 | 24 |
+| ...of which colours | 16 | 16 |
+| ...of which movable | ~34 | **0** |
+| package globals | 3 | 1 |
+
+Every constant that remains is one of: a defaults struct (`CAMERA3D_DEFAULTS`,
+`FONT_DEFAULTS`, `GAMEPAD_DEFAULTS`, `UI_DEFAULTS`, `BUTTON_STYLE`), a colour, an
+array size Odin needs a constant for, or `DEFAULT_FONT_BYTES`.
+
+**Stage 5 came out as "leave it", which is a result rather than a skip:**
+
+- `model_load.odin` is 676 lines once its dead half is gone, down from 1,179.
+  The plan said to re-measure before splitting; 676 does not need splitting
+- the nine accessor readers share `accessor_span`, which is already extracted.
+  What is left differs in element type, widening rules and post-processing --
+  normalise, transpose, reorder a quaternion. One generic reader would need a
+  per-type conversion callback, which is more complexity than the repetition it
+  removes. Written out is clearer
+- `ui.odin` grew slightly (1,993 to 2,074) because `UI_DEFAULTS` is more lines
+  than the constants it replaced. Splitting it by widget is still open, and is
+  now the only Stage 5 item left
+
+---
+
 ## Where it stands
 
 Measured 2026-08-29, over 13,751 lines of `matchbox/*.odin`.

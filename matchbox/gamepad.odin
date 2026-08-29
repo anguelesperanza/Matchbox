@@ -38,13 +38,26 @@ Gamepad_Trigger :: enum {
 }
 
 /*
+	How far a stick or trigger must move before Matchbox believes it.
+
+	Both are on `mbi.input` as live values -- `set_gamepad_deadzone` and
+	`set_gamepad_trigger_threshold` change them at runtime -- and this is only
+	where they start.
+
 	Defaults lifted from XInput, which is where the numbers everyone else uses
 	came from: 7849/32767 for a stick and 30/255 for a trigger. They are a
 	starting point rather than a truth -- a worn thumbstick needs more, and a
 	twin-stick shooter often wants less.
 */
-GAMEPAD_STICK_DEADZONE    :: 0.24
-GAMEPAD_TRIGGER_THRESHOLD :: 0.12
+Gamepad_Defaults :: struct {
+	stick_deadzone:    f32,
+	trigger_threshold: f32,
+}
+
+GAMEPAD_DEFAULTS :: Gamepad_Defaults{
+	stick_deadzone    = 0.24,
+	trigger_threshold = 0.12,
+}
 
 Gamepad :: struct {
 	handle:    ^sdl.Gamepad,

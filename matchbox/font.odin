@@ -24,7 +24,11 @@ DEFAULT_FONT_BYTES :: #load("fonts/Adapa.ttf")
 // exactly two screen pixels, and at anything between two multiples the stems
 // come out as an uneven mix of two and three pixels with grey down one side.
 // The same holds for any size asked of get_font -- 13, 26, 39, 52.
-DEFAULT_FONT_SIZE :: f32(26)
+FONT_DEFAULTS :: Font_Defaults{
+	size         = 26,
+	line_spacing = 0.15,
+	cache_limit  = 6,
+}
 
 Font :: struct {
 	using mesh:  Mesh,
@@ -228,7 +232,10 @@ draw_text_ui :: proc {
 	Eviction is least-recently-used, and never touches a size that has been
 	asked for during the current frame -- see font_cache_trim.
 */
-FONT_CACHE_LIMIT :: 6
+// Kept as a name rather than reached for through FONT_DEFAULTS at every use,
+// because this one is compared against a length in a loop.
+@(private)
+font_cache_limit :: proc() -> int { return FONT_DEFAULTS.cache_limit }
 
 @(private)
 Cached_Font :: struct {
@@ -290,7 +297,7 @@ get_font :: proc(size: f32) -> ^Font {
 
 	// The one init already baked. Handing back a second copy of it would be a
 	// megabyte of atlas to say the same thing.
-	if f32(px) == DEFAULT_FONT_SIZE do return &mbi.font
+	if f32(px) == FONT_DEFAULTS.size do return &mbi.font
 
 	if cached, found := mbi.font_cache.sizes[px]; found {
 		cached.used_on = mbi.frame
@@ -341,7 +348,7 @@ font_cache_touch :: proc(px: i32) {
 */
 @(private)
 font_cache_trim :: proc() {
-	for len(mbi.font_cache.order) > FONT_CACHE_LIMIT {
+	for len(mbi.font_cache.order) > font_cache_limit() {
 		oldest := mbi.font_cache.order[0]
 
 		if cached, found := mbi.font_cache.sizes[oldest]; found {

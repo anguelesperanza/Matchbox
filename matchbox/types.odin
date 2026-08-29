@@ -335,6 +335,24 @@ mbi: MatchboxInfo
 // Constants
 // -----------------------------------------------------------------------
 
+/*
+	The font numbers a game may reasonably want different.
+
+	`size` is what `get_font` bakes when nobody asks for a size, `line_spacing`
+	is the gap between wrapped lines as a fraction of the line height, and
+	`cache_limit` is how many baked sizes are kept before the least recently
+	used is evicted.
+
+	The three atlas constants below are **not** here and cannot be: they size
+	fixed arrays and index the baked glyph range, and Odin needs a compile-time
+	constant for both. See CLAUDE.md.
+*/
+Font_Defaults :: struct {
+	size:         f32,
+	line_spacing: f32,
+	cache_limit:  int,
+}
+
 FONT_ATLAS_SIZE :: 512
 
 // The glyphs an atlas holds: printable ASCII, space through '~'.

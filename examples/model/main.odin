@@ -30,6 +30,7 @@ package model_example
 */
 
 import "core:fmt"
+import "core:math"
 
 import mb "../../matchbox"
 
@@ -77,8 +78,15 @@ main :: proc() {
 		if prop.loaded do mb.destroy(&prop.model)
 	}
 
-	camera := mb.camera3d_at(position = {-2, 5, 18}, target = {-2, 1.5, 0})
-	yaw, pitch := mb.camera3d_angles(camera)
+	// Well back and high up, looking down the line of props.
+	player := [3]f32{-2, 0, 18}
+
+	rig := mb.first_person_camera(
+		position   = player,
+		facing     = -math.PI * 0.5,
+		pitch      = math.atan2(f32(-3.5), f32(18.0)),
+		eye_offset = {0, 5, 0},
+	)
 
 	show_bounds := false
 	tinted      := false
@@ -98,7 +106,7 @@ main :: proc() {
 		if mb.is_key_pressed(.T) do tinted      = !tinted
 
 		if mb.cursor_locked() {
-			mb.camera3d_first_person(&camera, &yaw, &pitch, 5, mb.delta_time())
+			mb.first_person_walk(&rig, &player, 5, mb.delta_time())
 		}
 
 		tint := mb.RED if tinted else mb.WHITE
@@ -106,7 +114,7 @@ main :: proc() {
 		mb.begin_drawing()
 		mb.clear_background({0.10, 0.11, 0.16, 1})
 
-		mb.begin_drawing_3d(camera)
+		mb.begin_drawing_3d(rig.camera)
 
 		mb.draw_plane({0, 0, 0}, {40, 40}, {0.22, 0.24, 0.26, 1})
 		mb.draw_grid(40, 1, {1, 1, 1, 0.15})

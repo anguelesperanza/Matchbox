@@ -236,6 +236,103 @@ of them still run.
 
 ---
 
+## What nothing calls
+
+Surveyed 2026-08-29 across the package, every example, and
+`games/third-person-game`. Two questions with very different answers.
+
+### Dead code: none
+
+**Zero of the 109 `@(private)` procedures are uncalled.** Nothing in the package
+is unreachable. The dead weight was all in the commented-out file copies Stage 1
+removed.
+
+### Public API nothing exercises: 52 procedures
+
+Not dead code. Matchbox is a library, so an uncalled public procedure means *no
+example exercises it* -- a coverage gap rather than a defect. Excludes the seven
+`test_*` in `touch_test.odin`, which are `@(test)` and only compiled by
+`odin test`.
+
+The share per module is the part worth looking at:
+
+| module | uncalled | public | share |
+|---|---|---|---|
+| `lerp.odin` | 3 | 3 | **100%** |
+| `tiled.odin` | 7 | 8 | **88%** |
+| `timer.odin` | 4 | 5 | **80%** |
+| `sound.odin` | 2 | 3 | 67% |
+| `collisions.odin` | 2 | 3 | 67% |
+| `animation.odin` | 3 | 6 | 50% |
+| `render3d.odin` | 2 | 6 | 33% |
+| `files.odin` | 1 | 3 | 33% |
+| `sprite_cache.odin` | 2 | 8 | 25% |
+| `light.odin` | 2 | 9 | 22% |
+| `sprite.odin` | 4 | 19 | 21% |
+| `animation3d.odin` | 2 | 10 | 20% |
+| `init.odin`, `image.odin` | 1 | 5 | 20% |
+| `ui.odin` | 9 | 58 | 16% |
+| `input.odin` | 3 | 22 | 14% |
+| `model.odin` | 1 | 10 | 10% |
+| `gamepad.odin` | 1 | 12 | 8% |
+| `font.odin` | 1 | 13 | 8% |
+| `camera3d.odin` | 1 | 31 | 3% |
+
+**Five modules are essentially unexercised by anything in the repository.**
+Nothing -- no example, not the game -- calls `tiled_load_level`, `play_sound`,
+`update_cooldown` or `update_lerp_move`. They compile and have never been run.
+If any of them has a bug, nothing here would have found it.
+
+That is a different finding from the low-share modules: `camera3d` at 3% is one
+procedure out of thirty-one, which is ordinary API surface, not a gap.
+
+### The list
+
+- **`ui.odin`** -- `clear_status`, `confirm_button_armed`, `dropdown_close`,
+  `dropdown_is_open`, `modal_is_open`, `scroll_needed`, `scroll_to`,
+  `text_field_height`, `text_field_set`
+- **`tiled.odin`** -- `draw_tiled_layers`, `tiled_find_layer`,
+  `tiled_find_objects`, `tiled_get_spawn_position`, `tiled_load_level`,
+  `tiled_resolve_x_collision`, `tiled_resolve_y_collision`
+- **`timer.odin`** -- `is_cooldown_done`, `reset_cooldown`, `stop_cooldown`,
+  `update_cooldown`
+- **`sprite.odin`** -- `create_sprite_from_pixels`, `draw_bounding_box_outline`,
+  `sprite_set_frame`, `sprite_world_collision`
+- **`lerp.odin`** -- `create_lerp_move`, `lerp_move_to`, `update_lerp_move`
+- **`input.odin`** -- `is_key_released`, `is_mouse_released`,
+  `is_text_input_open`
+- **`animation.odin`** -- `create_animated_sprite`, `draw_animated_sprite`,
+  `switch_animation`
+- **`sprite_cache.odin`** -- `sprite_cache_find`, `sprite_cache_has`
+- **`sound.odin`** -- `load_sound`, `play_sound`
+- **`render3d.odin`** -- `current_camera3d`, `in_drawing_3d`
+- **`light.odin`** -- `lighting_active`, `set_light`
+- **`collisions.odin`** -- `sprite_to_index_by_sprite`,
+  `sprite_to_index_by_value`
+- **`animation3d.odin`** -- `animation_names`, `stop_animation`
+- **one each** -- `model_center`, `load_shader`, `image_size`,
+  `is_gamepad_button_released`, `draw_text_ui`, `base_path`,
+  `camera3d_orbit_angles`
+
+### What to do about it, and what not to
+
+**Not a cleanup task.** Deleting unused *public* API is a product decision about
+what Matchbox offers, not a refactor, and nothing here should be removed as part
+of this branch.
+
+Three things are worth a decision rather than a deletion:
+
+- **`animation_names`, `stop_animation`, `camera3d_orbit_angles`** were added
+  recently and have never executed once. Legitimate API; simply unproven
+- **`load_shader`** is a public shader loader in a package whose own D3 in
+  `3d.md` says a shader API is deliberately not offered yet. Either intended
+  surface that contradicts the decision, or a leftover
+- **The five unexercised modules** are the useful finding. The fix is examples,
+  not deletions -- and an example is also how anyone finds out whether `tiled`
+  and `sound` still work
+
+---
+
 ## Deferred
 
 Recorded here so they are decisions rather than oversights, and so a later

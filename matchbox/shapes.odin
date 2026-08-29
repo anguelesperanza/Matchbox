@@ -102,7 +102,7 @@ draw_ellipse_shape :: proc(center: [2]f32, radii: [2]f32, color: [4]f32, thickne
 		color     = color,
 		p0        = {0.5, 0.5},
 		p1        = radii / (half * 2), // the ellipse's radii as a share of the quad
-		kind      = SHAPE_ELLIPSE,
+		kind      = f32(Shape_Kind.ELLIPSE),
 		thickness = thickness,
 	})
 }
@@ -137,7 +137,7 @@ draw_triangle_shape :: proc(a, b, c: [2]f32, color: [4]f32, thickness: f32) {
 		p0        = uv(a, low, size),
 		p1        = uv(b, low, size),
 		p2        = uv(c, low, size),
-		kind      = SHAPE_TRIANGLE,
+		kind      = f32(Shape_Kind.TRIANGLE),
 		thickness = thickness,
 	})
 }

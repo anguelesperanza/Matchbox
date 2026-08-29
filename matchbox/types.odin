@@ -67,8 +67,20 @@ Shape_Frag_Data :: struct #align(16) {
 	thickness: f32,
 }
 
-SHAPE_ELLIPSE  :: f32(0)
-SHAPE_TRIANGLE :: f32(1)
+/*
+	Which shape `shape.frag` should draw, in the one uniform it has room for.
+
+	An enum rather than the two bare floats it used to be. The cbuffer field is
+	a `float` and has to stay one, so the value is converted at the call site --
+	but the conversion is the only place a raw number appears, and nothing else
+	can be passed by accident. The shader's own numbering is the enum's order,
+	so adding a third shape means adding it here and to the switch in the
+	fragment shader, in that order.
+*/
+Shape_Kind :: enum {
+	ELLIPSE,
+	TRIANGLE,
+}
 
 // 32 bytes: (color) (border, pad).
 //

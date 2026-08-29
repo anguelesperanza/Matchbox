@@ -74,20 +74,122 @@ Button_Style :: struct {
 // The dim used when a style was built from scratch and left this at zero.
 // Without it a hand-made Button_Style would draw a disabled button in black
 // rather than a dimmed version of its own colour.
-BUTTON_DISABLED_DIM :: f32(0.45)
+
+/*
+	Every number the widgets in this file measure themselves by.
+
+	One struct rather than the twenty-two loose constants this used to be,
+	scattered down two thousand lines beside whichever widget first needed one.
+	They are the same kind of thing -- a size, a colour or a duration a widget
+	uses when nobody said otherwise -- and grouping them means a game retheming
+	the UI reads one declaration instead of hunting.
+
+	`BUTTON_STYLE` stays separate and is not folded in here: it is a value a
+	game copies and edits (`style := mb.BUTTON_STYLE; style.hover = ...`),
+	which is a different job from a default nothing overrides.
+*/
+Ui_Confirm_Defaults :: struct {
+	timeout:     f32, // seconds before an armed button forgets
+	armed:       [4]f32,
+	armed_hover: [4]f32,
+}
+
+Ui_Text_Plate_Defaults :: struct {
+	bg:      [4]f32,
+	fg:      [4]f32,
+	padding: [2]f32,
+}
+
+Ui_Text_Field_Defaults :: struct {
+	padding:     f32, // gap between the box edge and the text
+	caret_width: f32,
+	ring:        f32, // pixels, all the way round
+	label_gap:   f32, // between the label's baseline row and the box
+	blink:       f32, // seconds for a full off-on cycle
+	mask:        rune,
+}
+
+Ui_Scroll_Defaults :: struct {
+	bar_width:  f32,
+	thumb_min:  f32, // shortest the thumb is allowed to get
+	inset:      f32, // gap between the bar and the panel edge
+	wheel_step: f32, // pixels per notch of the wheel
+}
+
+Ui_Dropdown_Defaults :: struct {
+	padding: f32, // gap from the box edge to the label
+	row_gap: f32, // hairline between options, so a long list reads as rows
+}
+
+Ui_Defaults :: struct {
+	// The dim a style built from scratch falls back to. Without it a hand-made
+	// Button_Style would draw a disabled button in black rather than a dimmed
+	// version of its own colour.
+	button_disabled_dim: f32,
+
+	hover_dwell:         f32, // seconds the pointer must rest before it counts
+	status_fade:         f32, // seconds a timed message spends fading out
+	slider_handle_width: f32,
+
+	confirm:    Ui_Confirm_Defaults,
+	text_plate: Ui_Text_Plate_Defaults,
+	text_field: Ui_Text_Field_Defaults,
+	scroll:     Ui_Scroll_Defaults,
+	dropdown:   Ui_Dropdown_Defaults,
+}
+
+UI_DEFAULTS :: Ui_Defaults{
+	button_disabled_dim = 0.45,
+	hover_dwell         = 0.4,
+	status_fade         = 0.5,
+	slider_handle_width = 14,
+
+	confirm = {
+		timeout     = 3.0,
+		armed       = {0.55, 0.18, 0.18, 1},
+		armed_hover = {0.70, 0.24, 0.24, 1},
+	},
+
+	text_plate = {
+		bg      = {0, 0, 0, 0.65},
+		fg      = {1, 1, 1, 1},
+		padding = {6, 4},
+	},
+
+	text_field = {
+		padding     = 8,
+		caret_width = 2,
+		ring        = 2,
+		label_gap   = 4,
+		blink       = 1.06,
+		mask        = '*',
+	},
+
+	scroll = {
+		bar_width  = 8,
+		thumb_min  = 24,
+		inset      = 2,
+		wheel_step = 48,
+	},
+
+	dropdown = {
+		padding = 8,
+		row_gap = 1,
+	},
+}
 
 BUTTON_STYLE :: Button_Style{
 	hover        = {0.35, 0.35, 0.42, 1},
 	text_color   = {1, 1, 1, 1},
 	align        = .CENTER,
 	padding      = 10,
-	disabled_dim = BUTTON_DISABLED_DIM,
+	disabled_dim = UI_DEFAULTS.button_disabled_dim,
 }
 
 // Multiplies the colour channels and leaves alpha alone.
 @(private)
 dimmed :: proc(color: [4]f32, amount: f32) -> [4]f32 {
-	dim := amount if amount > 0 else BUTTON_DISABLED_DIM
+	dim := amount if amount > 0 else UI_DEFAULTS.button_disabled_dim
 	return {color.r * dim, color.g * dim, color.b * dim, color.a}
 }
 
@@ -173,14 +275,11 @@ mouse_over_rect :: proc(rectangle: Rectangle) -> bool {
 // Confirm-on-second-press
 // -----------------------------------------------------------------------
 
-CONFIRM_TIMEOUT :: 3.0 // seconds before an armed button forgets
 
 // Two colours, because an armed button is nearly always under the pointer --
 // you are about to press it again. If arming only changed the resting colour,
 // the ordinary hover fill would paint over the warning at exactly the moment
 // it matters.
-CONFIRM_ARMED       :: [4]f32{0.55, 0.18, 0.18, 1}
-CONFIRM_ARMED_HOVER :: [4]f32{0.70, 0.24, 0.24, 1}
 
 // Held by the caller, one per button, like Text_Field. Zero value is unarmed.
 Confirm_Button :: struct {
@@ -198,7 +297,7 @@ Confirm_Button :: struct {
 		}
 
 	It disarms on three things, in rough order of how often they happen: the
-	pointer being clicked anywhere else, CONFIRM_TIMEOUT passing, and the
+	pointer being clicked anywhere else, UI_DEFAULTS.confirm.timeout passing, and the
 	pointer leaving is deliberately *not* one of them -- moving off a button by
 	a pixel and back should not lose the arming, or the second press has to be
 	hurried.
@@ -212,14 +311,14 @@ button_confirm :: proc(
 	text:         string,
 	confirm_text: string,
 	style        := BUTTON_STYLE,
-	armed_color  := CONFIRM_ARMED,
-	armed_hover  := CONFIRM_ARMED_HOVER,
+	armed_color  := UI_DEFAULTS.confirm.armed,
+	armed_hover  := UI_DEFAULTS.confirm.armed_hover,
 ) -> bool {
 	armed := state.armed_at != 0
 
 	// Forgotten after a while. Somebody who armed this and wandered off should
 	// not come back to a button that deletes on one click.
-	if armed && seconds_since(state.armed_at) > CONFIRM_TIMEOUT {
+	if armed && seconds_since(state.armed_at) > UI_DEFAULTS.confirm.timeout {
 		state.armed_at = 0
 		armed = false
 	}
@@ -252,14 +351,13 @@ button_confirm :: proc(
 // Whether it is currently asking. For anything that wants to dim the rest of a
 // row while one of its buttons is waiting for an answer.
 confirm_button_armed :: proc(state: ^Confirm_Button) -> bool {
-	return state.armed_at != 0 && seconds_since(state.armed_at) <= CONFIRM_TIMEOUT
+	return state.armed_at != 0 && seconds_since(state.armed_at) <= UI_DEFAULTS.confirm.timeout
 }
 
 // -----------------------------------------------------------------------
 // Hover dwell
 // -----------------------------------------------------------------------
 
-HOVER_DWELL :: 0.4 // seconds the pointer must rest before it counts
 
 // Held by the caller, one per thing that can be dwelled on.
 Hover :: struct {
@@ -281,7 +379,7 @@ Hover :: struct {
 			draw_closeup(card)
 		}
 */
-hover_dwell :: proc(state: ^Hover, rectangle: Rectangle, seconds: f32 = HOVER_DWELL) -> bool {
+hover_dwell :: proc(state: ^Hover, rectangle: Rectangle, seconds: f32 = UI_DEFAULTS.hover_dwell) -> bool {
 	// Something above has the pointer, so this is not being looked at even
 	// though the pointer is over it. Cleared rather than merely reported, so
 	// the dwell starts again once whatever it was closes
@@ -306,7 +404,7 @@ hover_dwell :: proc(state: ^Hover, rectangle: Rectangle, seconds: f32 = HOVER_DW
 // How far through the dwell the pointer is, 0 to 1. For drawing the wait --
 // a ring filling, a bar creeping -- so it does not look like nothing is
 // happening.
-hover_progress :: proc(state: ^Hover, seconds: f32 = HOVER_DWELL) -> f32 {
+hover_progress :: proc(state: ^Hover, seconds: f32 = UI_DEFAULTS.hover_dwell) -> f32 {
 	if state.entered_at == 0 || seconds <= 0 do return 0
 	return clamp(seconds_since(state.entered_at) / seconds, 0, 1)
 }
@@ -351,9 +449,6 @@ mouse_over_button :: proc(button:Button) -> bool {
 // Text on a plate
 // -----------------------------------------------------------------------
 
-TEXT_PLATE_BG      :: [4]f32{0, 0, 0, 0.65}
-TEXT_PLATE_FG      :: [4]f32{1, 1, 1, 1}
-TEXT_PLATE_PADDING :: [2]f32{6, 4}
 
 /*
 	Text on a dark plate cut to fit it. Returns the size of the plate.
@@ -377,9 +472,9 @@ draw_text_plate :: proc(
 	font:      ^Font,
 	text:      string,
 	top_left:  [2]f32,
-	color:     [4]f32 = TEXT_PLATE_FG,
-	plate:     [4]f32 = TEXT_PLATE_BG,
-	padding:   [2]f32 = TEXT_PLATE_PADDING,
+	color:     [4]f32 = UI_DEFAULTS.text_plate.fg,
+	plate:     [4]f32 = UI_DEFAULTS.text_plate.bg,
+	padding:   [2]f32 = UI_DEFAULTS.text_plate.padding,
 ) -> [2]f32 {
 	measured := measure_text(font, text)
 	size     := measured + padding * 2
@@ -435,13 +530,7 @@ draw_rect_border :: proc(rectangle:Rectangle, color:[4]f32, thickness:f32) {
 // Text_Field -- somewhere to type
 // -----------------------------------------------------------------------
 
-TEXT_FIELD_PADDING     :: 8    // gap between the box edge and the text
-TEXT_FIELD_CARET_WIDTH :: 2
-TEXT_FIELD_RING        :: 2    // pixels, all the way round
-TEXT_FIELD_BLINK       :: 1.06 // seconds for a full off-on cycle
-TEXT_FIELD_MASK        :: '*'
 
-TEXT_FIELD_LABEL_GAP   :: 4    // between the label's baseline row and the box
 
 TEXT_FIELD_PLACEHOLDER: [4]f32 = {0.6, 0.6, 0.6, 1}
 TEXT_FIELD_FOCUS_RING:  [4]f32 = {1, 1, 1, 1}
@@ -465,7 +554,7 @@ Text_Field :: struct {
 	placeholder: string, // shown, dimmed, while empty
 	caret:       int,    // byte offset into text
 	focused:     bool,
-	masked:      bool,   // draw every character as TEXT_FIELD_MASK
+	masked:      bool,   // draw every character as UI_DEFAULTS.text_field.mask
 	max_bytes:   int,    // 0 for no limit. Bytes, not characters
 
 	// Drawn above the box when set. Every form field on a screen wants one, and
@@ -612,7 +701,7 @@ text_field_label_height :: proc(field:^Text_Field, font:^Font = nil) -> f32 {
 	if len(field.label) == 0 do return 0
 
 	font := font if font != nil else &mbi.font
-	return font.ascent + font.descent + TEXT_FIELD_LABEL_GAP
+	return font.ascent + font.descent + UI_DEFAULTS.text_field.label_gap
 }
 
 // The whole height a field occupies, label included, for a box `box_height`
@@ -642,7 +731,7 @@ draw_text_field :: proc(field:^Text_Field, font:^Font = nil) {
 
 	top_left := rect_top_left(field.rectangle)
 	baseline := top_left.y + (field.rectangle.size.y - (font.ascent + font.descent)) * 0.5 + font.ascent
-	left     := top_left.x + TEXT_FIELD_PADDING
+	left     := top_left.x + UI_DEFAULTS.text_field.padding
 
 	if len(field.label) > 0 {
 		color := field.label_color
@@ -650,10 +739,10 @@ draw_text_field :: proc(field:^Text_Field, font:^Font = nil) {
 
 		// Sitting on its own baseline directly above the box, which is what
 		// text_field_place left room for.
-		draw_text(font, field.label, top_left.x, top_left.y - TEXT_FIELD_LABEL_GAP - font.descent, color)
+		draw_text(font, field.label, top_left.x, top_left.y - UI_DEFAULTS.text_field.label_gap - font.descent, color)
 	}
 
-	if field.focused do draw_rect_border(field.rectangle, TEXT_FIELD_FOCUS_RING, TEXT_FIELD_RING)
+	if field.focused do draw_rect_border(field.rectangle, TEXT_FIELD_FOCUS_RING, UI_DEFAULTS.text_field.ring)
 
 	shown := text_field_shown(field, context.temp_allocator)
 
@@ -667,7 +756,7 @@ draw_text_field :: proc(field:^Text_Field, font:^Font = nil) {
 
 	// Solid for the first half second after a keystroke, blinking after that
 	since := f32(mbi.now_ts - field.blink_from) / f32(mbi.ts_freq)
-	if since > TEXT_FIELD_BLINK * 0.5 && math.mod(since, TEXT_FIELD_BLINK) > TEXT_FIELD_BLINK * 0.5 do return
+	if since > UI_DEFAULTS.text_field.blink * 0.5 && math.mod(since, UI_DEFAULTS.text_field.blink) > UI_DEFAULTS.text_field.blink * 0.5 do return
 
 	// Measured off what is on screen, not off the real text: with a masked
 	// field those are different widths, and the caret has to follow the stars
@@ -675,7 +764,7 @@ draw_text_field :: proc(field:^Text_Field, font:^Font = nil) {
 
 	draw_rect({
 		position = {left + measure_text(font, before).x, baseline - font.ascent},
-		size     = {TEXT_FIELD_CARET_WIDTH, font.ascent + font.descent},
+		size     = {UI_DEFAULTS.text_field.caret_width, font.ascent + font.descent},
 		pivot    = {0.5, 0.5}, // position is the top-left corner
 		color    = WHITE,
 	})
@@ -687,7 +776,7 @@ text_field_shown :: proc(field:^Text_Field, allocator := context.allocator) -> s
 
 	// Per character, not per byte, or an accented letter would show as two
 	stars := strings.builder_make(allocator)
-	for _ in string(field.text[:]) do strings.write_rune(&stars, TEXT_FIELD_MASK)
+	for _ in string(field.text[:]) do strings.write_rune(&stars, UI_DEFAULTS.text_field.mask)
 
 	return strings.to_string(stars)
 }
@@ -739,10 +828,6 @@ text_field_shown_caret :: proc(field:^Text_Field) -> int {
 	`view.offset` and the panel height, and loop over only those.
 */
 
-SCROLLBAR_WIDTH   :: f32(8)
-SCROLLBAR_MIN     :: f32(24) // shortest the thumb is allowed to get
-SCROLLBAR_INSET   :: f32(2)  // gap between the bar and the panel edge
-SCROLL_WHEEL_STEP :: f32(48) // pixels per notch of the wheel
 
 SCROLLBAR_TRACK: [4]f32 = {1, 1, 1, 0.06}
 SCROLLBAR_THUMB: [4]f32 = {1, 1, 1, 0.28}
@@ -792,7 +877,7 @@ begin_scroll :: proc(view: ^Scroll_View, area: Rectangle, content_height: f32) -
 	// claimed the pointer -- scrolling the list under an open dropdown is the
 	// same mistake as clicking through it.
 	if max_offset > 0 && mouse_over_rect(area) && !mouse_captured() {
-		view.offset -= get_mouse_wheel().y * SCROLL_WHEEL_STEP
+		view.offset -= get_mouse_wheel().y * UI_DEFAULTS.scroll.wheel_step
 	}
 
 	scroll_drag(view, max_offset)
@@ -866,10 +951,10 @@ scrollbar_track_rect :: proc(view: ^Scroll_View) -> Rectangle {
 
 	return {
 		position = {
-			top_left.x + view.area.size.x - SCROLLBAR_WIDTH - SCROLLBAR_INSET,
-			top_left.y + SCROLLBAR_INSET,
+			top_left.x + view.area.size.x - UI_DEFAULTS.scroll.bar_width - UI_DEFAULTS.scroll.inset,
+			top_left.y + UI_DEFAULTS.scroll.inset,
 		},
-		size  = {SCROLLBAR_WIDTH, view.area.size.y - SCROLLBAR_INSET * 2},
+		size  = {UI_DEFAULTS.scroll.bar_width, view.area.size.y - UI_DEFAULTS.scroll.inset * 2},
 		pivot = {0.5, 0.5},
 	}
 }
@@ -878,7 +963,7 @@ scrollbar_track_rect :: proc(view: ^Scroll_View) -> Rectangle {
 	The thumb, as long as the share of the content on screen and as far down as
 	the share already scrolled past.
 
-	Kept to SCROLLBAR_MIN however long the content is, because a thumb that
+	Kept to UI_DEFAULTS.scroll.thumb_min however long the content is, because a thumb that
 	shrinks in proportion forever ends up two pixels tall and cannot be taken
 	hold of. That makes the thumb's travel shorter than the track on a long
 	list, which is why the position is worked out against the travel rather than
@@ -890,7 +975,7 @@ scrollbar_thumb_rect :: proc(view: ^Scroll_View) -> Rectangle {
 	if max_offset <= 0 do return track
 
 	visible := clamp(view.area.size.y / max(view.content, 1), 0, 1)
-	height  := max(track.size.y * visible, min(SCROLLBAR_MIN, track.size.y))
+	height  := max(track.size.y * visible, min(UI_DEFAULTS.scroll.thumb_min, track.size.y))
 	travel  := track.size.y - height
 
 	top_left := rect_top_left(track)
@@ -997,8 +1082,6 @@ draw_rect_in :: proc(rectangle: Rectangle, color: [4]f32) {
 	is called before the things it covers.
 */
 
-DROPDOWN_PADDING :: 8 // gap from the box edge to the label
-DROPDOWN_ROW_GAP :: 1 // hairline between options, so a long list reads as rows
 
 DROPDOWN_LIST_BG:  [4]f32 = {0.10, 0.10, 0.13, 1}
 DROPDOWN_BORDER:   [4]f32 = {0.35, 0.38, 0.46, 1}
@@ -1012,7 +1095,7 @@ DROPDOWN_STYLE := Dropdown_Style{
 	list_bg          = DROPDOWN_LIST_BG,
 	border           = DROPDOWN_BORDER,
 	mark             = DROPDOWN_MARK,
-	padding          = DROPDOWN_PADDING,
+	padding          = UI_DEFAULTS.dropdown.padding,
 	border_thickness = 1,
 }
 
@@ -1289,7 +1372,7 @@ dropdown_list_rect :: proc(state: ^Dropdown, count: int) -> Rectangle {
 	anchor := rect_top_left(state.rectangle)
 
 	width  := state.row.x
-	height := f32(count) * state.row.y + f32(max(0, count - 1)) * DROPDOWN_ROW_GAP
+	height := f32(count) * state.row.y + f32(max(0, count - 1)) * UI_DEFAULTS.dropdown.row_gap
 
 	x := anchor.x
 	y := anchor.y + state.rectangle.size.y // under the box, or at the point
@@ -1325,7 +1408,7 @@ dropdown_row_rect :: proc(state: ^Dropdown, index: int, count: int) -> Rectangle
 	top_left := rect_top_left(list)
 
 	return {
-		position = {top_left.x, top_left.y + f32(index) * (state.row.y + DROPDOWN_ROW_GAP)},
+		position = {top_left.x, top_left.y + f32(index) * (state.row.y + UI_DEFAULTS.dropdown.row_gap)},
 		size     = {list.size.x, state.row.y},
 		pivot    = {0.5, 0.5},
 	}
@@ -1400,9 +1483,9 @@ draw_tooltip :: proc(
 	text:      string,
 	font:      ^Font = nil,
 	max_width: f32 = TOOLTIP_MAX,
-	color:     [4]f32 = TEXT_PLATE_FG,
-	plate:     [4]f32 = TEXT_PLATE_BG,
-	padding:   [2]f32 = TEXT_PLATE_PADDING,
+	color:     [4]f32 = UI_DEFAULTS.text_plate.fg,
+	plate:     [4]f32 = UI_DEFAULTS.text_plate.bg,
+	padding:   [2]f32 = UI_DEFAULTS.text_plate.padding,
 ) -> Rectangle {
 	font := font if font != nil else &mbi.font
 	if len(text) == 0 do return {}
@@ -1466,7 +1549,6 @@ STATUS_COLOR := [Status_Level][4]f32{
 	.BAD  = {0.90, 0.45, 0.45, 1},
 }
 
-STATUS_FADE :: f32(0.5) // seconds a timed message spends fading out
 
 // Longest message kept. A status line is one line on a screen somebody is
 // reading at a glance; anything longer wants a panel of its own.
@@ -1540,9 +1622,9 @@ status_alpha :: proc(status: ^Status_Line) -> f32 {
 	left := status.seconds - seconds_since(status.set_at)
 
 	if left <= 0 do return 0
-	if left >= STATUS_FADE do return 1
+	if left >= UI_DEFAULTS.status_fade do return 1
 
-	return left / STATUS_FADE
+	return left / UI_DEFAULTS.status_fade
 }
 
 /*
@@ -1685,14 +1767,13 @@ modal_dismissed :: proc(content: Rectangle) -> bool {
 // Slider -- pick a number by dragging
 // -----------------------------------------------------------------------
 
-SLIDER_HANDLE_WIDTH :: f32(14)
 
 SLIDER_STYLE := Slider_Style{
 	track        = {1, 1, 1, 0.12},
 	fill         = {0.45, 0.60, 0.85, 1},
 	handle       = {0.85, 0.87, 0.92, 1},
 	handle_hover = {1, 1, 1, 1},
-	handle_width = SLIDER_HANDLE_WIDTH,
+	handle_width = UI_DEFAULTS.slider_handle_width,
 }
 
 Slider_Style :: struct {
@@ -1700,7 +1781,7 @@ Slider_Style :: struct {
 	fill:         [4]f32, // from the left edge up to the handle
 	handle:       [4]f32,
 	handle_hover: [4]f32,
-	handle_width: f32,    // SLIDER_HANDLE_WIDTH when left at zero
+	handle_width: f32,    // UI_DEFAULTS.slider_handle_width when left at zero
 }
 
 /*
@@ -1761,7 +1842,7 @@ slider :: proc(
 	value^ = clamp(value^, low, high)
 
 	span   := high - low
-	width  := style.handle_width if style.handle_width > 0 else SLIDER_HANDLE_WIDTH
+	width  := style.handle_width if style.handle_width > 0 else UI_DEFAULTS.slider_handle_width
 	travel := rectangle.size.x - width
 
 	top_left := rect_top_left(rectangle)
@@ -1842,7 +1923,7 @@ slider_int :: proc(
 // tick mark, a tooltip over the handle, or a second thing anchored to it needs
 // the same answer this uses.
 slider_handle_rect :: proc(rectangle: Rectangle, value, low, high: f32, style: Slider_Style = SLIDER_STYLE) -> Rectangle {
-	width  := style.handle_width if style.handle_width > 0 else SLIDER_HANDLE_WIDTH
+	width  := style.handle_width if style.handle_width > 0 else UI_DEFAULTS.slider_handle_width
 	travel := max(0, rectangle.size.x - width)
 	span   := high - low
 

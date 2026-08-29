@@ -210,7 +210,7 @@ main :: proc() {
 		for deck, i in decks {
 			row := mb.Rectangle{
 				position = {origin.x + 8, origin.y + f32(i) * (ROW_H + ROW_GAP)},
-				size     = {panel.size.x - 16 - mb.SCROLLBAR_WIDTH, ROW_H},
+				size     = {panel.size.x - 16 - mb.UI_DEFAULTS.scroll.bar_width, ROW_H},
 				color    = ROW,
 				pivot    = {0.5, 0.5},
 			}

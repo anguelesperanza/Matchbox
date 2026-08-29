@@ -57,6 +57,13 @@ Tiled :: struct {
 	width:int
 }
 
+/*
+	Reads a Tiled `.tmj` map off disk and parses it.
+
+	`core:os` rather than `read_entire_file`, so unlike the model loader this
+	one does **not** work from inside an Android apk. Returns a zeroed `Tiled`
+	and logs on a file it cannot read or parse.
+*/
 tiled_load_level :: proc(level:string)  -> Tiled {
 	data, data_err := os.read_entire_file(level, context.allocator)
 	if data_err != nil {
@@ -115,6 +122,15 @@ tiled_get_spawn_position :: proc(level: Tiled, layer_name: string, scale: f32, s
 	return {0, 0}
 }
 
+/*
+	Stops a body at the first solid object in its way horizontally, adjusting
+	`dx` in place.
+
+	Horizontal and vertical are resolved by separate procedures, called one
+	after the other, because doing both at once against a grid catches a body on
+	seams between tiles that are flush with each other -- the classic "snagging
+	while running along a flat floor" bug.
+*/
 tiled_resolve_x_collision :: proc(body: ^Body, collisions: []TiledObjectLayer, dx: ^f32, scale: f32) {
 	p  := body.bounding_box_padding
 	bb := sprite_bounds(body)
@@ -134,6 +150,14 @@ tiled_resolve_x_collision :: proc(body: ^Body, collisions: []TiledObjectLayer, d
 	}
 }
 
+/*
+	The vertical half of the pair, adjusting `vy` in place.
+
+	Uses `bounding_box_contact_check` where the horizontal one uses
+	`bounding_box_collision_check`: a body resting exactly on a floor is in
+	contact with it rather than overlapping it, and an overlap test reports
+	"standing on nothing" on the frame it lands.
+*/
 tiled_resolve_y_collision :: proc(body: ^Body, collisions: []TiledObjectLayer, vy: ^f32, scale: f32) {
 	p  := body.bounding_box_padding
 	bb := sprite_bounds(body)

@@ -61,6 +61,9 @@ create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh {
 	}
 }
 
+// A sprite from an encoded image -- PNG, JPG, whatever stb_image reads.
+// `#load` the file and hand the bytes over, so the image ships inside the
+// executable and works the same inside an Android apk.
 create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 	mesh := create_mesh(bytes)
 	return sprite_of(mesh, scale)
@@ -106,10 +109,18 @@ destroy_mesh :: proc(mesh: ^Mesh) {
 	mesh.texture = nil
 }
 
+// Gives the sprite's texture and vertex buffer back to the GPU. A sprite whose
+// mesh came from `sprite_cache` must not be destroyed here -- the cache owns it
+// and hands the same one to everybody who asked for that image.
 destroy_sprite :: proc(sprite: ^Sprite) {
 	destroy_mesh(&sprite.mesh)
 }
 
+// The middle of the sprite in world coordinates.
+//
+// Off `position` and `size` rather than off `pivot`: this is where the sprite
+// visually is, which is what a distance check or a camera follow wants, and not
+// where it is anchored for drawing.
 sprite_center :: proc(sprite: Sprite) -> [2]f32 {
 	return {
 		sprite.position.x + sprite.size.x / 2,
@@ -117,12 +128,23 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32 {
 	}
 }
 
+// Destroys every layer of a parallax set. The layers own their meshes, unlike
+// cache-backed sprites, so this is the right way to take one down.
 destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites) {
 	for &i in parallax_sprites.sprites {
 		destroy_sprite(&i)
 	}
 }
 
+/*
+	Draws a sprite at its position, turned about its pivot and multiplied by its
+	tint.
+
+	The pivot is measured the opposite way round from most engines: `{0, 0}`
+	means `position` already is the centre, and `{0.5, 0.5}` offsets the sprite
+	by half its own size. Worth knowing before a crosshair comes out as a
+	corner.
+*/
 draw_sprite :: proc(sprite: Sprite) {
 	draw_center := sprite.position + sprite.pivot * sprite.size
 
@@ -176,6 +198,12 @@ sprite_frag_data :: proc(body: Body) -> Sprite_Frag_Data {
 	return Sprite_Frag_Data{color = tint, desaturate = clamp(body.desaturate, 0, 1)}
 }
 
+// The body's collision rectangle as {left, top, right, bottom}, with its
+// per-side padding applied.
+//
+// Padding is per-side rather than one number because a sprite's art rarely
+// fills its own box evenly -- a character with a hat wants the top pulled in
+// further than the feet.
 sprite_bounds :: proc(body: ^Body) -> [4]f32 {
 	p := body.bounding_box_padding
 	return {
@@ -266,6 +294,16 @@ draw_rect_outline :: proc(body: ^Body, color: [4]f32, thickness: f32) {
 }
 
 
+/*
+	The sprite's position clamped so it cannot leave the visible area.
+
+	Returns the corrected position rather than writing it, so a caller decides
+	whether hitting the edge also means stopping, bouncing or wrapping.
+
+	The edges are worked out in world coordinates by undoing the letterbox: the
+	visible area is not the window when `set_logical_size` is in force, and
+	using the window size here would let a sprite sit in the black bars.
+*/
 sprite_world_collision :: proc(sprite: Sprite) -> [2]f32 {
 	pos   := sprite.position
 	scale := f32(1)
@@ -281,12 +319,22 @@ sprite_world_collision :: proc(sprite: Sprite) -> [2]f32 {
 	return pos
 }
 
+// Whether two {left, top, right, bottom} rectangles overlap.
+//
+// Strictly, so two boxes sharing an edge do not count as overlapping. That is
+// what stops a character resting exactly on a platform from being reported as
+// inside it every frame -- see `bounding_box_contact_check` for the opposite.
 bounding_box_collision_check :: proc(a: [4]f32, b: [4]f32) -> bool {
 	return a[0] < b[2] &&
 	       a[2] > b[0] &&
 	       a[1] < b[3] &&
 	       a[3] > b[1]
 }
+// The same test as `bounding_box_collision_check`, except that touching counts.
+//
+// One `>=` is the whole difference, on the bottom edge: a character standing on
+// a platform is exactly in contact with it and not overlapping it, so an
+// overlap test reports "not standing on anything" on the very frame it lands.
 bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool {
     return a[0] < b[2] &&
            a[2] > b[0] &&

@@ -125,6 +125,8 @@ for f in sorted(glob.glob("matchbox/*.odin")):
             continue
 
         block = []
+        while k >= 0 and not lines[k].strip():
+            k -= 1
         if k >= 0 and lines[k].strip().endswith("*/"):
             while k >= 0:
                 block.insert(0, lines[k])
@@ -153,9 +155,8 @@ out = [
     "and one line on what it does.\n",
     "**Generated from the source.** Regenerate rather than edit by hand: each",
     "description is the first sentence of that procedure's own doc comment, so the way",
-    "to improve an entry here is to improve the comment it came from. Anything marked",
-    "_(no doc comment)_ is a procedure with nothing to take a description from, which",
-    "is worth fixing at the source.\n",
+    "to improve an entry here is to improve the comment it came from. Every public",
+    "procedure has one; anything showing _(no doc comment)_ is a regression.\n",
     "Names are as exported. A game importing the package as `mb` writes `mb.init(...)`.",
     "Private procedures are left out -- there are 109 of them and a game cannot call",
     "any.\n",

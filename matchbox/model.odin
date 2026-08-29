@@ -94,6 +94,8 @@ model_center :: proc(model: Model) -> [3]f32 {
 	return (model.bounds_min + model.bounds_max) * 0.5
 }
 
+// How big the model is on each axis, in its own space before any Transform.
+// What a game scales from, and what sizes a collider to match the art.
 model_size :: proc(model: Model) -> [3]f32 {
 	return model.bounds_max - model.bounds_min
 }
@@ -134,6 +136,12 @@ model_from_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_T
 	return Model{parts = parts, bounds_min = low, bounds_max = high}
 }
 
+/*
+	Gives a model's buffers, textures, skeleton and clips back.
+
+	A texture shared between parts -- which is every model built round one atlas
+	-- is released once rather than once per part that points at it.
+*/
 destroy_model :: proc(model: ^Model) {
 	// Freed before the early return below, because a skeleton is plain memory
 	// and does not care whether there is still a GPU to give buffers back to.

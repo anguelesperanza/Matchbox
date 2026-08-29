@@ -265,6 +265,9 @@ create_animator :: proc(
 	return animator
 }
 
+// Frees an animator's working arrays and resets it. The `Model` it was made
+// for is untouched -- several animators share one, and the skeleton and clips
+// belong to the model.
 destroy_animator :: proc(animator: ^Animator) {
 	for palette in animator.pose.palettes do delete(palette)
 	delete(animator.pose.palettes)

@@ -150,6 +150,8 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 	return skybox, true
 }
 
+// Releases the sky's texture. The samplers belong to the renderer and are
+// shared between every skybox, so they are not this one's to give back.
 destroy_skybox :: proc(skybox: ^Skybox) {
 	// The samplers belong to the renderer and are shared between every skybox,
 	// so only the texture is this one's to give back.

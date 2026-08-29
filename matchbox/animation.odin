@@ -24,6 +24,16 @@ AnimatedSprite :: struct {
 	accumulator:   f32,
 }
 
+/*
+	A sprite that plays frames off a sheet, in one call.
+
+	The sheet is a grid: `cols` by `rows` frames of `frame_w` by `frame_h`, read
+	left to right and then down, for `frame_count` frames -- which may be fewer
+	than the grid holds, since a sheet's last row is often part empty.
+
+	This is the 2D animation system and is unrelated to `animation3d.odin`,
+	which animates a skeleton. Nothing here touches a model.
+*/
 create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1) -> AnimatedSprite {
     sprite: AnimatedSprite
     sprite.clip  = load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
@@ -34,6 +44,9 @@ create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: 
     return sprite
 }
 
+// The clip on its own, without a sprite wrapped round it. What to use when
+// several sprites play the same sheet, or when a sprite switches between clips
+// -- see `switch_animation`.
 load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> AnimationClip {
 	return AnimationClip{
 		mesh              = create_mesh(bytes),
@@ -46,10 +59,17 @@ load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, row
 	}
 }
 
+// Gives the clip's sheet texture back to the GPU. A clip shared between
+// sprites is destroyed once, not once per sprite.
 destroy_animation_clip :: proc(clip: ^AnimationClip) {
 	destroy_mesh(&clip.mesh)
 }
 
+// Puts a different clip on a sprite and restarts it from frame zero.
+//
+// Asking for the clip already playing does nothing, which is what lets a game
+// call this every frame from a state machine without the animation being stuck
+// on its first frame forever.
 switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip) {
     // Same sheet means same clip: the texture handle identifies it now that
     // there are no descriptor-pool ids to compare.
@@ -60,6 +80,10 @@ switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip) {
     sprite.size          = {clip.frame_w * sprite.scale, clip.frame_h * sprite.scale}
 }
 
+// Advances the sprite's frame and works out its uv window. Call once a frame,
+// before drawing.
+//
+// The 2D one. `update_animator` is the skeletal equivalent.
 update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
     sprite.accumulator += delta_time
     if sprite.accumulator >= sprite.clip.seconds_per_frame {
@@ -95,6 +119,8 @@ update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
 }
 
 
+// Draws the current frame. `update_animation` decides which frame that is, so
+// a sprite drawn without being updated shows the same one forever.
 draw_animated_sprite :: proc(sprite: AnimatedSprite) {
 	draw_center := sprite.position + sprite.pivot * sprite.size + sprite.clip.offset
 

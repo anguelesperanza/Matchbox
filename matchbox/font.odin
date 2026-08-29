@@ -40,6 +40,16 @@ Font :: struct {
 	descent:     f32, // baseline down to the lowest glyph
 }
 
+/*
+	Bakes a TTF into an atlas at one pixel size.
+
+	One size per atlas, because stb bakes glyphs at a fixed size rather than
+	scaling them -- drawing a 26px atlas at 64px is a blurry 26px atlas. A game
+	wanting several sizes calls `get_font`, which keeps a small cache of them.
+
+	`bytes` is the file's contents, so `#load` works and the font ships inside
+	the executable.
+*/
 load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	font: Font
 	font.atlas_size = FONT_ATLAS_SIZE
@@ -79,10 +89,13 @@ load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	return font
 }
 
+// Gives the font's atlas texture and vertex buffer back to the GPU.
 destroy_font :: proc(font: ^Font) {
 	destroy_mesh(&font.mesh)
 }
 
+// An integer, without the caller building a string for it. Part of the
+// `draw_text` group.
 draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_int(buf[:], integer, 10)
@@ -90,6 +103,8 @@ draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) 
 }
 
 
+// A float at two decimal places, without the caller building a string. Part of
+// the `draw_text` group.
 draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) where intrinsics.type_is_float(T) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
@@ -97,6 +112,10 @@ draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) w
 }
 
 
+// A string at a position, in world coordinates -- so it moves with the camera
+// and scales with the letterbox. `draw_text_ui` is the one that does not.
+//
+// `x` and `y` are the left end of the baseline, not the top-left corner.
 draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
 	// Bound once for the whole string. The pipeline, the shared quad and the
 	// atlas are the same for every character in it -- only the uniforms differ.
@@ -135,6 +154,8 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 	}
 }
 
+// Draws a string, an integer or a float, so a game does not build a string for
+// a number it wants on screen.
 draw_text :: proc {
 	draw_text_string,
 	draw_text_i64,
@@ -197,18 +218,23 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 	}
 }
 
+// An integer in screen coordinates. Part of the `draw_text_ui` group.
 draw_text_ui_int :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_int(buf[:], integer, 10)
     draw_text_ui_string(font, result[:], x, y, color)
 }
 
+// A float in screen coordinates, two decimal places. Part of the
+// `draw_text_ui` group.
 draw_text_ui_f32 :: proc(font: ^Font, float: f32, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
     draw_text_ui_string(font, result[1:], x, y, color)
 }
 
+// `draw_text`, but in screen coordinates: fixed to the window and untouched by
+// the camera. What a HUD, a score or a debug readout wants.
 draw_text_ui :: proc {
     draw_text_ui_string,
     draw_text_ui_int,

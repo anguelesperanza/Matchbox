@@ -15,6 +15,17 @@ package matchbox
 
 import "core:math/rand"
 
+/*
+	A drunkard's-walk map: `steps` moves from `start`, carving out the cells it
+	passes through.
+
+	Returns a `size.x * size.y` grid, row-major, with 1 where the walk went and
+	0 everywhere else. Allocated, so the caller frees it.
+
+	The simplest cave generator there is, and it makes no promise that the
+	result is connected end to end or that it fills any particular share of the
+	grid -- a short walk on a large grid is mostly zeroes.
+*/
 random_walk :: proc(size:[2]int, start: [2]f32, steps: int, stride: f32) -> []u8 {
 	current_pos := start
 

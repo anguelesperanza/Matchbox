@@ -5,17 +5,12 @@ and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
 description is the first sentence of that procedure's own doc comment, so the way
-to improve an entry here is to improve the comment it came from. Anything marked
-_(no doc comment)_ is a procedure with nothing to take a description from, which
-is worth fixing at the source.
+to improve an entry here is to improve the comment it came from. Every public
+procedure has one; anything showing _(no doc comment)_ is a regression.
 
 Names are as exported. A game importing the package as `mb` writes `mb.init(...)`.
 Private procedures are left out -- there are 109 of them and a game cannot call
 any.
-
-Sixty-four procedures have no doc comment to take a line from. They are listed
-with _(no doc comment)_ and are concentrated in `input.odin`, `sprite.odin` and
-`font.odin` -- nine each -- which is a fair list of what to write next.
 
 ## Contents
 
@@ -71,7 +66,7 @@ Loads a shader off disk.
 ```odin
 destroy :: proc
 ```
-_(no doc comment)_
+destroy ------- One name for giving anything back.
 
 ```odin
 destroy_animated_sprite :: proc(sprite: ^AnimatedSprite)
@@ -110,7 +105,7 @@ Pins the resolution games draw against.
 ```odin
 screen_pos :: proc(pos: [2]f32) -> [2]f32
 ```
-_(no doc comment)_
+A world position as the shader wants it, with the camera and the letterbox applied.
 
 ```odin
 screen_size :: proc(size: [2]f32) -> [2]f32
@@ -120,7 +115,7 @@ The camera zoom has to be applied here as well as in screen_pos.
 ```odin
 screen_dims :: proc() -> [2]f32
 ```
-_(no doc comment)_
+The size everything 2D is measured against this frame.
 
 ### `files.odin`
 
@@ -184,22 +179,22 @@ Whether the pointer is currently locked to the window.
 ```odin
 set_escape_key :: proc(key:sdl.Scancode)
 ```
-_(no doc comment)_
+Which key closes the window, or `.UNKNOWN` for none.
 
 ```odin
 is_key_pressed :: proc(key:sdl.Scancode) -> bool
 ```
-_(no doc comment)_
+True only on the frame the key went down.
 
 ```odin
 is_key_held :: proc(key:sdl.Scancode) -> bool
 ```
-_(no doc comment)_
+True every frame the key is down, including the first.
 
 ```odin
 is_key_released :: proc(key:sdl.Scancode) -> bool
 ```
-_(no doc comment)_
+True only on the frame the key came back up.
 
 ```odin
 is_key_repeated :: proc(key:sdl.Scancode) -> bool
@@ -214,12 +209,12 @@ Starts accepting typed text, and returns it from get_text_input.
 ```odin
 end_text_input :: proc()
 ```
-_(no doc comment)_
+Stops accepting typing, and takes down the on-screen keyboard a phone put up.
 
 ```odin
 is_text_input_open :: proc() -> bool
 ```
-_(no doc comment)_
+Whether typing is being accepted.
 
 ```odin
 get_text_input :: proc() -> string
@@ -234,17 +229,17 @@ The clipboard's contents, or "" when it holds no text.
 ```odin
 is_mouse_pressed :: proc(button:Mouse_Button) -> bool
 ```
-_(no doc comment)_
+True only on the frame the button went down.
 
 ```odin
 is_mouse_held :: proc(button:Mouse_Button) -> bool
 ```
-_(no doc comment)_
+True every frame the button is down.
 
 ```odin
 is_mouse_released :: proc(button:Mouse_Button) -> bool
 ```
-_(no doc comment)_
+True only on the frame the button came back up.
 
 ```odin
 capture_mouse :: proc()
@@ -281,12 +276,12 @@ What the controller calls itself -- "Xbox Series X Controller" and such.
 ```odin
 is_gamepad_button_pressed :: proc(pad: int, button: sdl.GamepadButton) -> bool
 ```
-_(no doc comment)_
+True only on the frame the button went down, and false for a pad nobody is holding -- so a game may ask about slot 3 whether or not anyone is in it.
 
 ```odin
 is_gamepad_button_held :: proc(pad: int, button: sdl.GamepadButton) -> bool
 ```
-_(no doc comment)_
+True every frame the button is down.
 
 ```odin
 is_gamepad_button_released :: proc(
@@ -294,7 +289,7 @@ is_gamepad_button_released :: proc(
 	button: sdl.GamepadButton,
 ) -> bool
 ```
-_(no doc comment)_
+True only on the frame the button came back up.
 
 ```odin
 get_gamepad_axis :: proc(pad: int, axis: sdl.GamepadAxis) -> f32
@@ -319,7 +314,7 @@ How far a stick has to move before it counts, as a fraction of its full travel.
 ```odin
 set_gamepad_trigger_threshold :: proc(threshold: f32)
 ```
-_(no doc comment)_
+How far a trigger must be pulled before it counts as pressed.
 
 ```odin
 set_gamepad_rumble :: proc(pad: int, low: f32, high: f32, duration_ms: u32)
@@ -375,17 +370,17 @@ The distance between the first two fingers, and how much it changed this frame.
 ```odin
 begin_drawing :: proc()
 ```
-_(no doc comment)_
+Starts a frame: acquires a command buffer and the swapchain image.
 
 ```odin
 end_drawing :: proc()
 ```
-_(no doc comment)_
+Ends the frame and hands it to the GPU.
 
 ```odin
 clear_background :: proc(color: [4]f32 = {0, 0, 0, 1})
 ```
-_(no doc comment)_
+Fills the frame with one colour.
 
 ```odin
 rect_center :: proc(rectangle: Rectangle) -> [2]f32
@@ -405,7 +400,7 @@ Whether a point is inside a rectangle.
 ```odin
 draw_rect :: proc(rectangle: Rectangle)
 ```
-_(no doc comment)_
+A filled rectangle, rotated about its own pivot.
 
 ### `sprite.odin`
 
@@ -422,7 +417,7 @@ The same, from pixels that have already been decoded.
 ```odin
 create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite
 ```
-_(no doc comment)_
+A sprite from an encoded image -- PNG, JPG, whatever stb_image reads.
 
 ```odin
 create_sprite_from_pixels :: proc(
@@ -442,27 +437,27 @@ Only the texture is owned.
 ```odin
 destroy_sprite :: proc(sprite: ^Sprite)
 ```
-_(no doc comment)_
+Gives the sprite's texture and vertex buffer back to the GPU.
 
 ```odin
 sprite_center :: proc(sprite: Sprite) -> [2]f32
 ```
-_(no doc comment)_
+The middle of the sprite in world coordinates.
 
 ```odin
 destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites)
 ```
-_(no doc comment)_
+Destroys every layer of a parallax set.
 
 ```odin
 draw_sprite :: proc(sprite: Sprite)
 ```
-_(no doc comment)_
+Draws a sprite at its position, turned about its pivot and multiplied by its tint.
 
 ```odin
 sprite_bounds :: proc(body: ^Body) -> [4]f32
 ```
-_(no doc comment)_
+The body's collision rectangle as {left, top, right, bottom}, with its per-side padding applied.
 
 ```odin
 draw_outline :: proc(
@@ -499,17 +494,17 @@ draw_rect_outline :: proc(body: ^Body, color: [4]f32, thickness: f32)
 ```odin
 sprite_world_collision :: proc(sprite: Sprite) -> [2]f32
 ```
-_(no doc comment)_
+The sprite's position clamped so it cannot leave the visible area.
 
 ```odin
 bounding_box_collision_check :: proc(a: [4]f32, b: [4]f32) -> bool
 ```
-_(no doc comment)_
+Whether two {left, top, right, bottom} rectangles overlap.
 
 ```odin
 bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool
 ```
-_(no doc comment)_
+The same test as `bounding_box_collision_check`, except that touching counts.
 
 ```odin
 sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32
@@ -538,7 +533,7 @@ sprite_cache_make :: proc(
 	allocator := context.allocator) -> Sprite_Cache(Key,
 )
 ```
-_(no doc comment)_
+A cache that loads each image once and hands the same sprite to everyone who asks for it, keyed by whatever a game already identifies its art by.
 
 ```odin
 sprite_cache_get :: proc(
@@ -758,12 +753,12 @@ Restores the clip that was in force before the matching begin_clip, or the whole
 ```odin
 load_font :: proc(bytes: []byte, font_size: f32) -> Font
 ```
-_(no doc comment)_
+Bakes a TTF into an atlas at one pixel size.
 
 ```odin
 destroy_font :: proc(font: ^Font)
 ```
-_(no doc comment)_
+Gives the font's atlas texture and vertex buffer back to the GPU.
 
 ```odin
 draw_text_i64 :: proc(
@@ -774,7 +769,7 @@ draw_text_i64 :: proc(
 	color: [4]f32,
 )
 ```
-_(no doc comment)_
+An integer, without the caller building a string for it.
 
 ```odin
 draw_text_float :: proc(
@@ -785,7 +780,7 @@ draw_text_float :: proc(
 	color: [4]f32) where intrinsics.type_is_float(T,
 )
 ```
-_(no doc comment)_
+A float at two decimal places, without the caller building a string.
 
 ```odin
 draw_text_string :: proc(
@@ -796,12 +791,12 @@ draw_text_string :: proc(
 	color: [4]f32,
 )
 ```
-_(no doc comment)_
+A string at a position, in world coordinates -- so it moves with the camera and scales with the letterbox.
 
 ```odin
 draw_text :: proc
 ```
-_(no doc comment)_
+Draws a string, an integer or a float, so a game does not build a string for a number it wants on screen.
 
 ```odin
 measure_text :: proc(font: ^Font, text: string) -> [2]f32
@@ -828,7 +823,7 @@ draw_text_ui_int :: proc(
 	color: [4]f32,
 )
 ```
-_(no doc comment)_
+An integer in screen coordinates.
 
 ```odin
 draw_text_ui_f32 :: proc(
@@ -839,12 +834,12 @@ draw_text_ui_f32 :: proc(
 	color: [4]f32,
 )
 ```
-_(no doc comment)_
+A float in screen coordinates, two decimal places.
 
 ```odin
 draw_text_ui :: proc
 ```
-_(no doc comment)_
+`draw_text`, but in screen coordinates: fixed to the window and untouched by the camera.
 
 ```odin
 get_font :: proc(size: f32) -> ^Font
@@ -1002,12 +997,12 @@ How far through the dwell the pointer is, 0 to 1.
 ```odin
 draw_button :: proc(button:Button)
 ```
-_(no doc comment)_
+Draws a button without asking whether it was clicked -- the drawing half of `button`, for a game that decides on its own terms what a click means.
 
 ```odin
 mouse_over_button :: proc(button:Button) -> bool
 ```
-_(no doc comment)_
+Whether the pointer is inside the button's rectangle.
 
 ```odin
 draw_text_plate :: proc(
@@ -1044,7 +1039,7 @@ Replaces the contents outright, putting the caret at the end*/
 ```odin
 mouse_over_text_field :: proc(field:^Text_Field) -> bool
 ```
-_(no doc comment)_
+Whether the pointer is inside the field's box.
 
 ```odin
 update_text_field :: proc(field:^Text_Field)
@@ -1261,12 +1256,12 @@ Puts the modal up.
 ```odin
 close_modal :: proc(modal: ^Modal)
 ```
-_(no doc comment)_
+Closes the modal.
 
 ```odin
 modal_is_open :: proc(modal: ^Modal) -> bool
 ```
-_(no doc comment)_
+Whether the modal is up.
 
 ```odin
 modal_begin :: proc(modal: ^Modal) -> bool
@@ -1683,7 +1678,7 @@ Returns the angle (radians) needed to face a sprite's visual center toward targe
 ```odin
 look_at :: proc
 ```
-_(no doc comment)_
+The angle that points something at a target, given either a plain position or a sprite -- see the two procedures above for which side counts as forward.
 
 ### `math3d.odin`
 
@@ -1879,7 +1874,7 @@ A cube map, from the six faces of a horizontal cross.
 ```odin
 destroy_skybox :: proc(skybox: ^Skybox)
 ```
-_(no doc comment)_
+Releases the sky's texture.
 
 ```odin
 draw_skybox :: proc(skybox: Skybox)
@@ -1898,7 +1893,7 @@ The middle of the model's own bounds, and how big it is.
 ```odin
 model_size :: proc(model: Model) -> [3]f32
 ```
-_(no doc comment)_
+How big the model is on each axis, in its own space before any Transform.
 
 ```odin
 upload_mesh :: proc(
@@ -1921,7 +1916,7 @@ A model of one part, from one lump of geometry.
 ```odin
 destroy_model :: proc(model: ^Model)
 ```
-_(no doc comment)_
+Gives a model's buffers, textures, skeleton and clips back.
 
 ```odin
 cube_model :: proc(size: f32 = 1) -> Model
@@ -1975,7 +1970,7 @@ create_animated_sprite :: proc(
 	scale: f32 = 1,
 ) -> AnimatedSprite
 ```
-_(no doc comment)_
+A sprite that plays frames off a sheet, in one call.
 
 ```odin
 load_animation :: proc(
@@ -1988,27 +1983,27 @@ load_animation :: proc(
 	seconds_per_frame: f32,
 ) -> AnimationClip
 ```
-_(no doc comment)_
+The clip on its own, without a sprite wrapped round it.
 
 ```odin
 destroy_animation_clip :: proc(clip: ^AnimationClip)
 ```
-_(no doc comment)_
+Gives the clip's sheet texture back to the GPU.
 
 ```odin
 switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip)
 ```
-_(no doc comment)_
+Puts a different clip on a sprite and restarts it from frame zero.
 
 ```odin
 update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32)
 ```
-_(no doc comment)_
+Advances the sprite's frame and works out its uv window.
 
 ```odin
 draw_animated_sprite :: proc(sprite: AnimatedSprite)
 ```
-_(no doc comment)_
+Draws the current frame.
 
 ### `animation3d.odin`
 
@@ -2030,7 +2025,7 @@ An animator for `model`, with nothing playing.
 ```odin
 destroy_animator :: proc(animator: ^Animator)
 ```
-_(no doc comment)_
+Frees an animator's working arrays and resets it.
 
 ```odin
 animation_index :: proc(
@@ -2140,7 +2135,7 @@ Makes a render target `width` by `height`, or the size of the window when either
 ```odin
 destroy_render_target :: proc(target: ^Render_Target)
 ```
-_(no doc comment)_
+Releases the target's colour and depth textures.
 
 ```odin
 begin_drawing_target :: proc(target: ^Render_Target)
@@ -2168,17 +2163,17 @@ Draws a render target over the whole window, through `effect`.
 ```odin
 load_sound :: proc(bytes: []byte) -> Sound
 ```
-_(no doc comment)_
+A WAV from bytes, so `#load` works and the sound ships inside the executable.
 
 ```odin
 destroy_sound :: proc(sound: ^Sound)
 ```
-_(no doc comment)_
+Frees the decoded samples.
 
 ```odin
 play_sound :: proc(sound: ^Sound)
 ```
-_(no doc comment)_
+Plays the sound once, immediately.
 
 ## Tiled maps
 
@@ -2187,7 +2182,7 @@ _(no doc comment)_
 ```odin
 tiled_load_level :: proc(level:string) -> Tiled
 ```
-_(no doc comment)_
+Reads a Tiled `.tmj` map off disk and parses it.
 
 ```odin
 tiled_find_layer :: proc(level: Tiled, name: string) -> (TiledLayer, bool)
@@ -2221,7 +2216,7 @@ tiled_resolve_x_collision :: proc(
 	scale: f32,
 )
 ```
-_(no doc comment)_
+Stops a body at the first solid object in its way horizontally, adjusting `dx` in place.
 
 ```odin
 tiled_resolve_y_collision :: proc(
@@ -2231,7 +2226,7 @@ tiled_resolve_y_collision :: proc(
 	scale: f32,
 )
 ```
-_(no doc comment)_
+The vertical half of the pair, adjusting `vy` in place.
 
 ```odin
 draw_tiled_layer :: proc(
@@ -2258,7 +2253,7 @@ Converts a sprites x and y into a 1D array index This is row-major so all the ro
 ```odin
 sprite_to_index_by_value :: proc(x:f32, y:f32, width:f32) -> (index:int)
 ```
-_(no doc comment)_
+A grid coordinate as an index into a row-major array of `width` columns.
 
 ```odin
 mouse_over_sprite :: proc(sprite:Sprite) -> bool
@@ -2275,5 +2270,5 @@ random_walk :: proc(
 	stride: f32,
 ) -> []u8
 ```
-_(no doc comment)_
+A drunkard's-walk map: `steps` moves from `start`, carving out the cells it passes through.
 

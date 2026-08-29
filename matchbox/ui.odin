@@ -422,6 +422,8 @@ Button :: struct {
 	rectangle:Rectangle,
 }
 
+// Draws a button without asking whether it was clicked -- the drawing half of
+// `button`, for a game that decides on its own terms what a click means.
 draw_button :: proc(button:Button) {
 	draw_rect(button.rectangle)
 
@@ -441,6 +443,8 @@ draw_button :: proc(button:Button) {
 }
 
 
+// Whether the pointer is inside the button's rectangle. Hover, without the
+// click.
 mouse_over_button :: proc(button:Button) -> bool {
 	return mouse_over_rect(button.rectangle)
 }
@@ -593,6 +597,8 @@ text_field_set :: proc(field:^Text_Field, text:string) {
 	field.blink_from = mbi.now_ts
 }
 
+// Whether the pointer is inside the field's box. What a game reads to show an
+// I-beam cursor.
 mouse_over_text_field :: proc(field:^Text_Field) -> bool {
 	return mouse_over_rect(field.rectangle)
 }
@@ -1691,10 +1697,13 @@ open_modal :: proc(modal: ^Modal) {
 	modal.opened_on = mbi.frame
 }
 
+// Closes the modal. Safe on one already closed.
 close_modal :: proc(modal: ^Modal) {
 	modal.open = false
 }
 
+// Whether the modal is up. What the rest of a screen checks before taking
+// input of its own.
 modal_is_open :: proc(modal: ^Modal) -> bool {
 	return modal.open
 }

@@ -230,16 +230,20 @@ get_gamepad_name :: proc(pad: int) -> string {
 	return string(name)
 }
 
+// True only on the frame the button went down, and false for a pad nobody is
+// holding -- so a game may ask about slot 3 whether or not anyone is in it.
 is_gamepad_button_pressed :: proc(pad: int, button: sdl.GamepadButton) -> bool {
 	if !is_gamepad_connected(pad) do return false
 	return mbi.input.gamepads[pad].buttons[button].pressed
 }
 
+// True every frame the button is down. False for a disconnected pad.
 is_gamepad_button_held :: proc(pad: int, button: sdl.GamepadButton) -> bool {
 	if !is_gamepad_connected(pad) do return false
 	return mbi.input.gamepads[pad].buttons[button].pressing
 }
 
+// True only on the frame the button came back up. False for a disconnected pad.
 is_gamepad_button_released :: proc(pad: int, button: sdl.GamepadButton) -> bool {
 	if !is_gamepad_connected(pad) do return false
 	return mbi.input.gamepads[pad].buttons[button].released
@@ -329,6 +333,8 @@ set_gamepad_deadzone :: proc(deadzone: f32) {
 	mbi.input.gamepad_deadzone = clamp(deadzone, 0, 0.95)
 }
 
+// How far a trigger must be pulled before it counts as pressed. Clamped to
+// 0.95, because a threshold of 1 is a trigger that can never fire.
 set_gamepad_trigger_threshold :: proc(threshold: f32) {
 	mbi.input.gamepad_trigger_threshold = clamp(threshold, 0, 0.95)
 }

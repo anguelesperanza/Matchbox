@@ -102,6 +102,8 @@ create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
 	return target
 }
 
+// Releases the target's colour and depth textures. Not to be called while it
+// is bound -- end the target's drawing first.
 destroy_render_target :: proc(target: ^Render_Target) {
 	device := mbi.renderer.device
 	if device == nil do return

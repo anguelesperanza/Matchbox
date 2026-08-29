@@ -580,6 +580,159 @@ facing_rotation :: proc(yaw: f32) -> quaternion128 {
 }
 
 // -----------------------------------------------------------------------
+// First person -- the whole thing in one struct
+// -----------------------------------------------------------------------
+
+/*
+	Everything a first-person camera needs, in one place.
+
+	The same argument as `Third_Person_Camera`, one section down, and the same
+	shape: a game holding a `Camera3D`, a yaw and a pitch as three loose
+	variables is a game that will one day update two of them. The loose
+	procedures above are still there and still right for a game that would
+	rather keep its own -- this is built out of them.
+
+	What is **not** in here is the body's position, for the same reason the
+	third-person rig does not hold the character's: it comes from the game,
+	usually from a solver, so it is an argument to `first_person_aim` rather
+	than a field somebody has to remember to write. Matchbox moves nothing (D7).
+
+	`eye_offset` is the piece the loose form has nowhere to put. Without it a
+	game folds eye height into `camera.position` and then has to remember to fold
+	it in again every time physics hands a position back -- which is exactly what
+	`examples/first-person` used to do, twice, with the constant written out at
+	both sites.
+*/
+First_Person_Camera :: struct {
+	// What `begin_drawing_3d` takes. Written by `first_person_aim`; there is
+	// nothing to set here by hand.
+	camera: Camera3D,
+
+	// Where the head is pointed. The same two angles the third-person rig
+	// orbits by -- a first-person camera is that one with the distance at zero.
+	yaw:   f32,
+	pitch: f32,
+
+	// Which way the keys asked to go this frame, flattened and normalised, and
+	// zero when nothing is pressed. What to multiply by a speed, or to hand a
+	// solver as a velocity. Written by `first_person_input`.
+	move: [3]f32,
+
+	// Added to the position being followed to get where the eye actually sits.
+	// The position passed in is the body's -- its feet, if it has any -- and
+	// this is how far above them it looks from.
+	eye_offset: [3]f32,
+
+	// Tuning, all of it defaulted by `first_person_camera` and none of it looked
+	// at again unless a game changes it.
+	sensitivity: f32,
+	pitch_min:   f32,
+	pitch_max:   f32,
+}
+
+/*
+	A first-person camera, set up and already looking where it was told to.
+
+	Every argument has a default, so `first_person_camera()` is a working camera
+	standing at the origin at eye height. Name the ones you care about:
+
+		rig := mb.first_person_camera(position = spawn, facing = spawn_facing)
+
+	The camera is seated before this returns, so the rig may be drawn with on the
+	frame it was made rather than on the one after.
+*/
+first_person_camera :: proc(
+	position:    [3]f32 = {0, 0, 0},
+	facing:      f32 = 0,
+	eye_offset:  [3]f32 = {0, 1.7, 0},
+	pitch:       f32 = 0,
+	fov:         f32 = 70,
+	near:        f32 = 0.1,
+	far:         f32 = 1000,
+	sensitivity: f32 = MOUSE_SENSITIVITY,
+	pitch_min:   f32 = -PITCH_LIMIT,
+	pitch_max:   f32 =  PITCH_LIMIT,
+) -> First_Person_Camera {
+	rig := First_Person_Camera{
+		camera = Camera3D{
+			up         = {0, 1, 0},
+			fov        = fov,
+			projection = .PERSPECTIVE,
+			near       = near,
+			far        = far,
+		},
+
+		yaw   = facing,
+		pitch = clamp(pitch, pitch_min, pitch_max),
+
+		eye_offset  = eye_offset,
+		sensitivity = sensitivity,
+		pitch_min   = pitch_min,
+		pitch_max   = pitch_max,
+	}
+
+	first_person_aim(&rig, position)
+
+	return rig
+}
+
+/*
+	Reads the mouse and the keys into the rig.
+
+	Afterwards `yaw` and `pitch` are this frame's, and `move` is which way the
+	keys are asking to go, flattened onto the ground.
+
+	Moves nothing and touches no position, so what happens next is the game's:
+	step a solver with `move` as a velocity, or add it to a position yourself.
+	`first_person_aim` comes after that.
+*/
+first_person_input :: proc(rig: ^First_Person_Camera) {
+	camera3d_look(&rig.yaw, &rig.pitch, rig.sensitivity, rig.pitch_min, rig.pitch_max)
+
+	rig.move = walk_direction(rig.yaw)
+}
+
+/*
+	Puts the eye above `position` and points it along the angles.
+
+	The second half of the frame, and the one that takes the position: call it
+	after the solver has run, or after you have added `move` to a position
+	yourself. The third-person counterpart is `third_person_follow`.
+
+	`position` is the body's, not the eye's -- `eye_offset` is added here. A game
+	handing this a Box3D body's position gets the eye in the right place without
+	writing an eye height at the call site.
+*/
+first_person_aim :: proc(rig: ^First_Person_Camera, position: [3]f32) {
+	rig.camera.position = position + rig.eye_offset
+	rig.camera.target   = rig.camera.position + direction_from_angles(rig.yaw, rig.pitch)
+}
+
+/*
+	Input, the move, and the aim -- the whole frame, for a body nothing else is
+	driving.
+
+	A free camera, a level viewer, an example. A game with collision calls
+	`first_person_input`, gives `move` to the solver, reads the body back out,
+	and calls `first_person_aim` with it; those are the two halves this is made
+	of. The same split, and the same warning, as `third_person_walk`.
+
+	`speed` is units per second.
+*/
+first_person_walk :: proc(
+	rig:        ^First_Person_Camera,
+	position:   ^[3]f32,
+	speed:      f32,
+	delta_time: f32,
+) {
+	first_person_input(rig)
+
+	position^ += rig.move * speed * delta_time
+
+	first_person_aim(rig, position^)
+}
+
+// -----------------------------------------------------------------------
 // Third person -- the whole thing in one struct
 // -----------------------------------------------------------------------
 

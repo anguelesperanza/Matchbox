@@ -3,15 +3,23 @@ package first_person_example
 /*
 	Walking around, with the mouse locked to the window.
 
-	Stage 2 of the 3D work, and the point of it is the split. There is one
-	procedure here that does everything -- `camera3d_first_person` -- and it is
-	the one a real game will not use, because a real game has collision and
-	wants the solver to decide where the player ends up. What it will use is the
-	three pieces underneath: `camera3d_look` for the angles, `walk_direction`
-	for which way the keys are asking to go, and `camera3d_aim` to point the
-	camera after something else has moved it. Both are shown below; the second
+	Stage 2 of the 3D work, and the point of it is the split. The camera, the
+	two angles and the eye height all have to agree every frame, so they live in
+	a `First_Person_Camera` -- one struct, one call to set it up, one call a
+	frame. The same shape as `Third_Person_Camera` in `examples/third-person`,
+	and for the same reason.
+
+	Underneath it are the pieces a game with collision wants, because such a
+	game needs the solver to decide where the player ends up rather than having
+	the camera moved for it: `first_person_input` for the angles and which way
+	the keys point, and `first_person_aim` to seat the eye after something else
+	has moved the body. `first_person_walk` is those two with the move between
+	them, for a camera nothing else is driving. Both are shown below; the second
 	is commented, because there is no physics library in this example to hand
 	the velocity to.
+
+	Note what the rig does **not** hold: the body's position. That stays the
+	game's, which is what lets a solver have the last word on it.
 
 	Things to try:
 
@@ -36,6 +44,7 @@ package first_person_example
 */
 
 import "core:fmt"
+import "core:math"
 
 import mb "../../matchbox"
 
@@ -71,12 +80,18 @@ main :: proc() {
 	cube := mb.cube_model(1)
 	defer mb.destroy(&cube)
 
-	camera := mb.camera3d_at(position = {0, EYE_HEIGHT, 4}, target = {0, EYE_HEIGHT, 0})
+	// Where the player is standing. The rig follows it and never writes it,
+	// which is the whole of why the physics version below is four lines.
+	player := [3]f32{0, 0, 4}
 
-	// Seeded from the camera rather than left at zero. Yaw 0 looks along +x,
-	// so starting from zero would spin the view a quarter turn on the first
-	// frame -- which is a small thing that looks like a bug.
-	yaw, pitch := mb.camera3d_angles(camera)
+	// Facing along -z rather than the +x that yaw 0 would give, so the cubes
+	// are in front of the player on the first frame. The eye sits EYE_HEIGHT
+	// above `player`, and the rig adds that itself from here on.
+	rig := mb.first_person_camera(
+		position   = player,
+		facing     = -math.PI * 0.5,
+		eye_offset = {0, EYE_HEIGHT, 0},
+	)
 
 	mb.set_cursor_locked(true)
 
@@ -102,31 +117,37 @@ main :: proc() {
 		// after ESC still carries the motion that reached the window before it
 		// was released, and the view jumps as you go for the menu.
 		if mb.cursor_locked() {
-			mb.camera3d_first_person(&camera, &yaw, &pitch, WALK_SPEED, dt)
+			mb.first_person_walk(&rig, &player, WALK_SPEED, dt)
 		}
 
 		/*
-			What the same thing looks like with physics, which is what both
-			games will do:
+			What `first_person_walk` is, for a game whose player is a body in a
+			solver:
 
-				mb.camera3d_look(&yaw, &pitch)
+				mb.first_person_input(&rig)
 
-				velocity := mb.walk_direction(yaw) * WALK_SPEED
+				velocity := rig.move * WALK_SPEED
 				b3.Body_SetLinearVelocity(body, {velocity.x, 0, velocity.z})
 				b3.World_Step(world, 1.0 / 60.0, 4)
 
 				body_pos := b3.Body_GetPosition(body)
-				camera.position = {body_pos.x, EYE_HEIGHT, body_pos.z}
-				mb.camera3d_aim(&camera, yaw, pitch)
+				player = {body_pos.x, body_pos.y, body_pos.z}
+
+				mb.first_person_aim(&rig, player)
 
 			Matchbox moves nothing. It says which way you are facing and which
 			way the keys point; the solver decides where that gets you.
+
+			Note that the eye height appears nowhere here. It is on the rig, and
+			`first_person_aim` adds it -- where the loose form had it written out
+			at the call site, and again at every other place a position came
+			back from the solver.
 		*/
 
 		mb.begin_drawing()
 		mb.clear_background(mb.CORNFLOWER_BLUE)
 
-		mb.begin_drawing_3d(camera)
+		mb.begin_drawing_3d(rig.camera)
 
 		// Non-uniform scale, which is the case the normal matrix exists for:
 		// the model matrix alone would leave this lit as though it were still a
@@ -152,9 +173,9 @@ main :: proc() {
 			mb.draw_text(font, "click to look again, ESC again to quit", 20, 70, mb.WHITE)
 		}
 
-		mb.draw_text(font, fmt.tprintf("yaw %.2f  pitch %.2f", yaw, pitch), 20, 110, mb.WHITE)
-		mb.draw_text(font, fmt.tprintf("at %.1f, %.1f, %.1f",
-			camera.position.x, camera.position.y, camera.position.z), 20, 140, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("yaw %.2f  pitch %.2f", rig.yaw, rig.pitch), 20, 110, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("standing at %.1f, %.1f, %.1f  eye at %.1f",
+			player.x, player.y, player.z, rig.camera.position.y), 20, 140, mb.WHITE)
 
 		// Crosshair, which is also the reminder that 2D still works over 3D.
 		//

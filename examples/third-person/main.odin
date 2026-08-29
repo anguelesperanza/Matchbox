@@ -47,8 +47,8 @@ package third_person_example
 	  - **scroll.** The wheel pulls the camera in and out between 1.5 and 20
 	    units. Keep going in and it becomes first person with a body in the way,
 	    which is the same thing this always was
-	  - **look up.** It stops early -- `ORBIT_PITCH_MAX` is 0.30, not
-	    `PITCH_LIMIT` -- because pitching up on an orbit camera swings it
+	  - **look up.** It stops early -- `CAMERA3D_DEFAULTS.orbit_pitch_max` is 0.30,
+	    not `pitch_limit` -- because pitching up on an orbit camera swings it
 	    *under* the character rather than tilting a head, and the floor is down
 	    there
 	  - **press C.** Toggles the camera keeping out of the floor. With it off,
@@ -73,7 +73,7 @@ WALK_SPEED :: 6.0
 RUN_SPEED  :: 11.0
 
 // Radians per second Q and E turn the character at, under `.CHARACTER`
-// steering. Slower than the rig's own `TURN_SPEED`, because that one is
+// steering. Slower than the rig's own `turn_speed`, because that one is
 // catching up with a direction already chosen and this one *is* the choosing.
 TURN_KEY_SPEED :: 2.5
 
@@ -85,7 +85,7 @@ CAMERA_FLOOR :: 0.4
 // Game policy, not the camera's. Over-the-shoulder framing is a close framing
 // -- the sideways step is a fixed distance at the character, so it reads as a
 // bigger part of the frame the nearer you are, and six units back makes the
-// whole thing a shrug. `SHOULDER_OFFSET` deliberately does not scale with
+// whole thing a shrug. The shoulder offset deliberately does not scale with
 // distance for exactly this reason, which leaves the choice here.
 SHOULDER_DISTANCE :: 3.0
 

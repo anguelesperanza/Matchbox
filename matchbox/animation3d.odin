@@ -111,6 +111,17 @@ Skeleton :: struct {
 	parents: []i32, // -1 for a root
 	rest:    []Transform,
 	order:   []u32,
+
+	/*
+		What the file calls each node, indexed the same way as `parents` and
+		`rest`. Empty for a node glTF left unnamed, which is legal and does
+		happen -- one of the 80 nodes in a Mesh2Motion export has no name.
+
+		Kept so a game can find a bone to hang something off without hard-coding
+		a number that a re-export would silently change. See `node_index`.
+	*/
+	names:   []string,
+
 	skins:   []Model_Skin,
 }
 
@@ -304,6 +315,106 @@ animation_names :: proc(model: Model, allocator := context.temp_allocator) -> []
 	names := make([]string, len(model.animations), allocator)
 	for clip, i in model.animations do names[i] = clip.name
 	return names
+}
+
+/*
+	The index of a skeleton node by name -- the bone to hang a weapon off.
+
+	**This is a node index, not a joint index, and the two are not the same
+	number.** A node index addresses `skeleton.parents`, `skeleton.rest` and an
+	animator's `pose.globals`; a joint index addresses `skin.joints` and a
+	palette. They are different lengths and scrambled relative to each other: in
+	the arms rig this was written against, `hand.R` is node 19 and joint 4, while
+	joint 19 is `f_ring.03.R`. Feeding one to the other is in range, silent, and
+	attaches the pistol to a fingertip -- which is why this returns a `u32` named
+	`node` rather than an `int` named `index`.
+
+	Names come from the file and follow no standard. The same VRoid character is
+	`J_Bip_R_Hand` before retargeting and `hand_r` after; a Blender rig says
+	`hand.R`, an Unreal one `hand_r`. Matchbox deliberately knows none of them --
+	`print_skeleton` is how you find out what an asset calls things, and the
+	game holds the mapping.
+
+	Resolve at load and check `found` there. A lookup that quietly fails every
+	frame gives you an object at the origin and nothing to explain it. Exact
+	match only: no fuzzy matching, because `hand` matches `handIK.R` in that same
+	rig and half the guesses would be an IK target that the fingers do not
+	follow. First wins if a file names two nodes the same, which glTF permits.
+*/
+node_index :: proc(model: Model, name: string) -> (node: u32, found: bool) {
+	// An unnamed node is stored as "", so asking for "" would match the first
+	// hole rather than failing. There is no node a game can mean by it.
+	if name == "" do return 0, false
+
+	for n, i in model.skeleton.names {
+		if n == name do return u32(i), true
+	}
+	return 0, false
+}
+
+/*
+	Prints a model's skeleton -- every node, its parent, its name, and which
+	joint of which skin it is, to stdout.
+
+	The companion to `print_animations`, and the answer to the same question one
+	noun over: a game cannot call `node_index` until somebody has looked at what
+	the file actually calls things, and no two exporters agree. Run it once
+	against a new asset, write the names down, delete the call.
+
+	The joint column is what makes it worth printing rather than guessing. It
+	shows the two index spaces side by side, so the gap between them is visible
+	before it becomes a weapon welded to the wrong bone.
+*/
+print_skeleton :: proc(model: Model) {
+	if !model_is_skinned(model) {
+		fmt.printfln("model has no skeleton: %v node(s), %v part(s), nothing to attach to",
+			len(model.skeleton.rest), len(model.parts))
+		return
+	}
+
+	skeleton := model.skeleton
+
+	// Node -> (skin, joint), built once rather than searched per row. A rig with
+	// thirteen skins and eighty nodes would otherwise be a thousand comparisons
+	// to print a table.
+	Slot :: struct{ skin, joint: int }
+	slot := make(map[u32]Slot, len(skeleton.rest), context.temp_allocator)
+	defer delete(slot)
+
+	for skin, si in skeleton.skins {
+		for joint, ji in skin.joints do slot[joint] = Slot{si, ji}
+	}
+
+	unnamed := 0
+	for name in skeleton.names do if name == "" do unnamed += 1
+
+	fmt.printfln("model: %v nodes, %v skin(s), %v part(s), %v clip(s)",
+		len(skeleton.rest), len(skeleton.skins), len(model.parts), len(model.animations))
+	fmt.println("node  skin/joint  parent  name")
+
+	for name, i in skeleton.names {
+		shown := name if name != "" else "(unnamed -- node_index cannot find this)"
+
+		// Numbers are rendered to strings before they are padded: a width on a
+		// number pads it with zeros, which turns joint 8 in a five-wide column
+		// into "80000" and the table into a puzzle.
+		index  := fmt.tprintf("%v", i)
+		parent := "-" if skeleton.parents[i] < 0 else fmt.tprintf("%v", skeleton.parents[i])
+
+		// Not every node is a joint: the mesh node and the armature root are in
+		// the hierarchy and weighted to nothing.
+		place := "-"
+		if s, is_joint := slot[u32(i)]; is_joint {
+			place = fmt.tprintf("%v/%v", s.skin, s.joint)
+		}
+
+		fmt.printfln("%4s  %-10s  %6s  %s", index, place, parent, shown)
+	}
+
+	if unnamed > 0 {
+		fmt.printfln("\n%v of %v nodes are unnamed and can only be reached by index",
+			unnamed, len(skeleton.names))
+	}
 }
 
 /*

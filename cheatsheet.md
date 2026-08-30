@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 329 of them -- with its arguments
+Every public procedure in the package -- 331 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -23,7 +23,7 @@ any.
 - [3D cameras](#3d-cameras) -- 44
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 24
+- [Animation](#animation) -- 26
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 12
@@ -2073,6 +2073,16 @@ animation_names :: proc(
 ) -> []string
 ```
 What the clips in a model are called, in the order `play_animation_index` numbers them.
+
+```odin
+node_index :: proc(model: Model, name: string) -> (node: u32, found: bool)
+```
+The index of a skeleton node by name -- the bone to hang a weapon off.
+
+```odin
+print_skeleton :: proc(model: Model)
+```
+Prints a model's skeleton -- every node, its parent, its name, and which joint of which skin it is, to stdout.
 
 ```odin
 print_animations :: proc(model: Model)

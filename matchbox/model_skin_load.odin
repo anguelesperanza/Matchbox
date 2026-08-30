@@ -48,6 +48,7 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 		parents = make([]i32, node_count),
 		rest    = make([]Transform, node_count),
 		order   = make([]u32, 0),
+		names   = make([]string, node_count),
 		skins   = make([]Model_Skin, len(data.skins)),
 	}
 
@@ -57,6 +58,11 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 		for child in node.children {
 			if int(child) < node_count do skeleton.parents[child] = i32(i)
 		}
+
+		// Cloned for the same reason clip names are: the parser frees its own
+		// strings when the document is unloaded, and that happens before
+		// load_model returns.
+		skeleton.names[i] = strings.clone(node.name.? or_else "")
 
 		/*
 			glTF gives a node either a matrix or a translation/rotation/scale
@@ -133,7 +139,12 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 hierarchy_order :: proc(parents: []i32) -> []u32 {
 	order   := make([dynamic]u32, 0, len(parents))
 	visited := make([]bool, len(parents), context.temp_allocator)
-	defer delete(visited)
+
+	// Freed through the allocator it came from. A slice does not carry its
+	// allocator the way a map does, so a bare `delete` here hands a temp pointer
+	// to the heap allocator -- which the default one tolerates and a tracking
+	// allocator reports as a bad free, in a game that did nothing wrong.
+	defer delete(visited, context.temp_allocator)
 
 	for parent, i in parents {
 		if parent < 0 {
@@ -496,6 +507,9 @@ destroy_skeleton :: proc(skeleton: ^Skeleton) {
 		delete(skin.joints)
 		delete(skin.inverse_bind)
 	}
+
+	for name in skeleton.names do delete(name)
+	delete(skeleton.names)
 
 	delete(skeleton.skins)
 	delete(skeleton.order)

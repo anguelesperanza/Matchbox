@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 325 of them -- with its arguments
+Every public procedure in the package -- 328 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -20,7 +20,7 @@ any.
 - [Text and fonts](#text-and-fonts) -- 19
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
-- [3D cameras](#3d-cameras) -- 41
+- [3D cameras](#3d-cameras) -- 44
 - [3D drawing](#3d-drawing) -- 25
 - [Models](#models) -- 11
 - [Animation](#animation) -- 24
@@ -1570,6 +1570,25 @@ Turns `angle` toward `target` the short way round, at most `speed` radians per s
 facing_rotation :: proc(yaw: f32) -> quaternion128
 ```
 The rotation that turns a model to face `yaw`.
+
+```odin
+model_facing_rotation :: proc(facing: Model_Facing) -> quaternion128
+```
+The rotation that brings a model's own forward onto +x, which is the direction the rest of this file assumes.
+
+```odin
+facing_rotation_of :: proc(yaw: f32, facing: Model_Facing) -> quaternion128
+```
+`facing_rotation` for a model that is not authored facing +x.
+
+```odin
+aim_rotation :: proc(
+	yaw,
+	pitch: f32,
+	facing := Model_Facing.POS_X,
+) -> quaternion128
+```
+The rotation that points a model along both angles -- yaw and pitch.
 
 ```odin
 first_person_camera :: proc(

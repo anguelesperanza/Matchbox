@@ -625,6 +625,78 @@ facing_rotation :: proc(yaw: f32) -> quaternion128 {
 	return transform_rotation({0, 1, 0}, -yaw)
 }
 
+/*
+	Which way a model points in its own file, before anything here turns it.
+
+	Everything above is written as "yaw 0 looks along +x", so a model authored
+	pointing some other way has to be turned onto +x first. glTF does not record
+	which way is forward, so this cannot be read off the file -- it is knowledge
+	about the asset, and it belongs at the call site as a name rather than as an
+	angle somebody has to get the sign of right.
+
+	An enum rather than an `f32`, because the angle form is a sign error waiting
+	to happen: the same VRoid model was corrected by `+PI/2` in one place and
+	`-PI/2` in another before it was noticed that one of them subtracted. There
+	are only four values a rigged model is ever exported at, so there is no
+	reason to accept the other infinity of them.
+
+	Pick by trying: if the model faces away from where it should, it is `NEG_X`;
+	if it points off to a side, it is one of the `Z` pair.
+*/
+Model_Facing :: enum {
+	// The direction yaw 0 looks. Nothing to correct.
+	POS_X,
+
+	// What most exporters write, glTF's own stated convention.
+	NEG_Z,
+
+	// What VRoid writes, and the reason this enum exists.
+	POS_Z,
+
+	// Backwards. Rare on purpose, common by accident.
+	NEG_X,
+}
+
+// The rotation that brings a model's own forward onto +x, which is the
+// direction the rest of this file assumes. Composed with the rotations below
+// rather than used alone.
+model_facing_rotation :: proc(facing: Model_Facing) -> quaternion128 {
+	switch facing {
+	case .POS_X: return facing_rotation(0)
+	case .NEG_Z: return facing_rotation(math.PI * 0.5)
+	case .POS_Z: return facing_rotation(-math.PI * 0.5)
+	case .NEG_X: return facing_rotation(math.PI)
+	}
+	return facing_rotation(0)
+}
+
+// `facing_rotation` for a model that is not authored facing +x. What a
+// third-person character wants: it turns but never tips.
+facing_rotation_of :: proc(yaw: f32, facing: Model_Facing) -> quaternion128 {
+	return facing_rotation(yaw) * model_facing_rotation(facing)
+}
+
+/*
+	The rotation that points a model along both angles -- yaw and pitch.
+
+	What first-person arms and a held weapon want, and the difference from
+	`facing_rotation` is the pitch: a character turns but stays upright, while
+	the thing in your hands tips with your view.
+
+	The order is load-bearing twice over. The pitch is taken about the *yawed*
+	right axis, not world +x, or a model turned away from yaw 0 pitches about
+	the wrong axis and rolls. And the facing correction post-multiplies rather
+	than being added to the yaw: adding it turns the right axis as well, which
+	leaves a model that aims correctly dead ahead and drifts everywhere else --
+	an error that is zero exactly where you would look to check it.
+*/
+aim_rotation :: proc(yaw, pitch: f32, facing := Model_Facing.POS_X) -> quaternion128 {
+	turn  := facing_rotation(yaw)
+	right := linalg.quaternion_mul_vector3(turn, [3]f32{0, 0, 1})
+
+	return transform_rotation(right, pitch) * turn * model_facing_rotation(facing)
+}
+
 // -----------------------------------------------------------------------
 // First person -- the whole thing in one struct
 // -----------------------------------------------------------------------

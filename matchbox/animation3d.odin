@@ -353,6 +353,102 @@ node_index :: proc(model: Model, name: string) -> (node: u32, found: bool) {
 }
 
 /*
+	What a model's skeleton nodes are called, indexed by node.
+
+	The counterpart to `animation_names`, and what to build a bone picker or a
+	debug list out of. To *see* them while working out what an export contains,
+	`print_skeleton` is the one to reach for.
+
+	The slice is temp-allocated and lasts until the next `free_all` on the temp
+	allocator, which for a game is the end of the frame. The strings inside it
+	are the model's own and live as long as the model does, so keeping one past
+	the frame is fine and keeping the slice is not.
+
+	`model.skeleton.names` is the same data without the copy, for a game that
+	only wants to read it. This exists so that a game need not reach through the
+	skeleton to get at it, and so the allocator is a choice.
+*/
+node_names :: proc(model: Model, allocator := context.temp_allocator) -> []string {
+	names := make([]string, len(model.skeleton.names), allocator)
+	copy(names, model.skeleton.names)
+	return names
+}
+
+/*
+	Where a skeleton node has been posed, in the model's own space.
+
+	The space is the one `draw_model`'s `Transform` is applied to and the one
+	`bounds_min`/`bounds_max` are measured in, so `transform_matrix(t) *
+	node_matrix(...)` puts a thing on that bone in the world. `node_world_matrix`
+	is that composition, pivot included, and is what a game should normally call.
+
+	**The mesh node's own transform is divided out**, exactly as
+	`animator_resolve` does when it builds a palette. glTF says a skinned mesh
+	ignores the transform of the node it hangs off, so a bone read straight out
+	of `pose.globals` would sit in a different space from the vertices it moves
+	whenever that node is not the identity. Both models this was written against
+	have identity mesh nodes -- so the correction is currently a no-op -- but the
+	VRoid has thirteen separate mesh nodes, and being wrong there would be a
+	weapon that tracks the hand at the wrong scale for reasons invisible in the
+	call site.
+
+	The mesh node is taken from the first skinned part. A model whose skinned
+	parts hang off differently transformed nodes would need a per-part form,
+	which is not offered because no asset here is built that way.
+
+	Returns the identity for a node out of range, which places the object at the
+	model's origin: wrong, visible, and diagnosable, where a bounds-checked crash
+	would take the game down over a mistyped bone name. Resolve names with
+	`node_index` at load and check `found` there.
+*/
+node_matrix :: proc(model: Model, animator: Animator, node: u32) -> matrix[4, 4]f32 {
+	if int(node) >= len(animator.pose.globals) do return linalg.MATRIX4F32_IDENTITY
+
+	for part in model.parts {
+		if part.skin < 0 do continue
+		if int(part.node) >= len(animator.pose.globals) do break
+
+		return linalg.inverse(animator.pose.globals[part.node]) * animator.pose.globals[node]
+	}
+
+	return animator.pose.globals[node]
+}
+
+/*
+	Where a skeleton node has been posed, in the world -- the matrix to hang a
+	weapon off.
+
+	`transform` and `pivot` are the ones the model was drawn with. Passing
+	anything else puts the attachment somewhere the model is not, which is the
+	single easiest way to get this wrong: the pivot in particular is invisible in
+	the result and silently offsets everything by the distance between a rig's
+	origin and its eye.
+
+		hand, ok := mb.node_index(arms, "hand.R")   // at load, once
+		...
+		m := mb.node_world_matrix(arms, anim, hand, arms_transform, arms_pivot)
+		mb.draw_model(pistol, mb.Transform{
+			position = {m[0, 3], m[1, 3], m[2, 3]},
+			rotation = quaternion_from_matrix4(m),
+			scale    = {1, 1, 1},
+		})
+
+	The pivot arithmetic is shared with `draw_model_pivoted` rather than repeated
+	here, so the place a bone is drawn and the place a thing is attached to it
+	cannot drift apart.
+*/
+node_world_matrix :: proc(
+	model:     Model,
+	animator:  Animator,
+	node:      u32,
+	transform: Transform,
+	pivot:     [3]f32 = {0, 0, 0},
+) -> matrix[4, 4]f32 {
+	return transform_matrix(transform_pivoted(transform, pivot)) *
+	       node_matrix(model, animator, node)
+}
+
+/*
 	Prints a model's skeleton -- every node, its parent, its name, and which
 	joint of which skin it is, to stdout.
 

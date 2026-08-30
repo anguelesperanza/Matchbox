@@ -326,3 +326,41 @@ draw_model_at :: proc(
 ) {
 	draw_model(model, transform_at(position, scale = scale), tint, animator)
 }
+
+/*
+	Draws a model placed and turned about `pivot` rather than about its origin.
+
+	`pivot` is a point in the model's own space, and `transform.position` is
+	where that point ends up. `model_center(model)` is the usual argument;
+	a body rig wants its eye height instead.
+
+	**Why this exists.** `draw_model` places the origin, and a rigged model's
+	origin is on the floor between its feet -- that is where an armature's root
+	goes. Held at arm's length in first person that is fatal: `arms_rig.glb`
+	carries its geometry 1.17 to 1.66 units *above* its origin, so placing the
+	origin half a metre in front of the eye puts the arms a metre above the
+	player's head, entirely outside the frustum. Nothing renders, nothing warns,
+	and every plausible suspect -- facing, scale, the near plane -- is innocent.
+
+	Scale is applied before the pivot is cancelled, so a model drawn at half size
+	pivots about the same point on the mesh rather than about a point that has
+	drifted half way to the origin.
+
+	The alternative was a `pivot` field on `Transform`, and it was rejected:
+	`Transform` is the argument to `draw_cube` and everything else spatial, so
+	the field would be present and zero at nearly every construction site, and
+	`transform_matrix` would silently start meaning something new for the callers
+	that already build one by hand.
+*/
+draw_model_pivoted :: proc(
+	model:     Model,
+	pivot:     [3]f32,
+	transform: Transform,
+	tint:      [4]f32 = WHITE,
+	animator:  ^Animator = nil,
+) {
+	t := transform
+	t.position -= linalg.quaternion_mul_vector3(transform.rotation, pivot * transform.scale)
+
+	draw_model(model, t, tint, animator)
+}

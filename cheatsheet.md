@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 328 of them -- with its arguments
+Every public procedure in the package -- 329 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -21,7 +21,7 @@ any.
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 44
-- [3D drawing](#3d-drawing) -- 25
+- [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
 - [Animation](#animation) -- 24
 - [Render targets](#render-targets) -- 5
@@ -1784,6 +1784,17 @@ draw_model_at :: proc(
 )
 ```
 A model at a position, at one scale on every axis and unturned.
+
+```odin
+draw_model_pivoted :: proc(
+	model: Model,
+	pivot: [3]f32,
+	transform: Transform,
+	tint: [4]f32 = WHITE,
+	animator: ^Animator = nil,
+)
+```
+Draws a model placed and turned about `pivot` rather than about its origin.
 
 ### `shapes3d.odin`
 

@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 334 of them -- with its arguments
+Every public procedure in the package -- 335 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -20,7 +20,7 @@ any.
 - [Text and fonts](#text-and-fonts) -- 19
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
-- [3D cameras](#3d-cameras) -- 44
+- [3D cameras](#3d-cameras) -- 45
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
 - [Animation](#animation) -- 29
@@ -1724,6 +1724,11 @@ Turn about an axis, in radians.
 transform_matrix :: proc(t: Transform) -> matrix[4, 4]f32
 ```
 Scale, then rotate, then translate -- the order that turns a model about its own centre rather than swinging it around the origin.
+
+```odin
+transform_from_matrix :: proc(m: matrix[4, 4]f32) -> Transform
+```
+A matrix back into the translation, rotation and scale it was built from -- the inverse of `transform_matrix`.
 
 ```odin
 perspective :: proc(fov_degrees, aspect, near, far: f32) -> matrix[4, 4]f32

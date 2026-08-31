@@ -94,6 +94,59 @@ transform_matrix :: proc(t: Transform) -> matrix[4, 4]f32 {
 	return tr * r * s
 }
 
+/*
+	A matrix back into the translation, rotation and scale it was built from --
+	the inverse of `transform_matrix`.
+
+	The bridge between the matrix half of the API and the Transform half.
+	`node_world_matrix` gives a bone as a matrix, `draw_model` wants a
+	Transform, and this is the step between:
+
+		mb.draw_model(pistol, mb.transform_from_matrix(
+			mb.node_world_matrix(arms, anim, hand, arms_transform, arms_pivot)))
+
+	**Do not reach for `linalg.quaternion_from_matrix4` instead.** It reads the
+	basis vectors as though they were unit length, so a matrix carrying any
+	scale gives a wrong rotation *and* silently loses the scale. That is not an
+	exotic case: `node_world_matrix` multiplies in the Transform the model was
+	drawn with, so a game that draws its arms at anything other than scale 1 hits
+	it immediately. Measured on a 2x matrix, the shortcut is off by 0.618 on a
+	unit vector -- about 36 degrees -- and reports the scale as 1.
+
+	A mirrored transform has a negative determinant, which no rotation can
+	express. The sign is folded into `scale.x`, keeping the handedness rather
+	than turning the node inside out.
+
+	**Assumes no shear**, which is true of anything an exporter produces from a
+	transform hierarchy and of any chain whose scales are uniform. Shear appears
+	when a *non-uniform* scale sits above a rotation, and this cannot represent
+	it: the result will be the closest sheared-free transform rather than an
+	error. Uniform scale is safe at any depth.
+*/
+transform_from_matrix :: proc(m: matrix[4, 4]f32) -> Transform {
+	position := [3]f32{m[0, 3], m[1, 3], m[2, 3]}
+
+	x := [3]f32{m[0, 0], m[1, 0], m[2, 0]}
+	y := [3]f32{m[0, 1], m[1, 1], m[2, 1]}
+	z := [3]f32{m[0, 2], m[1, 2], m[2, 2]}
+
+	scale := [3]f32{linalg.length(x), linalg.length(y), linalg.length(z)}
+
+	if linalg.determinant(m) < 0 do scale.x = -scale.x
+
+	rotation := linalg.QUATERNIONF32_IDENTITY
+	if scale.x != 0 && scale.y != 0 && scale.z != 0 {
+		basis := matrix[3, 3]f32{
+			x.x / scale.x, y.x / scale.y, z.x / scale.z,
+			x.y / scale.x, y.y / scale.y, z.y / scale.z,
+			x.z / scale.x, y.z / scale.y, z.z / scale.z,
+		}
+		rotation = linalg.quaternion_from_matrix3_f32(basis)
+	}
+
+	return Transform{position = position, rotation = rotation, scale = scale}
+}
+
 // -----------------------------------------------------------------------
 // Projection
 // -----------------------------------------------------------------------

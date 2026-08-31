@@ -359,8 +359,25 @@ draw_model_pivoted :: proc(
 	tint:      [4]f32 = WHITE,
 	animator:  ^Animator = nil,
 ) {
+	draw_model(model, transform_pivoted(transform, pivot), tint, animator)
+}
+
+/*
+	`transform` rewritten so that `pivot`, a point in model space, lands on
+	`transform.position`.
+
+	Its own procedure because two callers need the identical answer:
+	`draw_model_pivoted` draws the model with it, and `node_world_matrix` places
+	things on that model's bones with it. Worked out separately they would drift,
+	and a weapon half a metre off the hand is a long way from an obvious cause.
+
+	Scale is applied before the pivot is cancelled, matching `transform_matrix`,
+	so a model drawn at half size pivots about the same point on the mesh rather
+	than one that has slid toward the origin.
+*/
+@(private)
+transform_pivoted :: proc(transform: Transform, pivot: [3]f32) -> Transform {
 	t := transform
 	t.position -= linalg.quaternion_mul_vector3(transform.rotation, pivot * transform.scale)
-
-	draw_model(model, t, tint, animator)
+	return t
 }

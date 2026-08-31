@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 329 of them -- with its arguments
+Every public procedure in the package -- 335 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -20,10 +20,10 @@ any.
 - [Text and fonts](#text-and-fonts) -- 19
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
-- [3D cameras](#3d-cameras) -- 44
+- [3D cameras](#3d-cameras) -- 45
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 24
+- [Animation](#animation) -- 29
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 12
@@ -1726,6 +1726,11 @@ transform_matrix :: proc(t: Transform) -> matrix[4, 4]f32
 Scale, then rotate, then translate -- the order that turns a model about its own centre rather than swinging it around the origin.
 
 ```odin
+transform_from_matrix :: proc(m: matrix[4, 4]f32) -> Transform
+```
+A matrix back into the translation, rotation and scale it was built from -- the inverse of `transform_matrix`.
+
+```odin
 perspective :: proc(fov_degrees, aspect, near, far: f32) -> matrix[4, 4]f32
 ```
 A perspective projection with a [0, 1] depth range.
@@ -2073,6 +2078,44 @@ animation_names :: proc(
 ) -> []string
 ```
 What the clips in a model are called, in the order `play_animation_index` numbers them.
+
+```odin
+node_index :: proc(model: Model, name: string) -> (node: u32, found: bool)
+```
+The index of a skeleton node by name -- the bone to hang a weapon off.
+
+```odin
+node_names :: proc(
+	model: Model,
+	allocator := context.temp_allocator,
+) -> []string
+```
+What a model's skeleton nodes are called, indexed by node.
+
+```odin
+node_matrix :: proc(
+	model: Model,
+	animator: Animator,
+	node: u32,
+) -> matrix[4, 4]f32
+```
+Where a skeleton node has been posed, in the model's own space.
+
+```odin
+node_world_matrix :: proc(
+	model: Model,
+	animator: Animator,
+	node: u32,
+	transform: Transform,
+	pivot: [3]f32 = {0, 0, 0},
+) -> matrix[4, 4]f32
+```
+Where a skeleton node has been posed, in the world -- the matrix to hang a weapon off.
+
+```odin
+print_skeleton :: proc(model: Model)
+```
+Prints a model's skeleton -- every node, its parent, its name, and which joint of which skin it is, to stdout.
 
 ```odin
 print_animations :: proc(model: Model)

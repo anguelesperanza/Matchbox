@@ -48,6 +48,7 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 		parents = make([]i32, node_count),
 		rest    = make([]Transform, node_count),
 		order   = make([]u32, 0),
+		names   = make([]string, node_count),
 		skins   = make([]Model_Skin, len(data.skins)),
 	}
 
@@ -58,6 +59,11 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 			if int(child) < node_count do skeleton.parents[child] = i32(i)
 		}
 
+		// Cloned for the same reason clip names are: the parser frees its own
+		// strings when the document is unloaded, and that happens before
+		// load_model returns.
+		skeleton.names[i] = strings.clone(node.name.? or_else "")
+
 		/*
 			glTF gives a node either a matrix or a translation/rotation/scale
 			triple, never both, and the parser defaults whichever is absent to
@@ -67,8 +73,8 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 
 			The common case is the cheap one: an animated node is written as TRS
 			by every exporter, because a matrix cannot be interpolated
-			meaningfully. The decompose below is for the static nodes above the
-			skeleton, which some exporters do write as matrices.
+			meaningfully. The `transform_from_matrix` below is for the static
+			nodes above the skeleton, which some exporters do write as matrices.
 		*/
 		if node.mat == linalg.MATRIX4F32_IDENTITY {
 			skeleton.rest[i] = Transform{
@@ -77,7 +83,7 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 				scale    = node.scale,
 			}
 		} else {
-			skeleton.rest[i] = decompose(node.mat)
+			skeleton.rest[i] = transform_from_matrix(node.mat)
 		}
 	}
 
@@ -133,7 +139,12 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 hierarchy_order :: proc(parents: []i32) -> []u32 {
 	order   := make([dynamic]u32, 0, len(parents))
 	visited := make([]bool, len(parents), context.temp_allocator)
-	defer delete(visited)
+
+	// Freed through the allocator it came from. A slice does not carry its
+	// allocator the way a map does, so a bare `delete` here hands a temp pointer
+	// to the heap allocator -- which the default one tolerates and a tracking
+	// allocator reports as a bad free, in a game that did nothing wrong.
+	defer delete(visited, context.temp_allocator)
 
 	for parent, i in parents {
 		if parent < 0 {
@@ -169,41 +180,6 @@ hierarchy_order :: proc(parents: []i32) -> []u32 {
 	}
 
 	return order[:]
-}
-
-/*
-	A matrix back into the translation, rotation and scale it was built from.
-
-	Only for the static nodes above a skeleton -- an animated node is always
-	written as TRS. Assumes no shear, which is true of anything an exporter
-	produces from a transform hierarchy.
-*/
-@(private)
-decompose :: proc(m: matrix[4, 4]f32) -> Transform {
-	position := [3]f32{m[0, 3], m[1, 3], m[2, 3]}
-
-	x := [3]f32{m[0, 0], m[1, 0], m[2, 0]}
-	y := [3]f32{m[0, 1], m[1, 1], m[2, 1]}
-	z := [3]f32{m[0, 2], m[1, 2], m[2, 2]}
-
-	scale := [3]f32{linalg.length(x), linalg.length(y), linalg.length(z)}
-
-	// A mirrored transform has a negative determinant, which cannot be
-	// expressed as a rotation. Folding it into x keeps the handedness rather
-	// than silently turning the node inside out.
-	if linalg.determinant(m) < 0 do scale.x = -scale.x
-
-	rotation := linalg.QUATERNIONF32_IDENTITY
-	if scale.x != 0 && scale.y != 0 && scale.z != 0 {
-		basis := matrix[3, 3]f32{
-			x.x / scale.x, y.x / scale.y, z.x / scale.z,
-			x.y / scale.x, y.y / scale.y, z.y / scale.z,
-			x.z / scale.x, y.z / scale.y, z.z / scale.z,
-		}
-		rotation = linalg.quaternion_from_matrix3_f32(basis)
-	}
-
-	return Transform{position = position, rotation = rotation, scale = scale}
 }
 
 // -----------------------------------------------------------------------
@@ -496,6 +472,9 @@ destroy_skeleton :: proc(skeleton: ^Skeleton) {
 		delete(skin.joints)
 		delete(skin.inverse_bind)
 	}
+
+	for name in skeleton.names do delete(name)
+	delete(skeleton.names)
 
 	delete(skeleton.skins)
 	delete(skeleton.order)

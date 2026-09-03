@@ -13,6 +13,8 @@ main :: proc() {
 		matchbox.draw_text(&matchbox.mbi.font, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG", 100, 100, matchbox.BLACK)
 		matchbox.draw_text(&matchbox.mbi.font, 4, 100, 200, matchbox.BLACK)
 		matchbox.draw_text(&matchbox.mbi.font, 3.14, 100, 300, matchbox.BLACK)
+		matchbox.draw_text(&matchbox.mbi.font, [2]f32{1.23, 49.97}, 100, 400, matchbox.BLACK)
+		matchbox.draw_text(&matchbox.mbi.font, [2]f32{1.23, 49.97}, 100, 500, matchbox.BLACK, separator = "-")
 		matchbox.end_drawing()
 	}
 

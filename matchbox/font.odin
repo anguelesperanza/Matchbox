@@ -1,9 +1,12 @@
 package matchbox
 
 import "core:math"
+import "core:strings"
 import "core:strconv"
 
 import "base:intrinsics"
+
+import "core:fmt"
 
 import stbtt "vendor:stb/truetype"
 
@@ -102,13 +105,48 @@ draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) 
     draw_text_string(font, result[:], x, y, color)
 }
 
+/*
+	`strconv.write_float`'s leading sign, dropped when it is a plus and kept
+	when it is a minus.
+
+	`write_float` always writes a sign, so "3.14" comes back as "+3.14" and has
+	to be trimmed. Trimming it as `result[1:]` is the obvious thing and it is
+	wrong: it takes whichever character is first, so -8.5 draws as "8.50". On a
+	position readout that is half the values on screen rendering as their own
+	mirror image, with nothing on screen to say so.
+*/
+@(private)
+trim_plus :: proc(s: string) -> string {
+	return s[1:] if len(s) > 0 && s[0] == '+' else s
+}
+
+// Two floats separated by `separator` -- a position or a size, without the
+// caller building a string for it. Part of the `draw_text` group.
+draw_text_2_float :: proc(font: ^Font, float: [2]$T, x: f32, y: f32, color: [4]f32, separator: string = " ") {
+	buf_one: [256]u8
+	buf_two: [256]u8
+
+	result_one := strconv.write_float(buf_one[:], cast(f64)float[0], 'f', 2, 64)
+	result_two := strconv.write_float(buf_two[:], cast(f64)float[1], 'f', 2, 64)
+
+	// Temp, not the context allocator: this is a draw call, so a game showing a
+	// position every frame would otherwise leak a string per frame forever. The
+	// temp allocator is reset at the end of the frame, which is exactly as long
+	// as the text needs to live.
+	text, _ := strings.concatenate({trim_plus(result_one), separator, trim_plus(result_two)},
+		context.temp_allocator)
+
+	draw_text_string(font = font, text = text, x = x, y = y, color = color)
+}
+
+
 
 // A float at two decimal places, without the caller building a string. Part of
 // the `draw_text` group.
 draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) where intrinsics.type_is_float(T) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
-    draw_text_string(font, result[1:], x, y, color)
+    draw_text_string(font, trim_plus(result), x, y, color)
 }
 
 
@@ -159,7 +197,8 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 draw_text :: proc {
 	draw_text_string,
 	draw_text_i64,
-	draw_text_float
+	draw_text_float,
+	draw_text_2_float,
 }
 
 // How much room `text` takes up when drawn with draw_text.
@@ -230,7 +269,7 @@ draw_text_ui_int :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f3
 draw_text_ui_f32 :: proc(font: ^Font, float: f32, x: f32, y: f32, color: [4]f32) {
     buf: [256]u8
     result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
-    draw_text_ui_string(font, result[1:], x, y, color)
+    draw_text_ui_string(font, trim_plus(result), x, y, color)
 }
 
 // `draw_text`, but in screen coordinates: fixed to the window and untouched by

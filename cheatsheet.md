@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 335 of them -- with its arguments
+Every public procedure in the package -- 336 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -17,7 +17,7 @@ any.
 - [Getting started](#getting-started) -- 18
 - [Input](#input) -- 42
 - [2D drawing](#2d-drawing) -- 56
-- [Text and fonts](#text-and-fonts) -- 19
+- [Text and fonts](#text-and-fonts) -- 20
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 45
@@ -770,6 +770,18 @@ draw_text_i64 :: proc(
 )
 ```
 An integer, without the caller building a string for it.
+
+```odin
+draw_text_2_float :: proc(
+	font: ^Font,
+	float: [2]$T,
+	x: f32,
+	y: f32,
+	color: [4]f32,
+	separator: string = " ",
+)
+```
+Two floats separated by `separator` -- a position or a size, without the caller building a string for it.
 
 ```odin
 draw_text_float :: proc(

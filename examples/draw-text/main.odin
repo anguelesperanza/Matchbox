@@ -15,6 +15,8 @@ main :: proc() {
 		matchbox.draw_text(&matchbox.mbi.font, 3.14, 100, 300, matchbox.BLACK)
 		matchbox.draw_text(&matchbox.mbi.font, [2]f32{1.23, 49.97}, 100, 400, matchbox.BLACK)
 		matchbox.draw_text(&matchbox.mbi.font, [2]f32{1.23, 49.97}, 100, 500, matchbox.BLACK, separator = "-")
+		matchbox.draw_text(&matchbox.mbi.font, [2]i64{1, 49}, 100, 600, matchbox.BLACK, separator = "-")
+		matchbox.draw_text(&matchbox.mbi.font, [2]i64{1, 9}, 100, 700, matchbox.BLACK, separator = " ")
 		matchbox.end_drawing()
 	}
 

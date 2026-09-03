@@ -97,6 +97,11 @@ destroy_font :: proc(font: ^Font) {
 	destroy_mesh(&font.mesh)
 }
 
+@(private)
+trim_plus :: proc(s: string) -> string {
+	return s[1:] if len(s) > 0 && s[0] == '+' else s
+}
+
 // An integer, without the caller building a string for it. Part of the
 // `draw_text` group.
 draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
@@ -115,9 +120,22 @@ draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) 
 	position readout that is half the values on screen rendering as their own
 	mirror image, with nothing on screen to say so.
 */
-@(private)
-trim_plus :: proc(s: string) -> string {
-	return s[1:] if len(s) > 0 && s[0] == '+' else s
+
+draw_text_2_i64 :: proc(font: ^Font, integers:[2]i64, x:f32, y:f32, color:[4]f32, separator:string = " ") {
+	
+	buf_one: [256]u8
+	buf_two: [256]u8
+
+	result_one := strconv.write_int(buf_one[:], integers[0], 10)
+	result_two := strconv.write_int(buf_two[:], integers[1], 10)
+
+	// Temp, not the context allocator: this is a draw call, so a game showing a
+	// position every frame would otherwise leak a string per frame forever. The
+	// temp allocator is reset at the end of the frame, which is exactly as long
+	// as the text needs to live.
+	text, _ := strings.concatenate({trim_plus(result_one), separator, trim_plus(result_two)},context.temp_allocator)
+
+	draw_text_string(font = font, text = text, x = x, y = y, color = color)
 }
 
 // Two floats separated by `separator` -- a position or a size, without the

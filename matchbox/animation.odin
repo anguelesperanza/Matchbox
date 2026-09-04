@@ -28,6 +28,13 @@ AnimatedSprite :: struct {
 	clip:          AnimationClip,
 	current_frame: i32,
 	accumulator:   f32,
+
+	// looping wraps back to frame_start forever, which is the default -- a
+	// walk or an idle has no "finished" to reach. false stops on the clip's
+	// last frame and clears playing, which is what a one-shot (an attack, a
+	// death) gives a game to watch for.
+	looping:       bool,
+	playing:       bool,
 }
 
 /*
@@ -39,14 +46,20 @@ AnimatedSprite :: struct {
 
 	This is the 2D animation system and is unrelated to `animation3d.odin`,
 	which animates a skeleton. Nothing here touches a model.
+
+	`looping = false` makes it a one-shot: it stops on its last frame and
+	clears `playing`, which a game checks (`!sprite.playing`) to know it has
+	finished.
 */
-create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1) -> AnimatedSprite {
+create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1, looping := true) -> AnimatedSprite {
     sprite: AnimatedSprite
-    sprite.clip  = load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
-    sprite.scale = scale
-    sprite.size  = {frame_w * scale, frame_h * scale}
-    sprite.pivot = {0.5, 0.5}
-    sprite.tint  = WHITE
+    sprite.clip    = load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
+    sprite.scale   = scale
+    sprite.size    = {frame_w * scale, frame_h * scale}
+    sprite.pivot   = {0.5, 0.5}
+    sprite.tint    = WHITE
+    sprite.looping = looping
+    seat_first_frame(&sprite)
     return sprite
 }
 
@@ -340,6 +353,10 @@ animation_range :: proc(
 	The first frame is `frame_start`, not 0. For a range cut out of the middle of
 	a sheet those differ, and using 0 draws a frame belonging to some other
 	animation.
+
+	Also sets `playing` -- seating the first frame is what starting or
+	restarting a clip means, so a one-shot that had already finished plays
+	again rather than staying stuck on its last frame.
 */
 @(private)
 seat_first_frame :: proc(sprite: ^AnimatedSprite) {
@@ -348,6 +365,7 @@ seat_first_frame :: proc(sprite: ^AnimatedSprite) {
 
 	sprite.current_frame = clip.frame_start
 	sprite.accumulator   = 0
+	sprite.playing       = true
 
 	col := clip.frame_start % clip.cols
 	row := clip.frame_start / clip.cols
@@ -382,17 +400,20 @@ seat_first_frame :: proc(sprite: ^AnimatedSprite) {
 
 	`scale` of 0 or less is treated as 1, as `sprite_of` does -- a caller who
 	leaves it out wants a sprite, not an invisible one.
+
+	`looping = false` makes it a one-shot -- see `create_animated_sprite`.
 */
-animated_sprite_of :: proc(clip: AnimationClip, scale: f32 = 1) -> AnimatedSprite {
+animated_sprite_of :: proc(clip: AnimationClip, scale: f32 = 1, looping := true) -> AnimatedSprite {
 	final_scale := scale
 	if final_scale <= 0 do final_scale = 1
 
 	sprite: AnimatedSprite
-	sprite.clip  = clip
-	sprite.scale = final_scale
-	sprite.size  = {clip.frame_w * final_scale, clip.frame_h * final_scale}
-	sprite.pivot = {0.5, 0.5}
-	sprite.tint  = WHITE
+	sprite.clip    = clip
+	sprite.scale   = final_scale
+	sprite.size    = {clip.frame_w * final_scale, clip.frame_h * final_scale}
+	sprite.pivot   = {0.5, 0.5}
+	sprite.tint    = WHITE
+	sprite.looping = looping
 
 	seat_first_frame(&sprite)
 
@@ -407,10 +428,12 @@ destroy_animation_clip :: proc(clip: ^AnimationClip) {
 
 // Puts a different clip on a sprite and restarts it from frame zero.
 //
-// Asking for the clip already playing does nothing, which is what lets a game
-// call this every frame from a state machine without the animation being stuck
-// on its first frame forever.
-switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip) {
+// Asking for the clip already playing does nothing but sync `looping`, which
+// is what lets a game call this every frame from a state machine without the
+// animation being stuck on its first frame forever -- and without a finished
+// one-shot being restarted just because the state machine is still asking for
+// it. Ask for a *different* clip to play it again.
+switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip, looping := true) {
     /*
         What makes two clips the same: the sheet *and* the stretch of it being
         played. The texture alone used to decide, which was right while every
@@ -429,26 +452,45 @@ switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip) {
     if same {
         // The clip is the one already playing, but its tuning may have moved.
         sprite.clip.seconds_per_frame = clip.seconds_per_frame
+        sprite.looping = looping
         return
     }
-    sprite.clip = clip
-    sprite.size = {clip.frame_w * sprite.scale, clip.frame_h * sprite.scale}
+    sprite.clip    = clip
+    sprite.size    = {clip.frame_w * sprite.scale, clip.frame_h * sprite.scale}
+    sprite.looping = looping
 
     // Not frame 0: a range starting at 4 left on frame 0 is outside its own
     // cycle, and update_animation's wrap arithmetic then lands somewhere that
-    // belongs to neither animation.
+    // belongs to neither animation. Also reseats `playing`, so switching back
+    // to a one-shot plays it again rather than leaving it finished.
     seat_first_frame(sprite)
 }
 
 // Advances the sprite's frame and works out its uv window. Call once a frame,
 // before drawing.
 //
+// A non-looping clip stops on its last frame and clears `playing`, which is
+// what a game watches (`!sprite.playing`) to know a one-shot has finished --
+// the same signal `update_animator`'s `playing` gives for the skeletal system.
+// Once stopped, further calls recompute the same uv window and do nothing
+// else, so a flip toggled after the fact still takes -- restart with
+// `switch_animation` or `animated_sprite_of`.
+//
 // The 2D one. `update_animator` is the skeletal equivalent.
 update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
-    sprite.accumulator += delta_time
-    if sprite.accumulator >= sprite.clip.seconds_per_frame {
-        sprite.accumulator  -= sprite.clip.seconds_per_frame
-        sprite.current_frame = sprite.clip.frame_start + (sprite.current_frame - sprite.clip.frame_start + 1) % sprite.clip.frame_count
+    if sprite.playing {
+        sprite.accumulator += delta_time
+        if sprite.accumulator >= sprite.clip.seconds_per_frame {
+            sprite.accumulator -= sprite.clip.seconds_per_frame
+
+            next := sprite.current_frame - sprite.clip.frame_start + 1
+            if next >= sprite.clip.frame_count && !sprite.looping {
+                sprite.current_frame = sprite.clip.frame_start + sprite.clip.frame_count - 1
+                sprite.playing = false
+            } else {
+                sprite.current_frame = sprite.clip.frame_start + next % sprite.clip.frame_count
+            }
+        }
     }
 
     col := sprite.current_frame % sprite.clip.cols

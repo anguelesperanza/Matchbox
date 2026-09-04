@@ -2027,6 +2027,7 @@ create_animated_sprite :: proc(
 	frame_count: i32,
 	seconds_per_frame: f32,
 	scale: f32 = 1,
+	looping := true,
 ) -> AnimatedSprite
 ```
 A sprite that plays frames off a sheet, in one call.
@@ -2079,6 +2080,7 @@ A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of 
 animated_sprite_of :: proc(
 	clip: AnimationClip,
 	scale: f32 = 1,
+	looping := true,
 ) -> AnimatedSprite
 ```
 A sprite ready to play `clip`, with everything that is not obviously yours already set.
@@ -2089,7 +2091,11 @@ destroy_animation_clip :: proc(clip: ^AnimationClip)
 Gives the clip's sheet texture back to the GPU.
 
 ```odin
-switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip)
+switch_animation :: proc(
+	sprite: ^AnimatedSprite,
+	clip: AnimationClip,
+	looping := true,
+)
 ```
 Puts a different clip on a sprite and restarts it from frame zero.
 

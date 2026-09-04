@@ -55,7 +55,8 @@ main :: proc() {
 	// One cube on the GPU, drawn four times. A model is geometry, not a thing
 	// in the world -- where it goes is the Transform's business, which is what
 	// lets one buffer serve every cube on screen.
-	cube := mb.create_cube_model(1)
+	cube, cube_err := mb.create_cube_model(1)
+	if cube_err != nil do return
 	defer mb.destroy(&cube)
 
 	// Wide enough to see the orbit go all the way round, high enough to look

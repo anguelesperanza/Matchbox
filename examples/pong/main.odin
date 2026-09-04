@@ -103,7 +103,8 @@ main :: proc() {
 		speed = 75,
 	}
 
-	font := matchbox.load_font(#load("new_hiscore.ttf"), 64)
+	font, font_err := matchbox.load_font(#load("new_hiscore.ttf"), 64)
+	if font_err != nil do return
 	
 
 	start_dir := rand.int_range(0, 2)

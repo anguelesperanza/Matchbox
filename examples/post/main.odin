@@ -65,7 +65,8 @@ main :: proc() {
 	// At the window's size. It does not follow a resize -- see the note on
 	// Render_Target -- and for a game with a filter over it a fixed resolution
 	// is usually the point anyway.
-	scene := mb.create_render_target()
+	scene, scene_err := mb.create_render_target()
+	if scene_err != nil do return
 	defer mb.destroy(&scene)
 
 	props := []Prop{

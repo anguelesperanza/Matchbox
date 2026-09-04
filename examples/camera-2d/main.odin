@@ -5,12 +5,14 @@ import "../../matchbox"
 main :: proc () {
 	matchbox.init("2D Camera", 1280, 720)
 
-	desperado := matchbox.create_sprite(#load("assets/images/desperado.png"), 10)
+	desperado, desperado_err := matchbox.create_sprite(#load("assets/images/desperado.png"), 10)
+	if desperado_err != nil do return
 
 	desperado.speed = 50
 	desperado.velocity = {10, 10}
 
-	sheriff := matchbox.create_sprite(#load("assets/images/sheriff.png"), 10)
+	sheriff, sheriff_err := matchbox.create_sprite(#load("assets/images/sheriff.png"), 10)
+	if sheriff_err != nil do return
 	sheriff.position = {1000, 0}
 
 

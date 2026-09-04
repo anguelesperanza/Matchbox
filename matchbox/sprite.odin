@@ -15,27 +15,37 @@ Sprite :: struct {
 	parallax_speed: f32,
 }
 
-// Decoding is what loading an image costs -- the upload to the gpu underneath
-// is nothing next to it -- so this goes through stb rather than core:image,
-// which is roughly five times slower on the same file. stb is already linked
-// for the font atlas, so it is not a new dependency.
-create_mesh :: proc(bytes: []byte) -> Mesh {
+/*
+	Decoding is what loading an image costs -- the upload to the gpu underneath
+	is nothing next to it -- so this goes through stb rather than core:image,
+	which is roughly five times slower on the same file. stb is already linked
+	for the font atlas, so it is not a new dependency.
+
+	`Image_Error.Decode_Failed` means the bytes were not a picture stb could
+	read, which is a content problem rather than a program one -- the wrong
+	file, or a truncated one. A `Gpu_Error` means the driver would not take the
+	texture.
+*/
+create_mesh :: proc(bytes: []byte) -> (Mesh, Error) {
 	width, height, channels_in_file: i32
 
 	// 4 forces RGBA out of whatever the file holds, which is what the texture
 	// format below wants and what alpha_add_if_missing used to guarantee
 	pixels := stbi.load_from_memory(raw_data(bytes), cast(i32)len(bytes), &width, &height, &channels_in_file, 4)
-	ensure(pixels != nil, "Could not load texture")
+	if pixels == nil do return {}, Image_Error.Decode_Failed
 	defer stbi.image_free(pixels)
 
 	// The quad every sprite draws with is shared and already on the GPU, so all
 	// that is uploaded here is the texture.
+	texture, err := upload_texture(pixels, width, height)
+	if err != nil do return {}, err
+
 	return Mesh{
-		texture = upload_texture(pixels, width, height),
+		texture = texture,
 		sampler = mbi.renderer.sprite_sampler,
 		width   = width,
 		height  = height,
-	}
+	}, nil
 }
 
 /*
@@ -48,31 +58,44 @@ create_mesh :: proc(bytes: []byte) -> Mesh {
 
 	`pixels` is RGBA8, `width * height * 4` bytes, and is copied on the way to
 	the GPU: it belongs to the caller both before and after.
+
+	The two `Argument_Error`s are answerable rather than fatal because the size
+	often comes from somewhere outside the program -- an image the player
+	opened, a buffer a game filled in from a file.
 */
-create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh {
-	ensure(width > 0 && height > 0, "a texture needs a size")
-	ensure(len(pixels) >= int(width) * int(height) * 4, "not enough pixels for that size")
+create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> (Mesh, Error) {
+	if width <= 0 || height <= 0 do return {}, Argument_Error.Empty_Size
+	if len(pixels) < int(width) * int(height) * 4 do return {}, Argument_Error.Not_Enough_Pixels
+
+	texture, err := upload_texture(raw_data(pixels), width, height)
+	if err != nil do return {}, err
 
 	return Mesh{
-		texture = upload_texture(raw_data(pixels), width, height),
+		texture = texture,
 		sampler = mbi.renderer.sprite_sampler,
 		width   = width,
 		height  = height,
-	}
+	}, nil
 }
 
 // A sprite from an encoded image -- PNG, JPG, whatever stb_image reads.
 // `#load` the file and hand the bytes over, so the image ships inside the
 // executable and works the same inside an Android apk.
-create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
-	mesh := create_mesh(bytes)
-	return create_sprite_from_mesh(mesh, scale)
+//
+// See `create_mesh` for what the error means.
+create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> (Sprite, Error) {
+	mesh, err := create_mesh(bytes)
+	if err != nil do return {}, err
+
+	return create_sprite_from_mesh(mesh, scale), nil
 }
 
 /*A sprite around pixels the game already holds. See create_mesh_from_pixels*/
-create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> Sprite {
-	mesh := create_mesh_from_pixels(pixels, width, height)
-	return create_sprite_from_mesh(mesh, scale)
+create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> (Sprite, Error) {
+	mesh, err := create_mesh_from_pixels(pixels, width, height)
+	if err != nil do return {}, err
+
+	return create_sprite_from_mesh(mesh, scale), nil
 }
 
 /*The body every sprite gets, whichever way its texture arrived*/

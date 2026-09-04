@@ -6,7 +6,8 @@ main :: proc() {
 
 	matchbox.init("Load TTF Font", 1280, 720)
 
-	font := matchbox.load_font(#load("new_hiscore.ttf"), 64)
+	font, font_err := matchbox.load_font(#load("new_hiscore.ttf"), 64)
+	if font_err != nil do return
 
 	for matchbox.is_running() {
 		matchbox.poll_events()

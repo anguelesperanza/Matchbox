@@ -61,7 +61,8 @@ main :: proc() {
 
 	font := &mb.mbi.font
 
-	screen := mb.create_pixel_buffer(W, H)
+	screen, screen_err := mb.create_pixel_buffer(W, H)
+	if screen_err != nil do return
 	defer mb.destroy(&screen)
 
 	// The pixels. An ordinary array that matchbox never sees except during the

@@ -1,5 +1,7 @@
 package matchbox
 
+import "core:log"
+
 /*
 	Sprite_Cache
 	------------
@@ -86,7 +88,13 @@ sprite_cache_get :: proc(cache: ^Sprite_Cache($Key), key: Key, path: string, sca
 	defer delete(bytes)
 
 	sprite := new(Sprite)
-	sprite^ = create_sprite(bytes, scale)
+	loaded, err := create_sprite(bytes, scale)
+	if err != nil {
+		log.errorf("sprite cache: could not build %s: %v", path, err)
+		free(sprite)
+		return nil
+	}
+	sprite^ = loaded
 
 	lru_put(&cache.lru, key, sprite)
 

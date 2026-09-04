@@ -42,7 +42,8 @@ main :: proc() {
 
 	// One sprite drawn four times over, to show that a tint is a property of
 	// the draw rather than of the art.
-	card := matchbox.create_sprite(#load("../ui/art/ember.png"), 1)
+	card, card_err := matchbox.create_sprite(#load("../ui/art/ember.png"), 1)
+	if card_err != nil do return
 	defer matchbox.destroy(&card)
 
 	elapsed: f32

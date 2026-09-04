@@ -52,14 +52,21 @@ Render_Target :: struct {
 	either is left at zero.
 
 	The caller owns it: `destroy` when finished.
+
+	This used to log and hand back a zeroed struct, which was the worst of the
+	three ways this package reported failure: nothing stopped, nothing was
+	returned to check, and the mistake surfaced later as an unrelated-looking
+	"render target was never created" from `begin_drawing_target` -- a
+	complaint about the wrong thing, in the wrong place, a frame or more after
+	the cause.
 */
-create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
+create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> (Render_Target, Error) {
 	r := &mbi.renderer
 
 	w := width  if width  > 0 else mbi.window_width
 	h := height if height > 0 else mbi.window_height
 
-	ensure(w > 0 && h > 0, "a render target needs a size")
+	if w <= 0 || h <= 0 do return {}, Argument_Error.Empty_Size
 
 	target: Render_Target
 	target.width  = w
@@ -78,7 +85,7 @@ create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
 
 	if target.texture == nil {
 		log.errorf("could not create a render target: %s", sdl.GetError())
-		return {}
+		return {}, Gpu_Error.Texture_Creation_Failed
 	}
 
 	if r.depth_format == .INVALID do r.depth_format = pick_depth_format()
@@ -96,10 +103,10 @@ create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
 	if target.depth == nil {
 		log.errorf("could not create a render target's depth: %s", sdl.GetError())
 		sdl.ReleaseGPUTexture(r.device, target.texture)
-		return {}
+		return {}, Gpu_Error.Texture_Creation_Failed
 	}
 
-	return target
+	return target, nil
 }
 
 // Releases the target's colour and depth textures. Not to be called while it

@@ -70,7 +70,8 @@ main :: proc() {
 	defer mb.destroy(&panorama)
 	defer mb.destroy(&cubemap)
 
-	cube := mb.create_cube_model(1)
+	cube, cube_err := mb.create_cube_model(1)
+	if cube_err != nil do return
 	defer mb.destroy(&cube)
 
 	// Six back, level, looking along -z.

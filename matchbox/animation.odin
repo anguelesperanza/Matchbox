@@ -51,31 +51,37 @@ Animated_Sprite :: struct {
 	clears `playing`, which a game checks (`!sprite.playing`) to know it has
 	finished.
 */
-create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1, looping := true) -> Animated_Sprite {
+create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1, looping := true) -> (Animated_Sprite, Error) {
+    clip, err := load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
+    if err != nil do return {}, err
+
     sprite: Animated_Sprite
-    sprite.clip    = load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
+    sprite.clip    = clip
     sprite.scale   = scale
     sprite.size    = {frame_w * scale, frame_h * scale}
     sprite.pivot   = {0.5, 0.5}
     sprite.tint    = WHITE
     sprite.looping = looping
     seat_first_frame(&sprite)
-    return sprite
+    return sprite, nil
 }
 
 // The clip on its own, without a sprite wrapped round it. What to use when
 // several sprites play the same sheet, or when a sprite switches between clips
 // -- see `switch_animation`.
-load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> Animation_Clip {
+load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> (Animation_Clip, Error) {
+	mesh, err := create_mesh(bytes)
+	if err != nil do return {}, err
+
 	return Animation_Clip{
-		mesh              = create_mesh(bytes),
+		mesh              = mesh,
 		cols              = cols,
 		rows              = rows,
 		frame_count       = frame_count,
 		seconds_per_frame = seconds_per_frame,
 		frame_w           = frame_w,
 		frame_h           = frame_h,
-	}
+	}, nil
 }
 
 /*
@@ -173,8 +179,15 @@ load_animation_frames :: proc(
 		}
 	}
 
+	// Reported and folded into `ok`; migrating this one to an Error is step 9b.
+	mesh, mesh_err := create_mesh_from_pixels(slice.to_bytes(sheet), sheet_w, frame_h * rows)
+	if mesh_err != nil {
+		log.errorf("load_animation_frames: could not upload the packed sheet: %v", mesh_err)
+		return {}, false
+	}
+
 	return Animation_Clip{
-		mesh              = create_mesh_from_pixels(slice.to_bytes(sheet), sheet_w, frame_h * rows),
+		mesh              = mesh,
 		cols              = cols,
 		rows              = rows,
 		frame_count       = count,

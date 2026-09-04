@@ -1,5 +1,6 @@
 package matchbox
 
+import "core:log"
 import "core:math"
 
 import stbtt "vendor:stb/truetype"
@@ -52,7 +53,7 @@ Font :: struct {
 	`bytes` is the file's contents, so `#load` works and the font ships inside
 	the executable.
 */
-load_font :: proc(bytes: []byte, font_size: f32) -> Font {
+load_font :: proc(bytes: []byte, font_size: f32) -> (Font, Error) {
 	font: Font
 	font.atlas_size = FONT_ATLAS_SIZE
 
@@ -83,12 +84,15 @@ load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 	// Linear filtering, unlike a sprite's nearest: glyph quads rarely land on
 	// whole pixels, and the atlas is a coverage mask that reads badly when it
 	// is point sampled.
-	font.texture = upload_texture(raw_data(rgba), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE)
+	texture, err := upload_texture(raw_data(rgba), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE)
+	if err != nil do return {}, err
+
+	font.texture = texture
 	font.sampler = mbi.renderer.font_sampler
 	font.width   = FONT_ATLAS_SIZE
 	font.height  = FONT_ATLAS_SIZE
 
-	return font
+	return font, nil
 }
 
 // Gives the font's atlas texture and vertex buffer back to the GPU.
@@ -176,8 +180,26 @@ get_font :: proc(size: f32) -> ^Font {
 		return cached
 	}
 
+	/*
+		A size that will not bake falls back to the default font rather than
+		being reported.
+
+		`get_font` is called from drawing code, often once a frame, and its
+		result goes straight into `draw_text` -- so an error return here would
+		be checked at almost no call site, and the alternative to a fallback is
+		a nil pointer reaching a draw. The default atlas is already resident
+		and always valid, so text comes out at the wrong size instead of not at
+		all, and the log says why.
+	*/
+	baked, err := load_font(DEFAULT_FONT_BYTES, f32(px))
+	if err != nil {
+		log.errorf("could not bake the default font at %v px, using %v px instead: %v",
+			px, FONT_DEFAULTS.size, err)
+		return &mbi.font
+	}
+
 	font  := new(Font)
-	font^ = load_font(DEFAULT_FONT_BYTES, f32(px))
+	font^ = baked
 
 	lru_put(&mbi.font_cache, px, font)
 

@@ -71,9 +71,17 @@ load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 			path, image.width, image.height, ratio)
 	}
 
+	// The upload's error is reported and folded into `ok`. Migrating this
+	// procedure to return an Error of its own is step 9b.
+	texture, err := upload_texture(raw_data(image.pixels), image.width, image.height)
+	if err != nil {
+		log.errorf("could not upload the panorama %s: %v", path, err)
+		return {}, false
+	}
+
 	skybox = Skybox{
 		kind    = .PANORAMA,
-		texture = upload_texture(raw_data(image.pixels), image.width, image.height),
+		texture = texture,
 		sampler = mbi.renderer.skybox_wrap_sampler,
 		tint    = WHITE,
 	}
@@ -123,7 +131,11 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 		{3, 1}, // -Z
 	}
 
-	texture := create_gpu_texture(i32(face), i32(face), cube = true)
+	texture, err := create_gpu_texture(i32(face), i32(face), cube = true)
+	if err != nil {
+		log.errorf("could not create the cube map for %s: %v", path, err)
+		return {}, false
+	}
 
 	// One scratch face, refilled six times, rather than six allocations.
 	pixels := make([][4]u8, face * face, context.temp_allocator)
@@ -137,7 +149,11 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 			copy(pixels[y * face:][:face], image.pixels[source:][:face])
 		}
 
-		upload_texture_region(texture, raw_data(pixels), i32(face), i32(face), u32(layer))
+		if fill_err := upload_texture_region(texture, raw_data(pixels), i32(face), i32(face), u32(layer)); fill_err != nil {
+			log.errorf("could not upload face %v of %s: %v", layer, path, fill_err)
+			sdl.ReleaseGPUTexture(mbi.renderer.device, texture)
+			return {}, false
+		}
 	}
 
 	skybox = Skybox{

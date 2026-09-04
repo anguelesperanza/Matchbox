@@ -401,17 +401,22 @@ A filled rectangle, rotated about its own pivot.
 ### `sprite.odin`
 
 ```odin
-create_mesh :: proc(bytes: []byte) -> Mesh
+create_mesh :: proc(bytes: []byte) -> (Mesh, Error)
 ```
 Decoding is what loading an image costs -- the upload to the gpu underneath is nothing next to it -- so this goes through stb rather than core:image, which is roughly five times slower on the same file.
 
 ```odin
-create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh
+create_mesh_from_pixels :: proc(
+	pixels: []byte,
+	width,
+	height: i32) -> (Mesh,
+	Error,
+)
 ```
 The same, from pixels that have already been decoded.
 
 ```odin
-create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite
+create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> (Sprite, Error)
 ```
 A sprite from an encoded image -- PNG, JPG, whatever stb_image reads.
 
@@ -420,8 +425,9 @@ create_sprite_from_pixels :: proc(
 	pixels: []byte,
 	width,
 	height: i32,
-	scale: f32 = 1,
-) -> Sprite
+	scale: f32 = 1) -> (Sprite,
+	Error,
+)
 ```
 A sprite around pixels the game already holds.
 
@@ -701,12 +707,12 @@ Frees the pixels, through the allocator they came from.
 ### `pixel_buffer.odin`
 
 ```odin
-create_pixel_buffer :: proc(width, height: i32) -> Pixel_Buffer
+create_pixel_buffer :: proc(width, height: i32) -> (Pixel_Buffer, Error)
 ```
 An empty buffer `width` by `height` pixels.
 
 ```odin
-pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T)
+pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) -> Error
 ```
 Hands this frame's pixels to the GPU.
 
@@ -771,7 +777,7 @@ Restores the clip that was in force before the matching begin_clip, or the whole
 ### `font.odin`
 
 ```odin
-load_font :: proc(bytes: []byte, font_size: f32) -> Font
+load_font :: proc(bytes: []byte, font_size: f32) -> (Font, Error)
 ```
 Bakes a TTF into an atlas at one pixel size.
 
@@ -1965,8 +1971,9 @@ How big the model is on each axis, in its own space before any Transform.
 upload_mesh :: proc(
 	vertices: []Vertex3D,
 	indices: []u32,
-	topology := Mesh_Topology.TRIANGLES,
-) -> Model_Part
+	topology := Mesh_Topology.TRIANGLES) -> (Model_Part,
+	Error,
+)
 ```
 Puts one lump of geometry on the GPU.
 
@@ -1974,8 +1981,9 @@ Puts one lump of geometry on the GPU.
 create_model_from_mesh :: proc(
 	vertices: []Vertex3D,
 	indices: []u32,
-	topology := Mesh_Topology.TRIANGLES,
-) -> Model
+	topology := Mesh_Topology.TRIANGLES) -> (Model,
+	Error,
+)
 ```
 A model of one part, from one lump of geometry.
 
@@ -1985,12 +1993,12 @@ destroy_model :: proc(model: ^Model)
 Gives a model's buffers, textures, skeleton and clips back.
 
 ```odin
-create_cube_model :: proc(size: f32 = 1) -> Model
+create_cube_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 A cube of `size` units, centred on its own origin.
 
 ```odin
-create_plane_model :: proc(size: f32 = 1) -> Model
+create_plane_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 A flat square of `size` units on the ground plane, facing up.
 
@@ -1998,18 +2006,23 @@ A flat square of `size` units on the ground plane, facing up.
 create_sphere_model :: proc(
 	radius: f32 = 1,
 	rings: int = 16,
-	sectors: int = 24,
-) -> Model
+	sectors: int = 24) -> (Model,
+	Error,
+)
 ```
 A sphere of `radius`, built the usual way out of rings of latitude and sectors of longitude.
 
 ```odin
-create_cube_wires_model :: proc(size: f32 = 1) -> Model
+create_cube_wires_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 The twelve edges of a cube, as lines.
 
 ```odin
-create_grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> Model
+create_grid_model :: proc(
+	slices: int = 10,
+	spacing: f32 = 1) -> (Model,
+	Error,
+)
 ```
 A grid of lines on the ground plane, centred on the origin.
 
@@ -2034,8 +2047,9 @@ create_animated_sprite :: proc(
 	frame_count: i32,
 	seconds_per_frame: f32,
 	scale: f32 = 1,
-	looping := true,
-) -> Animated_Sprite
+	looping := true) -> (Animated_Sprite,
+	Error,
+)
 ```
 A sprite that plays frames off a sheet, in one call.
 
@@ -2047,8 +2061,9 @@ load_animation :: proc(
 	cols: i32,
 	rows: i32,
 	frame_count: i32,
-	seconds_per_frame: f32,
-) -> Animation_Clip
+	seconds_per_frame: f32) -> (Animation_Clip,
+	Error,
+)
 ```
 The clip on its own, without a sprite wrapped round it.
 
@@ -2238,7 +2253,11 @@ Advances the clip and works out this frame's matrices.
 ### `render_target.odin`
 
 ```odin
-create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target
+create_render_target :: proc(
+	width: i32 = 0,
+	height: i32 = 0) -> (Render_Target,
+	Error,
+)
 ```
 Makes a render target `width` by `height`, or the size of the window when either is left at zero.
 

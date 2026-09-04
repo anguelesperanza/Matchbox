@@ -449,17 +449,26 @@ upload_skinned_mesh :: proc(
 	indices:  []u32,
 	skin:     int,
 	node:     u32,
-) -> Model_Part {
+) -> (Model_Part, Error) {
+	vertex_buffer, vertex_err := upload_buffer(
+		raw_data(vertices), u32(len(vertices) * size_of(Vertex3D_Skinned)), {.VERTEX})
+	if vertex_err != nil do return {}, vertex_err
+
+	index_buffer, index_err := upload_buffer(
+		raw_data(indices), u32(len(indices) * size_of(u32)), {.INDEX})
+	if index_err != nil {
+		sdl.ReleaseGPUBuffer(mbi.renderer.device, vertex_buffer)
+		return {}, index_err
+	}
+
 	return Model_Part{
-		vertices = upload_buffer(
-			raw_data(vertices), u32(len(vertices) * size_of(Vertex3D_Skinned)), {.VERTEX}),
-		indices = upload_buffer(
-			raw_data(indices), u32(len(indices) * size_of(u32)), {.INDEX}),
+		vertices    = vertex_buffer,
+		indices     = index_buffer,
 		index_count = u32(len(indices)),
 		topology    = .TRIANGLES,
 		skin        = skin,
 		node        = node,
-	}
+	}, nil
 }
 
 // -----------------------------------------------------------------------

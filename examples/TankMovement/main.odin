@@ -12,9 +12,15 @@ Tank :: struct {
 main :: proc() {
 	matchbox.init("Tank", 1920, 1080)
 
+	body, body_err := matchbox.create_sprite(#load("assets/images/tank_body.png"), 20)
+	if body_err != nil do return
+
+	cannon, cannon_err := matchbox.create_sprite(#load("assets/images/tank_cannon.png"), 20)
+	if cannon_err != nil do return
+
 	tank:Tank = {
-		body = matchbox.create_sprite(#load("assets/images/tank_body.png"), 20),
-		cannon = matchbox.create_sprite(#load("assets/images/tank_cannon.png"), 20),
+		body = body,
+		cannon = cannon,
 	}
 
 	tank.body.velocity = {5, 5}

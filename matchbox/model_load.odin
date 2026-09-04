@@ -271,7 +271,13 @@ primitive_part :: proc(
 
 	indices := read_indices(data, primitive, count)
 
-	part = upload_mesh(vertices, indices)
+	err: Error
+	part, err = upload_mesh(vertices, indices)
+	if err != nil {
+		log.errorf("could not upload a mesh primitive: %v", err)
+		return {}, nil, false
+	}
+
 	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
 
 	return part, vertices, true
@@ -354,7 +360,13 @@ skinned_primitive_part :: proc(
 
 	indices := read_indices(data, primitive, count)
 
-	part = upload_skinned_mesh(vertices, indices, skin, node)
+	err: Error
+	part, err = upload_skinned_mesh(vertices, indices, skin, node)
+	if err != nil {
+		log.errorf("could not upload a skinned mesh primitive: %v", err)
+		return {}, nil, false
+	}
+
 	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
 
 	return part, vertices, true
@@ -461,7 +473,16 @@ decode_and_upload :: proc(encoded: []byte) -> ^sdl.GPUTexture {
 	}
 	defer stbi.image_free(pixels)
 
-	return upload_texture(pixels, width, height)
+	// A texture that will not upload leaves the part untextured rather than
+	// failing the load: the geometry is still worth having, and the caller
+	// already treats a nil texture as "draw this flat".
+	texture, err := upload_texture(pixels, width, height)
+	if err != nil {
+		log.errorf("could not upload a model texture: %v", err)
+		return nil
+	}
+
+	return texture
 }
 
 // -----------------------------------------------------------------------

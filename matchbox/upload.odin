@@ -16,20 +16,36 @@ import "base:runtime"
 
 import sdl "vendor:sdl3"
 
-// Creates a device-local buffer and fills it from `data`.
+/*
+	Creates a device-local buffer and fills it from `data`.
+
+	Every failure here is the driver refusing an allocation, so they come back
+	as `Gpu_Error` rather than stopping the program: the caller is usually a
+	loader, and a game that cannot load one model may still have something
+	useful to say about it.
+
+	The buffer is released on a later failure. Handing back nil *and* leaking
+	the allocation that did succeed would be the worst of both.
+*/
 @(private)
-upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -> ^sdl.GPUBuffer {
+upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -> (^sdl.GPUBuffer, Error) {
 	device := mbi.renderer.device
 
 	buffer := sdl.CreateGPUBuffer(device, {usage = usage, size = size})
-	ensure(buffer != nil, "could not create GPU buffer")
+	if buffer == nil do return nil, Gpu_Error.Buffer_Creation_Failed
 
 	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
-	ensure(transfer != nil, "could not create transfer buffer")
+	if transfer == nil {
+		sdl.ReleaseGPUBuffer(device, buffer)
+		return nil, Gpu_Error.Transfer_Buffer_Creation_Failed
+	}
 	defer sdl.ReleaseGPUTransferBuffer(device, transfer)
 
 	dst := sdl.MapGPUTransferBuffer(device, transfer, false)
-	ensure(dst != nil, "could not map transfer buffer")
+	if dst == nil {
+		sdl.ReleaseGPUBuffer(device, buffer)
+		return nil, Gpu_Error.Transfer_Buffer_Map_Failed
+	}
 	runtime.mem_copy(dst, data, int(size))
 	sdl.UnmapGPUTransferBuffer(device, transfer)
 
@@ -42,16 +58,27 @@ upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -
 		false,
 	)
 	sdl.EndGPUCopyPass(pass)
-	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit buffer upload")
 
-	return buffer
+	if !sdl.SubmitGPUCommandBuffer(cmd) {
+		sdl.ReleaseGPUBuffer(device, buffer)
+		return nil, Gpu_Error.Submit_Failed
+	}
+
+	return buffer, nil
 }
 
-// An empty sampled RGBA8 texture. Split out because two things want one: a
-// sprite, which fills it once and never again, and a Pixel_Buffer, which is
-// created empty and rewritten every frame.
+/*
+	An empty sampled RGBA8 texture. Split out because two things want one: a
+	sprite, which fills it once and never again, and a Pixel_Buffer, which is
+	created empty and rewritten every frame.
+
+	Both kinds report the same way. This used to `ensure`, on the reasoning
+	that a texture the driver will not allocate is a dead program anyway --
+	which is true of the built-in font atlas and not true of the twentieth
+	image a level asked for, and only the caller knows which it is holding.
+*/
 @(private)
-create_gpu_texture :: proc(width, height: i32, cube := false) -> ^sdl.GPUTexture {
+create_gpu_texture :: proc(width, height: i32, cube := false) -> (^sdl.GPUTexture, Error) {
 	texture := sdl.CreateGPUTexture(mbi.renderer.device, {
 		type                 = .CUBE if cube else .D2,
 		format               = .R8G8B8A8_UNORM,
@@ -64,13 +91,9 @@ create_gpu_texture :: proc(width, height: i32, cube := false) -> ^sdl.GPUTexture
 		num_levels           = 1,
 	})
 
-	// `ensure` rather than a nil return, for both kinds. A texture the driver
-	// will not allocate is a dead program either way, and returning nil only
-	// moves the crash somewhere with less to say about it. The cube path used
-	// to log and return nil, which was drift rather than a decision.
-	ensure(texture != nil, "could not create GPU texture")
+	if texture == nil do return nil, Gpu_Error.Texture_Creation_Failed
 
-	return texture
+	return texture, nil
 }
 
 /*
@@ -93,16 +116,16 @@ upload_texture_region :: proc(
 	pixels:  rawptr,
 	width, height: i32,
 	layer:   u32 = 0,
-) {
+) -> Error {
 	device := mbi.renderer.device
 	size   := u32(width) * u32(height) * 4
 
 	transfer := sdl.CreateGPUTransferBuffer(device, {usage = .UPLOAD, size = size})
-	ensure(transfer != nil, "could not create transfer buffer")
+	if transfer == nil do return Gpu_Error.Transfer_Buffer_Creation_Failed
 	defer sdl.ReleaseGPUTransferBuffer(device, transfer)
 
 	dst := sdl.MapGPUTransferBuffer(device, transfer, false)
-	ensure(dst != nil, "could not map transfer buffer")
+	if dst == nil do return Gpu_Error.Transfer_Buffer_Map_Failed
 	runtime.mem_copy(dst, pixels, int(size))
 	sdl.UnmapGPUTransferBuffer(device, transfer)
 
@@ -115,16 +138,26 @@ upload_texture_region :: proc(
 		false,
 	)
 	sdl.EndGPUCopyPass(pass)
-	ensure(sdl.SubmitGPUCommandBuffer(cmd), "could not submit texture upload")
+
+	if !sdl.SubmitGPUCommandBuffer(cmd) do return Gpu_Error.Submit_Failed
+
+	return nil
 }
 
 // Creates a sampled RGBA8 texture and fills it from `pixels`, which must hold
-// width * height * 4 bytes.
+// width * height * 4 bytes. The texture is released if the fill fails, so a
+// caller that gets an error is not also holding something to free.
 @(private)
-upload_texture :: proc(pixels: rawptr, width, height: i32) -> ^sdl.GPUTexture {
-	texture := create_gpu_texture(width, height)
-	upload_texture_region(texture, pixels, width, height)
-	return texture
+upload_texture :: proc(pixels: rawptr, width, height: i32) -> (^sdl.GPUTexture, Error) {
+	texture, err := create_gpu_texture(width, height)
+	if err != nil do return nil, err
+
+	if fill_err := upload_texture_region(texture, pixels, width, height); fill_err != nil {
+		sdl.ReleaseGPUTexture(mbi.renderer.device, texture)
+		return nil, fill_err
+	}
+
+	return texture, nil
 }
 
 /*

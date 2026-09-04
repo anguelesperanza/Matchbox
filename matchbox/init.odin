@@ -648,11 +648,31 @@ init :: proc(title: string, width: i32, height: i32) {
 		}
 		indices := [6]u32{0, 2, 1, 0, 1, 3}
 
-		mbi.renderer.quad_verts   = upload_buffer(&verts,   size_of(verts),   {.VERTEX})
-		mbi.renderer.quad_indices = upload_buffer(&indices, size_of(indices), {.INDEX})
+		/*
+			Fatal, unlike everywhere else these errors are returned.
+
+			`init` is the one caller with nobody to hand a failure to, and a
+			program without the shared quad cannot draw anything at all -- every
+			2D draw in Matchbox binds it. Carrying on would mean a window that
+			opens and stays blank, which is a worse thing to debug than a
+			message saying which allocation the driver refused.
+		*/
+		verts_err, indices_err: Error
+		mbi.renderer.quad_verts,   verts_err   = upload_buffer(&verts,   size_of(verts),   {.VERTEX})
+		mbi.renderer.quad_indices, indices_err = upload_buffer(&indices, size_of(indices), {.INDEX})
+
+		if verts_err != nil || indices_err != nil {
+			log.errorf("could not upload the shared quad: %v %v", verts_err, indices_err)
+			panic("Cannot upload the quad every draw is built on")
+		}
 	}
 
-	mbi.font = load_font(DEFAULT_FONT_BYTES, FONT_DEFAULTS.size)
+	font, font_err := load_font(DEFAULT_FONT_BYTES, FONT_DEFAULTS.size)
+	if font_err != nil {
+		log.errorf("could not bake the default font: %v", font_err)
+		panic("Cannot bake the built-in font")
+	}
+	mbi.font = font
 
 	mbi.camera = Camera{
 		position = {f32(width) * 0.5, f32(height) * 0.5},

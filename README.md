@@ -43,7 +43,8 @@ import "matchbox"
 main :: proc() {
 	matchbox.init("My Game", 1280, 720)
 
-	player := matchbox.create_sprite(#load("player.png"))
+	player, err := matchbox.create_sprite(#load("player.png"))
+	if err != nil do return
 
 	for matchbox.is_running() {
 		matchbox.poll_events()
@@ -62,6 +63,28 @@ main :: proc() {
 	matchbox.cleanup()
 }
 ```
+
+### Errors
+Anything that builds a thing which might not build hands back the thing *and* an
+error, in the shape `core:os` uses:
+
+```odin
+sprite, err := matchbox.create_sprite(bytes)
+if err != nil {
+	// a picture stb could not read, or a texture the driver refused
+}
+```
+
+The error is a union, so `err != nil` is the whole test. `Image_Error` means the
+bytes were not a picture, `Gpu_Error` means the driver refused an allocation, and
+`Argument_Error` means the size or the pixel count did not describe something
+that could be made.
+
+**What does *not* come back as an error is deliberate.** Drawing outside a pass,
+`end_clip` without a `begin_clip`, using Matchbox before `init` -- those are bugs
+in the calling code rather than conditions the world produced, and they stop the
+program where the mistake is instead of being handed back as a value nobody
+checks.
 
 ### State
 Matchbox keeps everything it needs in one global, `matchbox.mbi`, so no state has

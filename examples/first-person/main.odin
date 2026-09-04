@@ -77,7 +77,8 @@ main :: proc() {
 	// behaviour off without needing a flag for it.
 	mb.set_escape_key(.UNKNOWN)
 
-	cube := mb.create_cube_model(1)
+	cube, cube_err := mb.create_cube_model(1)
+	if cube_err != nil do return
 	defer mb.destroy(&cube)
 
 	// Where the player is standing. The rig follows it and never writes it,

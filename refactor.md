@@ -333,6 +333,70 @@ indexes `mbi.input.mouse.buttons` by integer, and let X1/X2 through the
 **9. Errors.** `(value, err)` with union error types, replacing `ensure`.
 Expect every call site, every example and the README snippet to move with it.
 
+### One thing step 1 left behind, deliberately
+
+`quad.vert.hlsl` declares `cbuffer VertData`, and the Odin type it must match
+is now `Vert_Data`. It was left alone, and should stay left alone until
+someone is on Windows:
+
+- The three other *vertex* shaders name their cbuffers exactly after their
+  Odin types (`Mesh_Vert_Data`, `Skin_Vert_Data`, `Skybox_Vert_Data`), so this
+  is a real inconsistency -- but every *fragment* shader uses a generic
+  `FragData` regardless of its Odin counterpart, so name-matching was never
+  universal.
+- It is behaviourally inert. SDL_GPU binds uniform blocks by slot, not by
+  name, so the two names never have to agree for the program to be correct.
+- Renaming it needs a rebuild, and no rebuild can happen on the Linux laptop.
+
+Change it on Windows, in a commit of its own carrying both rebuilt formats,
+or leave it. Not worth doing halfway.
+
+### Shaders and the two platforms -- worth fixing `build_shaders.sh`
+
+Raised 2026-09-04. The working understanding was "dxc can't run because this
+session is on Linux, and that's fine because SDL3_GPU uses Vulkan on Linux
+anyway". **The conclusion is right -- nothing is broken -- but two parts of
+the reasoning need correcting, and the second one matters.**
+
+**1. Linux is not what stops `dxc`.** The Vulkan SDK ships `dxc` for Linux
+too; it is simply not installed on this laptop. So this is a "not set up
+here" problem, not a platform limit.
+
+**2. "Vulkan on Linux, so it doesn't matter" is true for *running* and false
+for *committing*.** Both formats are committed -- 17 `.spv` and 17 `.dxil` in
+`matchbox/shaders`. On Linux, `build_shaders.sh` sets `WANT_DXIL=0` and emits
+SPIR-V only. So a Linux machine that edits shader **code** and reruns the
+script produces an updated `.spv` beside an untouched `.dxil`, and committing
+that pair ships a `.dxil` that no longer matches its source. Locally
+everything still looks right, because Vulkan reads the `.spv` that *was*
+rebuilt. The person who finds out is whoever next runs the D3D12 backend on
+Windows, and what they get is stale shader code rendering wrong pixels --
+not a build error, which is the worse failure of the two.
+
+So the rule is: **the platform protects the person making the change and
+exposes everyone else.** Nothing is wrong right now -- step 1 edited shader
+*comments* only, which cannot alter compiled output, so all 34 binaries are
+still correct.
+
+**Why DXIL is Windows-gated at all:** D3D12 requires DXIL to be signed, and
+the signing library (`dxil.dll`) is shipped by Microsoft for Windows only --
+unsigned DXIL is rejected outside developer mode. That is the constraint
+behind the script's "DXIL is Windows-only in practice" comment. Reasonably
+confident but not verified against this toolchain; worth a check before
+relying on it.
+
+**What `build_shaders.sh` should do about it** -- pick one, later:
+
+- At minimum, **say so loudly** when it skips DXIL: name the `.dxil` files it
+  has just left stale and warn against committing shader-code changes from
+  this platform. Right now it skips silently.
+- Better, **tell a comment edit from a code edit** -- strip comments before
+  hashing the `.hlsl`, and only warn when the hash of the actual code moved.
+  That distinction is exactly what made step 1 safe, and the script currently
+  cannot make it.
+- Or **gate committing rather than building**: a check that fails when a
+  tracked `.hlsl`'s code hash disagrees with what its `.dxil` was built from.
+
 ### Deferred past this run
 
 The file splits (`ui.odin`, `camera3d.odin`, `init.odin`), batching load-time

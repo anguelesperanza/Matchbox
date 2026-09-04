@@ -276,12 +276,20 @@ natural_less :: proc(a, b: string) -> bool {
 
 /*
 	A stretch of a sheet as a clip of its own -- walk, idle and jump off one set
-	of frames -- clamped to the frames the sheet actually has.
+	of frames -- given as the first and last frame, inclusive, and clamped to the
+	frames the sheet actually has.
 
 		sheet, _ := mb.load_animation_directory(#load_directory("art/hero"), 0.1)
-		idle := mb.animation_range(sheet, 0,  4, 0.25)
-		walk := mb.animation_range(sheet, 4,  6, 0.10)
-		jump := mb.animation_range(sheet, 10, 6, 0.05)
+		idle := mb.animation_range(sheet, 67,  74, 0.20)   // 8 frames
+		walk := mb.animation_range(sheet, 95, 106, 0.10)   // 12 frames
+
+	**`last` is the final frame, not a count.** This took a `count` first, and
+	every call site written against it got the same thing wrong: the numbers a
+	game has are the ones printed beside a frame listing, so `(67, 74)` is what
+	somebody writes when they mean frames 67 through 74. Reading it as a count
+	gave them 74 frames -- most of the sheet -- and the clamp below quietly made
+	that legal. Two procedures, one counting and one not, would only have moved
+	the coin flip to the call site.
 
 	A view, not a copy: the returned clip points at the same texture, so this
 	costs no upload and no VRAM, and a game may make as many as it likes.
@@ -292,25 +300,29 @@ natural_less :: proc(a, b: string) -> bool {
 	sprites, and the reason `destroy_animation_clip` takes the clip rather than
 	the sprite.
 
-	`seconds_per_frame` of 0 keeps the sheet's, which is usually right for
-	ranges cut from one animation and usually wrong for ranges that are different
-	moves -- a walk and a jump rarely run at the same rate.
+	`seconds_per_frame` of 0 keeps the sheet's, which is usually right for ranges
+	cut from one animation and usually wrong for ranges that are different moves
+	-- a walk and a jump rarely run at the same rate.
 
-	A range is clamped to the frames that exist rather than refused, because the
-	common way to get this wrong is an off-by-one at the end of a sheet, and a
-	clip one frame short is a great deal easier to see than a silent failure.
+	A range is clamped rather than refused, because the common way to get this
+	wrong is an off-by-one at the end of a sheet, and a clip one frame short is a
+	great deal easier to see than a silent failure. `last` before `first` gives
+	the single frame `first`, which is visibly stuck rather than empty.
 */
 animation_range :: proc(
 	clip:              AnimationClip,
-	start:             i32,
-	count:             i32,
+	first:             i32,
+	last:              i32,
 	seconds_per_frame: f32 = 0,
 ) -> AnimationClip {
-	total := clip.cols * clip.rows
+	total := max(clip.cols * clip.rows, 1)
+
+	begin := clamp(first, 0, total - 1)
+	end   := clamp(last,  begin, total - 1)
 
 	out := clip
-	out.frame_start = clamp(start, 0, max(total - 1, 0))
-	out.frame_count = clamp(count, 1, max(total - out.frame_start, 1))
+	out.frame_start = begin
+	out.frame_count = end - begin + 1
 
 	if seconds_per_frame > 0 do out.seconds_per_frame = seconds_per_frame
 

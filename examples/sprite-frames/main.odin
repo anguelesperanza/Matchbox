@@ -28,10 +28,11 @@ main :: proc() {
 	coin := matchbox.animated_sprite_of(clip, scale = 4)
 	coin.position = {480 - coin.size.x, 240 - coin.size.y}
 
-	// Half the sheet, at a third of the speed. A range is a view onto the same
+	// The first four frames, at a third of the speed. The bounds are first and
+	// last, inclusive. A range is a view onto the same
 	// texture -- no second upload -- which is how a walk, an idle and a jump come
 	// off one sheet. Destroy the sheet only; the ranges share its texture.
-	half := matchbox.animation_range(clip, 0, 4, 0.25)
+	half := matchbox.animation_range(clip, 0, 3, 0.25)
 	slow := matchbox.animated_sprite_of(half, scale = 2)
 	slow.position = {760, 400}
 

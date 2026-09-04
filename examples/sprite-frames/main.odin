@@ -9,22 +9,16 @@ main :: proc() {
 	// Without this, a frame that failed to decode would be logged nowhere.
 	context.logger = matchbox.mbi.logger
 
-	// Eight separate files rather than one strip, which is what an exporter that
-	// numbers its output gives you. A slice of slices cannot be a `::` constant,
-	// so this is a local. `load_animation_frames` packs them into a sheet at
-	// load, and everything after that is the ordinary animation API.
-	coin_frames := [][]byte{
-		#load("assets/coin_0.png"),
-		#load("assets/coin_1.png"),
-		#load("assets/coin_2.png"),
-		#load("assets/coin_3.png"),
-		#load("assets/coin_4.png"),
-		#load("assets/coin_5.png"),
-		#load("assets/coin_6.png"),
-		#load("assets/coin_7.png"),
-	}
-
-	clip, ok := matchbox.load_animation_frames(coin_frames, 0.08)
+	// A folder of separate files rather than one strip, which is what an exporter
+	// that numbers its output gives you. `#load_directory` is a compile-time
+	// builtin so the path has to be a literal written here; the result is a
+	// local, because it is no more a constant than a slice literal is.
+	//
+	// load_animation_directory skips anything that is not an image and orders
+	// what is left so that coin_10 would follow coin_9 rather than coin_1.
+	// `load_animation_frames` is the explicit form when the frames are named
+	// individually or come from more than one place.
+	clip, ok := matchbox.load_animation_directory(#load_directory("assets"), 0.08)
 	if !ok do return
 	defer matchbox.destroy_animation_clip(&clip)
 

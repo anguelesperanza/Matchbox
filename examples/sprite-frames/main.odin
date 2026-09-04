@@ -22,22 +22,15 @@ main :: proc() {
 	if !ok do return
 	defer matchbox.destroy_animation_clip(&clip)
 
-	// switch_animation sizes the sprite from the clip, so the frame size is not
-	// written out here and cannot drift from the art.
-	coin: matchbox.AnimatedSprite
-	coin.scale = 4
-	coin.pivot = {0.5, 0.5}
-	coin.tint  = matchbox.WHITE
-	matchbox.switch_animation(&coin, clip)
-	coin.position = {480 - coin.size.x * 0.5, 240 - coin.size.y * 0.5}
+	// Sized from the clip, so the frame size is never written out here and cannot
+	// drift from the art. `position` is the top-left: draw_animated_sprite adds
+	// pivot * size, so a centred pivot draws half a frame right and down of it.
+	coin := matchbox.animated_sprite_of(clip, scale = 4)
+	coin.position = {480 - coin.size.x, 240 - coin.size.y}
 
 	// The same clip on a second sprite, running at its own speed: a clip holds
 	// the art, a sprite holds where it has got to.
-	slow: matchbox.AnimatedSprite
-	slow.scale = 2
-	slow.pivot = {0.5, 0.5}
-	slow.tint  = matchbox.WHITE
-	matchbox.switch_animation(&slow, clip)
+	slow := matchbox.animated_sprite_of(clip, scale = 2)
 	slow.clip.seconds_per_frame = 0.25
 	slow.position = {760, 400}
 

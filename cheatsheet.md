@@ -2073,7 +2073,7 @@ animation_range :: proc(
 	seconds_per_frame: f32 = 0,
 ) -> AnimationClip
 ```
-A stretch of a sheet as a clip of its own -- walk, idle, jump, all off one set of frames.
+A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of frames -- clamped to the frames the sheet actually has.
 
 ```odin
 animated_sprite_of :: proc(

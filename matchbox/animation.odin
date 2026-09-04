@@ -275,8 +275,8 @@ natural_less :: proc(a, b: string) -> bool {
 }
 
 /*
-	A stretch of a sheet as a clip of its own -- walk, idle, jump, all off one
-	set of frames.
+	A stretch of a sheet as a clip of its own -- walk, idle and jump off one set
+	of frames -- clamped to the frames the sheet actually has.
 
 		sheet, _ := mb.load_animation_directory(#load_directory("art/hero"), 0.1)
 		idle := mb.animation_range(sheet, 0,  4, 0.25)

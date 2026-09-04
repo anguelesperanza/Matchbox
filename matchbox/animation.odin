@@ -1,7 +1,10 @@
 package matchbox
 
+import "base:runtime"
+
 import "core:log"
 import "core:slice"
+import "core:strings"
 
 
 // -----------------------------------------------------------------------
@@ -166,6 +169,109 @@ load_animation_frames :: proc(
 		frame_w           = f32(frame_w),
 		frame_h           = f32(frame_h),
 	}, true
+}
+
+/*
+	A clip from a whole folder of frames, in the order a person would read them.
+
+	`#load_directory` is a compile-time builtin and needs a literal path, so it
+	has to be written at the call site -- matchbox cannot call it for you:
+
+		clip, ok := mb.load_animation_directory(#load_directory("art/walk"), 0.1)
+
+	**Two things make the raw builtin's output unusable**, and both are handled
+	here. It returns *every* file in the folder, so a stray `notes.txt` or a
+	`.psd` fails the load. And it orders lexicographically, which puts `walk_10`
+	before `walk_2` -- an animation that plays its frames in the wrong order, out
+	of a folder that looks perfectly sensible in a file browser.
+
+	Anything not matching `suffixes` is skipped rather than treated as an error:
+	a folder with a readme in it is normal, and refusing to load would be less
+	use than ignoring it. The remainder are sorted so that digits inside a name
+	compare by value.
+
+	Note that `#load_directory` bakes **every** file in the folder into the
+	executable, including the ones skipped here. Keep `.psd` sources and working
+	files somewhere else, or they ship too.
+
+	`load_animation_frames` is the explicit form, for frames named individually
+	or assembled from more than one place.
+*/
+load_animation_directory :: proc(
+	files:             []runtime.Load_Directory_File,
+	seconds_per_frame: f32,
+	columns:           i32 = 0,
+	suffixes:          []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"},
+) -> (clip: AnimationClip, ok: bool) {
+	keep := make([dynamic]runtime.Load_Directory_File, 0, len(files), context.temp_allocator)
+
+	for file in files {
+		lower := strings.to_lower(file.name, context.temp_allocator)
+		for suffix in suffixes {
+			if strings.has_suffix(lower, suffix) {
+				append(&keep, file)
+				break
+			}
+		}
+	}
+
+	if len(keep) == 0 {
+		log.errorf("load_animation_directory: none of the %v file(s) look like images", len(files))
+		return {}, false
+	}
+
+	slice.sort_by(keep[:], proc(a, b: runtime.Load_Directory_File) -> bool {
+		return natural_less(a.name, b.name)
+	})
+
+	frames := make([][]byte, len(keep), context.temp_allocator)
+	for file, i in keep do frames[i] = file.data
+
+	return load_animation_frames(frames, seconds_per_frame, columns)
+}
+
+/*
+	Orders names the way a person expects: "walk_2" before "walk_10".
+
+	A plain string compare puts "10" before "2", because it compares '1' against
+	'2' and stops. Frames are numbered, so a plain compare is wrong for exactly
+	the case this package cares about, and wrong in a way that looks like a
+	rigging or export problem rather than a sorting one.
+
+	Runs of digits compare by value, everything else byte by byte. Leading zeros
+	are skipped first, so a folder that mixes "07" and "7" still orders sensibly
+	rather than by how the artist happened to pad that day.
+*/
+@(private)
+natural_less :: proc(a, b: string) -> bool {
+	i, j := 0, 0
+
+	for i < len(a) && j < len(b) {
+		digit_a := a[i] >= '0' && a[i] <= '9'
+		digit_b := b[j] >= '0' && b[j] <= '9'
+
+		if digit_a && digit_b {
+			for i < len(a) - 1 && a[i] == '0' && a[i + 1] >= '0' && a[i + 1] <= '9' do i += 1
+			for j < len(b) - 1 && b[j] == '0' && b[j + 1] >= '0' && b[j + 1] <= '9' do j += 1
+
+			start_a, start_b := i, j
+			for i < len(a) && a[i] >= '0' && a[i] <= '9' do i += 1
+			for j < len(b) && b[j] >= '0' && b[j] <= '9' do j += 1
+
+			// More digits means a bigger number, once leading zeros are gone.
+			if (i - start_a) != (j - start_b) do return (i - start_a) < (j - start_b)
+			if a[start_a:i] != b[start_b:j]   do return a[start_a:i] < b[start_b:j]
+			continue
+		}
+
+		if a[i] != b[j] do return a[i] < b[j]
+
+		i += 1
+		j += 1
+	}
+
+	// Whichever has more left is the longer name, and sorts after.
+	return len(a) - i < len(b) - j
 }
 
 // Gives the clip's sheet texture back to the GPU. A clip shared between

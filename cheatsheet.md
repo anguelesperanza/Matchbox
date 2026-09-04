@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 338 of them -- with its arguments
+Every public procedure in the package -- 339 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -23,7 +23,7 @@ any.
 - [3D cameras](#3d-cameras) -- 45
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 30
+- [Animation](#animation) -- 31
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 12
@@ -2053,6 +2053,17 @@ load_animation_frames :: proc(
 )
 ```
 A clip from frames that arrived as separate image files.
+
+```odin
+load_animation_directory :: proc(
+	files: []runtime.Load_Directory_File,
+	seconds_per_frame: f32,
+	columns: i32 = 0,
+	suffixes: []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) -> (clip: AnimationClip,
+	ok: bool,
+)
+```
+A clip from a whole folder of frames, in the order a person would read them.
 
 ```odin
 destroy_animation_clip :: proc(clip: ^AnimationClip)

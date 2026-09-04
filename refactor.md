@@ -283,8 +283,16 @@ first and the risky work lands on a base that is already consistent.
 | 1 -- type names | **done**, `69ff605` -- 74 renames, 21 files |
 | 2 -- `create_x` / `destroy_x` | **done**, `669ce87` -- 20 renames, 27 files. `destroy` group audited: 15 public members, 4 privates correctly outside |
 | 3 -- `is_x` / `get_x` | **done**, `0930c9e` -- 30 renames, 39 files |
-| 4 -- file moves | next |
-| 5-9 | not started |
+| 4 -- file moves | **done**, `14fa9c7` -- `utility.odin` created, `timer`/`lerp`/`look_at` deleted, clock logic out of `poll_events` |
+| 5 -- input onto SDL values | next |
+| 6-9 | not started |
+
+Step 4's clock extraction was the one place a silent behavioural change could
+have hidden, so it was checked line by line: `clock_wait_for_frame` and
+`clock_tick` are byte-for-byte the original inline code, and the call order in
+`poll_events` -- limiter, then `touches_end_frame`, then tick -- is preserved.
+That order is a constraint, not an accident, and is now commented at both the
+call site and in `clock.odin`.
 
 Two judgement calls made during the run, easy to reverse if either is wrong:
 

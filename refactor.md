@@ -49,11 +49,16 @@ reasoning is wanted back:
 - `candidates.md` -- the intake list of things a game had written for itself.
   Every entry is DONE, "probably not" (decided against), or "already done".
 
-**`improvements.md` stays, trimmed.** Decided: keep whatever is still an
-improvement waiting to be made -- the `# Not Started` backlog (the clip-aware
-hit test, batching quads into one draw, window sizing, reducing system usage)
-and the Android account `README.md` links into. Everything else goes, which
-means the ~1200-line `# Completed` log. **Not done yet.**
+**`improvements.md` stays, trimmed -- done.** The `# Completed` log was cut
+separately, leaving only the live `# Not Started` backlog (the clip-aware hit
+test, batching quads into one draw, the window-sizing entry, reducing system
+usage) and the Android account `README.md` links into.
+
+One dangling cross-reference went with the cut and has been repaired: the
+batching entry pointed at "the Completed entry" for the removal of redundant
+binds, which no longer exists. It now says what happened instead of pointing
+at where it used to be written down -- the same repair the deleted planning
+documents needed.
 
 ## Decisions, round two (2026-09-04)
 
@@ -495,17 +500,26 @@ behind the script's "DXIL is Windows-only in practice" comment. Reasonably
 confident but not verified against this toolchain; worth a check before
 relying on it.
 
-**What `build_shaders.sh` should do about it** -- pick one, later:
+**Left open on purpose.** Changing `build_shaders.sh` was considered and set
+aside -- the problem is worth solving, but the script is only one of the
+places it could be solved and the others have not been explored yet. So this
+entry records the *hazard* rather than prescribing the fix.
 
-- At minimum, **say so loudly** when it skips DXIL: name the `.dxil` files it
-  has just left stale and warn against committing shader-code changes from
-  this platform. Right now it skips silently.
-- Better, **tell a comment edit from a code edit** -- strip comments before
-  hashing the `.hlsl`, and only warn when the hash of the actual code moved.
-  That distinction is exactly what made step 1 safe, and the script currently
-  cannot make it.
-- Or **gate committing rather than building**: a check that fails when a
+Ideas that came up, none chosen, none ruled out:
+
+- Have the script **say so loudly** when it skips DXIL, naming the `.dxil`
+  files it has just left stale. It skips silently today.
+- **Tell a comment edit from a code edit** -- hash the `.hlsl` with comments
+  stripped and only warn when the code hash moved. That distinction is what
+  made step 1's shader edits safe, and nothing automated can currently make
+  it.
+- **Gate committing rather than building** -- a check that fails when a
   tracked `.hlsl`'s code hash disagrees with what its `.dxil` was built from.
+
+Other angles worth weighing before picking any of them: whether both formats
+need committing at all, whether DXIL could be produced somewhere other than a
+developer's machine, and whether the pair could be checked in CI rather than
+by a script someone has to remember to run.
 
 ### Deferred past this run
 

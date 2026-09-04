@@ -55,7 +55,8 @@ be re-read rather than re-argued, and so the next person to notice "there is no
 batching" finds out what it is worth before spending a week on it.
 
 Every quad is its own draw call with its own vertex uniform push. Redundant binds
-are gone -- see the Completed entry -- and what is left is one
+were removed separately -- the renderer's bind cache means a run of identical
+draws describes its pipeline and buffers once -- and what is left is one
 PushGPUVertexUniformData and one DrawGPUIndexedPrimitives per quad, at about
 0.16 us each.
 

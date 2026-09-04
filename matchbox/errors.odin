@@ -63,7 +63,6 @@ Argument_Error :: enum {
 	None = 0,
 	Empty_Size,        // a width or height of zero or less
 	Not_Enough_Pixels, // fewer bytes than width * height * 4
-	Wrong_Pixel_Count, // an update that does not match the buffer it is for
 	No_Geometry,       // a mesh with no vertices, or no indices
 }
 

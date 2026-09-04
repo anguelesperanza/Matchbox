@@ -127,7 +127,20 @@ create_pixel_buffer :: proc(width, height: i32) -> (Pixel_Buffer, Error) {
 pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) -> Error {
 	size := int(buffer.width) * int(buffer.height) * 4
 
-	if len(pixels) * size_of(T) != size do return Argument_Error.Wrong_Pixel_Count
+	/*
+		An abort rather than a returned error, unlike the map failure below.
+
+		The two look alike and are not. A transfer buffer can fail to map at
+		any time, for reasons outside the program -- that is a runtime
+		condition and comes back as a `Gpu_Error`. This is the caller handing
+		over an array of the wrong length, and the length is fixed by the
+		buffer's dimensions and the caller's own type: right on the first
+		frame means right on the ten-thousandth. Returning it would make a
+		programming mistake ignorable, which is the opposite of useful, and
+		`Error` is easy to drop on a procedure called every frame.
+	*/
+	ensure(len(pixels) * size_of(T) == size,
+		"pixel_buffer_update was given an array that is not width * height * 4 bytes")
 
 	r := &mbi.renderer
 

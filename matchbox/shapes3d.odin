@@ -18,7 +18,8 @@ package matchbox
 
 	When a shape is drawn thousands of times, or wants its own vertices, the
 	generators in model.odin are the same shapes without the sharing --
-	`cube_model`, `sphere_model` and the rest hand back a Model to keep.
+	`create_cube_model`, `create_sphere_model` and the rest hand back a Model to
+	keep.
 */
 
 // -----------------------------------------------------------------------
@@ -28,34 +29,34 @@ package matchbox
 @(private)
 shapes3d_cube :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_cube.parts == nil do r.unit_cube = cube_model(1)
+	if r.unit_cube.parts == nil do r.unit_cube = create_cube_model(1)
 	return r.unit_cube
 }
 
 @(private)
 shapes3d_cube_wires :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_cube_wires.parts == nil do r.unit_cube_wires = cube_wires_model(1)
+	if r.unit_cube_wires.parts == nil do r.unit_cube_wires = create_cube_wires_model(1)
 	return r.unit_cube_wires
 }
 
 @(private)
 shapes3d_plane :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_plane.parts == nil do r.unit_plane = plane_model(1)
+	if r.unit_plane.parts == nil do r.unit_plane = create_plane_model(1)
 	return r.unit_plane
 }
 
 @(private)
 shapes3d_sphere :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_sphere.parts == nil do r.unit_sphere = sphere_model(1)
+	if r.unit_sphere.parts == nil do r.unit_sphere = create_sphere_model(1)
 	return r.unit_sphere
 }
 
 // Called by cleanup. Everything here is optional, so all of it is a nil check.
 @(private)
-shapes3d_destroy :: proc() {
+destroy_shapes3d :: proc() {
 	r := &mbi.renderer
 
 	if r.unit_cube.parts       != nil do destroy_model(&r.unit_cube)
@@ -157,7 +158,7 @@ draw_grid :: proc(slices: int = 10, spacing: f32 = 1, color: [4]f32 = {1, 1, 1, 
 	if r.grid.parts == nil || r.grid_slices != slices || r.grid_spacing != spacing {
 		if r.grid.parts != nil do destroy_model(&r.grid)
 
-		r.grid         = grid_model(slices, spacing)
+		r.grid         = create_grid_model(slices, spacing)
 		r.grid_slices  = slices
 		r.grid_spacing = spacing
 	}

@@ -104,7 +104,7 @@ main :: proc() {
 	// One slot. Selecting a different card evicts the one before it -- the
 	// shape a full-size card view needs, where the art is far too big to keep
 	// all of it resident and only one is ever on screen.
-	cache := mb.sprite_cache_make(Card, limit = 1)
+	cache := mb.create_sprite_cache(Card, limit = 1)
 	defer mb.destroy(&cache)
 
 	decks: [dynamic]Deck

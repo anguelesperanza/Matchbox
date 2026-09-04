@@ -46,7 +46,7 @@ Sprite_Cache :: struct($Key: typeid) {
 	for and frees them together. A non-zero limit evicts least-recently-used,
 	which is what a game streaming a large atlas set wants.
 */
-sprite_cache_make :: proc($Key: typeid, limit: int = 0, allocator := context.allocator) -> Sprite_Cache(Key) {
+create_sprite_cache :: proc($Key: typeid, limit: int = 0, allocator := context.allocator) -> Sprite_Cache(Key) {
 	return Sprite_Cache(Key){
 		sprites = make(map[Key]^Sprite, allocator = allocator),
 		order   = make([dynamic]Key, allocator = allocator),
@@ -162,7 +162,7 @@ sprite_cache_evict :: proc(cache: ^Sprite_Cache($Key), key: Key) {
 }
 
 // Frees every sprite and the cache's own storage.
-sprite_cache_destroy :: proc(cache: ^Sprite_Cache($Key)) {
+destroy_sprite_cache :: proc(cache: ^Sprite_Cache($Key)) {
 	for _, sprite in cache.sprites {
 		destroy_sprite(sprite)
 		free(sprite)

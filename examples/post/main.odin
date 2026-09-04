@@ -86,7 +86,7 @@ main :: proc() {
 	// The same opening view as examples/lighting, which this scene is.
 	player := [3]f32{0, 0, 5}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		pitch      = math.atan2(f32(-1.0), f32(5.0)),
@@ -123,7 +123,7 @@ main :: proc() {
 
 		// PsxGame's campfire flicker, from stage 5.
 		flicker := 1.0 + math.sin(time * 1.0) * 0.1 + math.sin(time * 0.5) * 0.05
-		mb.set_lights({mb.point_light(
+		mb.set_lights({mb.create_point_light(
 			{math.sin(time * 8.0) * 0.05, 1.0, math.cos(time * 6.0) * 0.05},
 			{clamp(EMBER.r * flicker, 0, 1), clamp(EMBER.g * flicker, 0, 0.31), 0, 1},
 		)})

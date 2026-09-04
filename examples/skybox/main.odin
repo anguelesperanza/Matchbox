@@ -70,13 +70,13 @@ main :: proc() {
 	defer mb.destroy(&panorama)
 	defer mb.destroy(&cubemap)
 
-	cube := mb.cube_model(1)
+	cube := mb.create_cube_model(1)
 	defer mb.destroy(&cube)
 
 	// Six back, level, looking along -z.
 	player := [3]f32{0, 0, 6}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		eye_offset = {0, EYE_HEIGHT, 0},

@@ -345,10 +345,10 @@ animation_range :: proc(
 /*
 	Puts a sprite on the first frame of its clip, uv window included.
 
-	Shared by `animated_sprite_of` and `switch_animation` because they have to
-	agree: a sprite whose `current_frame` says one thing and whose uv window
-	shows another is wrong on screen and right in the debugger, which is the
-	worst pair to chase.
+	Shared by `create_animated_sprite_from_clip` and `switch_animation` because
+	they have to agree: a sprite whose `current_frame` says one thing and whose
+	uv window shows another is wrong on screen and right in the debugger, which
+	is the worst pair to chase.
 
 	The first frame is `frame_start`, not 0. For a range cut out of the middle of
 	a sheet those differ, and using 0 draws a frame belonging to some other
@@ -386,7 +386,7 @@ seat_first_frame :: proc(sprite: ^Animated_Sprite) {
 	no log line to say why. That cost somebody an afternoon, which is why this
 	exists.
 
-		sprite := mb.animated_sprite_of(clip, scale = 4)
+		sprite := mb.create_animated_sprite_from_clip(clip, scale = 4)
 		sprite.position = {100, 100}
 
 	Only `position` is left at zero, because that is a decision rather than an
@@ -398,12 +398,12 @@ seat_first_frame :: proc(sprite: ^Animated_Sprite) {
 	first `update_animation` shows frame 0 rather than a zero-width sample of the
 	sheet's top-left texel.
 
-	`scale` of 0 or less is treated as 1, as `sprite_of` does -- a caller who
-	leaves it out wants a sprite, not an invisible one.
+	`scale` of 0 or less is treated as 1, as `create_sprite_from_mesh` does --
+	a caller who leaves it out wants a sprite, not an invisible one.
 
 	`looping = false` makes it a one-shot -- see `create_animated_sprite`.
 */
-animated_sprite_of :: proc(clip: Animation_Clip, scale: f32 = 1, looping := true) -> Animated_Sprite {
+create_animated_sprite_from_clip :: proc(clip: Animation_Clip, scale: f32 = 1, looping := true) -> Animated_Sprite {
 	final_scale := scale
 	if final_scale <= 0 do final_scale = 1
 
@@ -474,7 +474,7 @@ switch_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping
 // the same signal `update_animator`'s `playing` gives for the skeletal system.
 // Once stopped, further calls recompute the same uv window and do nothing
 // else, so a flip toggled after the fact still takes -- restart with
-// `switch_animation` or `animated_sprite_of`.
+// `switch_animation` or `create_animated_sprite_from_clip`.
 //
 // The 2D one. `update_animator` is the skeletal equivalent.
 update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32) {

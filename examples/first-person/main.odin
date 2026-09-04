@@ -77,7 +77,7 @@ main :: proc() {
 	// behaviour off without needing a flag for it.
 	mb.set_escape_key(.UNKNOWN)
 
-	cube := mb.cube_model(1)
+	cube := mb.create_cube_model(1)
 	defer mb.destroy(&cube)
 
 	// Where the player is standing. The rig follows it and never writes it,
@@ -87,7 +87,7 @@ main :: proc() {
 	// Facing along -z rather than the +x that yaw 0 would give, so the cubes
 	// are in front of the player on the first frame. The eye sits EYE_HEIGHT
 	// above `player`, and the rig adds that itself from here on.
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		eye_offset = {0, EYE_HEIGHT, 0},

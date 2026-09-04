@@ -109,8 +109,8 @@ single slot that evicts, which is what full-size art too big to keep around
 wants. Eviction is least recently used, and a hit counts as a use.
 
 ```odin
-cache := matchbox.sprite_cache_make(Card, limit = 1)
-defer matchbox.sprite_cache_destroy(&cache)
+cache := matchbox.create_sprite_cache(Card, limit = 1)
+defer matchbox.destroy_sprite_cache(&cache)
 
 if art := matchbox.sprite_cache_get(&cache, card, path); art != nil {
 	sprite := art^          // a copy: position is yours, the cache keeps its own
@@ -176,7 +176,7 @@ moved past, which saves threading a `y` through every call and adding heights
 back by hand:
 
 ```odin
-l := matchbox.layout_make({24, 24}, 190, 8)
+l := matchbox.create_layout({24, 24}, 190, 8)
 
 if matchbox.button(matchbox.layout_next(&l, 40), "All cards") { ... }
 if matchbox.button(matchbox.layout_next(&l, 40), "Owned")     { ... }
@@ -195,7 +195,7 @@ how many items there are, so a filtered list of three draws three normal cells
 with space to the right rather than three enormous ones.
 
 ```odin
-grid := matchbox.grid_fit(area, {130, 180}, len(cards), 10)
+grid := matchbox.create_grid(area, {130, 180}, len(cards), 10)
 
 for card, i in cards {
 	cell := matchbox.grid_cell(grid, i)

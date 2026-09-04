@@ -81,7 +81,7 @@ main :: proc() {
 	// Well back and high up, looking down the line of props.
 	player := [3]f32{-2, 0, 18}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		pitch      = math.atan2(f32(-3.5), f32(18.0)),

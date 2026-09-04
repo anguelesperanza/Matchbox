@@ -324,7 +324,7 @@ draw_model_at :: proc(
 	tint:     [4]f32 = WHITE,
 	animator: ^Animator = nil,
 ) {
-	draw_model(model, transform_at(position, scale = scale), tint, animator)
+	draw_model(model, create_transform(position, scale = scale), tint, animator)
 }
 
 /*

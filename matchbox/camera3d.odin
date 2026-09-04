@@ -46,7 +46,7 @@ Camera3D :: struct {
 
 // A camera at `position` looking at `target`, with everything else left to the
 // defaults. The short way to get a scene on screen.
-camera3d_at :: proc(position, target: [3]f32, fov: f32 = 70) -> Camera3D {
+create_camera3d :: proc(position, target: [3]f32, fov: f32 = 70) -> Camera3D {
 	return Camera3D{
 		position   = position,
 		target     = target,
@@ -527,8 +527,8 @@ camera3d_follow :: proc(
 
 // The angles and distance an orbit camera is already at. What to seed yaw,
 // pitch and distance with, for the same reason `camera3d_angles` exists: a
-// camera placed by `camera3d_at` and then driven from zeroed angles jumps on
-// the first frame.
+// camera placed by `create_camera3d` and then driven from zeroed angles jumps
+// on the first frame.
 camera3d_orbit_angles :: proc(camera: Camera3D) -> (yaw, pitch, distance: f32) {
 	yaw, pitch = camera3d_angles(camera)
 	return yaw, pitch, linalg.length(camera.target - camera.position)
@@ -741,8 +741,8 @@ First_Person_Camera :: struct {
 	// this is how far above them it looks from.
 	eye_offset: [3]f32,
 
-	// Tuning, all of it defaulted by `first_person_camera` and none of it looked
-	// at again unless a game changes it.
+	// Tuning, all of it defaulted by `create_first_person_camera` and none of
+	// it looked at again unless a game changes it.
 	sensitivity: f32,
 	pitch_min:   f32,
 	pitch_max:   f32,
@@ -751,15 +751,15 @@ First_Person_Camera :: struct {
 /*
 	A first-person camera, set up and already looking where it was told to.
 
-	Every argument has a default, so `first_person_camera()` is a working camera
-	standing at the origin at eye height. Name the ones you care about:
+	Every argument has a default, so `create_first_person_camera()` is a working
+	camera standing at the origin at eye height. Name the ones you care about:
 
-		rig := mb.first_person_camera(position = spawn, facing = spawn_facing)
+		rig := mb.create_first_person_camera(position = spawn, facing = spawn_facing)
 
 	The camera is seated before this returns, so the rig may be drawn with on the
 	frame it was made rather than on the one after.
 */
-first_person_camera :: proc(
+create_first_person_camera :: proc(
 	position:    [3]f32 = {0, 0, 0},
 	facing:      f32 = 0,
 	eye_offset:  [3]f32 = CAMERA3D_DEFAULTS.eye_offset,
@@ -962,7 +962,7 @@ Third_Person_Camera :: struct {
 	steering:   Camera3D_Steering,
 	turn_speed: f32,
 
-	// Tuning, all of it defaulted by `third_person_camera` and none of it
+	// Tuning, all of it defaulted by `create_third_person_camera` and none of it
 	// looked at again unless a game changes it.
 	sensitivity:  f32,
 	pitch_min:    f32,
@@ -975,10 +975,11 @@ Third_Person_Camera :: struct {
 /*
 	A third-person camera, set up and already pointed at the character.
 
-	Every argument has a default, so `third_person_camera()` is a working camera
-	behind a character standing at the origin. Name the ones you care about:
+	Every argument has a default, so `create_third_person_camera()` is a working
+	camera behind a character standing at the origin. Name the ones you care
+	about:
 
-		rig := mb.third_person_camera(position = spawn, facing = spawn_facing,
+		rig := mb.create_third_person_camera(position = spawn, facing = spawn_facing,
 			shoulder = .RIGHT)
 
 	`yaw` is not an argument. It is seeded from `facing`, which puts the camera
@@ -990,7 +991,7 @@ Third_Person_Camera :: struct {
 	the same frame it was made -- which matters for a loading screen, and for
 	anything that reads `rig.camera` before the first `third_person_follow`.
 */
-third_person_camera :: proc(
+create_third_person_camera :: proc(
 	position:        [3]f32 = {0, 0, 0},
 	facing:          f32 = 0,
 	focus_offset:    [3]f32 = CAMERA3D_DEFAULTS.focus_offset,

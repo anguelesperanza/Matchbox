@@ -74,11 +74,11 @@ as three variables is a game that will one day update two of them.
 The pattern, as `Third_Person_Camera` and `First_Person_Camera` do it:
 
 - one struct holding the state
-- one constructor named after it, with every argument defaulted
+- one `create_` constructor named after it, with every argument defaulted
 - procedures taking a pointer to it
 
 ```odin
-rig := mb.first_person_camera(position = spawn, facing = -math.PI * 0.5)
+rig := mb.create_first_person_camera(position = spawn, facing = -math.PI * 0.5)
 mb.first_person_walk(&rig, &player, speed, dt)
 ```
 

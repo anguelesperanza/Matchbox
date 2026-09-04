@@ -25,7 +25,7 @@ main :: proc() {
 	// Sized from the clip, so the frame size is never written out here and cannot
 	// drift from the art. `position` is the top-left: draw_animated_sprite adds
 	// pivot * size, so a centred pivot draws half a frame right and down of it.
-	coin := matchbox.animated_sprite_of(clip, scale = 4)
+	coin := matchbox.create_animated_sprite_from_clip(clip, scale = 4)
 	coin.position = {480 - coin.size.x, 240 - coin.size.y}
 
 	// The first four frames, at a third of the speed. The bounds are first and
@@ -33,7 +33,7 @@ main :: proc() {
 	// texture -- no second upload -- which is how a walk, an idle and a jump come
 	// off one sheet. Destroy the sheet only; the ranges share its texture.
 	half := matchbox.animation_range(clip, 0, 3, 0.25)
-	slow := matchbox.animated_sprite_of(half, scale = 2)
+	slow := matchbox.create_animated_sprite_from_clip(half, scale = 2)
 	slow.position = {760, 400}
 
 	for matchbox.is_running() {

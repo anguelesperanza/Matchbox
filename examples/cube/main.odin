@@ -55,12 +55,12 @@ main :: proc() {
 	// One cube on the GPU, drawn four times. A model is geometry, not a thing
 	// in the world -- where it goes is the Transform's business, which is what
 	// lets one buffer serve every cube on screen.
-	cube := mb.cube_model(1)
+	cube := mb.create_cube_model(1)
 	defer mb.destroy(&cube)
 
 	// Wide enough to see the orbit go all the way round, high enough to look
 	// slightly down on it so the top faces catch the light.
-	camera := mb.camera3d_at(position = {0, 2.5, 7}, target = {0, 0, 0})
+	camera := mb.create_camera3d(position = {0, 2.5, 7}, target = {0, 0, 0})
 
 	spin: f32
 

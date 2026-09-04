@@ -126,7 +126,7 @@ main :: proc() {
 	// looking slightly down, camera-steered, looking at head height. Facing
 	// -pi/2 is along -z, so the character starts with its back to the camera
 	// and the blocks in front of it.
-	rig := mb.third_person_camera(
+	rig := mb.create_third_person_camera(
 		position = player_position,
 		facing   = -math.PI * 0.5,
 	)

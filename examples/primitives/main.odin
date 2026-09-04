@@ -67,7 +67,7 @@ main :: proc() {
 	// Ten back, level, looking along -z at the boxes.
 	player := [3]f32{0, 0, 10}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		eye_offset = {0, EYE_HEIGHT, 0},

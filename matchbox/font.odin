@@ -453,7 +453,7 @@ font_cache_trim :: proc() {
 
 // Frees every cached size. Called by cleanup; a game does not need to.
 @(private)
-font_cache_destroy :: proc() {
+destroy_font_cache :: proc() {
 	for _, cached in mbi.font_cache.sizes {
 		destroy_font(cached.font)
 		free(cached.font)

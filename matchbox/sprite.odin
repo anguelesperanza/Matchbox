@@ -66,18 +66,18 @@ create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh {
 // executable and works the same inside an Android apk.
 create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
 	mesh := create_mesh(bytes)
-	return sprite_of(mesh, scale)
+	return create_sprite_from_mesh(mesh, scale)
 }
 
 /*A sprite around pixels the game already holds. See create_mesh_from_pixels*/
 create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> Sprite {
 	mesh := create_mesh_from_pixels(pixels, width, height)
-	return sprite_of(mesh, scale)
+	return create_sprite_from_mesh(mesh, scale)
 }
 
 /*The body every sprite gets, whichever way its texture arrived*/
 @(private)
-sprite_of :: proc(mesh: Mesh, scale: f32) -> Sprite {
+create_sprite_from_mesh :: proc(mesh: Mesh, scale: f32) -> Sprite {
 	final_scale := scale
 	if scale <= 0 {
 		final_scale = 1

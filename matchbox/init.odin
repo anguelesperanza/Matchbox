@@ -302,7 +302,7 @@ create_pipeline :: proc(
 			cull_mode  = cull,
 
 			// Counter-clockwise is front, which is what glTF produces and what
-			// cube_model is wound to match.
+			// create_cube_model is wound to match.
 			front_face = .COUNTER_CLOCKWISE,
 
 			// Clip, do not clamp. SDL3 reads this field the way it is named --
@@ -683,7 +683,7 @@ cleanup :: proc() {
 	// Nothing may be released while the GPU is still reading it.
 	_ = sdl.WaitForGPUIdle(device)
 
-	font_cache_destroy()
+	destroy_font_cache()
 	destroy_font(&mbi.font)
 
 	if mbi.renderer.quad_verts   != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.quad_verts)
@@ -727,7 +727,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
 
 	// The generated shapes, if anything ever asked for one.
-	shapes3d_destroy()
+	destroy_shapes3d()
 
 	// Only ever made if the game asked for a 3D pass.
 	if mbi.renderer.depth_texture != nil {

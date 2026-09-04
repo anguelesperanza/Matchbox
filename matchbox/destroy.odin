@@ -41,7 +41,7 @@ destroy :: proc {
 	destroy_render_target,
 	destroy_image,
 	destroy_text_field,
-	sprite_cache_destroy,
+	destroy_sprite_cache,
 }
 
 /*

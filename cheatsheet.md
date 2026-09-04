@@ -527,7 +527,7 @@ Selects a single tile from a sprite sheet by its column and row (0-indexed).
 ### `sprite_cache.odin`
 
 ```odin
-sprite_cache_make :: proc(
+create_sprite_cache :: proc(
 	$Key: typeid,
 	limit: int = 0,
 	allocator := context.allocator) -> Sprite_Cache(Key,
@@ -575,7 +575,7 @@ sprite_cache_evict :: proc(cache: ^Sprite_Cache($Key), key: Key)
 Drops one entry.
 
 ```odin
-sprite_cache_destroy :: proc(cache: ^Sprite_Cache($Key))
+destroy_sprite_cache :: proc(cache: ^Sprite_Cache($Key))
 ```
 Frees every sprite and the cache's own storage.
 
@@ -1375,7 +1375,11 @@ Percentage text for a bar, as "42%".
 ### `layout.odin`
 
 ```odin
-layout_make :: proc(top_left: [2]f32, width: f32, spacing: f32 = 0) -> Layout
+create_layout :: proc(
+	top_left: [2]f32,
+	width: f32,
+	spacing: f32 = 0,
+) -> Layout
 ```
 A column starting at `top_left`, `width` across, with `spacing` between items.
 
@@ -1405,7 +1409,7 @@ layout_height :: proc(layout: ^Layout, from_y: f32) -> f32
 Where the cursor has reached.
 
 ```odin
-grid_fit :: proc(
+create_grid :: proc(
 	area: Rectangle,
 	target: [2]f32,
 	count: int,
@@ -1429,7 +1433,7 @@ How tall the whole grid is, which is what a scroll extent is measured against an
 ### `camera3d.odin`
 
 ```odin
-camera3d_at :: proc(position, target: [3]f32, fov: f32 = 70) -> Camera3D
+create_camera3d :: proc(position, target: [3]f32, fov: f32 = 70) -> Camera3D
 ```
 A camera at `position` looking at `target`, with everything else left to the defaults.
 
@@ -1615,7 +1619,7 @@ aim_rotation :: proc(
 The rotation that points a model along both angles -- yaw and pitch.
 
 ```odin
-first_person_camera :: proc(
+create_first_person_camera :: proc(
 	position: [3]f32 = {0, 0, 0},
 	facing: f32 = 0,
 	eye_offset: [3]f32 = CAMERA3D_DEFAULTS.eye_offset,
@@ -1651,7 +1655,7 @@ first_person_walk :: proc(
 Input, the move, and the aim -- the whole frame, for a body nothing else is driving.
 
 ```odin
-third_person_camera :: proc(
+create_third_person_camera :: proc(
 	position: [3]f32 = {0, 0, 0},
 	facing: f32 = 0,
 	focus_offset: [3]f32 = CAMERA3D_DEFAULTS.focus_offset,
@@ -1731,7 +1735,7 @@ transform_identity :: proc() -> Transform
 A Transform that does nothing: at the origin, unturned, full size.
 
 ```odin
-transform_at :: proc(
+create_transform :: proc(
 	position: [3]f32,
 	rotation := linalg.QUATERNIONF32_IDENTITY,
 	scale: f32 = 1,
@@ -1874,12 +1878,15 @@ A grid of lines on the ground plane, centred on the origin, `slices` squares acr
 ### `light.odin`
 
 ```odin
-point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light
+create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light
 ```
 A point light at `position`.
 
 ```odin
-directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Light
+create_directional_light :: proc(
+	direction: [3]f32,
+	color: [4]f32 = WHITE,
+) -> Light
 ```
 A light shining along `direction`, from nowhere in particular.
 
@@ -1964,7 +1971,7 @@ upload_mesh :: proc(
 Puts one lump of geometry on the GPU.
 
 ```odin
-model_from_mesh :: proc(
+create_model_from_mesh :: proc(
 	vertices: []Vertex3D,
 	indices: []u32,
 	topology := Mesh_Topology.TRIANGLES,
@@ -1978,17 +1985,17 @@ destroy_model :: proc(model: ^Model)
 Gives a model's buffers, textures, skeleton and clips back.
 
 ```odin
-cube_model :: proc(size: f32 = 1) -> Model
+create_cube_model :: proc(size: f32 = 1) -> Model
 ```
 A cube of `size` units, centred on its own origin.
 
 ```odin
-plane_model :: proc(size: f32 = 1) -> Model
+create_plane_model :: proc(size: f32 = 1) -> Model
 ```
 A flat square of `size` units on the ground plane, facing up.
 
 ```odin
-sphere_model :: proc(
+create_sphere_model :: proc(
 	radius: f32 = 1,
 	rings: int = 16,
 	sectors: int = 24,
@@ -1997,12 +2004,12 @@ sphere_model :: proc(
 A sphere of `radius`, built the usual way out of rings of latitude and sectors of longitude.
 
 ```odin
-cube_wires_model :: proc(size: f32 = 1) -> Model
+create_cube_wires_model :: proc(size: f32 = 1) -> Model
 ```
 The twelve edges of a cube, as lines.
 
 ```odin
-grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> Model
+create_grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> Model
 ```
 A grid of lines on the ground plane, centred on the origin.
 
@@ -2077,7 +2084,7 @@ animation_range :: proc(
 A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of frames -- given as the first and last frame, inclusive, and clamped to the frames the sheet actually has.
 
 ```odin
-animated_sprite_of :: proc(
+create_animated_sprite_from_clip :: proc(
 	clip: Animation_Clip,
 	scale: f32 = 1,
 	looping := true,

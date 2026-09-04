@@ -41,7 +41,12 @@ Mouse :: struct {
 	x:       f32,
 	y:       f32,
 	wheel:   [2]f32,
-	buttons: [Mouse_Button]Key_State,
+
+	// Keyed by SDL's own enum rather than one of ours, which is the same call
+	// Matchbox makes for keys (`sdl.Scancode`) and gamepad buttons
+	// (`sdl.GamepadButton`). It covers `.X1` and `.X2` -- the side buttons --
+	// as well as the usual three.
+	buttons: [sdl.MouseButtonFlag]Key_State,
 
 	// Whether something on top has claimed the pointer this frame. Per-frame
 	// like `wheel`, and false again on the next poll_events.
@@ -53,12 +58,6 @@ Mouse :: struct {
 	// Without it, the click that picks an option out of an open list also
 	// lands on whatever that list was covering.
 	captured: bool,
-}
-
-Mouse_Button :: enum {
-	LEFT,
-	MIDDLE,
-	RIGHT,
 }
 
 Input :: struct {
@@ -167,16 +166,21 @@ poll_events :: proc() {
 			{
 				event := event.button
 
-				mb: Mouse_Button
-				valid := true
-				switch event.button {
-				case sdl.BUTTON_LEFT:   mb = .LEFT
-				case sdl.BUTTON_MIDDLE: mb = .MIDDLE
-				case sdl.BUTTON_RIGHT:  mb = .RIGHT
-				case:                   valid = false
-				}
+				/*
+					SDL numbers its buttons from 1 and `MouseButtonFlag` from 0
+					-- the enum is literally declared `LEFT = 1 - 1` and so on
+					-- so the whole mapping is a subtraction rather than the
+					five-arm switch it would otherwise be.
 
-				if valid {
+					The range check is not paranoia. `button` is a `Uint8`
+					index and a mouse with more than five buttons reports
+					higher ones, which have no enum member; indexing the array
+					with one would read past the end. The old three-arm switch
+					dropped those on the floor along with `.X1` and `.X2`.
+				*/
+				if event.button >= sdl.BUTTON_LEFT && event.button <= sdl.BUTTON_X2 {
+					mb := sdl.MouseButtonFlag(event.button - 1)
+
 					if event.type == .MOUSE_BUTTON_DOWN {
 						mbi.input.mouse.buttons[mb].pressed  = true
 						mbi.input.mouse.buttons[mb].pressing = true
@@ -425,18 +429,22 @@ get_clipboard_text :: proc(allocator := context.allocator) -> string {
 }
 
 // True only on the frame the button went down. The mouse's `is_key_pressed`.
-is_mouse_pressed :: proc(button:Mouse_Button) -> bool {
+//
+// The button is SDL's own `.LEFT`, `.MIDDLE`, `.RIGHT`, `.X1` or `.X2`, the
+// last two being the side buttons a thumb reaches. Odin infers the enum, so
+// `is_mouse_pressed(.LEFT)` needs no import of its own.
+is_mouse_pressed :: proc(button: sdl.MouseButtonFlag) -> bool {
 	return mbi.input.mouse.buttons[button].pressed
 }
 
 // True every frame the button is down. What a drag reads.
-is_mouse_held :: proc(button:Mouse_Button) -> bool {
+is_mouse_held :: proc(button: sdl.MouseButtonFlag) -> bool {
 	return mbi.input.mouse.buttons[button].pressing
 }
 
 // True only on the frame the button came back up. What ends a drag, and what
 // a click-to-place wants rather than the press.
-is_mouse_released :: proc(button:Mouse_Button) -> bool {
+is_mouse_released :: proc(button: sdl.MouseButtonFlag) -> bool {
 	return mbi.input.mouse.buttons[button].released
 }
 

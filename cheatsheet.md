@@ -223,17 +223,17 @@ get_clipboard_text :: proc(allocator := context.allocator) -> string
 The clipboard's contents, or "" when it holds no text.
 
 ```odin
-is_mouse_pressed :: proc(button:Mouse_Button) -> bool
+is_mouse_pressed :: proc(button: sdl.MouseButtonFlag) -> bool
 ```
 True only on the frame the button went down.
 
 ```odin
-is_mouse_held :: proc(button:Mouse_Button) -> bool
+is_mouse_held :: proc(button: sdl.MouseButtonFlag) -> bool
 ```
 True every frame the button is down.
 
 ```odin
-is_mouse_released :: proc(button:Mouse_Button) -> bool
+is_mouse_released :: proc(button: sdl.MouseButtonFlag) -> bool
 ```
 True only on the frame the button came back up.
 

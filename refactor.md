@@ -285,8 +285,9 @@ first and the risky work lands on a base that is already consistent.
 | 3 -- `is_x` / `get_x` | **done**, `0930c9e` -- 30 renames, 39 files |
 | 4 -- file moves | **done**, `14fa9c7` -- `utility.odin` created, `timer`/`lerp`/`look_at` deleted, clock logic out of `poll_events` |
 | 5 -- input onto SDL values | **done**, `415800f` -- `Mouse_Button` deleted for `sdl.MouseButtonFlag` |
-| 6 -- small dedupe | next |
-| 7-9 | not started |
+| 6 -- small dedupe | **done**, `7477aee` -- one glyph walker, `linalg.length` ×3, net -17 lines |
+| 7 -- one LRU with frame guard | next |
+| 8-9 | not started |
 
 **Step 5 fixed a real bug, not just a naming inconsistency.** The old handler
 switched SDL's button id into the three-member enum and set `valid = false`

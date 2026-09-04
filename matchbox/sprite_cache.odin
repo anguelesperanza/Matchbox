@@ -24,7 +24,6 @@ package matchbox
 	how one is given back.
 */
 
-import "core:log"
 
 /*
 	`limit` is how many sprites may be resident. Zero means no limit, which is

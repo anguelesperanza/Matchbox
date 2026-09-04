@@ -42,7 +42,7 @@ main :: proc() {
 		// ---- the menu column ---------------------------------------------
 		// Rebuilt every frame. The cursor holds no state between them, which
 		// is the point: there is nothing to keep in sync.
-		l := matchbox.layout_make({24, 24}, 190, 8)
+		l := matchbox.create_layout({24, 24}, 190, 8)
 
 		matchbox.layout_text(&l, font, "Deck")
 		matchbox.layout_space(&l, 6)
@@ -81,7 +81,7 @@ main :: proc() {
 		inner.position += {GAP, GAP}
 		inner.size     -= {GAP * 2, GAP * 2}
 
-		grid := matchbox.grid_fit(inner, CARD, CARDS, GAP)
+		grid := matchbox.create_grid(inner, CARD, CARDS, GAP)
 
 		scroll -= matchbox.get_mouse_wheel().y * 40
 		scroll = clamp(scroll, 0, max(0, matchbox.grid_height(grid) - inner.size.y))

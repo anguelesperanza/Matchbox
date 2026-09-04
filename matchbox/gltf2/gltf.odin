@@ -1447,10 +1447,11 @@ mesh_primitives_parse :: proc(array: json.Array) -> (res: []Mesh_Primitive, err:
                 // name to accessor index exactly like `attributes`.
                 //
                 // Skipped rather than parsed, because Matchbox has nothing to
-                // do with the answer: morph targets are blend shapes, blend
-                // shapes need a shader that interpolates between them, and
-                // that is the same feature as skeletal animation, which 3d.md
-                // lists under "Not doing". The mesh still loads -- its base
+                // do with the answer: morph targets are blend shapes, and
+                // blend shapes need a shader that interpolates between them,
+                // which nothing here does -- the skinning path deforms a mesh
+                // by a skeleton, not by weighted targets. The mesh still
+                // loads -- its base
                 // POSITION and NORMAL are what `model_load.odin` reads -- and
                 // arrives in its neutral pose, which is the right answer for
                 // an engine that cannot blend it into any other.

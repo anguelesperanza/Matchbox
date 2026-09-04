@@ -41,7 +41,12 @@ Mouse :: struct {
 	x:       f32,
 	y:       f32,
 	wheel:   [2]f32,
-	buttons: [Mouse_Button]Key_State,
+
+	// Keyed by SDL's own enum rather than one of ours, which is the same call
+	// Matchbox makes for keys (`sdl.Scancode`) and gamepad buttons
+	// (`sdl.GamepadButton`). It covers `.X1` and `.X2` -- the side buttons --
+	// as well as the usual three.
+	buttons: [sdl.MouseButtonFlag]Key_State,
 
 	// Whether something on top has claimed the pointer this frame. Per-frame
 	// like `wheel`, and false again on the next poll_events.
@@ -53,12 +58,6 @@ Mouse :: struct {
 	// Without it, the click that picks an option out of an open list also
 	// lands on whatever that list was covering.
 	captured: bool,
-}
-
-Mouse_Button :: enum {
-	LEFT,
-	MIDDLE,
-	RIGHT,
 }
 
 Input :: struct {
@@ -167,16 +166,21 @@ poll_events :: proc() {
 			{
 				event := event.button
 
-				mb: Mouse_Button
-				valid := true
-				switch event.button {
-				case sdl.BUTTON_LEFT:   mb = .LEFT
-				case sdl.BUTTON_MIDDLE: mb = .MIDDLE
-				case sdl.BUTTON_RIGHT:  mb = .RIGHT
-				case:                   valid = false
-				}
+				/*
+					SDL numbers its buttons from 1 and `MouseButtonFlag` from 0
+					-- the enum is literally declared `LEFT = 1 - 1` and so on
+					-- so the whole mapping is a subtraction rather than the
+					five-arm switch it would otherwise be.
 
-				if valid {
+					The range check is not paranoia. `button` is a `Uint8`
+					index and a mouse with more than five buttons reports
+					higher ones, which have no enum member; indexing the array
+					with one would read past the end. The old three-arm switch
+					dropped those on the floor along with `.X1` and `.X2`.
+				*/
+				if event.button >= sdl.BUTTON_LEFT && event.button <= sdl.BUTTON_X2 {
+					mb := sdl.MouseButtonFlag(event.button - 1)
+
 					if event.type == .MOUSE_BUTTON_DOWN {
 						mbi.input.mouse.buttons[mb].pressed  = true
 						mbi.input.mouse.buttons[mb].pressing = true
@@ -245,65 +249,16 @@ poll_events :: proc() {
 		}
 	}
 
-	/*
-		Frame limiting, against an absolute deadline.
-
-		Two things were wrong with waiting for "the frame time minus however long
-		this frame took". The wait went through sdl.Delay, which takes whole
-		milliseconds, so a rate that is not a whole number of them -- a Game Boy
-		frame is 16.742706 ms -- lost the remainder every frame. And, which
-		matters more, nothing ever made up for a wait that came back late: the
-		error was measured fresh each frame and any overshoot was simply kept.
-
-		Measured over 180 frames at a Game Boy's 16.742706 ms, that ran 1.4 to
-		1.6 percent fast -- about 60.6 fps against a target of 59.7275, and
-		repeatable to within a fifth of a percent run to run, so it was the model
-		and not noise. The version below comes in at 0.22 percent under.
-
-		So the deadline is absolute and advances by exactly one period whatever
-		the last frame cost, which lets a long frame be followed by a short wait
-		and leaves the average where it was asked to be. DelayPrecise takes
-		nanoseconds and spins down the last fraction rather than handing the whole
-		wait to the scheduler.
-
-		The catch-up limit is what keeps that from turning into a stampede. A
-		window dragged for two seconds would otherwise leave a deadline two
-		seconds in the past and a hundred frames owed, and the loop would run flat
-		out with no wait at all trying to serve them. Past four frames behind the
-		debt is written off and the deadline starts again from now.
-	*/
-	if mbi.target_frame_time > 0 && mbi.ts_freq > 0 {
-		period := u64(f64(mbi.target_frame_time) * f64(mbi.ts_freq))
-		now    := sdl.GetPerformanceCounter()
-
-		switch {
-		case mbi.next_frame_ts == 0, now > mbi.next_frame_ts + period * 4:
-			mbi.next_frame_ts = now + period
-
-		case now < mbi.next_frame_ts:
-			wait := f64(mbi.next_frame_ts - now) / f64(mbi.ts_freq)
-			sdl.DelayPrecise(u64(wait * 1_000_000_000))
-			fallthrough
-
-		case:
-			mbi.next_frame_ts += period
-		}
-	}
+	// Sleeps out whatever is left of the frame's budget. See clock.odin -- this
+	// has to happen before the touch state is closed off below, which is why
+	// the clock's two halves are two procedures rather than one.
+	clock_wait_for_frame()
 
 	// After every event has been seen, so a tap that starts and ends inside one
 	// frame is still visible to the frame it happened in.
 	touches_end_frame()
 
-	last_ts := mbi.now_ts
-	mbi.now_ts = sdl.GetPerformanceCounter()
-
-	// Seconds elapsed since the previous poll_events, clamped so a slow/stalled
-	// frame can't teleport everything. Without this, delta_time stays 0 and the
-	// whole game appears frozen on the first frame.
-	mbi.delta_time = min(
-		mbi.max_delta_time,
-		f32(f64((mbi.now_ts - last_ts) * 1000) / f64(mbi.ts_freq)) / 1000.0,
-	)
+	clock_tick()
 }
 
 // Mouse position in logical screen space, matching the coordinates you draw
@@ -360,7 +315,7 @@ set_cursor_locked :: proc(locked: bool) {
 }
 
 // Whether the pointer is currently locked to the window.
-cursor_locked :: proc() -> bool {
+is_cursor_locked :: proc() -> bool {
 	return sdl.GetWindowRelativeMouseMode(mbi.window)
 }
 
@@ -382,7 +337,7 @@ is_key_pressed :: proc(key:sdl.Scancode) -> bool {
 }
 
 // True every frame the key is down, including the first. What movement wants,
-// and what to multiply by `delta_time`.
+// and what to multiply by `get_delta_time`.
 is_key_held :: proc(key:sdl.Scancode) -> bool {
 	return mbi.input.keys[key].pressing
 }
@@ -474,18 +429,22 @@ get_clipboard_text :: proc(allocator := context.allocator) -> string {
 }
 
 // True only on the frame the button went down. The mouse's `is_key_pressed`.
-is_mouse_pressed :: proc(button:Mouse_Button) -> bool {
+//
+// The button is SDL's own `.LEFT`, `.MIDDLE`, `.RIGHT`, `.X1` or `.X2`, the
+// last two being the side buttons a thumb reaches. Odin infers the enum, so
+// `is_mouse_pressed(.LEFT)` needs no import of its own.
+is_mouse_pressed :: proc(button: sdl.MouseButtonFlag) -> bool {
 	return mbi.input.mouse.buttons[button].pressed
 }
 
 // True every frame the button is down. What a drag reads.
-is_mouse_held :: proc(button:Mouse_Button) -> bool {
+is_mouse_held :: proc(button: sdl.MouseButtonFlag) -> bool {
 	return mbi.input.mouse.buttons[button].pressing
 }
 
 // True only on the frame the button came back up. What ends a drag, and what
 // a click-to-place wants rather than the press.
-is_mouse_released :: proc(button:Mouse_Button) -> bool {
+is_mouse_released :: proc(button: sdl.MouseButtonFlag) -> bool {
 	return mbi.input.mouse.buttons[button].released
 }
 
@@ -505,7 +464,7 @@ capture_mouse :: proc() {
 
 	A modal is what needs this. It takes the pointer at the top of the frame so
 	nothing underneath answers a click, and then has to give it back before it
-	draws its own buttons -- which ask mouse_captured() like every other button
+	draws its own buttons -- which ask is_mouse_captured() like every other button
 	and would otherwise be as dead as the screen behind them.
 */
 release_mouse :: proc() {
@@ -520,7 +479,7 @@ release_mouse :: proc() {
 	Order matters: this only knows about widgets that have already run, so the
 	thing that opens out has to be drawn before the things it covers.
 */
-mouse_captured :: proc() -> bool {
+is_mouse_captured :: proc() -> bool {
 	return mbi.input.mouse.captured
 }
 

@@ -18,8 +18,11 @@ package matchbox
 
 	When a shape is drawn thousands of times, or wants its own vertices, the
 	generators in model.odin are the same shapes without the sharing --
-	`cube_model`, `sphere_model` and the rest hand back a Model to keep.
+	`create_cube_model`, `create_sphere_model` and the rest hand back a Model to
+	keep.
 */
+
+import "core:log"
 
 // -----------------------------------------------------------------------
 // The shared shapes
@@ -28,34 +31,56 @@ package matchbox
 @(private)
 shapes3d_cube :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_cube.parts == nil do r.unit_cube = cube_model(1)
+	if r.unit_cube.parts == nil do r.unit_cube = build_shared_shape(create_cube_model(1), "cube")
 	return r.unit_cube
 }
 
 @(private)
 shapes3d_cube_wires :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_cube_wires.parts == nil do r.unit_cube_wires = cube_wires_model(1)
+	if r.unit_cube_wires.parts == nil do r.unit_cube_wires = build_shared_shape(create_cube_wires_model(1), "cube wires")
 	return r.unit_cube_wires
 }
 
 @(private)
 shapes3d_plane :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_plane.parts == nil do r.unit_plane = plane_model(1)
+	if r.unit_plane.parts == nil do r.unit_plane = build_shared_shape(create_plane_model(1), "plane")
 	return r.unit_plane
 }
 
 @(private)
 shapes3d_sphere :: proc() -> Model {
 	r := &mbi.renderer
-	if r.unit_sphere.parts == nil do r.unit_sphere = sphere_model(1)
+	if r.unit_sphere.parts == nil do r.unit_sphere = build_shared_shape(create_sphere_model(1), "sphere")
 	return r.unit_sphere
+}
+
+/*
+	Reports a shared shape that would not build, and hands back the empty model.
+
+	These are lazy singletons behind `draw_cube` and friends, which are draw
+	calls: they run every frame, and an error return on them would be either
+	ignored at every call site or dropped. A model with no parts draws nothing
+	-- `draw_model` loops over `parts` -- so a failure here costs the shape and
+	not the frame, and the log says which shape went missing rather than
+	leaving a silently empty screen.
+
+	The two leading parameters take a `create_*_model` call whole.
+*/
+@(private)
+build_shared_shape :: proc(model: Model, err: Error, name: string) -> Model {
+	if err != nil {
+		log.errorf("could not build the shared %s: %v", name, err)
+		return {}
+	}
+
+	return model
 }
 
 // Called by cleanup. Everything here is optional, so all of it is a nil check.
 @(private)
-shapes3d_destroy :: proc() {
+destroy_shapes3d :: proc() {
 	r := &mbi.renderer
 
 	if r.unit_cube.parts       != nil do destroy_model(&r.unit_cube)
@@ -135,8 +160,8 @@ draw_cube_wires :: proc(position: [3]f32, size: [3]f32, color: [4]f32 = BLACK, r
 		aabb := b3.Shape_GetAABB(shape)
 		matchbox.draw_bounds_wires(aabb.lowerBound, aabb.upperBound, matchbox.RED)
 
-	Matchbox owns no bounding box type of its own and is not getting one -- see
-	D7 in 3d.md -- so this takes two plain vectors and stays ignorant of
+	Matchbox owns no bounding box type of its own and is not getting one, so
+	this takes two plain vectors and stays ignorant of
 	whichever library produced them.
 */
 draw_bounds_wires :: proc(lower, upper: [3]f32, color: [4]f32 = WHITE) {
@@ -157,7 +182,7 @@ draw_grid :: proc(slices: int = 10, spacing: f32 = 1, color: [4]f32 = {1, 1, 1, 
 	if r.grid.parts == nil || r.grid_slices != slices || r.grid_spacing != spacing {
 		if r.grid.parts != nil do destroy_model(&r.grid)
 
-		r.grid         = grid_model(slices, spacing)
+		r.grid         = build_shared_shape(create_grid_model(slices, spacing), "grid")
 		r.grid_slices  = slices
 		r.grid_spacing = spacing
 	}

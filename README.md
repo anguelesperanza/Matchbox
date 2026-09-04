@@ -43,13 +43,14 @@ import "matchbox"
 main :: proc() {
 	matchbox.init("My Game", 1280, 720)
 
-	player := matchbox.create_sprite(#load("player.png"))
+	player, err := matchbox.create_sprite(#load("player.png"))
+	if err != nil do return
 
 	for matchbox.is_running() {
 		matchbox.poll_events()
 
 		if matchbox.is_key_held(.D) {
-			player.position.x += 200 * matchbox.delta_time()
+			player.position.x += 200 * matchbox.get_delta_time()
 		}
 
 		matchbox.begin_drawing()
@@ -62,6 +63,28 @@ main :: proc() {
 	matchbox.cleanup()
 }
 ```
+
+### Errors
+Anything that builds a thing which might not build hands back the thing *and* an
+error, in the shape `core:os` uses:
+
+```odin
+sprite, err := matchbox.create_sprite(bytes)
+if err != nil {
+	// a picture stb could not read, or a texture the driver refused
+}
+```
+
+The error is a union, so `err != nil` is the whole test. `Image_Error` means the
+bytes were not a picture, `Gpu_Error` means the driver refused an allocation, and
+`Argument_Error` means the size or the pixel count did not describe something
+that could be made.
+
+**What does *not* come back as an error is deliberate.** Drawing outside a pass,
+`end_clip` without a `begin_clip`, using Matchbox before `init` -- those are bugs
+in the calling code rather than conditions the world produced, and they stop the
+program where the mistake is instead of being handed back as a value nobody
+checks.
 
 ### State
 Matchbox keeps everything it needs in one global, `matchbox.mbi`, so no state has
@@ -109,8 +132,8 @@ single slot that evicts, which is what full-size art too big to keep around
 wants. Eviction is least recently used, and a hit counts as a use.
 
 ```odin
-cache := matchbox.sprite_cache_make(Card, limit = 1)
-defer matchbox.sprite_cache_destroy(&cache)
+cache := matchbox.create_sprite_cache(Card, limit = 1)
+defer matchbox.destroy_sprite_cache(&cache)
 
 if art := matchbox.sprite_cache_get(&cache, card, path); art != nil {
 	sprite := art^          // a copy: position is yours, the cache keeps its own
@@ -154,19 +177,19 @@ matchbox.dropdown_overlay(&filter, options)
 ```
 
 While a list is open it calls `capture_mouse`, and `button`, `button_confirm`,
-`hover_dwell` and `Text_Field` all check `mouse_captured` for you -- so a
+`hover_dwell` and `Text_Field` all check `is_mouse_captured` for you -- so a
 button under an open list neither lights up nor answers a click. Anything
 hit-testing the mouse by hand should ask as well:
 
 ```odin
-over := matchbox.mouse_over_rect(cell) && !matchbox.mouse_captured()
+over := matchbox.is_mouse_over_rect(cell) && !matchbox.is_mouse_captured()
 ```
 
 That only reaches widgets drawn *after* the dropdown, so draw it before the
 things it covers.
 
-`point_in_rect` is the plain geometric test the rest are built on, for anything
-hit-testing something that is not the mouse.
+`is_point_in_rect` is the plain geometric test the rest are built on, for
+anything hit-testing something that is not the mouse.
 
 `examples/ui` shows all of these.
 
@@ -176,7 +199,7 @@ moved past, which saves threading a `y` through every call and adding heights
 back by hand:
 
 ```odin
-l := matchbox.layout_make({24, 24}, 190, 8)
+l := matchbox.create_layout({24, 24}, 190, 8)
 
 if matchbox.button(matchbox.layout_next(&l, 40), "All cards") { ... }
 if matchbox.button(matchbox.layout_next(&l, 40), "Owned")     { ... }
@@ -195,7 +218,7 @@ how many items there are, so a filtered list of three draws three normal cells
 with space to the right rather than three enormous ones.
 
 ```odin
-grid := matchbox.grid_fit(area, {130, 180}, len(cards), 10)
+grid := matchbox.create_grid(area, {130, 180}, len(cards), 10)
 
 for card, i in cards {
 	cell := matchbox.grid_cell(grid, i)
@@ -242,7 +265,7 @@ the next one. Nothing has to be set up -- plugging one in mid-game is handled.
 ```odin
 if matchbox.is_gamepad_connected(0) {
 	move := matchbox.get_gamepad_stick(0, .LEFT)
-	player.position += move * speed * matchbox.delta_time()
+	player.position += move * speed * matchbox.get_delta_time()
 
 	if matchbox.is_gamepad_button_pressed(0, .SOUTH) {
 		matchbox.set_gamepad_rumble(0, 0.6, 0.6, 200)
@@ -359,12 +382,12 @@ provides one that hands over to Odin's `_odin_entry_point`, so an ordinary
 
 Three things to know when writing a game that will run there. Anything you ship
 with the game must be read with `read_entire_file`, not `core:os`, because inside
-an apk it is not a file; anything the player creates belongs under `pref_path`,
-which is the one directory Android gives you; and the window size you pass to
-`init` is a request the desktop honours and Android ignores, so read
-`window_width` and `window_height` rather than assuming what you asked for. The
-first two are already true on the desktop -- Android is just where ignoring them
-stops working.
+an apk it is not a file; anything the player creates belongs under
+`get_pref_path`, which is the one directory Android gives you; and the window
+size you pass to `init` is a request the desktop honours and Android ignores,
+so read `window_width` and `window_height` rather than assuming what you asked
+for. The first two are already true on the desktop -- Android is just where
+ignoring them stops working.
 
 If nothing appears in `adb logcat`, check `adb shell getprop log.tag`. Some ROMs
 ship it set to `S`, which silences the log completely; `adb shell setprop log.tag

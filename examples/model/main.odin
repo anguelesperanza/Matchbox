@@ -60,8 +60,12 @@ main :: proc() {
 	}
 
 	for &prop in props {
-		prop.model, prop.loaded = mb.load_model(prop.path)
-		if !prop.loaded do continue
+		model, err := mb.load_model(prop.path)
+		if err != nil {
+			fmt.eprintfln("could not load %s: %v", prop.path, err)
+			continue
+		}
+		prop.model, prop.loaded = model, true
 
 		// Sat on the ground using the model's own bounds rather than by hand.
 		// These files are authored around all sorts of origins -- the pot's is
@@ -81,7 +85,7 @@ main :: proc() {
 	// Well back and high up, looking down the line of props.
 	player := [3]f32{-2, 0, 18}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		pitch      = math.atan2(f32(-3.5), f32(18.0)),
@@ -97,16 +101,16 @@ main :: proc() {
 		mb.poll_events()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(.B) do show_bounds = !show_bounds
 		if mb.is_key_pressed(.T) do tinted      = !tinted
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, 5, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, 5, mb.get_delta_time())
 		}
 
 		tint := mb.RED if tinted else mb.WHITE

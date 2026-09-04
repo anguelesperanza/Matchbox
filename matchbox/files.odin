@@ -17,11 +17,11 @@ package matchbox
 	the player made. The distinction worth holding on to is:
 
 	  shipped with the game   -> read_entire_file, so it works inside an apk
-	  made by the player      -> pref_path, and core:os is fine
+	  made by the player      -> get_pref_path, and core:os is fine
 
 	Which is also why writing is separate and does not take an arbitrary path.
 	There is nowhere on Android a program may simply write to; it gets a
-	directory of its own and that is all. pref_path is that directory, and on a
+	directory of its own and that is all. get_pref_path is that directory, and on a
 	desktop it is the equivalent -- AppData, Application Support, .local/share --
 	rather than the working directory, which is wherever a shortcut happened to
 	start the program.
@@ -40,32 +40,35 @@ import sdl "vendor:sdl3"
 	on a desktop and is meaningless on Android, so anything shipped with the game
 	should be asked for by a relative path.
 
-	Returns ok = false and logs rather than panicking. A file that will not open
-	is a content problem, and every caller here already has something sensible to
-	do about it -- the sprite cache draws nothing, the image loader reports it.
+	Returns `File_Error.Read_Failed` and logs rather than panicking. A file that
+	will not open is a content problem, and every caller here already has
+	something sensible to do about it -- the sprite cache draws nothing, the
+	image loader reports it. SDL's own account of what went wrong goes to the
+	log, since the distinction between missing, locked and unreadable changes
+	nothing a game can do.
 
 	The bytes are copied into `allocator` so they are freed with `delete` like
 	anything else, rather than handed back as SDL's allocation with a rule about
 	which free to call.
 */
-read_entire_file :: proc(path: string, allocator := context.allocator) -> (data: []byte, ok: bool) {
+read_entire_file :: proc(path: string, allocator := context.allocator) -> (data: []byte, err: Error) {
 	c_path := strings.clone_to_cstring(path, context.temp_allocator)
 
 	size: uint
 	loaded := sdl.LoadFile(c_path, &size)
 	if loaded == nil {
 		log.errorf("could not read %s: %s", path, sdl.GetError())
-		return nil, false
+		return nil, File_Error.Read_Failed
 	}
 	defer sdl.free(loaded)
 
 	// A real file of no bytes is not an error, and neither is an empty asset.
-	if size == 0 do return nil, true
+	if size == 0 do return nil, nil
 
 	data = make([]byte, int(size), allocator)
 	copy(data, (cast([^]byte)loaded)[:size])
 
-	return data, true
+	return data, nil
 }
 
 /*
@@ -75,7 +78,7 @@ read_entire_file :: proc(path: string, allocator := context.allocator) -> (data:
 	the app's own internal storage, which is the only place there is. Ends with a
 	separator, so a filename can be joined straight on:
 
-		dir := matchbox.pref_path("Bramble", "Cards")
+		dir := matchbox.get_pref_path("Bramble", "Cards")
 		defer delete(dir)
 		os.write_entire_file(fmt.tprintf("%ssave.json", dir), bytes)
 
@@ -86,7 +89,7 @@ read_entire_file :: proc(path: string, allocator := context.allocator) -> (data:
 
 	The result is the caller's to delete.
 */
-pref_path :: proc(org: string, app: string, allocator := context.allocator) -> string {
+get_pref_path :: proc(org: string, app: string, allocator := context.allocator) -> string {
 	c_org := strings.clone_to_cstring(org, context.temp_allocator)
 	c_app := strings.clone_to_cstring(app, context.temp_allocator)
 
@@ -111,7 +114,7 @@ pref_path :: proc(org: string, app: string, allocator := context.allocator) -> s
 
 	The result is the caller's to delete.
 */
-base_path :: proc(allocator := context.allocator) -> string {
+get_base_path :: proc(allocator := context.allocator) -> string {
 	raw := sdl.GetBasePath()
 	if raw == nil do return ""
 

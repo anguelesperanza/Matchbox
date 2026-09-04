@@ -61,7 +61,7 @@ Button_Style :: struct {
 	// separate procedure because "can this be pressed" changes per frame and per
 	// button, and every caller that had to handle it by hand ended up dropping
 	// out of `button` altogether and back to Button / draw_button /
-	// mouse_over_button -- which is the wrapper `button` was added to retire.
+	// is_mouse_over_button -- which is the wrapper `button` was added to retire.
 	disabled:     bool,
 
 	// What the fill and the label are multiplied by while disabled. A factor
@@ -205,12 +205,12 @@ dimmed :: proc(color: [4]f32, amount: f32) -> [4]f32 {
 	Everything a caller needs is at the call site: the size comes from the
 	Rectangle rather than a fixed constant, and `style.align` puts the label
 	left instead of centred. Those two are what every hand-rolled wrapper
-	around Button/draw_button/mouse_over_button ended up adding.
+	around Button/draw_button/is_mouse_over_button ended up adding.
 
 	The fill comes from `rectangle.color`, and `style.hover` replaces it while
 	the pointer is inside. Pass a style to change either, or leave it off.
 
-	Button, draw_button and mouse_over_button are still here and unchanged, for
+	Button, draw_button and is_mouse_over_button are still here and unchanged, for
 	anything that wants the parts separately.
 */
 button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE, font: ^Font = nil) -> bool {
@@ -221,7 +221,7 @@ button :: proc(rectangle: Rectangle, text: string, style := BUTTON_STYLE, font: 
 	// care of the click and the highlight together: a button under an open
 	// dropdown should neither light up nor answer. Nor when it is disabled,
 	// which takes care of the highlight and the answer the same way.
-	hovered := !style.disabled && mouse_over_rect(rectangle) && !mouse_captured()
+	hovered := !style.disabled && is_mouse_over_rect(rectangle) && !is_mouse_captured()
 
 	label := style.text_color
 
@@ -265,10 +265,10 @@ button_enabled_if :: proc(enabled: bool, style := BUTTON_STYLE) -> Button_Style 
 	return style
 }
 
-// Whether the pointer is inside a rectangle. point_in_rect with the mouse
+// Whether the pointer is inside a rectangle. is_point_in_rect with the mouse
 // already filled in, which is what almost every caller wants.
-mouse_over_rect :: proc(rectangle: Rectangle) -> bool {
-	return point_in_rect(get_mouse_position(), rectangle)
+is_mouse_over_rect :: proc(rectangle: Rectangle) -> bool {
+	return is_point_in_rect(get_mouse_position(), rectangle)
 }
 
 // -----------------------------------------------------------------------
@@ -324,7 +324,7 @@ button_confirm :: proc(
 	}
 
 	// A click anywhere else is an answer of no.
-	if armed && is_mouse_pressed(.LEFT) && !mouse_over_rect(rectangle) {
+	if armed && is_mouse_pressed(.LEFT) && !is_mouse_over_rect(rectangle) {
 		state.armed_at = 0
 		armed = false
 	}
@@ -350,7 +350,7 @@ button_confirm :: proc(
 
 // Whether it is currently asking. For anything that wants to dim the rest of a
 // row while one of its buttons is waiting for an answer.
-confirm_button_armed :: proc(state: ^Confirm_Button) -> bool {
+is_confirm_button_armed :: proc(state: ^Confirm_Button) -> bool {
 	return state.armed_at != 0 && seconds_since(state.armed_at) <= UI_DEFAULTS.confirm.timeout
 }
 
@@ -383,12 +383,12 @@ hover_dwell :: proc(state: ^Hover, rectangle: Rectangle, seconds: f32 = UI_DEFAU
 	// Something above has the pointer, so this is not being looked at even
 	// though the pointer is over it. Cleared rather than merely reported, so
 	// the dwell starts again once whatever it was closes
-	if mouse_captured() {
+	if is_mouse_captured() {
 		state.entered_at = 0
 		return false
 	}
 
-	if !mouse_over_rect(rectangle) {
+	if !is_mouse_over_rect(rectangle) {
 		state.entered_at = 0
 		return false
 	}
@@ -445,8 +445,8 @@ draw_button :: proc(button:Button) {
 
 // Whether the pointer is inside the button's rectangle. Hover, without the
 // click.
-mouse_over_button :: proc(button:Button) -> bool {
-	return mouse_over_rect(button.rectangle)
+is_mouse_over_button :: proc(button:Button) -> bool {
+	return is_mouse_over_rect(button.rectangle)
 }
 
 // -----------------------------------------------------------------------
@@ -585,7 +585,7 @@ destroy_text_field :: proc(field:^Text_Field) {
 }
 
 /*What has been typed. Points into the field and changes as it is edited*/
-text_field_string :: proc(field:^Text_Field) -> string {
+get_text_field_string :: proc(field:^Text_Field) -> string {
 	return string(field.text[:])
 }
 
@@ -599,8 +599,8 @@ text_field_set :: proc(field:^Text_Field, text:string) {
 
 // Whether the pointer is inside the field's box. What a game reads to show an
 // I-beam cursor.
-mouse_over_text_field :: proc(field:^Text_Field) -> bool {
-	return mouse_over_rect(field.rectangle)
+is_mouse_over_text_field :: proc(field:^Text_Field) -> bool {
+	return is_mouse_over_rect(field.rectangle)
 }
 
 /*
@@ -620,8 +620,8 @@ update_text_field :: proc(field:^Text_Field) {
 	// A click that belongs to something above neither focuses this field nor
 	// takes focus off it -- picking an option out of a dropdown should leave
 	// the caret where it was
-	if is_mouse_pressed(.LEFT) && !mouse_captured() {
-		field.focused = mouse_over_text_field(field)
+	if is_mouse_pressed(.LEFT) && !is_mouse_captured() {
+		field.focused = is_mouse_over_text_field(field)
 		if field.focused do field.blink_from = mbi.now_ts
 	}
 
@@ -778,7 +778,7 @@ draw_text_field :: proc(field:^Text_Field, font:^Font = nil) {
 
 /*What the field puts on screen: its text, or one star per character when masked*/
 text_field_shown :: proc(field:^Text_Field, allocator := context.allocator) -> string {
-	if !field.masked do return text_field_string(field)
+	if !field.masked do return get_text_field_string(field)
 
 	// Per character, not per byte, or an accented letter would show as two
 	stars := strings.builder_make(allocator)
@@ -877,12 +877,12 @@ begin_scroll :: proc(view: ^Scroll_View, area: Rectangle, content_height: f32) -
 	view.area    = area
 	view.content = max(content_height, 0)
 
-	max_offset := scroll_max(view)
+	max_offset := get_scroll_max(view)
 
 	// The wheel only counts over the panel, and only when nothing above has
 	// claimed the pointer -- scrolling the list under an open dropdown is the
 	// same mistake as clicking through it.
-	if max_offset > 0 && mouse_over_rect(area) && !mouse_captured() {
+	if max_offset > 0 && is_mouse_over_rect(area) && !is_mouse_captured() {
 		view.offset -= get_mouse_wheel().y * UI_DEFAULTS.scroll.wheel_step
 	}
 
@@ -912,14 +912,14 @@ end_scroll :: proc(view: ^Scroll_View) {
 
 // The furthest the content can be scrolled. Zero when everything already fits,
 // which is also what makes the bar go away.
-scroll_max :: proc(view: ^Scroll_View) -> f32 {
+get_scroll_max :: proc(view: ^Scroll_View) -> f32 {
 	return max(0, view.content - view.area.size.y)
 }
 
 // Whether there is anything to scroll. For a caller deciding whether to leave
 // room for the bar.
-scroll_needed :: proc(view: ^Scroll_View) -> bool {
-	return scroll_max(view) > 0
+is_scroll_needed :: proc(view: ^Scroll_View) -> bool {
+	return get_scroll_max(view) > 0
 }
 
 /*
@@ -977,7 +977,7 @@ scrollbar_track_rect :: proc(view: ^Scroll_View) -> Rectangle {
 */
 scrollbar_thumb_rect :: proc(view: ^Scroll_View) -> Rectangle {
 	track      := scrollbar_track_rect(view)
-	max_offset := scroll_max(view)
+	max_offset := get_scroll_max(view)
 	if max_offset <= 0 do return track
 
 	visible := clamp(view.area.size.y / max(view.content, 1), 0, 1)
@@ -1012,8 +1012,8 @@ scroll_drag :: proc(view: ^Scroll_View, max_offset: f32) {
 	// it going, so the pointer may wander off the bar mid-drag and still be
 	// dragging it, which is what every scrollbar does.
 	if !view.dragging {
-		if !is_mouse_pressed(.LEFT) || mouse_captured() do return
-		if !mouse_over_rect(thumb) do return
+		if !is_mouse_pressed(.LEFT) || is_mouse_captured() do return
+		if !is_mouse_over_rect(thumb) do return
 
 		view.dragging = true
 		view.grab     = get_mouse_position().y - rect_top_left(thumb).y
@@ -1037,13 +1037,13 @@ scroll_drag :: proc(view: ^Scroll_View, max_offset: f32) {
 	is more to see.
 */
 draw_scrollbar :: proc(view: ^Scroll_View) {
-	if scroll_max(view) <= 0 do return
+	if get_scroll_max(view) <= 0 do return
 
 	draw_rect_in(scrollbar_track_rect(view), SCROLLBAR_TRACK)
 
 	thumb := scrollbar_thumb_rect(view)
 	color := SCROLLBAR_THUMB
-	if view.dragging || (mouse_over_rect(thumb) && !mouse_captured()) do color = SCROLLBAR_HOVER
+	if view.dragging || (is_mouse_over_rect(thumb) && !is_mouse_captured()) do color = SCROLLBAR_HOVER
 
 	draw_rect_in(thumb, color)
 }
@@ -1084,7 +1084,7 @@ draw_rect_in :: proc(rectangle: Rectangle, color: [4]f32) {
 	rather than the next. The second call only draws.
 
 	While the list is open the pointer is captured, so whatever the list covers
-	can ask mouse_captured() and leave the click alone. That only works if this
+	can ask is_mouse_captured() and leave the click alone. That only works if this
 	is called before the things it covers.
 */
 
@@ -1179,7 +1179,7 @@ dropdown :: proc(
 	}
 	state.selected = clamp(state.selected, 0, len(options) - 1)
 
-	over := mouse_over_rect(rectangle)
+	over := is_mouse_over_rect(rectangle)
 
 	if state.open {
 		changed = dropdown_take_input(state, len(options), over)
@@ -1213,7 +1213,7 @@ dropdown :: proc(
 	The caller decides what opens it, which is the whole difference between this
 	and a dropdown -- usually the right button over something:
 
-		if matchbox.is_mouse_pressed(.RIGHT) && matchbox.mouse_over_rect(deck) {
+		if matchbox.is_mouse_pressed(.RIGHT) && matchbox.is_mouse_over_rect(deck) {
 			matchbox.open_context_menu(&menu, matchbox.get_mouse_position(), {160, 32})
 		}
 
@@ -1288,7 +1288,7 @@ context_menu :: proc(
 */
 @(private)
 dropdown_take_input :: proc(state: ^Dropdown, count: int, over_anchor: bool) -> (changed: bool) {
-	if over_anchor || mouse_over_rect(dropdown_list_rect(state, count)) do capture_mouse()
+	if over_anchor || is_mouse_over_rect(dropdown_list_rect(state, count)) do capture_mouse()
 
 	// Either button puts a menu away. Right-clicking somewhere else with a menu
 	// open means "open one there instead", and leaving the first one up would
@@ -1333,7 +1333,7 @@ dropdown_overlay :: proc(
 	for option, i in options {
 		row := dropdown_row_rect(state, i, len(options))
 
-		if point_in_rect(mouse, row) {
+		if is_point_in_rect(mouse, row) {
 			row.color = style.hover
 			draw_rect(row)
 		}
@@ -1353,7 +1353,7 @@ dropdown_overlay :: proc(
 
 // Whether a dropdown is showing its list, for a caller deciding what else to
 // draw.
-dropdown_is_open :: proc(state: ^Dropdown) -> bool {
+is_dropdown_open :: proc(state: ^Dropdown) -> bool {
 	return state.open
 }
 
@@ -1423,7 +1423,7 @@ dropdown_row_rect :: proc(state: ^Dropdown, index: int, count: int) -> Rectangle
 // Which row a point is on, or -1 for none of them.
 dropdown_row_at :: proc(state: ^Dropdown, count: int, point: [2]f32) -> int {
 	for i in 0 ..< count {
-		if point_in_rect(point, dropdown_row_rect(state, i, count)) do return i
+		if is_point_in_rect(point, dropdown_row_rect(state, i, count)) do return i
 	}
 	return -1
 }
@@ -1610,7 +1610,7 @@ clear_status :: proc(status: ^Status_Line) {
 
 // What is on the line. Points into the status line and changes when it is set
 // again.
-status_text :: proc(status: ^Status_Line) -> string {
+get_status_text :: proc(status: ^Status_Line) -> string {
 	return string(status.buffer[:status.length])
 }
 
@@ -1649,7 +1649,7 @@ draw_status :: proc(status: ^Status_Line, top_left: [2]f32, font: ^Font = nil) -
 	color := STATUS_COLOR[status.level]
 	color.a *= alpha
 
-	text := status_text(status)
+	text := get_status_text(status)
 	draw_text(font, text, top_left.x, top_left.y + font.ascent, color)
 
 	return measure_text(font, text)
@@ -1678,7 +1678,7 @@ MODAL_DIM: [4]f32 = {0, 0, 0, 0.6}
 	Capture only reaches widgets that run *after* it, which is why the first call
 	goes at the top of the frame. The second gives the pointer back before
 	handing over the box, so buttons drawn inside the modal answer normally --
-	they ask mouse_captured() like every other button and would otherwise be as
+	they ask is_mouse_captured() like every other button and would otherwise be as
 	dead as the screen behind them.
 */
 Modal :: struct {
@@ -1704,7 +1704,7 @@ close_modal :: proc(modal: ^Modal) {
 
 // Whether the modal is up. What the rest of a screen checks before taking
 // input of its own.
-modal_is_open :: proc(modal: ^Modal) -> bool {
+is_modal_open :: proc(modal: ^Modal) -> bool {
 	return modal.open
 }
 
@@ -1741,7 +1741,7 @@ modal_overlay :: proc(modal: ^Modal, size: [2]f32, dim: [4]f32 = MODAL_DIM) -> (
 	// is still live and belongs to whatever was clicked, not to the modal. Held
 	// rather than released, so that one press reaches nothing: not a button
 	// inside the box that happens to sit where the opening button was, and not
-	// modal_dismissed, which would otherwise shut it immediately.
+	// is_modal_dismissed, which would otherwise shut it immediately.
 	if modal.opened_on == mbi.frame {
 		capture_mouse()
 	} else {
@@ -1762,14 +1762,14 @@ modal_overlay :: proc(modal: ^Modal, size: [2]f32, dim: [4]f32 = MODAL_DIM) -> (
 	Call after modal_overlay and after whatever went inside it, so a button in
 	the corner of the content gets the click first.
 
-		if matchbox.modal_dismissed(box) do matchbox.close_modal(&preview)
+		if matchbox.is_modal_dismissed(box) do matchbox.close_modal(&preview)
 
-	The `mouse_captured` test is what keeps the opening click from counting:
+	The `is_mouse_captured` test is what keeps the opening click from counting:
 	modal_overlay holds the pointer for that one frame rather than giving it
 	back. See there.
 */
-modal_dismissed :: proc(content: Rectangle) -> bool {
-	return is_mouse_pressed(.LEFT) && !mouse_over_rect(content) && !mouse_captured()
+is_modal_dismissed :: proc(content: Rectangle) -> bool {
+	return is_mouse_pressed(.LEFT) && !is_mouse_over_rect(content) && !is_mouse_captured()
 }
 
 // -----------------------------------------------------------------------
@@ -1875,11 +1875,11 @@ slider :: proc(
 		// Held is what keeps a drag alive, so the pointer may wander off the
 		// track -- above it, below it, out of the window -- and still be dragging.
 
-	case is_mouse_pressed(.LEFT) && !mouse_captured() && mouse_over_rect(handle):
+	case is_mouse_pressed(.LEFT) && !is_mouse_captured() && is_mouse_over_rect(handle):
 		state.dragging = true
 		state.grab     = mouse.x - rect_top_left(handle).x
 
-	case is_mouse_pressed(.LEFT) && !mouse_captured() && mouse_over_rect(rectangle):
+	case is_mouse_pressed(.LEFT) && !is_mouse_captured() && is_mouse_over_rect(rectangle):
 		// Anywhere else on the track: put the handle under the pointer and carry
 		// on as though the drag started there.
 		state.dragging = true
@@ -1891,7 +1891,7 @@ slider :: proc(
 		value^ = slider_snap(low + t * span, low, high, step)
 	}
 
-	hot := state.dragging || (mouse_over_rect(handle) && !mouse_captured())
+	hot := state.dragging || (is_mouse_over_rect(handle) && !is_mouse_captured())
 	draw_slider(rectangle, value^, low, high, style, hot)
 
 	return value^ != before

@@ -9,7 +9,7 @@ package matchbox
 	model is the case that could not.
 
 	The name is `Model` and not `Mesh` because `Mesh` is already the texture
-	holder that `Sprite` embeds -- see D6 in 3d.md. A Model is what one file
+	holder that `Sprite` embeds. A Model is what one file
 	loads into: several parts, each with its own geometry and its own material,
 	because a glTF scene routinely has more than one of both.
 
@@ -107,24 +107,37 @@ model_size :: proc(model: Model) -> [3]f32 {
 	part costs two copy passes at load and nothing afterwards. The slices belong
 	to the caller and are not kept.
 */
-upload_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topology.TRIANGLES) -> Model_Part {
-	ensure(len(vertices) > 0, "a mesh needs vertices")
-	ensure(len(indices) > 0, "a mesh needs indices")
+upload_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topology.TRIANGLES) -> (Model_Part, Error) {
+	if len(vertices) == 0 || len(indices) == 0 do return {}, Argument_Error.No_Geometry
+
+	vertex_buffer, vertex_err := upload_buffer(raw_data(vertices), u32(len(vertices) * size_of(Vertex3D)), {.VERTEX})
+	if vertex_err != nil do return {}, vertex_err
+
+	// The vertices are already on the device, so a failure here has something
+	// to give back rather than only something to report.
+	index_buffer, index_err := upload_buffer(raw_data(indices), u32(len(indices) * size_of(u32)), {.INDEX})
+	if index_err != nil {
+		sdl.ReleaseGPUBuffer(mbi.renderer.device, vertex_buffer)
+		return {}, index_err
+	}
 
 	return Model_Part{
-		vertices    = upload_buffer(raw_data(vertices), u32(len(vertices) * size_of(Vertex3D)), {.VERTEX}),
-		indices     = upload_buffer(raw_data(indices),  u32(len(indices)  * size_of(u32)),      {.INDEX}),
+		vertices    = vertex_buffer,
+		indices     = index_buffer,
 		index_count = u32(len(indices)),
 		topology    = topology,
 		skin        = -1,
-	}
+	}, nil
 }
 
 // A model of one part, from one lump of geometry. Bounds are measured off the
 // vertices on the way past, since they are right here and will not be later.
-model_from_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topology.TRIANGLES) -> Model {
+create_model_from_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topology.TRIANGLES) -> (Model, Error) {
+	part, err := upload_mesh(vertices, indices, topology)
+	if err != nil do return {}, err
+
 	parts := make([]Model_Part, 1)
-	parts[0] = upload_mesh(vertices, indices, topology)
+	parts[0] = part
 
 	low  := vertices[0].pos
 	high := vertices[0].pos
@@ -133,7 +146,7 @@ model_from_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_T
 		high = {max(high.x, v.pos.x), max(high.y, v.pos.y), max(high.z, v.pos.z)}
 	}
 
-	return Model{parts = parts, bounds_min = low, bounds_max = high}
+	return Model{parts = parts, bounds_min = low, bounds_max = high}, nil
 }
 
 /*
@@ -195,7 +208,7 @@ destroy_model :: proc(model: ^Model) {
 	Wound counter-clockwise seen from outside, which is what the pipeline's
 	`front_face` expects and what glTF produces.
 */
-cube_model :: proc(size: f32 = 1) -> Model {
+create_cube_model :: proc(size: f32 = 1) -> (Model, Error) {
 	h := size * 0.5
 
 	// Per face: the four corners in counter-clockwise order seen from outside,
@@ -239,7 +252,7 @@ cube_model :: proc(size: f32 = 1) -> Model {
 		indices[i + 5] = base + 3
 	}
 
-	return model_from_mesh(vertices, indices)
+	return create_model_from_mesh(vertices, indices)
 }
 
 /*
@@ -248,7 +261,7 @@ cube_model :: proc(size: f32 = 1) -> Model {
 	The same four corners as the cube's top face, wound the same way, so a plane
 	and the top of a cube agree about which side is out.
 */
-plane_model :: proc(size: f32 = 1) -> Model {
+create_plane_model :: proc(size: f32 = 1) -> (Model, Error) {
 	h := size * 0.5
 
 	vertices := []Vertex3D{
@@ -260,7 +273,7 @@ plane_model :: proc(size: f32 = 1) -> Model {
 
 	indices := []u32{0, 1, 2, 0, 2, 3}
 
-	return model_from_mesh(vertices, indices)
+	return create_model_from_mesh(vertices, indices)
 }
 
 /*
@@ -275,7 +288,7 @@ plane_model :: proc(size: f32 = 1) -> Model {
 	two vertices at the same place with different uvs -- otherwise the last
 	sector would stretch the whole texture backwards across itself.
 */
-sphere_model :: proc(radius: f32 = 1, rings: int = 16, sectors: int = 24) -> Model {
+create_sphere_model :: proc(radius: f32 = 1, rings: int = 16, sectors: int = 24) -> (Model, Error) {
 	rings   := max(rings, 2)
 	sectors := max(sectors, 3)
 
@@ -310,7 +323,7 @@ sphere_model :: proc(radius: f32 = 1, rings: int = 16, sectors: int = 24) -> Mod
 		}
 	}
 
-	return model_from_mesh(vertices, indices[:])
+	return create_model_from_mesh(vertices, indices[:])
 }
 
 // -----------------------------------------------------------------------
@@ -325,7 +338,7 @@ sphere_model :: proc(radius: f32 = 1, rings: int = 16, sectors: int = 24) -> Mod
 	shared. The normals are filled in anyway because the vertex layout is shared
 	with the solid pipeline -- the line shader ignores them.
 */
-cube_wires_model :: proc(size: f32 = 1) -> Model {
+create_cube_wires_model :: proc(size: f32 = 1) -> (Model, Error) {
 	h := size * 0.5
 
 	corners := [8][3]f32{
@@ -344,7 +357,7 @@ cube_wires_model :: proc(size: f32 = 1) -> Model {
 		0, 4, 1, 5, 2, 6, 3, 7, // the uprights joining them
 	}
 
-	return model_from_mesh(vertices, indices, .LINES)
+	return create_model_from_mesh(vertices, indices, .LINES)
 }
 
 /*
@@ -354,7 +367,7 @@ cube_wires_model :: proc(size: f32 = 1) -> Model {
 	side. `draw_grid` keeps one of these and rebuilds it only when the numbers
 	change, so a game asking for the same grid every frame builds it once.
 */
-grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> Model {
+create_grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> (Model, Error) {
 	slices := max(slices, 1)
 
 	half  := f32(slices) * spacing * 0.5
@@ -379,5 +392,5 @@ grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> Model {
 		indices[v + 3] = u32(v + 3)
 	}
 
-	return model_from_mesh(vertices, indices, .LINES)
+	return create_model_from_mesh(vertices, indices, .LINES)
 }

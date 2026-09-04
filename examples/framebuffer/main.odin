@@ -61,7 +61,8 @@ main :: proc() {
 
 	font := &mb.mbi.font
 
-	screen := mb.create_pixel_buffer(W, H)
+	screen, screen_err := mb.create_pixel_buffer(W, H)
+	if screen_err != nil do return
 	defer mb.destroy(&screen)
 
 	// The pixels. An ordinary array that matchbox never sees except during the
@@ -78,7 +79,7 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		elapsed += mb.delta_time()
+		elapsed += mb.get_delta_time()
 
 		if mb.is_key_pressed(.I) do integer = !integer
 		if mb.is_key_pressed(.G) do grid    = !grid
@@ -86,7 +87,7 @@ main :: proc() {
 
 		// ---- open a real file into the canvas ------------------------------
 		if mb.is_key_pressed(.O) {
-			if img, ok := mb.load_image_from_file("art/ember.png"); ok {
+			if img, err := mb.load_image_from_file("art/ember.png"); err == nil {
 				defer mb.destroy(&img)
 
 				// Nearest-sampled to fit, keeping its shape. Sampling by hand

@@ -49,12 +49,12 @@ Light :: struct {
 }
 
 // A point light at `position`. The common case, and the one the campfire is.
-point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light {
+create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light {
 	return Light{kind = .POINT, position = position, color = color, enabled = true}
 }
 
 // A light shining along `direction`, from nowhere in particular. A sun.
-directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Light {
+create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Light {
 	return Light{kind = .DIRECTIONAL, position = {0, 0, 0}, target = direction, color = color, enabled = true}
 }
 
@@ -66,7 +66,7 @@ directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Light {
 	into a block that is pushed at the start of the next 3D pass, so there is no
 	GPU work here and no cost to setting the same thing repeatedly.
 
-		matchbox.set_lights({matchbox.point_light(fire_position, ember)})
+		matchbox.set_lights({matchbox.create_point_light(fire_position, ember)})
 */
 set_lights :: proc(lights: []Light) {
 	l := &mbi.renderer.lighting
@@ -138,7 +138,7 @@ disable_fog :: proc() {
 
 // Whether a game has set any lights. Mostly for an example that wants to say so
 // on screen.
-lighting_active :: proc() -> bool {
+is_lighting_active :: proc() -> bool {
 	return mbi.renderer.lighting.flags.x > 0
 }
 

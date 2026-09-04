@@ -41,16 +41,5 @@ destroy :: proc {
 	destroy_render_target,
 	destroy_image,
 	destroy_text_field,
-	sprite_cache_destroy,
-}
-
-/*
-	Frees the sheet an animated sprite draws from.
-
-	There was no such procedure: a game holding an AnimatedSprite had to know
-	that the thing to free was the clip inside it, and reach past the sprite to
-	do it. Every other type in the group frees itself.
-*/
-destroy_animated_sprite :: proc(sprite: ^AnimatedSprite) {
-	destroy_animation_clip(&sprite.clip)
+	destroy_sprite_cache,
 }

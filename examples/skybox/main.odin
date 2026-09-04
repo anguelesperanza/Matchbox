@@ -59,10 +59,10 @@ main :: proc() {
 
 	mb.set_escape_key(.UNKNOWN)
 
-	panorama, panorama_ok := mb.load_skybox_panorama(PANORAMA)
-	cubemap,  cubemap_ok  := mb.load_skybox_cubemap(CUBEMAP)
+	panorama, panorama_err := mb.load_skybox_panorama(PANORAMA)
+	cubemap,  cubemap_err  := mb.load_skybox_cubemap(CUBEMAP)
 
-	if !panorama_ok && !cubemap_ok {
+	if panorama_err != nil && cubemap_err != nil {
 		fmt.eprintln("neither sky loaded -- set PANORAMA and CUBEMAP at the top of this file")
 		return
 	}
@@ -70,45 +70,46 @@ main :: proc() {
 	defer mb.destroy(&panorama)
 	defer mb.destroy(&cubemap)
 
-	cube := mb.cube_model(1)
+	cube, cube_err := mb.create_cube_model(1)
+	if cube_err != nil do return
 	defer mb.destroy(&cube)
 
 	// Six back, level, looking along -z.
 	player := [3]f32{0, 0, 6}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		eye_offset = {0, EYE_HEIGHT, 0},
 	)
 
-	showing_cubemap := !panorama_ok
+	showing_cubemap := panorama_err != nil
 	tint            := mb.WHITE
 
 	mb.set_cursor_locked(true)
 
 	for mb.is_running() {
 		mb.poll_events()
-		dt := mb.delta_time()
+		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() {
+			if mb.is_cursor_locked() {
 				mb.set_cursor_locked(false)
 			} else {
 				mb.mbi.running = false
 			}
 		}
 
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
-		if mb.is_key_pressed(.SPACE) && panorama_ok && cubemap_ok {
+		if mb.is_key_pressed(.SPACE) && panorama_err == nil && cubemap_err == nil {
 			showing_cubemap = !showing_cubemap
 		}
 
 		if mb.is_key_pressed(._1) do tint = mb.WHITE
 		if mb.is_key_pressed(._2) do tint = {0.45, 0.35, 0.55, 1}
 
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, WALK_SPEED, dt)
 		}
 

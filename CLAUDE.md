@@ -1,7 +1,69 @@
 # Working in Matchbox
 
-House style. Follow it for new code and when touching old code; `cleanup.md`
+House style. Follow it for new code and when touching old code; `refactor.md`
 tracks bringing the rest of the package into line.
+
+## Naming
+
+- **Procedures are `snake_case`** -- `draw_sprite`, `update_animation`,
+  `camera3d_view_projection`.
+- **Types -- structs, enums and unions -- are `Pascal_Snake_Case`** --
+  `Animated_Sprite`, `Render_Target`, `Model_Part`, `Key_State`. This is Odin's
+  own convention, and what `core:` and `vendor:` use.
+- **Enum *values* are `SCREAMING_CASE`** -- the type name follows the rule
+  above, the values inside it do not:
+
+```odin
+Player_State :: enum {
+	LEFT,
+	RIGHT,
+	UP,
+	DOWN,
+}
+```
+
+- **One value per line**, as above -- never several to a line, however short
+  they are.
+
+Single-word type names need no separator, so `Sprite`, `Camera`, `Font` and
+`Mesh` are already right. It is the multi-word ones to watch: the separator is
+not optional, so `Animated_Sprite` and `Vert_Data` rather than running the
+words together.
+
+SDL's own enums are used as they come -- Matchbox leans on `sdl.Scancode`,
+`sdl.GamepadButton` and `sdl.MouseButtonFlag` rather than wrapping them, and
+those are SDL's types to name.
+
+### Procedure prefixes
+
+- **`create_x`** makes one -- `create_sprite`. **`load_x`** imports a thing
+  that already exists whole -- `load_model`. The difference is real: a model
+  arrives finished, a sprite is an image plus values set here.
+- **`destroy_x`** gives one back, never `x_destroy`. Every public one joins
+  the `destroy :: proc{...}` group in `destroy.odin`, so `matchbox.destroy(&x)`
+  resolves.
+- **`is_x`** asks a question and answers `bool` -- `is_key_pressed`,
+  `is_mouse_captured`, `is_dropdown_open`.
+- **`get_x`** reads state that is already stored somewhere -- `get_delta_time`,
+  `get_mouse_position`, `get_status_text`.
+
+Two carve-outs, because the prefixes describe *reading*:
+
+- A procedure that **does** something and reports what happened keeps its verb.
+  `button` draws a button and answers whether it was clicked; `is_button` would
+  be a lie. Same for `button_confirm`, `dropdown`, `slider`, `modal_begin`,
+  `hover_dwell`.
+- A procedure that **computes** a value from its arguments is not a getter.
+  `measure_text`, `rect_center`, `model_center`, `line_height`, `screen_pos`
+  and `wrap_text` derive an answer rather than fetch one, and
+  `get_measure_text` would say the opposite.
+
+**Why it matters here:** the package used to carry both spellings, and the
+worst of it was inside one family in one file -- the uniform blocks in
+`types.odin` were split between `Sprite_Frag_Data` and a run-together form,
+same purpose and same file. That has been swept, so the rules above describe
+what is there now rather than an aspiration. Keep it that way: a single new
+type in the old shape puts the file back to two conventions.
 
 ## Group like data into structs
 
@@ -12,11 +74,11 @@ as three variables is a game that will one day update two of them.
 The pattern, as `Third_Person_Camera` and `First_Person_Camera` do it:
 
 - one struct holding the state
-- one constructor named after it, with every argument defaulted
+- one `create_` constructor named after it, with every argument defaulted
 - procedures taking a pointer to it
 
 ```odin
-rig := mb.first_person_camera(position = spawn, facing = -math.PI * 0.5)
+rig := mb.create_first_person_camera(position = spawn, facing = -math.PI * 0.5)
 mb.first_person_walk(&rig, &player, speed, dt)
 ```
 

@@ -18,14 +18,14 @@ main :: proc() {
 	// what is left so that coin_10 would follow coin_9 rather than coin_1.
 	// `load_animation_frames` is the explicit form when the frames are named
 	// individually or come from more than one place.
-	clip, ok := matchbox.load_animation_directory(#load_directory("assets"), 0.08)
-	if !ok do return
+	clip, err := matchbox.load_animation_directory(#load_directory("assets"), 0.08)
+	if err != nil do return
 	defer matchbox.destroy_animation_clip(&clip)
 
 	// Sized from the clip, so the frame size is never written out here and cannot
 	// drift from the art. `position` is the top-left: draw_animated_sprite adds
 	// pivot * size, so a centred pivot draws half a frame right and down of it.
-	coin := matchbox.animated_sprite_of(clip, scale = 4)
+	coin := matchbox.create_animated_sprite_from_clip(clip, scale = 4)
 	coin.position = {480 - coin.size.x, 240 - coin.size.y}
 
 	// The first four frames, at a third of the speed. The bounds are first and
@@ -33,14 +33,14 @@ main :: proc() {
 	// texture -- no second upload -- which is how a walk, an idle and a jump come
 	// off one sheet. Destroy the sheet only; the ranges share its texture.
 	half := matchbox.animation_range(clip, 0, 3, 0.25)
-	slow := matchbox.animated_sprite_of(half, scale = 2)
+	slow := matchbox.create_animated_sprite_from_clip(half, scale = 2)
 	slow.position = {760, 400}
 
 	for matchbox.is_running() {
 		matchbox.poll_events()
 		if matchbox.is_key_pressed(.ESCAPE) do matchbox.mbi.running = false
 
-		dt := matchbox.delta_time()
+		dt := matchbox.get_delta_time()
 		matchbox.update_animation(&coin, dt)
 		matchbox.update_animation(&slow, dt)
 

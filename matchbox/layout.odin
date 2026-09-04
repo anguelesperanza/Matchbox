@@ -34,14 +34,14 @@ Layout :: struct {
 	A column starting at `top_left`, `width` across, with `spacing` between
 	items.
 
-		l := matchbox.layout_make({40, 40}, 200, 8)
+		l := matchbox.create_layout({40, 40}, 200, 8)
 
 		if matchbox.button(matchbox.layout_next(&l, 42), "Play")     { ... }
 		if matchbox.button(matchbox.layout_next(&l, 42), "Settings") { ... }
 		matchbox.layout_space(&l, 16)
 		matchbox.layout_text(&l, font, "v0.1")
 */
-layout_make :: proc(top_left: [2]f32, width: f32, spacing: f32 = 0) -> Layout {
+create_layout :: proc(top_left: [2]f32, width: f32, spacing: f32 = 0) -> Layout {
 	return Layout{x = top_left.x, y = top_left.y, width = width, spacing = spacing}
 }
 
@@ -131,7 +131,7 @@ Grid :: struct {
 	area's height: a grid taller than its area is the normal case for something
 	scrolling, and begin_clip is what confines it.
 */
-grid_fit :: proc(area: Rectangle, target: [2]f32, count: int, spacing: f32 = 0) -> Grid {
+create_grid :: proc(area: Rectangle, target: [2]f32, count: int, spacing: f32 = 0) -> Grid {
 	origin := rect_top_left(area)
 
 	if count <= 0 || target.x <= 0 || target.y <= 0 || area.size.x <= 0 {

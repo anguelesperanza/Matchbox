@@ -6,8 +6,8 @@ package matchbox
 	Skeletal animation: a hierarchy of joints, a set of clips that move them,
 	and the matrix palette a skinning vertex shader needs.
 
-	`3d.md` listed this under "Not doing", with the note that the first game
-	wanting a character to walk is what starts it. This is that.
+	Deliberately left out of the original 3D plan, on the reasoning that the
+	first game wanting a character to walk is what starts it. This is that.
 
 	**The split is the same one the cameras use.** A `Model` holds what came out
 	of the file and never changes: the skeleton's rest pose, its hierarchy, and
@@ -17,7 +17,7 @@ package matchbox
 	is the same reason `draw_model` takes a `Transform` rather than storing one.
 
 	The names here are `Model_`-prefixed or `_3d`-flavoured because 2D sprite
-	animation already owns the plain ones: `AnimationClip`, `update_animation`
+	animation already owns the plain ones: `Animation_Clip`, `update_animation`
 	and `load_animation` in `animation.odin` are the sprite ones and are
 	unrelated to any of this.
 */
@@ -126,7 +126,7 @@ Skeleton :: struct {
 }
 
 // Whether a model has a skeleton at all. A cube does not.
-model_is_skinned :: proc(model: Model) -> bool {
+is_model_skinned :: proc(model: Model) -> bool {
 	return len(model.skeleton.rest) > 0 && len(model.skeleton.skins) > 0
 }
 
@@ -240,7 +240,7 @@ create_animator :: proc(
 ) -> Animator {
 	idle := Animation_Playback{clip = -1, speed = 1, looping = true}
 
-	if !model_is_skinned(model) {
+	if !is_model_skinned(model) {
 		log.info("model has no skeleton; animator will do nothing")
 		return Animator{playback = idle, blend = blend}
 	}
@@ -462,7 +462,7 @@ node_world_matrix :: proc(
 	before it becomes a weapon welded to the wrong bone.
 */
 print_skeleton :: proc(model: Model) {
-	if !model_is_skinned(model) {
+	if !is_model_skinned(model) {
 		fmt.printfln("model has no skeleton: %v node(s), %v part(s), nothing to attach to",
 			len(model.skeleton.rest), len(model.parts))
 		return
@@ -525,7 +525,7 @@ print_skeleton :: proc(model: Model) {
 	the mesh was exported without its armature.
 */
 print_animations :: proc(model: Model) {
-	if !model_is_skinned(model) {
+	if !is_model_skinned(model) {
 		fmt.println("model has no skeleton: nothing here can be animated")
 
 		// A file can carry clips with no skin to drive -- they would move nodes
@@ -634,7 +634,7 @@ stop_animation :: proc(animator: ^Animator) {
 	what a game watches to know a one-shot has finished.
 */
 update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32) {
-	if !model_is_skinned(model) do return
+	if !is_model_skinned(model) do return
 	if len(animator.pose.locals) != len(model.skeleton.rest) do return
 
 	// The clip being faded out, first, because the fade's own clock decides

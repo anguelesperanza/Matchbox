@@ -42,14 +42,15 @@ main :: proc() {
 
 	// One sprite drawn four times over, to show that a tint is a property of
 	// the draw rather than of the art.
-	card := matchbox.create_sprite(#load("../ui/art/ember.png"), 1)
+	card, card_err := matchbox.create_sprite(#load("../ui/art/ember.png"), 1)
+	if card_err != nil do return
 	defer matchbox.destroy(&card)
 
 	elapsed: f32
 
 	for matchbox.is_running() {
 		matchbox.poll_events()
-		elapsed += matchbox.delta_time()
+		elapsed += matchbox.get_delta_time()
 
 		w := f32(matchbox.mbi.width)
 		h := f32(matchbox.mbi.height)
@@ -172,7 +173,7 @@ main :: proc() {
 		label   := "sizes resident: "
 
 		matchbox.draw_text(body, label, text_x, count_y + body.ascent, DIM)
-		matchbox.draw_text(body, i64(matchbox.font_cache_len()),
+		matchbox.draw_text(body, i64(matchbox.get_font_cache_len()),
 			text_x + matchbox.measure_text(body, label).x, count_y + body.ascent, matchbox.WHITE)
 
 		matchbox.end_drawing()

@@ -61,7 +61,7 @@ Skybox :: struct {
 	out. It loads anyway, because a slightly-off ratio is a legitimate crop and
 	refusing would be worse than saying so.
 */
-load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, ok: bool) {
+load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, err: Error) {
 	image := load_image_from_file(path) or_return
 	defer destroy_image(&image)
 
@@ -71,14 +71,16 @@ load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 			path, image.width, image.height, ratio)
 	}
 
+	texture := upload_texture(raw_data(image.pixels), image.width, image.height) or_return
+
 	skybox = Skybox{
 		kind    = .PANORAMA,
-		texture = upload_texture(raw_data(image.pixels), image.width, image.height),
+		texture = texture,
 		sampler = mbi.renderer.skybox_wrap_sampler,
 		tint    = WHITE,
 	}
 
-	return skybox, true
+	return skybox, nil
 }
 
 /*
@@ -100,14 +102,14 @@ load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 	shader rather than by swapping faces here, so that what this slices is what
 	a person sees when they open the file.
 */
-load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
+load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, err: Error) {
 	image := load_image_from_file(path) or_return
 	defer destroy_image(&image)
 
 	if image.width % 4 != 0 || image.height % 3 != 0 || image.width / 4 != image.height / 3 {
 		log.errorf("%s is %vx%v, which is not a 4x3 cross of square faces",
 			path, image.width, image.height)
-		return {}, false
+		return {}, Skybox_Error.Not_A_Cross
 	}
 
 	face := int(image.width / 4)
@@ -123,7 +125,7 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 		{3, 1}, // -Z
 	}
 
-	texture := create_gpu_texture(i32(face), i32(face), cube = true)
+	texture := create_gpu_texture(i32(face), i32(face), cube = true) or_return
 
 	// One scratch face, refilled six times, rather than six allocations.
 	pixels := make([][4]u8, face * face, context.temp_allocator)
@@ -137,7 +139,14 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 			copy(pixels[y * face:][:face], image.pixels[source:][:face])
 		}
 
-		upload_texture_region(texture, raw_data(pixels), i32(face), i32(face), u32(layer))
+		// Released here rather than propagated bare: five faces already
+		// uploaded into a texture nobody will receive is a leak, and the
+		// caller has no handle to free it with.
+		if fill_err := upload_texture_region(texture, raw_data(pixels), i32(face), i32(face), u32(layer)); fill_err != nil {
+			log.errorf("could not upload face %v of %s: %v", layer, path, fill_err)
+			sdl.ReleaseGPUTexture(mbi.renderer.device, texture)
+			return {}, fill_err
+		}
 	}
 
 	skybox = Skybox{
@@ -147,7 +156,7 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool) {
 		tint    = WHITE,
 	}
 
-	return skybox, true
+	return skybox, nil
 }
 
 // Releases the sky's texture. The samplers belong to the renderer and are

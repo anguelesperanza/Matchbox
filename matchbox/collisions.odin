@@ -25,14 +25,14 @@ sprite_to_index_by_value :: proc(x:f32, y:f32, width:f32) -> (index:int) {
 /*
 	Whether the pointer is over a sprite.
 
-	Through point_in_rect, which means the sprite's `pivot` is now accounted
+	Through is_point_in_rect, which means the sprite's `pivot` is now accounted
 	for. This used to test position..position + size directly, which is only
 	right when the pivot is {0.5, 0.5} -- what create_sprite gives you, so the
 	usual case was fine and a sprite with any other pivot had its hitbox half a
 	size away from the picture.
 */
-mouse_over_sprite :: proc(sprite:Sprite) -> bool {
-	return point_in_rect(get_mouse_position(), {
+is_mouse_over_sprite :: proc(sprite:Sprite) -> bool {
+	return is_point_in_rect(get_mouse_position(), {
 		position = sprite.position,
 		size     = sprite.size,
 		pivot    = sprite.pivot,

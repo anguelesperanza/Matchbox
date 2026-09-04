@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 341 of them -- with its arguments
+Every public procedure in the package -- 336 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -14,19 +14,20 @@ any.
 
 ## Contents
 
-- [Getting started](#getting-started) -- 18
+- [Getting started](#getting-started) -- 17
 - [Input](#input) -- 42
-- [2D drawing](#2d-drawing) -- 56
+- [2D drawing](#2d-drawing) -- 60
 - [Text and fonts](#text-and-fonts) -- 21
-- [2D cameras](#2d-cameras) -- 3
+- [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
-- [3D cameras](#3d-cameras) -- 45
+- [3D cameras](#3d-cameras) -- 42
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 33
+- [Animation](#animation) -- 26
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
-- [Tiled maps](#tiled-maps) -- 12
+- [Tiled maps](#tiled-maps) -- 3
+- [Other](#other) -- 10
 
 ## Getting started
 
@@ -68,20 +69,15 @@ destroy :: proc
 ```
 destroy ------- One name for giving anything back.
 
-```odin
-destroy_animated_sprite :: proc(sprite: ^AnimatedSprite)
-```
-Frees the sheet an animated sprite draws from.
-
 ### `clock.odin`
 
 ```odin
-frame_count :: proc() -> u64
+get_frame_count :: proc() -> u64
 ```
 How many frames poll_events has run.
 
 ```odin
-delta_time :: proc() -> f32
+get_delta_time :: proc() -> f32
 ```
 Seconds elapsed during the previous frame.
 
@@ -113,7 +109,7 @@ screen_size :: proc(size: [2]f32) -> [2]f32
 The camera zoom has to be applied here as well as in screen_pos.
 
 ```odin
-screen_dims :: proc() -> [2]f32
+get_screen_dims :: proc() -> [2]f32
 ```
 The size everything 2D is measured against this frame.
 
@@ -123,13 +119,13 @@ The size everything 2D is measured against this frame.
 read_entire_file :: proc(
 	path: string,
 	allocator := context.allocator) -> (data: []byte,
-	ok: bool,
+	err: Error,
 )
 ```
 Reads a whole file into memory.
 
 ```odin
-pref_path :: proc(
+get_pref_path :: proc(
 	org: string,
 	app: string,
 	allocator := context.allocator,
@@ -138,7 +134,7 @@ pref_path :: proc(
 The one directory a game may write to, created if it is not there.
 
 ```odin
-base_path :: proc(allocator := context.allocator) -> string
+get_base_path :: proc(allocator := context.allocator) -> string
 ```
 Where the program itself lives, ending with a separator.
 
@@ -172,7 +168,7 @@ set_cursor_locked :: proc(locked: bool)
 Hides the pointer and keeps it in the window, reporting only how far it moved.
 
 ```odin
-cursor_locked :: proc() -> bool
+is_cursor_locked :: proc() -> bool
 ```
 Whether the pointer is currently locked to the window.
 
@@ -227,17 +223,17 @@ get_clipboard_text :: proc(allocator := context.allocator) -> string
 The clipboard's contents, or "" when it holds no text.
 
 ```odin
-is_mouse_pressed :: proc(button:Mouse_Button) -> bool
+is_mouse_pressed :: proc(button: sdl.MouseButtonFlag) -> bool
 ```
 True only on the frame the button went down.
 
 ```odin
-is_mouse_held :: proc(button:Mouse_Button) -> bool
+is_mouse_held :: proc(button: sdl.MouseButtonFlag) -> bool
 ```
 True every frame the button is down.
 
 ```odin
-is_mouse_released :: proc(button:Mouse_Button) -> bool
+is_mouse_released :: proc(button: sdl.MouseButtonFlag) -> bool
 ```
 True only on the frame the button came back up.
 
@@ -252,7 +248,7 @@ release_mouse :: proc()
 Hands the pointer back, for a widget that claimed it and has now drawn the thing it was protecting.
 
 ```odin
-mouse_captured :: proc() -> bool
+is_mouse_captured :: proc() -> bool
 ```
 Whether something above has already claimed the pointer this frame.
 
@@ -324,7 +320,7 @@ Shakes the controller.
 ### `touch.odin`
 
 ```odin
-touch_active :: proc() -> bool
+is_touch_active :: proc() -> bool
 ```
 Whether input is currently coming from touch.
 
@@ -393,7 +389,7 @@ rect_top_left :: proc(rectangle: Rectangle) -> [2]f32
 The top-left corner.
 
 ```odin
-point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool
+is_point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool
 ```
 Whether a point is inside a rectangle.
 
@@ -405,17 +401,22 @@ A filled rectangle, rotated about its own pivot.
 ### `sprite.odin`
 
 ```odin
-create_mesh :: proc(bytes: []byte) -> Mesh
+create_mesh :: proc(bytes: []byte) -> (Mesh, Error)
 ```
 Decoding is what loading an image costs -- the upload to the gpu underneath is nothing next to it -- so this goes through stb rather than core:image, which is roughly five times slower on the same file.
 
 ```odin
-create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh
+create_mesh_from_pixels :: proc(
+	pixels: []byte,
+	width,
+	height: i32) -> (Mesh,
+	Error,
+)
 ```
 The same, from pixels that have already been decoded.
 
 ```odin
-create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite
+create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> (Sprite, Error)
 ```
 A sprite from an encoded image -- PNG, JPG, whatever stb_image reads.
 
@@ -424,8 +425,9 @@ create_sprite_from_pixels :: proc(
 	pixels: []byte,
 	width,
 	height: i32,
-	scale: f32 = 1,
-) -> Sprite
+	scale: f32 = 1) -> (Sprite,
+	Error,
+)
 ```
 A sprite around pixels the game already holds.
 
@@ -445,9 +447,24 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32
 The middle of the sprite in world coordinates.
 
 ```odin
-destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites)
+create_parallax :: proc(allocator := context.allocator) -> Parallax_Sprites
 ```
-Destroys every layer of a parallax set.
+Layers that move with the camera at different rates, which is what reads as depth in a 2D scene.
+
+```odin
+parallax_add :: proc(set: ^Parallax_Sprites, sprite: Sprite, speed: f32 = 1)
+```
+Adds a layer, drawn in front of everything already in the set.
+
+```odin
+draw_parallax :: proc(set: Parallax_Sprites)
+```
+Draws every layer, first to last, so the set is ordered back to front.
+
+```odin
+destroy_parallax :: proc(parallax_sprites: ^Parallax_Sprites)
+```
+Destroys every layer of a parallax set, and the set's own storage.
 
 ```odin
 draw_sprite :: proc(sprite: Sprite)
@@ -497,19 +514,28 @@ sprite_world_collision :: proc(sprite: Sprite) -> [2]f32
 The sprite's position clamped so it cannot leave the visible area.
 
 ```odin
-bounding_box_collision_check :: proc(a: [4]f32, b: [4]f32) -> bool
+is_bounding_box_collision :: proc(a: [4]f32, b: [4]f32) -> bool
 ```
 Whether two {left, top, right, bottom} rectangles overlap.
 
 ```odin
-bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool
+is_bounding_box_contact :: proc(a: [4]f32, b: [4]f32) -> bool
 ```
-The same test as `bounding_box_collision_check`, except that touching counts.
+The same test as `is_bounding_box_collision`, except that touching counts.
 
 ```odin
 sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32
 ```
 Returns the forward direction vector of a sprite based on its current rotation.
+
+```odin
+look_at_sprite :: proc(
+	sprite: Sprite,
+	target: [2]f32,
+	forward: Sprite_Forward = .TOP,
+) -> f32
+```
+Returns the angle (radians) needed to face a sprite's visual center toward target.
 
 ```odin
 sprite_set_frame :: proc(
@@ -527,7 +553,7 @@ Selects a single tile from a sprite sheet by its column and row (0-indexed).
 ### `sprite_cache.odin`
 
 ```odin
-sprite_cache_make :: proc(
+create_sprite_cache :: proc(
 	$Key: typeid,
 	limit: int = 0,
 	allocator := context.allocator) -> Sprite_Cache(Key,
@@ -560,12 +586,12 @@ sprite_cache_find :: proc(cache: ^Sprite_Cache($Key), key: Key) -> ^Sprite
 The sprite under a key, or nil, without loading anything.
 
 ```odin
-sprite_cache_has :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool
+is_sprite_cache_holding :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool
 ```
 Whether a key is resident, without loading it.
 
 ```odin
-sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int
+get_sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int
 ```
 How many sprites are resident.
 
@@ -575,7 +601,7 @@ sprite_cache_evict :: proc(cache: ^Sprite_Cache($Key), key: Key)
 Drops one entry.
 
 ```odin
-sprite_cache_destroy :: proc(cache: ^Sprite_Cache($Key))
+destroy_sprite_cache :: proc(cache: ^Sprite_Cache($Key))
 ```
 Frees every sprite and the cache's own storage.
 
@@ -649,7 +675,7 @@ The same three points joined by a line `thickness` pixels wide.
 load_image :: proc(
 	bytes: []byte,
 	allocator := context.allocator) -> (image: Image,
-	ok: bool,
+	err: Error,
 )
 ```
 Decodes an image held in memory.
@@ -658,13 +684,18 @@ Decodes an image held in memory.
 load_image_from_file :: proc(
 	path: string,
 	allocator := context.allocator) -> (image: Image,
-	ok: bool,
+	err: Error,
 )
 ```
 The same, read from a path.
 
 ```odin
-image_size :: proc(bytes: []byte) -> (width, height, channels: i32, ok: bool)
+image_size :: proc(
+	bytes: []byte) -> (width,
+	height,
+	channels: i32,
+	err: Error,
+)
 ```
 How big an image is without decoding it.
 
@@ -681,12 +712,12 @@ Frees the pixels, through the allocator they came from.
 ### `pixel_buffer.odin`
 
 ```odin
-create_pixel_buffer :: proc(width, height: i32) -> Pixel_Buffer
+create_pixel_buffer :: proc(width, height: i32) -> (Pixel_Buffer, Error)
 ```
 An empty buffer `width` by `height` pixels.
 
 ```odin
-pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T)
+pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) -> Error
 ```
 Hands this frame's pixels to the GPU.
 
@@ -727,7 +758,7 @@ pixel_buffer_pick_mouse :: proc(
 	ok: bool,
 )
 ```
-pixel_buffer_pick with the pointer already filled in, which is what almost every caller wants -- the same shape as mouse_over_rect against point_in_rect.
+pixel_buffer_pick with the pointer already filled in, which is what almost every caller wants -- the same shape as is_mouse_over_rect against is_point_in_rect.
 
 ```odin
 destroy_pixel_buffer :: proc(buffer: ^Pixel_Buffer)
@@ -751,7 +782,7 @@ Restores the clip that was in force before the matching begin_clip, or the whole
 ### `font.odin`
 
 ```odin
-load_font :: proc(bytes: []byte, font_size: f32) -> Font
+load_font :: proc(bytes: []byte, font_size: f32) -> (Font, Error)
 ```
 Bakes a TTF into an atlas at one pixel size.
 
@@ -759,6 +790,18 @@ Bakes a TTF into an atlas at one pixel size.
 destroy_font :: proc(font: ^Font)
 ```
 Gives the font's atlas texture and vertex buffer back to the GPU.
+
+```odin
+get_font :: proc(size: f32) -> ^Font
+```
+The default font baked at `size` pixels.
+
+```odin
+get_font_cache_len :: proc() -> int
+```
+How many extra sizes are resident, not counting the default one.
+
+### `text.odin`
 
 ```odin
 draw_text_i64 :: proc(
@@ -866,18 +909,6 @@ draw_text_ui :: proc
 `draw_text`, but in screen coordinates: fixed to the window and untouched by the camera.
 
 ```odin
-get_font :: proc(size: f32) -> ^Font
-```
-The default font baked at `size` pixels.
-
-```odin
-font_cache_len :: proc() -> int
-```
-How many extra sizes are resident, not counting the default one.
-
-### `text.odin`
-
-```odin
 wrap_text :: proc(
 	font: ^Font,
 	text: string,
@@ -952,6 +983,11 @@ end_drawing_2d :: proc()
 Deactivates the camera transform.
 
 ```odin
+camera_follow :: proc(target: [2]f32, delta_time: f32)
+```
+Eases the camera toward `target`, once per frame.
+
+```odin
 get_mouse_world_pos :: proc() -> [2]f32
 ```
 Returns the mouse position in world space, accounting for camera position and zoom.
@@ -979,7 +1015,7 @@ button_enabled_if :: proc(
 A style with `disabled` set the way the caller says, which is the shape this is nearly always wanted in: if matchbox.button(rect, "Play", matchbox.button_enabled_if(hand > 0)) { ...
 
 ```odin
-mouse_over_rect :: proc(rectangle: Rectangle) -> bool
+is_mouse_over_rect :: proc(rectangle: Rectangle) -> bool
 ```
 Whether the pointer is inside a rectangle.
 
@@ -997,7 +1033,7 @@ button_confirm :: proc(
 A button that asks first.
 
 ```odin
-confirm_button_armed :: proc(state: ^Confirm_Button) -> bool
+is_confirm_button_armed :: proc(state: ^Confirm_Button) -> bool
 ```
 Whether it is currently asking.
 
@@ -1024,7 +1060,7 @@ draw_button :: proc(button:Button)
 Draws a button without asking whether it was clicked -- the drawing half of `button`, for a game that decides on its own terms what a click means.
 
 ```odin
-mouse_over_button :: proc(button:Button) -> bool
+is_mouse_over_button :: proc(button:Button) -> bool
 ```
 Whether the pointer is inside the button's rectangle.
 
@@ -1051,7 +1087,7 @@ destroy_text_field :: proc(field:^Text_Field)
 Frees what the field owns.
 
 ```odin
-text_field_string :: proc(field:^Text_Field) -> string
+get_text_field_string :: proc(field:^Text_Field) -> string
 ```
 What has been typed.
 
@@ -1061,7 +1097,7 @@ text_field_set :: proc(field:^Text_Field, text:string)
 Replaces the contents outright, putting the caret at the end*/
 
 ```odin
-mouse_over_text_field :: proc(field:^Text_Field) -> bool
+is_mouse_over_text_field :: proc(field:^Text_Field) -> bool
 ```
 Whether the pointer is inside the field's box.
 
@@ -1132,12 +1168,12 @@ end_scroll :: proc(view: ^Scroll_View)
 Ends the panel and draws the scrollbar.
 
 ```odin
-scroll_max :: proc(view: ^Scroll_View) -> f32
+get_scroll_max :: proc(view: ^Scroll_View) -> f32
 ```
 The furthest the content can be scrolled.
 
 ```odin
-scroll_needed :: proc(view: ^Scroll_View) -> bool
+is_scroll_needed :: proc(view: ^Scroll_View) -> bool
 ```
 Whether there is anything to scroll.
 
@@ -1198,7 +1234,7 @@ dropdown_overlay :: proc(
 The open list, drawn over whatever came after it.
 
 ```odin
-dropdown_is_open :: proc(state: ^Dropdown) -> bool
+is_dropdown_open :: proc(state: ^Dropdown) -> bool
 ```
 Whether a dropdown is showing its list, for a caller deciding what else to draw.
 
@@ -1254,7 +1290,7 @@ clear_status :: proc(status: ^Status_Line)
 Takes the message off the line.
 
 ```odin
-status_text :: proc(status: ^Status_Line) -> string
+get_status_text :: proc(status: ^Status_Line) -> string
 ```
 What is on the line.
 
@@ -1283,7 +1319,7 @@ close_modal :: proc(modal: ^Modal)
 Closes the modal.
 
 ```odin
-modal_is_open :: proc(modal: ^Modal) -> bool
+is_modal_open :: proc(modal: ^Modal) -> bool
 ```
 Whether the modal is up.
 
@@ -1303,7 +1339,7 @@ modal_overlay :: proc(
 Draws the dim and hands back a centred box to put content in.
 
 ```odin
-modal_dismissed :: proc(content: Rectangle) -> bool
+is_modal_dismissed :: proc(content: Rectangle) -> bool
 ```
 Whether the click landed on the dim rather than on `content`, which is the usual way a modal is dismissed.
 
@@ -1375,7 +1411,11 @@ Percentage text for a bar, as "42%".
 ### `layout.odin`
 
 ```odin
-layout_make :: proc(top_left: [2]f32, width: f32, spacing: f32 = 0) -> Layout
+create_layout :: proc(
+	top_left: [2]f32,
+	width: f32,
+	spacing: f32 = 0,
+) -> Layout
 ```
 A column starting at `top_left`, `width` across, with `spacing` between items.
 
@@ -1405,7 +1445,7 @@ layout_height :: proc(layout: ^Layout, from_y: f32) -> f32
 Where the cursor has reached.
 
 ```odin
-grid_fit :: proc(
+create_grid :: proc(
 	area: Rectangle,
 	target: [2]f32,
 	count: int,
@@ -1429,7 +1469,7 @@ How tall the whole grid is, which is what a scroll extent is measured against an
 ### `camera3d.odin`
 
 ```odin
-camera3d_at :: proc(position, target: [3]f32, fov: f32 = 70) -> Camera3D
+create_camera3d :: proc(position, target: [3]f32, fov: f32 = 70) -> Camera3D
 ```
 A camera at `position` looking at `target`, with everything else left to the defaults.
 
@@ -1615,7 +1655,7 @@ aim_rotation :: proc(
 The rotation that points a model along both angles -- yaw and pitch.
 
 ```odin
-first_person_camera :: proc(
+create_first_person_camera :: proc(
 	position: [3]f32 = {0, 0, 0},
 	facing: f32 = 0,
 	eye_offset: [3]f32 = CAMERA3D_DEFAULTS.eye_offset,
@@ -1651,7 +1691,7 @@ first_person_walk :: proc(
 Input, the move, and the aim -- the whole frame, for a body nothing else is driving.
 
 ```odin
-third_person_camera :: proc(
+create_third_person_camera :: proc(
 	position: [3]f32 = {0, 0, 0},
 	facing: f32 = 0,
 	focus_offset: [3]f32 = CAMERA3D_DEFAULTS.focus_offset,
@@ -1698,31 +1738,6 @@ third_person_walk :: proc(
 ```
 Input, the move, and the follow -- the whole frame, for a character nothing else is driving.
 
-### `look_at.odin`
-
-```odin
-look_at_point :: proc(
-	from: [2]f32,
-	target: [2]f32,
-	forward: SpriteForward = .Top,
-) -> f32
-```
-Returns the angle (radians) needed to face from a point toward target.
-
-```odin
-look_at_sprite :: proc(
-	sprite: Sprite,
-	target: [2]f32,
-	forward: SpriteForward = .Top,
-) -> f32
-```
-Returns the angle (radians) needed to face a sprite's visual center toward target.
-
-```odin
-look_at :: proc
-```
-The angle that points something at a target, given either a plain position or a sprite -- see the two procedures above for which side counts as forward.
-
 ### `math3d.odin`
 
 ```odin
@@ -1731,7 +1746,7 @@ transform_identity :: proc() -> Transform
 A Transform that does nothing: at the origin, unturned, full size.
 
 ```odin
-transform_at :: proc(
+create_transform :: proc(
 	position: [3]f32,
 	rotation := linalg.QUATERNIONF32_IDENTITY,
 	scale: f32 = 1,
@@ -1784,7 +1799,7 @@ end_drawing_3d :: proc()
 Closes the 3D pass.
 
 ```odin
-in_drawing_3d :: proc() -> bool
+is_drawing_3d :: proc() -> bool
 ```
 Whether a 3D pass is open.
 
@@ -1874,12 +1889,15 @@ A grid of lines on the ground plane, centred on the origin, `slices` squares acr
 ### `light.odin`
 
 ```odin
-point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light
+create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light
 ```
 A point light at `position`.
 
 ```odin
-directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Light
+create_directional_light :: proc(
+	direction: [3]f32,
+	color: [4]f32 = WHITE,
+) -> Light
 ```
 A light shining along `direction`, from nowhere in particular.
 
@@ -1914,19 +1932,19 @@ disable_fog :: proc()
 Turns fog off, leaving its colour and range where they were.
 
 ```odin
-lighting_active :: proc() -> bool
+is_lighting_active :: proc() -> bool
 ```
 Whether a game has set any lights.
 
 ### `skybox.odin`
 
 ```odin
-load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, ok: bool)
+load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, err: Error)
 ```
 An equirectangular panorama, from a 2:1 image.
 
 ```odin
-load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool)
+load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, err: Error)
 ```
 A cube map, from the six faces of a horizontal cross.
 
@@ -1958,17 +1976,19 @@ How big the model is on each axis, in its own space before any Transform.
 upload_mesh :: proc(
 	vertices: []Vertex3D,
 	indices: []u32,
-	topology := Mesh_Topology.TRIANGLES,
-) -> Model_Part
+	topology := Mesh_Topology.TRIANGLES) -> (Model_Part,
+	Error,
+)
 ```
 Puts one lump of geometry on the GPU.
 
 ```odin
-model_from_mesh :: proc(
+create_model_from_mesh :: proc(
 	vertices: []Vertex3D,
 	indices: []u32,
-	topology := Mesh_Topology.TRIANGLES,
-) -> Model
+	topology := Mesh_Topology.TRIANGLES) -> (Model,
+	Error,
+)
 ```
 A model of one part, from one lump of geometry.
 
@@ -1978,38 +1998,43 @@ destroy_model :: proc(model: ^Model)
 Gives a model's buffers, textures, skeleton and clips back.
 
 ```odin
-cube_model :: proc(size: f32 = 1) -> Model
+create_cube_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 A cube of `size` units, centred on its own origin.
 
 ```odin
-plane_model :: proc(size: f32 = 1) -> Model
+create_plane_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 A flat square of `size` units on the ground plane, facing up.
 
 ```odin
-sphere_model :: proc(
+create_sphere_model :: proc(
 	radius: f32 = 1,
 	rings: int = 16,
-	sectors: int = 24,
-) -> Model
+	sectors: int = 24) -> (Model,
+	Error,
+)
 ```
 A sphere of `radius`, built the usual way out of rings of latitude and sectors of longitude.
 
 ```odin
-cube_wires_model :: proc(size: f32 = 1) -> Model
+create_cube_wires_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 The twelve edges of a cube, as lines.
 
 ```odin
-grid_model :: proc(slices: int = 10, spacing: f32 = 1) -> Model
+create_grid_model :: proc(
+	slices: int = 10,
+	spacing: f32 = 1) -> (Model,
+	Error,
+)
 ```
 A grid of lines on the ground plane, centred on the origin.
 
 ### `model_load.odin`
 
 ```odin
-load_model :: proc(path: string) -> (model: Model, ok: bool)
+load_model :: proc(path: string) -> (model: Model, err: Error)
 ```
 Loads a model from a `.gltf` or `.glb` file.
 
@@ -2027,8 +2052,9 @@ create_animated_sprite :: proc(
 	frame_count: i32,
 	seconds_per_frame: f32,
 	scale: f32 = 1,
-	looping := true,
-) -> AnimatedSprite
+	looping := true) -> (Animated_Sprite,
+	Error,
+)
 ```
 A sprite that plays frames off a sheet, in one call.
 
@@ -2040,8 +2066,9 @@ load_animation :: proc(
 	cols: i32,
 	rows: i32,
 	frame_count: i32,
-	seconds_per_frame: f32,
-) -> AnimationClip
+	seconds_per_frame: f32) -> (Animation_Clip,
+	Error,
+)
 ```
 The clip on its own, without a sprite wrapped round it.
 
@@ -2049,8 +2076,8 @@ The clip on its own, without a sprite wrapped round it.
 load_animation_frames :: proc(
 	frames: [][]byte,
 	seconds_per_frame: f32,
-	columns: i32 = 0) -> (clip: AnimationClip,
-	ok: bool,
+	columns: i32 = 0) -> (clip: Animation_Clip,
+	err: Error,
 )
 ```
 A clip from frames that arrived as separate image files.
@@ -2060,59 +2087,64 @@ load_animation_directory :: proc(
 	files: []runtime.Load_Directory_File,
 	seconds_per_frame: f32,
 	columns: i32 = 0,
-	suffixes: []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) -> (clip: AnimationClip,
-	ok: bool,
+	suffixes: []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) -> (clip: Animation_Clip,
+	err: Error,
 )
 ```
 A clip from a whole folder of frames, in the order a person would read them.
 
 ```odin
 animation_range :: proc(
-	clip: AnimationClip,
+	clip: Animation_Clip,
 	first: i32,
 	last: i32,
 	seconds_per_frame: f32 = 0,
-) -> AnimationClip
+) -> Animation_Clip
 ```
 A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of frames -- given as the first and last frame, inclusive, and clamped to the frames the sheet actually has.
 
 ```odin
-animated_sprite_of :: proc(
-	clip: AnimationClip,
+create_animated_sprite_from_clip :: proc(
+	clip: Animation_Clip,
 	scale: f32 = 1,
 	looping := true,
-) -> AnimatedSprite
+) -> Animated_Sprite
 ```
 A sprite ready to play `clip`, with everything that is not obviously yours already set.
 
 ```odin
-destroy_animation_clip :: proc(clip: ^AnimationClip)
+destroy_animation_clip :: proc(clip: ^Animation_Clip)
 ```
 Gives the clip's sheet texture back to the GPU.
 
 ```odin
+destroy_animated_sprite :: proc(sprite: ^Animated_Sprite)
+```
+Frees the sheet an animated sprite draws from.
+
+```odin
 switch_animation :: proc(
-	sprite: ^AnimatedSprite,
-	clip: AnimationClip,
+	sprite: ^Animated_Sprite,
+	clip: Animation_Clip,
 	looping := true,
 )
 ```
 Puts a different clip on a sprite and restarts it from frame zero.
 
 ```odin
-update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32)
+update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32)
 ```
 Advances the sprite's frame and works out its uv window.
 
 ```odin
-draw_animated_sprite :: proc(sprite: AnimatedSprite)
+draw_animated_sprite :: proc(sprite: Animated_Sprite)
 ```
 Draws the current frame.
 
 ### `animation3d.odin`
 
 ```odin
-model_is_skinned :: proc(model: Model) -> bool
+is_model_skinned :: proc(model: Model) -> bool
 ```
 Whether a model has a skeleton at all.
 
@@ -2221,56 +2253,16 @@ update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32)
 ```
 Advances the clip and works out this frame's matrices.
 
-### `lerp.odin`
-
-```odin
-create_lerp_move :: proc(position: [2]f32, duration: f32) -> LerpMove
-```
-Creates a LerpMove anchored at position.
-
-```odin
-lerp_move_to :: proc(lerp: ^LerpMove, current_position: [2]f32, dest: [2]f32)
-```
-Sets a new destination.
-
-```odin
-update_lerp_move :: proc(lerp: ^LerpMove, delta_time: f32) -> [2]f32
-```
-Advances the lerp by delta_time and returns the new position.
-
-### `timer.odin`
-
-```odin
-start_cooldown :: proc(cooldown: ^CooldownTimer, duration: f32)
-```
-Starts the cooldown.
-
-```odin
-update_cooldown :: proc(cooldown: ^CooldownTimer, delta_time: f32)
-```
-Advances the cooldown by delta_time.
-
-```odin
-is_cooldown_done :: proc(cooldown: CooldownTimer) -> bool
-```
-Returns true once the cooldown has fully elapsed.
-
-```odin
-reset_cooldown :: proc(cooldown: ^CooldownTimer)
-```
-Resets remaining back to the original duration, restarting the countdown.
-
-```odin
-stop_cooldown :: proc(cooldown: ^CooldownTimer)
-```
-Immediately expires the cooldown (sets remaining to 0).
-
 ## Render targets
 
 ### `render_target.odin`
 
 ```odin
-create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target
+create_render_target :: proc(
+	width: i32 = 0,
+	height: i32 = 0) -> (Render_Target,
+	Error,
+)
 ```
 Makes a render target `width` by `height`, or the size of the window when either is left at zero.
 
@@ -2319,72 +2311,6 @@ Plays the sound once, immediately.
 
 ## Tiled maps
 
-### `tiled.odin`
-
-```odin
-tiled_load_level :: proc(level:string) -> Tiled
-```
-Reads a Tiled `.tmj` map off disk and parses it.
-
-```odin
-tiled_find_layer :: proc(level: Tiled, name: string) -> (TiledLayer, bool)
-```
-Returns the TiledLayer whose name matches `name`.
-
-```odin
-tiled_find_objects :: proc(
-	level: Tiled,
-	layer_name: string) -> ([]TiledObjectLayer,
-	bool,
-)
-```
-Returns the object list from the layer whose name matches `layer_name`.
-
-```odin
-tiled_get_spawn_position :: proc(
-	level: Tiled,
-	layer_name: string,
-	scale: f32,
-	sprite_size: [2]f32,
-) -> [2]f32
-```
-Returns the world-space position for a sprite spawned at the first object in the layer named `layer_name`.
-
-```odin
-tiled_resolve_x_collision :: proc(
-	body: ^Body,
-	collisions: []TiledObjectLayer,
-	dx: ^f32,
-	scale: f32,
-)
-```
-Stops a body at the first solid object in its way horizontally, adjusting `dx` in place.
-
-```odin
-tiled_resolve_y_collision :: proc(
-	body: ^Body,
-	collisions: []TiledObjectLayer,
-	vy: ^f32,
-	scale: f32,
-)
-```
-The vertical half of the pair, adjusting `vy` in place.
-
-```odin
-draw_tiled_layer :: proc(
-	layer:TiledLayer,
-	tileset:Sprite,
-	tile_width:int,
-	tile_height:int,
-)
-```
-Draw tiled layer to the screen.
-
-```odin
-draw_tiled_layers :: proc(level: Tiled, tileset: Sprite)
-```
-Draw every visible tile layer in the level.
-
 ### `collisions.odin`
 
 ```odin
@@ -2398,19 +2324,65 @@ sprite_to_index_by_value :: proc(x:f32, y:f32, width:f32) -> (index:int)
 A grid coordinate as an index into a row-major array of `width` columns.
 
 ```odin
-mouse_over_sprite :: proc(sprite:Sprite) -> bool
+is_mouse_over_sprite :: proc(sprite:Sprite) -> bool
 ```
 Whether the pointer is over a sprite.
 
-### `procedural_generation.odin`
+## Other
+
+### `utility.odin`
 
 ```odin
-random_walk :: proc(
-	size:[2]int,
-	start: [2]f32,
-	steps: int,
-	stride: f32,
-) -> []u8
+start_cooldown :: proc(cooldown: ^Cooldown_Timer, duration: f32)
 ```
-A drunkard's-walk map: `steps` moves from `start`, carving out the cells it passes through.
+Starts the cooldown.
+
+```odin
+update_cooldown :: proc(cooldown: ^Cooldown_Timer, delta_time: f32)
+```
+Advances the cooldown by delta_time.
+
+```odin
+is_cooldown_done :: proc(cooldown: Cooldown_Timer) -> bool
+```
+Returns true once the cooldown has fully elapsed.
+
+```odin
+reset_cooldown :: proc(cooldown: ^Cooldown_Timer)
+```
+Resets remaining back to the original duration, restarting the countdown.
+
+```odin
+stop_cooldown :: proc(cooldown: ^Cooldown_Timer)
+```
+Immediately expires the cooldown (sets remaining to 0).
+
+```odin
+create_lerp_move :: proc(position: [2]f32, duration: f32) -> Lerp_Move
+```
+Creates a Lerp_Move anchored at position.
+
+```odin
+lerp_move_to :: proc(lerp: ^Lerp_Move, current_position: [2]f32, dest: [2]f32)
+```
+Sets a new destination.
+
+```odin
+update_lerp_move :: proc(lerp: ^Lerp_Move, delta_time: f32) -> [2]f32
+```
+Advances the lerp by delta_time and returns the new position.
+
+```odin
+look_at_point :: proc(
+	from: [2]f32,
+	target: [2]f32,
+	forward: Sprite_Forward = .TOP,
+) -> f32
+```
+Returns the angle (radians) needed to face from a point toward target.
+
+```odin
+look_at :: proc
+```
+The angle that points something at a target, given either a plain position or a sprite.
 

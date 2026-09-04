@@ -65,7 +65,8 @@ main :: proc() {
 	// At the window's size. It does not follow a resize -- see the note on
 	// Render_Target -- and for a game with a filter over it a fixed resolution
 	// is usually the point anyway.
-	scene := mb.create_render_target()
+	scene, scene_err := mb.create_render_target()
+	if scene_err != nil do return
 	defer mb.destroy(&scene)
 
 	props := []Prop{
@@ -75,8 +76,14 @@ main :: proc() {
 	}
 
 	for &prop in props {
-		prop.model, prop.loaded = mb.load_model(prop.path)
-		if prop.loaded do prop.position.y = -prop.model.bounds_min.y * prop.scale
+		model, err := mb.load_model(prop.path)
+		if err != nil {
+			fmt.eprintfln("could not load %s: %v", prop.path, err)
+			continue
+		}
+
+		prop.model, prop.loaded = model, true
+		prop.position.y = -prop.model.bounds_min.y * prop.scale
 	}
 
 	defer for &prop in props {
@@ -86,7 +93,7 @@ main :: proc() {
 	// The same opening view as examples/lighting, which this scene is.
 	player := [3]f32{0, 0, 5}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		pitch      = math.atan2(f32(-1.0), f32(5.0)),
@@ -105,10 +112,10 @@ main :: proc() {
 		time := f32(mb.get_time())
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(._1) do effect = .NONE
 		if mb.is_key_pressed(._2) do effect = .VHS
@@ -117,13 +124,13 @@ main :: proc() {
 		if mb.is_key_pressed(.LEFTBRACKET)  do grid = {max(grid.x * 0.5, 40),  max(grid.y * 0.5, 30)}
 		if mb.is_key_pressed(.RIGHTBRACKET) do grid = {min(grid.x * 2, 1280), min(grid.y * 2, 720)}
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, 4, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
 		}
 
 		// PsxGame's campfire flicker, from stage 5.
 		flicker := 1.0 + math.sin(time * 1.0) * 0.1 + math.sin(time * 0.5) * 0.05
-		mb.set_lights({mb.point_light(
+		mb.set_lights({mb.create_point_light(
 			{math.sin(time * 8.0) * 0.05, 1.0, math.cos(time * 6.0) * 0.05},
 			{clamp(EMBER.r * flicker, 0, 1), clamp(EMBER.g * flicker, 0, 0.31), 0, 1},
 		)})

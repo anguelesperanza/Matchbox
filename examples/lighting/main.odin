@@ -64,8 +64,14 @@ main :: proc() {
 	}
 
 	for &prop in props {
-		prop.model, prop.loaded = mb.load_model(prop.path)
-		if prop.loaded do prop.position.y = -prop.model.bounds_min.y * prop.scale
+		model, err := mb.load_model(prop.path)
+		if err != nil {
+			fmt.eprintfln("could not load %s: %v", prop.path, err)
+			continue
+		}
+
+		prop.model, prop.loaded = model, true
+		prop.position.y = -prop.model.bounds_min.y * prop.scale
 	}
 
 	defer for &prop in props {
@@ -76,7 +82,7 @@ main :: proc() {
 	// the same opening view this had before the rig existed.
 	player := [3]f32{0, 0, 5}
 
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		pitch      = math.atan2(f32(-1.0), f32(5.0)),
@@ -97,10 +103,10 @@ main :: proc() {
 		time := f32(mb.get_time())
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(.L) do lights_on = !lights_on
 		if mb.is_key_pressed(.K) do moon_on   = !moon_on
@@ -111,8 +117,8 @@ main :: proc() {
 			else      do mb.disable_fog()
 		}
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, 4, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
 		}
 
 		if lights_on {
@@ -120,7 +126,7 @@ main :: proc() {
 			// each other, so the fire never repeats on a beat you can hear.
 			flicker := 1.0 + math.sin(time * 1.0) * 0.1 + math.sin(time * 0.5) * 0.05
 
-			fire := mb.point_light(
+			fire := mb.create_point_light(
 				{math.sin(time * 8.0) * 0.05, 1.0, math.cos(time * 6.0) * 0.05},
 				{
 					clamp(EMBER.r * flicker, 0, 1),
@@ -130,7 +136,7 @@ main :: proc() {
 				})
 
 			if moon_on {
-				moon := mb.directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1})
+				moon := mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1})
 				mb.set_lights({fire, moon})
 			} else {
 				mb.set_lights({fire})

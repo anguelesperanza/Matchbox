@@ -52,14 +52,21 @@ Render_Target :: struct {
 	either is left at zero.
 
 	The caller owns it: `destroy` when finished.
+
+	This used to log and hand back a zeroed struct, which was the worst of the
+	three ways this package reported failure: nothing stopped, nothing was
+	returned to check, and the mistake surfaced later as an unrelated-looking
+	"render target was never created" from `begin_drawing_target` -- a
+	complaint about the wrong thing, in the wrong place, a frame or more after
+	the cause.
 */
-create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
+create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> (Render_Target, Error) {
 	r := &mbi.renderer
 
 	w := width  if width  > 0 else mbi.window_width
 	h := height if height > 0 else mbi.window_height
 
-	ensure(w > 0 && h > 0, "a render target needs a size")
+	if w <= 0 || h <= 0 do return {}, Argument_Error.Empty_Size
 
 	target: Render_Target
 	target.width  = w
@@ -78,7 +85,7 @@ create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
 
 	if target.texture == nil {
 		log.errorf("could not create a render target: %s", sdl.GetError())
-		return {}
+		return {}, Gpu_Error.Texture_Creation_Failed
 	}
 
 	if r.depth_format == .INVALID do r.depth_format = pick_depth_format()
@@ -96,10 +103,10 @@ create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> Render_Target {
 	if target.depth == nil {
 		log.errorf("could not create a render target's depth: %s", sdl.GetError())
 		sdl.ReleaseGPUTexture(r.device, target.texture)
-		return {}
+		return {}, Gpu_Error.Texture_Creation_Failed
 	}
 
-	return target
+	return target, nil
 }
 
 // Releases the target's colour and depth textures. Not to be called while it
@@ -124,7 +131,7 @@ destroy_render_target :: proc(target: ^Render_Target) {
 
 	Everything works inside as it does outside: `clear_background`,
 	`begin_drawing_3d`, sprites, text. What changes is where the pixels land and
-	what `screen_dims` reports, so a 2D layout laid out as a fraction of the
+	what `get_screen_dims` reports, so a 2D layout laid out as a fraction of the
 	screen fills the target instead.
 
 	Nested targets are not supported -- one at a time, and `end_drawing_target`
@@ -180,7 +187,7 @@ current_depth_texture :: proc() -> ^sdl.GPUTexture {
 }
 
 @(private)
-current_target_size :: proc() -> [2]f32 {
+get_current_target_size :: proc() -> [2]f32 {
 	r := &mbi.renderer
 
 	if r.target != nil do return {f32(r.target.width), f32(r.target.height)}
@@ -195,7 +202,7 @@ current_target_size :: proc() -> [2]f32 {
 	The effects Matchbox ships.
 
 	They are shaders compiled into the framework rather than something a game
-	supplies -- see D3 in 3d.md. A game that wants a look not in this list asks
+	supplies. A game that wants a look not in this list asks
 	for it to be added; everything goes through `create_pipeline`, so the door
 	is open, but a general shader API is not what this is.
 */
@@ -246,12 +253,12 @@ draw_post :: proc(target: Render_Target, effect: Post_Effect = .NONE, grid: [2]f
 
 	if !bind_quad_state(pipeline, target.texture, sampler) do return
 
-	size := current_target_size()
+	size := get_current_target_size()
 
 	// Window pixels, not logical ones: this is the finished frame going to the
 	// screen, so `set_logical_size`'s letterbox has already been accounted for
 	// by whatever drew into the target.
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = size * 0.5,
 		size     = size,
 		screen   = size,

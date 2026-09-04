@@ -77,7 +77,8 @@ main :: proc() {
 	// behaviour off without needing a flag for it.
 	mb.set_escape_key(.UNKNOWN)
 
-	cube := mb.cube_model(1)
+	cube, cube_err := mb.create_cube_model(1)
+	if cube_err != nil do return
 	defer mb.destroy(&cube)
 
 	// Where the player is standing. The rig follows it and never writes it,
@@ -87,7 +88,7 @@ main :: proc() {
 	// Facing along -z rather than the +x that yaw 0 would give, so the cubes
 	// are in front of the player on the first frame. The eye sits EYE_HEIGHT
 	// above `player`, and the rig adds that itself from here on.
-	rig := mb.first_person_camera(
+	rig := mb.create_first_person_camera(
 		position   = player,
 		facing     = -math.PI * 0.5,
 		eye_offset = {0, EYE_HEIGHT, 0},
@@ -97,10 +98,10 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		dt := mb.delta_time()
+		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() {
+			if mb.is_cursor_locked() {
 				mb.set_cursor_locked(false)
 			} else {
 				mb.mbi.running = false
@@ -109,14 +110,14 @@ main :: proc() {
 
 		// Clicking in the window takes the pointer back. Only when it is loose
 		// already, so a click while playing is a click in the game.
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) {
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) {
 			mb.set_cursor_locked(true)
 		}
 
 		// Only while the pointer belongs to us. Without the check, the frame
 		// after ESC still carries the motion that reached the window before it
 		// was released, and the view jumps as you go for the menu.
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, WALK_SPEED, dt)
 		}
 
@@ -167,7 +168,7 @@ main :: proc() {
 		font := &mb.mbi.font
 		mb.draw_text(font, "WASD to walk, mouse to look", 20, 40, mb.WHITE)
 
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.draw_text(font, "ESC releases the pointer", 20, 70, mb.WHITE)
 		} else {
 			mb.draw_text(font, "click to look again, ESC again to quit", 20, 70, mb.WHITE)

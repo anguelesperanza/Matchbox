@@ -79,7 +79,7 @@ write_gpu_report :: proc() {
 		Except where there is no such folder. On Android an apk's directory is not
 		writable and os.args[0] means nothing, so the fallback is the one place
 		the program is allowed to write -- which is also somewhere a bug report
-		can be fetched from. pref_path makes the directory if it is not there.
+		can be fetched from. get_pref_path makes the directory if it is not there.
 	*/
 	path := "gpu-report.txt"
 
@@ -92,7 +92,7 @@ write_gpu_report :: proc() {
 	report := fmt.tprintf("%s%s", header, body)
 
 	if !write_report_file(path, report) {
-		if dir := pref_path("matchbox", mbi.title, context.temp_allocator); dir != "" {
+		if dir := get_pref_path("matchbox", mbi.title, context.temp_allocator); dir != "" {
 			path = fmt.tprintf("%sgpu-report.txt", dir)
 			if !write_report_file(path, report) {
 				// Nothing left to fall back on but the console, which is where
@@ -302,7 +302,7 @@ create_pipeline :: proc(
 			cull_mode  = cull,
 
 			// Counter-clockwise is front, which is what glTF produces and what
-			// cube_model is wound to match.
+			// create_cube_model is wound to match.
 			front_face = .COUNTER_CLOCKWISE,
 
 			// Clip, do not clamp. SDL3 reads this field the way it is named --
@@ -389,11 +389,11 @@ init :: proc(title: string, width: i32, height: i32) {
 	// The uniform structs are pushed straight at shader cbuffers, and a
 	// mismatch shows up as wrong geometry or colour rather than an error.
 	// Cheaper to find out here.
-	#assert(size_of(VertData)        == 48)
+	#assert(size_of(Vert_Data)        == 48)
 	#assert(size_of(Sprite_Frag_Data) == 32)
 	#assert(size_of(Shape_Frag_Data)  == 48)
-	#assert(size_of(OutlineFragData) == 32)
-	#assert(size_of(FontFragData)    == 16)
+	#assert(size_of(Outline_Frag_Data) == 32)
+	#assert(size_of(Font_Frag_Data)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
 	#assert(size_of(Vertex3D)        == 32)
 	#assert(size_of(Mesh_Vert_Data)  == 192)
@@ -648,11 +648,31 @@ init :: proc(title: string, width: i32, height: i32) {
 		}
 		indices := [6]u32{0, 2, 1, 0, 1, 3}
 
-		mbi.renderer.quad_verts   = upload_buffer(&verts,   size_of(verts),   {.VERTEX})
-		mbi.renderer.quad_indices = upload_buffer(&indices, size_of(indices), {.INDEX})
+		/*
+			Fatal, unlike everywhere else these errors are returned.
+
+			`init` is the one caller with nobody to hand a failure to, and a
+			program without the shared quad cannot draw anything at all -- every
+			2D draw in Matchbox binds it. Carrying on would mean a window that
+			opens and stays blank, which is a worse thing to debug than a
+			message saying which allocation the driver refused.
+		*/
+		verts_err, indices_err: Error
+		mbi.renderer.quad_verts,   verts_err   = upload_buffer(&verts,   size_of(verts),   {.VERTEX})
+		mbi.renderer.quad_indices, indices_err = upload_buffer(&indices, size_of(indices), {.INDEX})
+
+		if verts_err != nil || indices_err != nil {
+			log.errorf("could not upload the shared quad: %v %v", verts_err, indices_err)
+			panic("Cannot upload the quad every draw is built on")
+		}
 	}
 
-	mbi.font = load_font(DEFAULT_FONT_BYTES, FONT_DEFAULTS.size)
+	font, font_err := load_font(DEFAULT_FONT_BYTES, FONT_DEFAULTS.size)
+	if font_err != nil {
+		log.errorf("could not bake the default font: %v", font_err)
+		panic("Cannot bake the built-in font")
+	}
+	mbi.font = font
 
 	mbi.camera = Camera{
 		position = {f32(width) * 0.5, f32(height) * 0.5},
@@ -683,7 +703,7 @@ cleanup :: proc() {
 	// Nothing may be released while the GPU is still reading it.
 	_ = sdl.WaitForGPUIdle(device)
 
-	font_cache_destroy()
+	destroy_font_cache()
 	destroy_font(&mbi.font)
 
 	if mbi.renderer.quad_verts   != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.quad_verts)
@@ -727,7 +747,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
 
 	// The generated shapes, if anything ever asked for one.
-	shapes3d_destroy()
+	destroy_shapes3d()
 
 	// Only ever made if the game asked for a 3D pass.
 	if mbi.renderer.depth_texture != nil {
@@ -776,8 +796,8 @@ load_shader :: proc(path: string, stage: sdl.GPUShaderStage, num_samplers: u32 =
 	// Through SDL, so a shader shipped inside an apk is reachable. Still a panic
 	// rather than a false, unlike the content loaders: a missing shader is a
 	// broken build rather than a broken file somebody chose.
-	data, read := read_entire_file(full, context.allocator)
-	if !read {
+	data, read_err := read_entire_file(full, context.allocator)
+	if read_err != nil {
 		panic("Cannot read shader file")
 	}
 

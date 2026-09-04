@@ -15,11 +15,12 @@ package matchbox
 
 	So this is the same decode with the pixels kept:
 
-		img, ok := matchbox.load_image_from_file("art/sprite.png")
-		if !ok do return
+		img, err := matchbox.load_image_from_file("art/sprite.png")
+		if err != nil do return
 		defer matchbox.destroy(&img)
 
-		canvas := matchbox.create_pixel_buffer(img.width, img.height)
+		canvas, canvas_err := matchbox.create_pixel_buffer(img.width, img.height)
+		if canvas_err != nil do return
 		matchbox.pixel_buffer_update(&canvas, img.pixels)
 
 	Always RGBA, one byte a channel, whatever the file held -- stb is asked for
@@ -78,10 +79,15 @@ Image :: struct {
 	Decodes an image held in memory. PNG, JPEG, BMP, TGA, GIF, PSD and the rest of
 	what stb reads.
 
-	Returns ok = false rather than panicking, and says why through the log. A file
-	that will not decode is a content problem -- somebody chose it from a file
-	dialog -- and bringing the program down over it is the wrong response. That is
-	the same call `sprite_cache_get` makes for a missing file.
+	Returns an `Image_Error` rather than panicking, and says why through the log.
+	A file that will not decode is a content problem -- somebody chose it from a
+	file dialog -- and bringing the program down over it is the wrong response.
+	That is the same call `sprite_cache_get` makes for a missing file.
+
+	The three failures are told apart because they send somebody looking in
+	different places: `.Empty_Input` is a caller handing over nothing,
+	`.Decode_Failed` is bytes that are not a picture, and `.Impossible_Size` is
+	stb reporting success on something with no area.
 
 	The pixels are copied out of stb's own allocation into `allocator`, so the
 	result is freed with `destroy` (or `delete`) like anything else, works under a
@@ -90,10 +96,10 @@ Image :: struct {
 	milliseconds, which is why it is not worth handing back stb's pointer and a
 	rule about how to free it.
 */
-load_image :: proc(bytes: []byte, allocator := context.allocator) -> (image: Image, ok: bool) {
+load_image :: proc(bytes: []byte, allocator := context.allocator) -> (image: Image, err: Error) {
 	if len(bytes) == 0 {
 		log.error("cannot decode an empty image")
-		return {}, false
+		return {}, Image_Error.Empty_Input
 	}
 
 	width, height, channels: i32
@@ -103,13 +109,13 @@ load_image :: proc(bytes: []byte, allocator := context.allocator) -> (image: Ima
 	decoded := stbi.load_from_memory(raw_data(bytes), i32(len(bytes)), &width, &height, &channels, 4)
 	if decoded == nil {
 		log.errorf("could not decode image: %s", stbi.failure_reason())
-		return {}, false
+		return {}, Image_Error.Decode_Failed
 	}
 	defer stbi.image_free(decoded)
 
 	if width <= 0 || height <= 0 {
 		log.errorf("image decoded to an impossible size: %dx%d", width, height)
-		return {}, false
+		return {}, Image_Error.Impossible_Size
 	}
 
 	count  := int(width) * int(height)
@@ -123,20 +129,20 @@ load_image :: proc(bytes: []byte, allocator := context.allocator) -> (image: Ima
 		height    = height,
 		channels  = channels,
 		allocator = allocator,
-	}, true
+	}, nil
 }
 
 /*
 	The same, read from a path.
 
-	Returns ok = false when the file cannot be read as well as when it cannot be
-	decoded, and the log says which -- those are different problems and an editor
-	reporting "could not open" for a corrupt PNG sends somebody looking in the
-	wrong place.
+	The error says which half failed: a `File_Error` when the path could not be
+	read, an `Image_Error` when the bytes were not a picture. Those are
+	different problems, and an editor reporting "could not open" for a corrupt
+	PNG sends somebody looking in the wrong place -- which is why the two
+	domains stay apart rather than collapsing into one "could not load".
 */
-load_image_from_file :: proc(path: string, allocator := context.allocator) -> (image: Image, ok: bool) {
-	bytes, read := read_entire_file(path, context.allocator)
-	if !read do return {}, false
+load_image_from_file :: proc(path: string, allocator := context.allocator) -> (image: Image, err: Error) {
+	bytes := read_entire_file(path, context.allocator) or_return
 	defer delete(bytes)
 
 	return load_image(bytes, allocator)
@@ -148,15 +154,19 @@ load_image_from_file :: proc(path: string, allocator := context.allocator) -> (i
 	stb reads the header alone for this, so it is cheap next to a decode -- which
 	is the point: a file browser showing dimensions beside a hundred thumbnails
 	should not decode a hundred images to find them out.
+
+	`.Header_Unreadable` rather than `.Decode_Failed`, because nothing was
+	decoded: stb could not make sense of the first few bytes, which is what a
+	file that is not an image at all looks like from here.
 */
-image_size :: proc(bytes: []byte) -> (width, height, channels: i32, ok: bool) {
-	if len(bytes) == 0 do return 0, 0, 0, false
+image_size :: proc(bytes: []byte) -> (width, height, channels: i32, err: Error) {
+	if len(bytes) == 0 do return 0, 0, 0, Image_Error.Empty_Input
 
 	if stbi.info_from_memory(raw_data(bytes), i32(len(bytes)), &width, &height, &channels) == 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, Image_Error.Header_Unreadable
 	}
 
-	return width, height, channels, true
+	return width, height, channels, nil
 }
 
 // One pixel, or {0,0,0,0} when the coordinates are off the image. Bounds-checked

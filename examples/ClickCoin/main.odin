@@ -23,7 +23,7 @@ main :: proc() {
 		matchbox.poll_events()
 
 		if matchbox.is_mouse_pressed(.LEFT) {
-			if matchbox.mouse_over_rect(coin) {
+			if matchbox.is_mouse_over_rect(coin) {
 				coin.position = {cast(f32)rand.int31_max(cast(i32)matchbox.mbi.width - cast(i32)coin.size.x),cast(f32)rand.int31_max(cast(i32)matchbox.mbi.height - cast(i32)coin.size.y)}
 				counter += 1
 			}

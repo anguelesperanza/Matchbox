@@ -59,7 +59,7 @@ transform_identity :: proc() -> Transform {
 }
 
 // A Transform at `position`, turned by `rotation`, at one scale on every axis.
-transform_at :: proc(position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY, scale: f32 = 1) -> Transform {
+create_transform :: proc(position: [3]f32, rotation := linalg.QUATERNIONF32_IDENTITY, scale: f32 = 1) -> Transform {
 	return Transform{
 		position = position,
 		rotation = rotation,

@@ -1,6 +1,6 @@
 // Glyph from the baked atlas. The atlas is white RGB with the coverage mask in
 // alpha, so the colour comes wholly from the uniform and only alpha is sampled.
-// Must match matchbox.FontFragData.
+// Must match matchbox.Font_Frag_Data.
 Texture2D<float4> tex : register(t0, space2);
 SamplerState      smp : register(s0, space2);
 

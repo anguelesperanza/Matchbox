@@ -1,6 +1,6 @@
 package wip
 
-import "../../../matchbox"
+import "../../matchbox"
 
 Tank :: struct {
 	body:matchbox.Sprite,
@@ -12,9 +12,15 @@ Tank :: struct {
 main :: proc() {
 	matchbox.init("Tank", 1920, 1080)
 
+	body, body_err := matchbox.create_sprite(#load("assets/images/tank_body.png"), 20)
+	if body_err != nil do return
+
+	cannon, cannon_err := matchbox.create_sprite(#load("assets/images/tank_cannon.png"), 20)
+	if cannon_err != nil do return
+
 	tank:Tank = {
-		body = matchbox.create_sprite(#load("assets/images/tank_body.png"), 20),
-		cannon = matchbox.create_sprite(#load("assets/images/tank_cannon.png"), 20),
+		body = body,
+		cannon = cannon,
 	}
 
 	tank.body.velocity = {5, 5}
@@ -29,19 +35,19 @@ main :: proc() {
 		forward := matchbox.sprite_forward_by_rotation(tank.body)
 
 		if matchbox.is_key_held(.W) {
-			tank.body.position += forward * tank.body.speed * matchbox.delta_time()
+			tank.body.position += forward * tank.body.speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_key_held(.S) {
-			tank.body.position -= forward * tank.body.speed * matchbox.delta_time()
+			tank.body.position -= forward * tank.body.speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_key_held(.A) {
-			tank.body.rotation -= tank.rotation_speed * matchbox.delta_time()
+			tank.body.rotation -= tank.rotation_speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_key_held(.D) {
-			tank.body.rotation += tank.rotation_speed * matchbox.delta_time()
+			tank.body.rotation += tank.rotation_speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_mouse_pressed(.RIGHT) {

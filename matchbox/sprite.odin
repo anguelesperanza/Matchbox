@@ -15,27 +15,37 @@ Sprite :: struct {
 	parallax_speed: f32,
 }
 
-// Decoding is what loading an image costs -- the upload to the gpu underneath
-// is nothing next to it -- so this goes through stb rather than core:image,
-// which is roughly five times slower on the same file. stb is already linked
-// for the font atlas, so it is not a new dependency.
-create_mesh :: proc(bytes: []byte) -> Mesh {
+/*
+	Decoding is what loading an image costs -- the upload to the gpu underneath
+	is nothing next to it -- so this goes through stb rather than core:image,
+	which is roughly five times slower on the same file. stb is already linked
+	for the font atlas, so it is not a new dependency.
+
+	`Image_Error.Decode_Failed` means the bytes were not a picture stb could
+	read, which is a content problem rather than a program one -- the wrong
+	file, or a truncated one. A `Gpu_Error` means the driver would not take the
+	texture.
+*/
+create_mesh :: proc(bytes: []byte) -> (Mesh, Error) {
 	width, height, channels_in_file: i32
 
 	// 4 forces RGBA out of whatever the file holds, which is what the texture
 	// format below wants and what alpha_add_if_missing used to guarantee
 	pixels := stbi.load_from_memory(raw_data(bytes), cast(i32)len(bytes), &width, &height, &channels_in_file, 4)
-	ensure(pixels != nil, "Could not load texture")
+	if pixels == nil do return {}, Image_Error.Decode_Failed
 	defer stbi.image_free(pixels)
 
 	// The quad every sprite draws with is shared and already on the GPU, so all
 	// that is uploaded here is the texture.
+	texture, err := upload_texture(pixels, width, height)
+	if err != nil do return {}, err
+
 	return Mesh{
-		texture = upload_texture(pixels, width, height),
+		texture = texture,
 		sampler = mbi.renderer.sprite_sampler,
 		width   = width,
 		height  = height,
-	}
+	}, nil
 }
 
 /*
@@ -48,36 +58,49 @@ create_mesh :: proc(bytes: []byte) -> Mesh {
 
 	`pixels` is RGBA8, `width * height * 4` bytes, and is copied on the way to
 	the GPU: it belongs to the caller both before and after.
+
+	The two `Argument_Error`s are answerable rather than fatal because the size
+	often comes from somewhere outside the program -- an image the player
+	opened, a buffer a game filled in from a file.
 */
-create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> Mesh {
-	ensure(width > 0 && height > 0, "a texture needs a size")
-	ensure(len(pixels) >= int(width) * int(height) * 4, "not enough pixels for that size")
+create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> (Mesh, Error) {
+	if width <= 0 || height <= 0 do return {}, Argument_Error.Empty_Size
+	if len(pixels) < int(width) * int(height) * 4 do return {}, Argument_Error.Not_Enough_Pixels
+
+	texture, err := upload_texture(raw_data(pixels), width, height)
+	if err != nil do return {}, err
 
 	return Mesh{
-		texture = upload_texture(raw_data(pixels), width, height),
+		texture = texture,
 		sampler = mbi.renderer.sprite_sampler,
 		width   = width,
 		height  = height,
-	}
+	}, nil
 }
 
 // A sprite from an encoded image -- PNG, JPG, whatever stb_image reads.
 // `#load` the file and hand the bytes over, so the image ships inside the
 // executable and works the same inside an Android apk.
-create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> Sprite {
-	mesh := create_mesh(bytes)
-	return sprite_of(mesh, scale)
+//
+// See `create_mesh` for what the error means.
+create_sprite :: proc(bytes: []byte, scale: f32 = 1) -> (Sprite, Error) {
+	mesh, err := create_mesh(bytes)
+	if err != nil do return {}, err
+
+	return create_sprite_from_mesh(mesh, scale), nil
 }
 
 /*A sprite around pixels the game already holds. See create_mesh_from_pixels*/
-create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> Sprite {
-	mesh := create_mesh_from_pixels(pixels, width, height)
-	return sprite_of(mesh, scale)
+create_sprite_from_pixels :: proc(pixels: []byte, width, height: i32, scale: f32 = 1) -> (Sprite, Error) {
+	mesh, err := create_mesh_from_pixels(pixels, width, height)
+	if err != nil do return {}, err
+
+	return create_sprite_from_mesh(mesh, scale), nil
 }
 
 /*The body every sprite gets, whichever way its texture arrived*/
 @(private)
-sprite_of :: proc(mesh: Mesh, scale: f32) -> Sprite {
+create_sprite_from_mesh :: proc(mesh: Mesh, scale: f32) -> Sprite {
 	final_scale := scale
 	if scale <= 0 {
 		final_scale = 1
@@ -128,12 +151,115 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32 {
 	}
 }
 
-// Destroys every layer of a parallax set. The layers own their meshes, unlike
-// cache-backed sprites, so this is the right way to take one down.
-destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites) {
+// -----------------------------------------------------------------------
+// Parallax
+// -----------------------------------------------------------------------
+
+/*
+	Layers that move with the camera at different rates, which is what reads as
+	depth in a 2D scene.
+
+	`parallax_speed` is **the fraction of the camera's movement a layer
+	follows**: 1 moves with the world exactly as an ordinary sprite does, 0.5
+	drifts at half the rate and so looks further away, and 0 is pinned to the
+	screen -- an infinitely distant backdrop.
+
+		sky := mb.create_parallax()
+		mb.parallax_add(&sky, backdrop, 0)     // never moves
+		mb.parallax_add(&sky, hills,    0.3)
+		mb.parallax_add(&sky, trees,    0.7)
+
+		mb.begin_drawing_2d()
+		mb.draw_parallax(sky)                  // back to front, before the world
+		mb.draw_sprite(player)
+		mb.end_drawing_2d()
+
+	**This only means anything inside `begin_drawing_2d`/`end_drawing_2d`**,
+	because the effect is defined against the camera offset that `screen_pos`
+	applies. Drawn outside one, every layer falls back to its own position and
+	the set is just a list of sprites -- which is the honest answer, since with
+	no camera there is no movement to be a fraction of.
+
+	**On the direction of the number.** It reads the way it does everywhere else
+	-- a bigger `parallax_speed` moves more -- and the alternative was to make it
+	a depth, where 0 meant the world plane and 1 meant pinned. That version has
+	the tidier zero value, matching how `Body.tint` and `scale` treat theirs as
+	"behave normally". It was rejected because it would invert the meaning of a
+	universally understood name: `parallax_speed = 1` would have meant *does not
+	move*, and every person who had met parallax anywhere else would have had it
+	backwards. The field's raw zero therefore means pinned, which only comes up
+	if a set is assembled by hand rather than through `parallax_add`.
+*/
+create_parallax :: proc(allocator := context.allocator) -> Parallax_Sprites {
+	return Parallax_Sprites{sprites = make([dynamic]Sprite, allocator)}
+}
+
+/*
+	Adds a layer, drawn in front of everything already in the set.
+
+	`speed` is written onto the sprite, so it is the one place a layer's depth
+	is stated and the sprite does not have to be built with it. It defaults to
+	1 -- moving with the world -- rather than to the field's own zero, because
+	a layer added without a stated depth should behave like an ordinary sprite
+	rather than silently pinning itself to the screen. Say `0` when that is
+	what is wanted; it is the more striking effect and worth being explicit
+	about.
+*/
+parallax_add :: proc(set: ^Parallax_Sprites, sprite: Sprite, speed: f32 = 1) {
+	layer := sprite
+	layer.parallax_speed = speed
+	append(&set.sprites, layer)
+}
+
+/*
+	Draws every layer, first to last, so the set is ordered back to front.
+
+	There is no `update_parallax` to pair with this, and that is deliberate. The
+	offset is a pure function of where the camera is right now, so working it
+	out at draw time means a layer cannot drift out of step with the camera,
+	drawing twice gives the same picture twice, and a skipped or doubled frame
+	changes nothing. The alternative -- advancing each layer's `position` by the
+	camera's movement every frame -- accumulates floating-point error, needs the
+	previous camera position kept somewhere, and quietly desynchronises if
+	anything ever calls it other than exactly once per frame.
+
+	A layer's own `position` therefore keeps meaning what it says: where that
+	layer sits in the world, not where it happens to have scrolled to.
+*/
+draw_parallax :: proc(set: Parallax_Sprites) {
+	for layer in set.sprites {
+		drawn := layer
+		drawn.position = parallax_position(layer)
+		draw_sprite(drawn)
+	}
+}
+
+/*
+	Where a layer is drawn, given where the camera is.
+
+	`screen_pos` subtracts the camera position from everything drawn through it,
+	so placing a layer at `base + camera * (1 - speed)` lands it at
+	`base - camera * speed` on screen -- moving at exactly `speed` of the
+	camera's movement, which is the whole definition. At `speed` 1 the two
+	cancel and the layer is an ordinary world-space sprite; at 0 the offset
+	cancels the camera entirely and the layer holds still.
+*/
+@(private)
+parallax_position :: proc(sprite: Sprite) -> [2]f32 {
+	if !mbi.camera.active do return sprite.position
+	return sprite.position + mbi.camera.position * (1 - sprite.parallax_speed)
+}
+
+// Destroys every layer of a parallax set, and the set's own storage. The layers
+// own their meshes, unlike cache-backed sprites, so this is the right way to
+// take one down.
+destroy_parallax :: proc(parallax_sprites: ^Parallax_Sprites) {
 	for &i in parallax_sprites.sprites {
 		destroy_sprite(&i)
 	}
+
+	delete(parallax_sprites.sprites)
+	parallax_sprites.sprites = nil
 }
 
 /*
@@ -161,10 +287,10 @@ draw_sprite :: proc(sprite: Sprite) {
 	if sprite.flip_x do uv_min.x, uv_max.x = uv_max.x, uv_min.x
 	if sprite.flip_y do uv_min.y, uv_max.y = uv_max.y, uv_min.y
 
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		rotation = sprite.rotation,
 		uv_min   = uv_min,
 		uv_max   = uv_max,
@@ -259,16 +385,16 @@ draw_outline_proportional :: proc(center: [2]f32, size: [2]f32, color: [4]f32, f
 
 @(private)
 draw_outline_uv :: proc(center: [2]f32, size: [2]f32, color: [4]f32, border: [2]f32, rotation: f32) {
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(center),
 		size     = screen_size(size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
 		rotation = rotation,
 	}
 
-	frag_data := OutlineFragData{
+	frag_data := Outline_Frag_Data{
 		color  = color,
 		border = border,
 	}
@@ -323,19 +449,19 @@ sprite_world_collision :: proc(sprite: Sprite) -> [2]f32 {
 //
 // Strictly, so two boxes sharing an edge do not count as overlapping. That is
 // what stops a character resting exactly on a platform from being reported as
-// inside it every frame -- see `bounding_box_contact_check` for the opposite.
-bounding_box_collision_check :: proc(a: [4]f32, b: [4]f32) -> bool {
+// inside it every frame -- see `is_bounding_box_contact` for the opposite.
+is_bounding_box_collision :: proc(a: [4]f32, b: [4]f32) -> bool {
 	return a[0] < b[2] &&
 	       a[2] > b[0] &&
 	       a[1] < b[3] &&
 	       a[3] > b[1]
 }
-// The same test as `bounding_box_collision_check`, except that touching counts.
+// The same test as `is_bounding_box_collision`, except that touching counts.
 //
 // One `>=` is the whole difference, on the bottom edge: a character standing on
 // a platform is exactly in contact with it and not overlapping it, so an
 // overlap test reports "not standing on anything" on the very frame it lands.
-bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool {
+is_bounding_box_contact :: proc(a: [4]f32, b: [4]f32) -> bool {
     return a[0] < b[2] &&
            a[2] > b[0] &&
            a[1] < b[3] &&
@@ -346,6 +472,26 @@ bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool {
 sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32 {
 	s, c := math.sincos(sprite.rotation)
 	return [2]f32{s, -c}
+}
+
+// Which side of the sprite image is its forward-facing direction at rotation 0.
+Sprite_Forward :: enum {
+    TOP,    // top of the image faces the target  (default — suits top-down sprites)
+    RIGHT,  // right side of the image faces the target
+    BOTTOM, // bottom of the image faces the target
+    LEFT,   // left side of the image faces the target
+}
+
+// Returns the angle (radians) needed to face a sprite's visual center toward target.
+// Uses position + pivot * size so rotation is always computed from the correct origin.
+// forward controls which side of the sprite is treated as its forward direction.
+//
+// The inverse of `sprite_forward_by_rotation` above: that one reads a sprite's
+// rotation and gives the direction it faces, this one takes a direction and
+// gives the rotation that would face it.
+look_at_sprite :: proc(sprite: Sprite, target: [2]f32, forward: Sprite_Forward = .TOP) -> f32 {
+	center := sprite.position + sprite.pivot * sprite.size
+	return look_at_point(center, target, forward)
 }
 
 

@@ -181,7 +181,7 @@ end_drawing_3d :: proc() {
 
 // Whether a 3D pass is open. `draw_model` checks it so that a model drawn
 // outside one does nothing rather than recording into a pass that has no depth.
-in_drawing_3d :: proc() -> bool {
+is_drawing_3d :: proc() -> bool {
 	return mbi.renderer.mode_3d
 }
 
@@ -324,7 +324,7 @@ draw_model_at :: proc(
 	tint:     [4]f32 = WHITE,
 	animator: ^Animator = nil,
 ) {
-	draw_model(model, transform_at(position, scale = scale), tint, animator)
+	draw_model(model, create_transform(position, scale = scale), tint, animator)
 }
 
 /*

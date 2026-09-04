@@ -5,7 +5,7 @@
     Ported from PsxGame's psx.fs, constant for constant.
 
     The image is sampled on a coarse grid rather than being *rendered* at that
-    size -- see D9 in 3d.md. That is what the game already does and it is what
+    size. That is what the game already does and it is what
     a port should keep; a native low-resolution target is cheaper and a
     different picture, and changing the picture is not what this is for. The
     grid is a uniform rather than the hard-coded 320x240 the original used, so

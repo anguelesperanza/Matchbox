@@ -70,25 +70,35 @@ Pixel_Buffer :: struct {
 	Give it the resolution of the thing being emulated, not the size it will be
 	drawn at -- the scaling up happens at draw time, which is what keeps one
 	pixel one pixel.
+
+	The size is answerable rather than fatal because it is often not the
+	program's own number -- `image.odin`'s own example opens a file and hands
+	over what came back.
 */
-create_pixel_buffer :: proc(width, height: i32) -> Pixel_Buffer {
-	ensure(width > 0 && height > 0, "a pixel buffer needs a positive width and height")
+create_pixel_buffer :: proc(width, height: i32) -> (Pixel_Buffer, Error) {
+	if width <= 0 || height <= 0 do return {}, Argument_Error.Empty_Size
 
 	transfer := sdl.CreateGPUTransferBuffer(mbi.renderer.device, {
 		usage = .UPLOAD,
 		size  = u32(width) * u32(height) * 4,
 	})
-	ensure(transfer != nil, "could not create the pixel buffer's transfer buffer")
+	if transfer == nil do return {}, Gpu_Error.Transfer_Buffer_Creation_Failed
+
+	texture, err := create_gpu_texture(width, height)
+	if err != nil {
+		sdl.ReleaseGPUTransferBuffer(mbi.renderer.device, transfer)
+		return {}, err
+	}
 
 	return Pixel_Buffer{
 		mesh = {
-			texture = create_gpu_texture(width, height),
+			texture = texture,
 			sampler = mbi.renderer.sprite_sampler,
 			width   = width,
 			height  = height,
 		},
 		transfer = transfer,
-	}
+	}, nil
 }
 
 /*
@@ -114,17 +124,29 @@ create_pixel_buffer :: proc(width, height: i32) -> Pixel_Buffer {
 	uploads made outside the draw context, and this is the arrangement that
 	problem does not have.
 */
-pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) {
+pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) -> Error {
 	size := int(buffer.width) * int(buffer.height) * 4
 
+	/*
+		An abort rather than a returned error, unlike the map failure below.
+
+		The two look alike and are not. A transfer buffer can fail to map at
+		any time, for reasons outside the program -- that is a runtime
+		condition and comes back as a `Gpu_Error`. This is the caller handing
+		over an array of the wrong length, and the length is fixed by the
+		buffer's dimensions and the caller's own type: right on the first
+		frame means right on the ten-thousandth. Returning it would make a
+		programming mistake ignorable, which is the opposite of useful, and
+		`Error` is easy to drop on a procedure called every frame.
+	*/
 	ensure(len(pixels) * size_of(T) == size,
-		"pixel buffer update is the wrong size -- it must be width * height * 4 bytes of RGBA")
+		"pixel_buffer_update was given an array that is not width * height * 4 bytes")
 
 	r := &mbi.renderer
 
 	// No command buffer this frame, which is a minimized or zero-sized window.
 	// Nothing is being drawn either, so skipping the upload loses nothing.
-	if !r.frame_active || r.cmd == nil do return
+	if !r.frame_active || r.cmd == nil do return nil
 
 	// A copy pass cannot be opened while a render pass is recording. Whatever
 	// has been drawn is already in the swapchain, and ensure_pass reopens with
@@ -139,7 +161,7 @@ pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) {
 	// is what keeps a per-frame upload from stalling on the GPU still reading
 	// last frame's copy.
 	dst := sdl.MapGPUTransferBuffer(r.device, buffer.transfer, true)
-	if dst == nil do return
+	if dst == nil do return Gpu_Error.Transfer_Buffer_Map_Failed
 
 	runtime.mem_copy(dst, raw_data(pixels), size)
 	sdl.UnmapGPUTransferBuffer(r.device, buffer.transfer)
@@ -157,6 +179,8 @@ pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) {
 		true,
 	)
 	sdl.EndGPUCopyPass(pass)
+
+	return nil
 }
 
 /*
@@ -168,10 +192,10 @@ pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) {
 	or flashed without touching the pixels.
 */
 draw_pixel_buffer :: proc(buffer: ^Pixel_Buffer, dest: Rectangle, tint: [4]f32 = WHITE) {
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(rect_center(dest)),
 		size     = screen_size(dest.size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		rotation = dest.rotation,
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
@@ -286,7 +310,8 @@ pixel_buffer_pick :: proc(buffer: ^Pixel_Buffer, dest: Rectangle, point: [2]f32)
 }
 
 // pixel_buffer_pick with the pointer already filled in, which is what almost
-// every caller wants -- the same shape as mouse_over_rect against point_in_rect.
+// every caller wants -- the same shape as is_mouse_over_rect against
+// is_point_in_rect.
 pixel_buffer_pick_mouse :: proc(buffer: ^Pixel_Buffer, dest: Rectangle) -> (x, y: int, ok: bool) {
 	return pixel_buffer_pick(buffer, dest, get_mouse_position())
 }

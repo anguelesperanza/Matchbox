@@ -1,5 +1,7 @@
 package matchbox
 
+import "core:log"
+
 /*
 	Sprite_Cache
 	------------
@@ -18,12 +20,12 @@ package matchbox
 	is what the game already calls the thing; the path is only how it is found
 	on disk the first time.
 
-	Sprites are heap allocated and handed back by pointer, so the pointer stays
-	good as more are loaded. A pointer into the map itself would not: Odin's
-	map moves its values when it grows.
+	The map, the order list and the eviction rule are `Lru_Cache` in `lru.odin`,
+	shared with the font cache. What lives here is the policy: sprites are what
+	is held, `limit` is where the ceiling comes from, and `destroy_sprite` is
+	how one is given back.
 */
 
-import "core:log"
 
 /*
 	`limit` is how many sprites may be resident. Zero means no limit, which is
@@ -31,11 +33,16 @@ import "core:log"
 
 	Eviction is least-recently-used, counting a hit as a use, so the thing on
 	screen is not the thing thrown away.
+
+	**A limit is a ceiling between frames, not within one.** Nothing asked for
+	during the current frame is ever evicted, so a `limit = 1` cache asked for
+	two sprites in one frame holds both until the next -- see `lru_trim`. That
+	is deliberate: the alternative is freeing a sprite whose pointer the caller
+	is still holding and about to draw through.
 */
 Sprite_Cache :: struct($Key: typeid) {
-	sprites: map[Key]^Sprite,
-	order:   [dynamic]Key, // least recently used first
-	limit:   int,
+	using lru: Lru_Cache(Key, Sprite),
+	limit:     int,
 }
 
 /*
@@ -46,12 +53,12 @@ Sprite_Cache :: struct($Key: typeid) {
 	for and frees them together. A non-zero limit evicts least-recently-used,
 	which is what a game streaming a large atlas set wants.
 */
-sprite_cache_make :: proc($Key: typeid, limit: int = 0, allocator := context.allocator) -> Sprite_Cache(Key) {
-	return Sprite_Cache(Key){
-		sprites = make(map[Key]^Sprite, allocator = allocator),
-		order   = make([dynamic]Key, allocator = allocator),
-		limit   = limit,
-	}
+create_sprite_cache :: proc($Key: typeid, limit: int = 0, allocator := context.allocator) -> Sprite_Cache(Key) {
+	cache: Sprite_Cache(Key)
+	cache.entries = make(map[Key]Lru_Entry(Sprite), allocator = allocator)
+	cache.order   = make([dynamic]Key, allocator = allocator)
+	cache.limit   = limit
+	return cache
 }
 
 /*
@@ -64,29 +71,46 @@ sprite_cache_make :: proc($Key: typeid, limit: int = 0, allocator := context.all
 	The result belongs to the cache. Copy it before moving it about -- position
 	and rotation live on the sprite, and two callers drawing the same cached
 	sprite in two places want two copies, not one they take turns overwriting.
+
+	The pointer itself is good for the frame it was asked in: the cache will not
+	evict something it handed out this frame, however small the limit.
+
+	**This is the one loader that reports failure as `nil` rather than as an
+	`Error`, and it stays that way.** Everything it calls returns one -- the
+	read, the decode, the upload -- and each is logged here with the path that
+	caused it. What it does not do is hand the error on, because the answer at
+	a call site is the same for all of them: there is no art for this key, so
+	draw nothing. `if art := sprite_cache_get(...); art != nil` says that in
+	one line, where a second return value would be checked on every lookup and
+	acted on by none of them. A pointer that may be nil is already an answer to
+	"is it there"; wrapping it in an error would be saying so twice.
 */
 sprite_cache_get :: proc(cache: ^Sprite_Cache($Key), key: Key, path: string, scale: f32 = 1) -> ^Sprite {
-	if existing, found := cache.sprites[key]; found {
-		sprite_cache_touch(cache, key)
+	if existing := lru_get(&cache.lru, key); existing != nil {
 		return existing
 	}
 
 	// Through SDL rather than core:os, so `path` reaches an apk's assets on
 	// Android as well as a file on a desktop. read_entire_file has already
 	// logged whatever went wrong.
-	bytes, ok := read_entire_file(path, context.allocator)
-	if !ok do return nil
+	bytes, read_err := read_entire_file(path, context.allocator)
+	if read_err != nil do return nil
 	defer delete(bytes)
 
 	sprite := new(Sprite)
-	sprite^ = create_sprite(bytes, scale)
+	loaded, err := create_sprite(bytes, scale)
+	if err != nil {
+		log.errorf("sprite cache: could not build %s: %v", path, err)
+		free(sprite)
+		return nil
+	}
+	sprite^ = loaded
 
-	cache.sprites[key] = sprite
-	append(&cache.order, key)
+	lru_put(&cache.lru, key, sprite)
 
 	// After inserting, not before: evicting first would throw something out to
 	// make room and then possibly fail to fill it.
-	sprite_cache_trim(cache)
+	lru_trim(&cache.lru, cache.limit, destroy_sprite)
 
 	return sprite
 }
@@ -109,10 +133,9 @@ sprite_cache_put :: proc(cache: ^Sprite_Cache($Key), key: Key, sprite: Sprite) -
 	held := new(Sprite)
 	held^ = sprite
 
-	cache.sprites[key] = held
-	append(&cache.order, key)
+	lru_put(&cache.lru, key, held)
+	lru_trim(&cache.lru, cache.limit, destroy_sprite)
 
-	sprite_cache_trim(cache)
 	return held
 }
 
@@ -127,72 +150,25 @@ sprite_cache_put :: proc(cache: ^Sprite_Cache($Key), key: Key, sprite: Sprite) -
 	Counts as a use, so what is asked for is not what gets evicted.
 */
 sprite_cache_find :: proc(cache: ^Sprite_Cache($Key), key: Key) -> ^Sprite {
-	existing, found := cache.sprites[key]
-	if !found do return nil
-
-	sprite_cache_touch(cache, key)
-	return existing
+	return lru_get(&cache.lru, key)
 }
 
 // Whether a key is resident, without loading it.
-sprite_cache_has :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool {
-	return key in cache.sprites
+is_sprite_cache_holding :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool {
+	return lru_has(&cache.lru, key)
 }
 
 // How many sprites are resident.
-sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int {
-	return len(cache.sprites)
+get_sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int {
+	return lru_len(&cache.lru)
 }
 
 // Drops one entry. Quietly does nothing when the key is not resident.
 sprite_cache_evict :: proc(cache: ^Sprite_Cache($Key), key: Key) {
-	sprite, found := cache.sprites[key]
-	if !found do return
-
-	destroy_sprite(sprite)
-	free(sprite)
-	delete_key(&cache.sprites, key)
-
-	for k, i in cache.order {
-		if k == key {
-			ordered_remove(&cache.order, i)
-			break
-		}
-	}
+	lru_evict(&cache.lru, key, destroy_sprite)
 }
 
 // Frees every sprite and the cache's own storage.
-sprite_cache_destroy :: proc(cache: ^Sprite_Cache($Key)) {
-	for _, sprite in cache.sprites {
-		destroy_sprite(sprite)
-		free(sprite)
-	}
-
-	delete(cache.sprites)
-	delete(cache.order)
-
-	cache.sprites = nil
-	cache.order   = nil
-}
-
-// Moves a key to the most-recently-used end.
-@(private)
-sprite_cache_touch :: proc(cache: ^Sprite_Cache($Key), key: Key) {
-	for k, i in cache.order {
-		if k == key {
-			ordered_remove(&cache.order, i)
-			append(&cache.order, key)
-			return
-		}
-	}
-}
-
-// Evicts from the least-recently-used end until the limit is met.
-@(private)
-sprite_cache_trim :: proc(cache: ^Sprite_Cache($Key)) {
-	if cache.limit <= 0 do return
-
-	for len(cache.order) > cache.limit {
-		sprite_cache_evict(cache, cache.order[0])
-	}
+destroy_sprite_cache :: proc(cache: ^Sprite_Cache($Key)) {
+	lru_destroy(&cache.lru, destroy_sprite)
 }

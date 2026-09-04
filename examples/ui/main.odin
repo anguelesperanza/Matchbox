@@ -104,7 +104,7 @@ main :: proc() {
 	// One slot. Selecting a different card evicts the one before it -- the
 	// shape a full-size card view needs, where the art is far too big to keep
 	// all of it resident and only one is ever on screen.
-	cache := mb.sprite_cache_make(Card, limit = 1)
+	cache := mb.create_sprite_cache(Card, limit = 1)
 	defer mb.destroy(&cache)
 
 	decks: [dynamic]Deck
@@ -221,7 +221,7 @@ main :: proc() {
 
 			// Hit-testing by hand, so it has to ask about capture itself.
 			// `button` does that for you; this does not.
-			if mb.mouse_over_rect(row) && !mb.mouse_captured() {
+			if mb.is_mouse_over_rect(row) && !mb.is_mouse_captured() {
 				hovered = i
 
 				if mb.is_mouse_pressed(.RIGHT) {
@@ -235,7 +235,7 @@ main :: proc() {
 
 		// ---- how far down the list is, as a bar --------------------------------
 		through: f32
-		if m := mb.scroll_max(&list); m > 0 do through = list.offset / m
+		if m := mb.get_scroll_max(&list); m > 0 do through = list.offset / m
 
 		heading(font, "scrolled", {COL_A, h - 84})
 		mb.draw_progress_labelled(
@@ -309,11 +309,11 @@ main :: proc() {
 			COL_B, 606 + font.ascent, LABEL)
 
 		// A name is needed before there is anything to save under.
-		typed := len(mb.text_field_string(&name)) > 0
+		typed := len(mb.get_text_field_string(&name)) > 0
 
 		if mb.button({position = {COL_B, 640}, size = {COL_B_W, 42}, color = BUTTON, pivot = {0.5, 0.5}},
 			"Save" if typed else "Save (needs a name)", mb.button_enabled_if(typed)) {
-			mb.set_status(&note, fmt.tprintf("saved as %s", mb.text_field_string(&name)), .GOOD, 3)
+			mb.set_status(&note, fmt.tprintf("saved as %s", mb.get_text_field_string(&name)), .GOOD, 3)
 		}
 
 		// ---- sliders ----------------------------------------------------------
@@ -355,7 +355,7 @@ main :: proc() {
 
 		mb.draw_text(font,
 			fmt.tprintf("resident %d of %d   loads %d",
-				mb.sprite_cache_len(&cache), len(Card), loads),
+				mb.get_sprite_cache_len(&cache), len(Card), loads),
 			COL_C, 400 + font.ascent, LABEL)
 
 		if mb.button({position = {COL_C, 436}, size = {240, 42}, color = BUTTON, pivot = {0.5, 0.5}},
@@ -409,7 +409,7 @@ main :: proc() {
 			}
 
 			// After the content, so the button in the corner gets the click first.
-			if mb.modal_dismissed(box) do mb.close_modal(&preview)
+			if mb.is_modal_dismissed(box) do mb.close_modal(&preview)
 		}
 
 		mb.end_drawing()

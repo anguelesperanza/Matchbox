@@ -171,7 +171,7 @@ draw_pixel_buffer :: proc(buffer: ^Pixel_Buffer, dest: Rectangle, tint: [4]f32 =
 	vert_data := Vert_Data{
 		position = screen_pos(rect_center(dest)),
 		size     = screen_size(dest.size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		rotation = dest.rotation,
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
@@ -286,7 +286,8 @@ pixel_buffer_pick :: proc(buffer: ^Pixel_Buffer, dest: Rectangle, point: [2]f32)
 }
 
 // pixel_buffer_pick with the pointer already filled in, which is what almost
-// every caller wants -- the same shape as mouse_over_rect against point_in_rect.
+// every caller wants -- the same shape as is_mouse_over_rect against
+// is_point_in_rect.
 pixel_buffer_pick_mouse :: proc(buffer: ^Pixel_Buffer, dest: Rectangle) -> (x, y: int, ok: bool) {
 	return pixel_buffer_pick(buffer, dest, get_mouse_position())
 }

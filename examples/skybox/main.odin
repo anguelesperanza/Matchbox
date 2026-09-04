@@ -89,17 +89,17 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		dt := mb.delta_time()
+		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() {
+			if mb.is_cursor_locked() {
 				mb.set_cursor_locked(false)
 			} else {
 				mb.mbi.running = false
 			}
 		}
 
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(.SPACE) && panorama_ok && cubemap_ok {
 			showing_cubemap = !showing_cubemap
@@ -108,7 +108,7 @@ main :: proc() {
 		if mb.is_key_pressed(._1) do tint = mb.WHITE
 		if mb.is_key_pressed(._2) do tint = {0.45, 0.35, 0.55, 1}
 
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, WALK_SPEED, dt)
 		}
 

@@ -79,9 +79,9 @@ screen_size :: proc(size: [2]f32) -> [2]f32 {
 }
 
 // The size everything 2D is measured against this frame.
-screen_dims :: proc() -> [2]f32 {
+get_screen_dims :: proc() -> [2]f32 {
 	// The render target when one is bound, so that 2D drawn into a texture of
 	// a different size than the window lands inside it rather than off the
 	// edge. The window otherwise, which is every frame that has no target.
-	return current_target_size()
+	return get_current_target_size()
 }

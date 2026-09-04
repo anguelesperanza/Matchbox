@@ -181,7 +181,7 @@ end_drawing_3d :: proc() {
 
 // Whether a 3D pass is open. `draw_model` checks it so that a model drawn
 // outside one does nothing rather than recording into a pass that has no depth.
-in_drawing_3d :: proc() -> bool {
+is_drawing_3d :: proc() -> bool {
 	return mbi.renderer.mode_3d
 }
 

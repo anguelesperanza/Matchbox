@@ -19,16 +19,16 @@ main :: proc () {
 		matchbox.poll_events()
 
 		if matchbox.is_key_held(.D) {
-			desperado.position.x += desperado.velocity.x * desperado.speed * matchbox.delta_time()
+			desperado.position.x += desperado.velocity.x * desperado.speed * matchbox.get_delta_time()
 		}
 		if matchbox.is_key_held(.A) {
-			desperado.position.x -= desperado.velocity.x * desperado.speed * matchbox.delta_time()
+			desperado.position.x -= desperado.velocity.x * desperado.speed * matchbox.get_delta_time()
 		}
 		if matchbox.is_key_held(.S) {
-			desperado.position.y += desperado.velocity.y * desperado.speed * matchbox.delta_time()
+			desperado.position.y += desperado.velocity.y * desperado.speed * matchbox.get_delta_time()
 		}
 		if matchbox.is_key_held(.W) {
-			desperado.position.y -= desperado.velocity.y * desperado.speed * matchbox.delta_time()
+			desperado.position.y -= desperado.velocity.y * desperado.speed * matchbox.get_delta_time()
 		}
 
 		matchbox.mbi.camera.position = matchbox.sprite_center(desperado)

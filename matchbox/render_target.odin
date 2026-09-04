@@ -124,7 +124,7 @@ destroy_render_target :: proc(target: ^Render_Target) {
 
 	Everything works inside as it does outside: `clear_background`,
 	`begin_drawing_3d`, sprites, text. What changes is where the pixels land and
-	what `screen_dims` reports, so a 2D layout laid out as a fraction of the
+	what `get_screen_dims` reports, so a 2D layout laid out as a fraction of the
 	screen fills the target instead.
 
 	Nested targets are not supported -- one at a time, and `end_drawing_target`
@@ -180,7 +180,7 @@ current_depth_texture :: proc() -> ^sdl.GPUTexture {
 }
 
 @(private)
-current_target_size :: proc() -> [2]f32 {
+get_current_target_size :: proc() -> [2]f32 {
 	r := &mbi.renderer
 
 	if r.target != nil do return {f32(r.target.width), f32(r.target.height)}
@@ -246,7 +246,7 @@ draw_post :: proc(target: Render_Target, effect: Post_Effect = .NONE, grid: [2]f
 
 	if !bind_quad_state(pipeline, target.texture, sampler) do return
 
-	size := current_target_size()
+	size := get_current_target_size()
 
 	// Window pixels, not logical ones: this is the finished frame going to the
 	// screen, so `set_logical_size`'s letterbox has already been accounted for

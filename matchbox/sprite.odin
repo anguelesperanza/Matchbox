@@ -164,7 +164,7 @@ draw_sprite :: proc(sprite: Sprite) {
 	vert_data := Vert_Data{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		rotation = sprite.rotation,
 		uv_min   = uv_min,
 		uv_max   = uv_max,
@@ -262,7 +262,7 @@ draw_outline_uv :: proc(center: [2]f32, size: [2]f32, color: [4]f32, border: [2]
 	vert_data := Vert_Data{
 		position = screen_pos(center),
 		size     = screen_size(size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
 		rotation = rotation,
@@ -323,19 +323,19 @@ sprite_world_collision :: proc(sprite: Sprite) -> [2]f32 {
 //
 // Strictly, so two boxes sharing an edge do not count as overlapping. That is
 // what stops a character resting exactly on a platform from being reported as
-// inside it every frame -- see `bounding_box_contact_check` for the opposite.
-bounding_box_collision_check :: proc(a: [4]f32, b: [4]f32) -> bool {
+// inside it every frame -- see `is_bounding_box_contact` for the opposite.
+is_bounding_box_collision :: proc(a: [4]f32, b: [4]f32) -> bool {
 	return a[0] < b[2] &&
 	       a[2] > b[0] &&
 	       a[1] < b[3] &&
 	       a[3] > b[1]
 }
-// The same test as `bounding_box_collision_check`, except that touching counts.
+// The same test as `is_bounding_box_collision`, except that touching counts.
 //
 // One `>=` is the whole difference, on the bottom edge: a character standing on
 // a platform is exactly in contact with it and not overlapping it, so an
 // overlap test reports "not standing on anything" on the very frame it lands.
-bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool {
+is_bounding_box_contact :: proc(a: [4]f32, b: [4]f32) -> bool {
     return a[0] < b[2] &&
            a[2] > b[0] &&
            a[1] < b[3] &&

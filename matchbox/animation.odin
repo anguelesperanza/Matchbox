@@ -529,7 +529,7 @@ draw_animated_sprite :: proc(sprite: Animated_Sprite) {
 	vert_data := Vert_Data{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		uv_min   = sprite.uv_min,
 		uv_max   = sprite.uv_max,
 		rotation = sprite.rotation,

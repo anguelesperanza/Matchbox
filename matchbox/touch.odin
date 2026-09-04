@@ -26,7 +26,7 @@ package matchbox
 	means it can never be a preview of what a tap would do. A tooltip that opens
 	on dwell becomes a tooltip that opens on long-press and covers the thing
 	being pressed. None of those are broken; they are decisions, and
-	`touch_active` is how a screen makes them.
+	`is_touch_active` is how a screen makes them.
 */
 
 import sdl "vendor:sdl3"
@@ -39,8 +39,8 @@ MAX_TOUCHES :: 10
 	One finger. Held in a fixed slot for as long as it is down.
 
 	`position` is in the same logical screen space as the mouse -- letterbox and
-	pixel density already taken off -- so it goes straight to `point_in_rect` and
-	everything built on it. SDL reports fingers normalised 0..1 across the
+	pixel density already taken off -- so it goes straight to `is_point_in_rect`
+	and everything built on it. SDL reports fingers normalised 0..1 across the
 	window; that conversion happens once, here, rather than in every caller.
 */
 Touch :: struct {
@@ -66,7 +66,7 @@ Touch :: struct {
 	pointer to exist while nothing is pressed: a hover preview, a tooltip on
 	dwell, a cursor drawn by the game.
 */
-touch_active :: proc() -> bool {
+is_touch_active :: proc() -> bool {
 	return mbi.input.touch_active
 }
 

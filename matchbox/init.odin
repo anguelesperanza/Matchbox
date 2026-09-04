@@ -79,7 +79,7 @@ write_gpu_report :: proc() {
 		Except where there is no such folder. On Android an apk's directory is not
 		writable and os.args[0] means nothing, so the fallback is the one place
 		the program is allowed to write -- which is also somewhere a bug report
-		can be fetched from. pref_path makes the directory if it is not there.
+		can be fetched from. get_pref_path makes the directory if it is not there.
 	*/
 	path := "gpu-report.txt"
 
@@ -92,7 +92,7 @@ write_gpu_report :: proc() {
 	report := fmt.tprintf("%s%s", header, body)
 
 	if !write_report_file(path, report) {
-		if dir := pref_path("matchbox", mbi.title, context.temp_allocator); dir != "" {
+		if dir := get_pref_path("matchbox", mbi.title, context.temp_allocator); dir != "" {
 			path = fmt.tprintf("%sgpu-report.txt", dir)
 			if !write_report_file(path, report) {
 				// Nothing left to fall back on but the console, which is where

@@ -30,13 +30,13 @@ Clock :: struct {
 
 // How many frames poll_events has run. Starts at 0 and is 1 during the first
 // frame, so a zero recorded anywhere means "never".
-frame_count :: proc() -> u64 {
+get_frame_count :: proc() -> u64 {
 	return mbi.frame
 }
 
 // Seconds elapsed during the previous frame. Multiply per-frame movement by
 // this so speeds stay the same regardless of frame rate.
-delta_time :: proc() -> f32 {
+get_delta_time :: proc() -> f32 {
 	return mbi.delta_time
 }
 
@@ -48,18 +48,20 @@ delta_time :: proc() -> f32 {
 	and getting different answers is a bug waiting to happen.
 
 	It reports real elapsed time, which is **not** always the same as summing
-	`delta_time`. delta_time is clamped by `max_delta_time` so that a stalled
-	frame cannot teleport everything across the screen; this is a clock and does
-	not get to lie about a stall. Measured over 120 ordinary frames the two
-	parted company by about fourteen milliseconds -- one clamped frame -- so
+	`get_delta_time`. That value is clamped by `max_delta_time` so that a
+	stalled frame cannot teleport everything across the screen; this is a clock
+	and does not get to lie about a stall. Measured over 120 ordinary frames the
+	two parted company by about fourteen milliseconds -- one clamped frame -- so
 	anything mixing the two will drift by however long it has spent stuttering.
-	Pick one and stay with it: delta_time to move things, this to schedule them.
+	Pick one and stay with it: `get_delta_time` to move things, this to schedule
+	them.
 
-	This exists because there was no way to ask. `delta_time` and `frame_count`
+	This exists because there was no way to ask. `get_delta_time` and
+	`get_frame_count`
 	were the whole of it, and an emulator ported from raylib reached for the
 	nearest thing to GetTime(), which is a clock, and got the frame delta:
 
-		current := matchbox.delta_time() * 1000   // wrong: a duration, not a time
+		current := matchbox.get_delta_time() * 1000   // wrong: a duration, not a time
 		elapsed := current - last                 // the *change* in frame length
 		last     = current                        // which is about zero
 

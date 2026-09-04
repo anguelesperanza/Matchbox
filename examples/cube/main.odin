@@ -66,7 +66,7 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		spin += mb.delta_time()
+		spin += mb.get_delta_time()
 
 		mb.begin_drawing()
 		mb.clear_background(mb.CORNFLOWER_BLUE)

@@ -201,7 +201,7 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 		vert_data := Vert_Data{
 			position = screen_pos(pos),
 			size     = screen_size(size),
-			screen   = screen_dims(),
+			screen   = get_screen_dims(),
 			uv_min   = {q.s0, q.t0},
 			uv_max   = {q.s1, q.t1},
 		}
@@ -266,7 +266,7 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 		vert_data := Vert_Data{
 			position = pos,
 			size     = size,
-			screen   = screen_dims(),
+			screen   = get_screen_dims(),
 			uv_min   = {q.s0, q.t0},
 			uv_max   = {q.s1, q.t1},
 		}
@@ -404,7 +404,7 @@ get_font :: proc(size: f32) -> ^Font {
 
 // How many extra sizes are resident, not counting the default one. For an
 // example or a debug overlay that wants to show the cache doing its job.
-font_cache_len :: proc() -> int {
+get_font_cache_len :: proc() -> int {
 	return len(mbi.font_cache.sizes)
 }
 

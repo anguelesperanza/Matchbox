@@ -76,12 +76,12 @@ Frees the sheet an animated sprite draws from.
 ### `clock.odin`
 
 ```odin
-frame_count :: proc() -> u64
+get_frame_count :: proc() -> u64
 ```
 How many frames poll_events has run.
 
 ```odin
-delta_time :: proc() -> f32
+get_delta_time :: proc() -> f32
 ```
 Seconds elapsed during the previous frame.
 
@@ -113,7 +113,7 @@ screen_size :: proc(size: [2]f32) -> [2]f32
 The camera zoom has to be applied here as well as in screen_pos.
 
 ```odin
-screen_dims :: proc() -> [2]f32
+get_screen_dims :: proc() -> [2]f32
 ```
 The size everything 2D is measured against this frame.
 
@@ -129,7 +129,7 @@ read_entire_file :: proc(
 Reads a whole file into memory.
 
 ```odin
-pref_path :: proc(
+get_pref_path :: proc(
 	org: string,
 	app: string,
 	allocator := context.allocator,
@@ -138,7 +138,7 @@ pref_path :: proc(
 The one directory a game may write to, created if it is not there.
 
 ```odin
-base_path :: proc(allocator := context.allocator) -> string
+get_base_path :: proc(allocator := context.allocator) -> string
 ```
 Where the program itself lives, ending with a separator.
 
@@ -172,7 +172,7 @@ set_cursor_locked :: proc(locked: bool)
 Hides the pointer and keeps it in the window, reporting only how far it moved.
 
 ```odin
-cursor_locked :: proc() -> bool
+is_cursor_locked :: proc() -> bool
 ```
 Whether the pointer is currently locked to the window.
 
@@ -252,7 +252,7 @@ release_mouse :: proc()
 Hands the pointer back, for a widget that claimed it and has now drawn the thing it was protecting.
 
 ```odin
-mouse_captured :: proc() -> bool
+is_mouse_captured :: proc() -> bool
 ```
 Whether something above has already claimed the pointer this frame.
 
@@ -324,7 +324,7 @@ Shakes the controller.
 ### `touch.odin`
 
 ```odin
-touch_active :: proc() -> bool
+is_touch_active :: proc() -> bool
 ```
 Whether input is currently coming from touch.
 
@@ -393,7 +393,7 @@ rect_top_left :: proc(rectangle: Rectangle) -> [2]f32
 The top-left corner.
 
 ```odin
-point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool
+is_point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool
 ```
 Whether a point is inside a rectangle.
 
@@ -497,14 +497,14 @@ sprite_world_collision :: proc(sprite: Sprite) -> [2]f32
 The sprite's position clamped so it cannot leave the visible area.
 
 ```odin
-bounding_box_collision_check :: proc(a: [4]f32, b: [4]f32) -> bool
+is_bounding_box_collision :: proc(a: [4]f32, b: [4]f32) -> bool
 ```
 Whether two {left, top, right, bottom} rectangles overlap.
 
 ```odin
-bounding_box_contact_check :: proc(a: [4]f32, b: [4]f32) -> bool
+is_bounding_box_contact :: proc(a: [4]f32, b: [4]f32) -> bool
 ```
-The same test as `bounding_box_collision_check`, except that touching counts.
+The same test as `is_bounding_box_collision`, except that touching counts.
 
 ```odin
 sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32
@@ -560,12 +560,12 @@ sprite_cache_find :: proc(cache: ^Sprite_Cache($Key), key: Key) -> ^Sprite
 The sprite under a key, or nil, without loading anything.
 
 ```odin
-sprite_cache_has :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool
+is_sprite_cache_holding :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool
 ```
 Whether a key is resident, without loading it.
 
 ```odin
-sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int
+get_sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int
 ```
 How many sprites are resident.
 
@@ -727,7 +727,7 @@ pixel_buffer_pick_mouse :: proc(
 	ok: bool,
 )
 ```
-pixel_buffer_pick with the pointer already filled in, which is what almost every caller wants -- the same shape as mouse_over_rect against point_in_rect.
+pixel_buffer_pick with the pointer already filled in, which is what almost every caller wants -- the same shape as is_mouse_over_rect against is_point_in_rect.
 
 ```odin
 destroy_pixel_buffer :: proc(buffer: ^Pixel_Buffer)
@@ -871,7 +871,7 @@ get_font :: proc(size: f32) -> ^Font
 The default font baked at `size` pixels.
 
 ```odin
-font_cache_len :: proc() -> int
+get_font_cache_len :: proc() -> int
 ```
 How many extra sizes are resident, not counting the default one.
 
@@ -979,7 +979,7 @@ button_enabled_if :: proc(
 A style with `disabled` set the way the caller says, which is the shape this is nearly always wanted in: if matchbox.button(rect, "Play", matchbox.button_enabled_if(hand > 0)) { ...
 
 ```odin
-mouse_over_rect :: proc(rectangle: Rectangle) -> bool
+is_mouse_over_rect :: proc(rectangle: Rectangle) -> bool
 ```
 Whether the pointer is inside a rectangle.
 
@@ -997,7 +997,7 @@ button_confirm :: proc(
 A button that asks first.
 
 ```odin
-confirm_button_armed :: proc(state: ^Confirm_Button) -> bool
+is_confirm_button_armed :: proc(state: ^Confirm_Button) -> bool
 ```
 Whether it is currently asking.
 
@@ -1024,7 +1024,7 @@ draw_button :: proc(button:Button)
 Draws a button without asking whether it was clicked -- the drawing half of `button`, for a game that decides on its own terms what a click means.
 
 ```odin
-mouse_over_button :: proc(button:Button) -> bool
+is_mouse_over_button :: proc(button:Button) -> bool
 ```
 Whether the pointer is inside the button's rectangle.
 
@@ -1051,7 +1051,7 @@ destroy_text_field :: proc(field:^Text_Field)
 Frees what the field owns.
 
 ```odin
-text_field_string :: proc(field:^Text_Field) -> string
+get_text_field_string :: proc(field:^Text_Field) -> string
 ```
 What has been typed.
 
@@ -1061,7 +1061,7 @@ text_field_set :: proc(field:^Text_Field, text:string)
 Replaces the contents outright, putting the caret at the end*/
 
 ```odin
-mouse_over_text_field :: proc(field:^Text_Field) -> bool
+is_mouse_over_text_field :: proc(field:^Text_Field) -> bool
 ```
 Whether the pointer is inside the field's box.
 
@@ -1132,12 +1132,12 @@ end_scroll :: proc(view: ^Scroll_View)
 Ends the panel and draws the scrollbar.
 
 ```odin
-scroll_max :: proc(view: ^Scroll_View) -> f32
+get_scroll_max :: proc(view: ^Scroll_View) -> f32
 ```
 The furthest the content can be scrolled.
 
 ```odin
-scroll_needed :: proc(view: ^Scroll_View) -> bool
+is_scroll_needed :: proc(view: ^Scroll_View) -> bool
 ```
 Whether there is anything to scroll.
 
@@ -1198,7 +1198,7 @@ dropdown_overlay :: proc(
 The open list, drawn over whatever came after it.
 
 ```odin
-dropdown_is_open :: proc(state: ^Dropdown) -> bool
+is_dropdown_open :: proc(state: ^Dropdown) -> bool
 ```
 Whether a dropdown is showing its list, for a caller deciding what else to draw.
 
@@ -1254,7 +1254,7 @@ clear_status :: proc(status: ^Status_Line)
 Takes the message off the line.
 
 ```odin
-status_text :: proc(status: ^Status_Line) -> string
+get_status_text :: proc(status: ^Status_Line) -> string
 ```
 What is on the line.
 
@@ -1283,7 +1283,7 @@ close_modal :: proc(modal: ^Modal)
 Closes the modal.
 
 ```odin
-modal_is_open :: proc(modal: ^Modal) -> bool
+is_modal_open :: proc(modal: ^Modal) -> bool
 ```
 Whether the modal is up.
 
@@ -1303,7 +1303,7 @@ modal_overlay :: proc(
 Draws the dim and hands back a centred box to put content in.
 
 ```odin
-modal_dismissed :: proc(content: Rectangle) -> bool
+is_modal_dismissed :: proc(content: Rectangle) -> bool
 ```
 Whether the click landed on the dim rather than on `content`, which is the usual way a modal is dismissed.
 
@@ -1788,7 +1788,7 @@ end_drawing_3d :: proc()
 Closes the 3D pass.
 
 ```odin
-in_drawing_3d :: proc() -> bool
+is_drawing_3d :: proc() -> bool
 ```
 Whether a 3D pass is open.
 
@@ -1921,7 +1921,7 @@ disable_fog :: proc()
 Turns fog off, leaving its colour and range where they were.
 
 ```odin
-lighting_active :: proc() -> bool
+is_lighting_active :: proc() -> bool
 ```
 Whether a game has set any lights.
 
@@ -2119,7 +2119,7 @@ Draws the current frame.
 ### `animation3d.odin`
 
 ```odin
-model_is_skinned :: proc(model: Model) -> bool
+is_model_skinned :: proc(model: Model) -> bool
 ```
 Whether a model has a skeleton at all.
 
@@ -2339,7 +2339,7 @@ sprite_to_index_by_value :: proc(x:f32, y:f32, width:f32) -> (index:int)
 A grid coordinate as an index into a row-major array of `width` columns.
 
 ```odin
-mouse_over_sprite :: proc(sprite:Sprite) -> bool
+is_mouse_over_sprite :: proc(sprite:Sprite) -> bool
 ```
 Whether the pointer is over a sprite.
 

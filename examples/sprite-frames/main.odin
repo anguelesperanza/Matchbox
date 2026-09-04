@@ -40,7 +40,7 @@ main :: proc() {
 		matchbox.poll_events()
 		if matchbox.is_key_pressed(.ESCAPE) do matchbox.mbi.running = false
 
-		dt := matchbox.delta_time()
+		dt := matchbox.get_delta_time()
 		matchbox.update_animation(&coin, dt)
 		matchbox.update_animation(&slow, dt)
 

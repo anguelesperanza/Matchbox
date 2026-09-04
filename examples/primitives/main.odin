@@ -82,16 +82,16 @@ main :: proc() {
 		mb.poll_events()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(.G) do show_grid   = !show_grid
 		if mb.is_key_pressed(.B) do show_bounds = !show_bounds
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, WALK_SPEED, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, WALK_SPEED, mb.get_delta_time())
 		}
 
 		mb.begin_drawing()

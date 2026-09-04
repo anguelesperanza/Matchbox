@@ -13,7 +13,7 @@ areas of improvement while trying to create them.
 Found converting the card game's deck builder from paging to Scroll_View, which
 is the first thing to use a clip for what it was added for.
 
-`mouse_over_rect` asks whether the pointer is inside a rectangle and nothing
+`is_mouse_over_rect` asks whether the pointer is inside a rectangle and nothing
 else. Inside a scrolling panel that is the wrong question: a row scrolled past
 the bottom edge is cut out of the picture by the scissor and still answers the
 mouse, because the scissor is a drawing state and the hit test never looks at
@@ -23,23 +23,23 @@ What that cost the game: the deck panel's Empty button sits in the panel's foot,
 below the scroll area. With the list scrolled, a content row lands underneath
 that button -- invisible, and still hit-testable -- so pressing Empty also
 pressed the `-` of whatever row happened to be there. Same shape as clicking
-through an open dropdown, which `mouse_captured` already solves, and the same
+through an open dropdown, which `is_mouse_captured` already solves, and the same
 answer is wanted here.
 
 The game works around it by testing the panel as well as the row:
 
-	inside := matchbox.mouse_over_rect(area) && !matchbox.mouse_captured()
+	inside := matchbox.is_mouse_over_rect(area) && !matchbox.is_mouse_captured()
 	...
-	over := inside && matchbox.mouse_over_rect(spot)
+	over := inside && matchbox.is_mouse_over_rect(spot)
 
 That is correct and it is a rule every caller has to know, which is what makes
 it worth moving. Two shapes suggest themselves:
 
-  - `mouse_over_rect` intersects against the current clip stack, so it is right
-    by default and nobody has to be told. Anything wanting the old behaviour
-    can still call `point_in_rect` with `get_mouse_position()`.
+  - `is_mouse_over_rect` intersects against the current clip stack, so it is
+    right by default and nobody has to be told. Anything wanting the old
+    behaviour can still call `is_point_in_rect` with `get_mouse_position()`.
   - or `scroll_contains(view, rect)` for the narrower case, which leaves
-    `mouse_over_rect` alone.
+    `is_mouse_over_rect` alone.
 
 The first is the one that stops this being discovered again. `apply_clip`
 already keeps the current rectangle, so the test has something to ask.

@@ -105,10 +105,10 @@ main :: proc() {
 		time := f32(mb.get_time())
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(._1) do effect = .NONE
 		if mb.is_key_pressed(._2) do effect = .VHS
@@ -117,8 +117,8 @@ main :: proc() {
 		if mb.is_key_pressed(.LEFTBRACKET)  do grid = {max(grid.x * 0.5, 40),  max(grid.y * 0.5, 30)}
 		if mb.is_key_pressed(.RIGHTBRACKET) do grid = {min(grid.x * 2, 1280), min(grid.y * 2, 720)}
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, 4, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
 		}
 
 		// PsxGame's campfire flicker, from stage 5.

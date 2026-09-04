@@ -46,7 +46,7 @@ test_touch_down_and_position :: proc(t: ^testing.T) {
 	setup(800, 600)
 
 	testing.expect(t, get_touch_count() == 0, "nothing should be touching yet")
-	testing.expect(t, !touch_active(), "touch_active should start false")
+	testing.expect(t, !is_touch_active(), "is_touch_active should start false")
 
 	touches_begin_frame()
 	finger(.FINGER_DOWN, 1, 0.5, 0.5)
@@ -58,7 +58,7 @@ test_touch_down_and_position :: proc(t: ^testing.T) {
 	testing.expect_value(t, touch.position, [2]f32{400, 300})
 	testing.expect(t, touch.pressed && touch.down && !touch.released,
 		"a finger should be pressed and down on the frame it lands")
-	testing.expect(t, touch_active(), "touch_active should follow a finger")
+	testing.expect(t, is_touch_active(), "is_touch_active should follow a finger")
 }
 
 @(test)

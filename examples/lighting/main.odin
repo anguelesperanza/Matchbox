@@ -97,10 +97,10 @@ main :: proc() {
 		time := f32(mb.get_time())
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(.L) do lights_on = !lights_on
 		if mb.is_key_pressed(.K) do moon_on   = !moon_on
@@ -111,8 +111,8 @@ main :: proc() {
 			else      do mb.disable_fog()
 		}
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, 4, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
 		}
 
 		if lights_on {

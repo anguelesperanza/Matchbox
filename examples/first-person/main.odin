@@ -97,10 +97,10 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		dt := mb.delta_time()
+		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() {
+			if mb.is_cursor_locked() {
 				mb.set_cursor_locked(false)
 			} else {
 				mb.mbi.running = false
@@ -109,14 +109,14 @@ main :: proc() {
 
 		// Clicking in the window takes the pointer back. Only when it is loose
 		// already, so a click while playing is a click in the game.
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) {
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) {
 			mb.set_cursor_locked(true)
 		}
 
 		// Only while the pointer belongs to us. Without the check, the frame
 		// after ESC still carries the motion that reached the window before it
 		// was released, and the view jumps as you go for the menu.
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, WALK_SPEED, dt)
 		}
 
@@ -167,7 +167,7 @@ main :: proc() {
 		font := &mb.mbi.font
 		mb.draw_text(font, "WASD to walk, mouse to look", 20, 40, mb.WHITE)
 
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.draw_text(font, "ESC releases the pointer", 20, 70, mb.WHITE)
 		} else {
 			mb.draw_text(font, "click to look again, ESC again to quit", 20, 70, mb.WHITE)

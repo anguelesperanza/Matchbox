@@ -143,17 +143,17 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		dt := mb.delta_time()
+		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() {
+			if mb.is_cursor_locked() {
 				mb.set_cursor_locked(false)
 			} else {
 				mb.mbi.running = false
 			}
 		}
 
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) {
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) {
 			mb.set_cursor_locked(true)
 		}
 
@@ -186,7 +186,7 @@ main :: proc() {
 		// Only while the pointer belongs to us, for the same reason the
 		// first-person example checks: the frame after ESC still carries the
 		// motion that arrived before the pointer was released.
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			// Under `.CHARACTER` steering nothing turns the character -- that
 			// is what the setting means -- so the turn keys are the game's to
 			// provide. `facing` is a plain field and this is all it takes.
@@ -261,7 +261,7 @@ main :: proc() {
 		font := &mb.mbi.font
 		mb.draw_text(font, "WASD to run, mouse to orbit, wheel to zoom, shift to sprint", 20, 40, mb.WHITE)
 
-		if mb.cursor_locked() {
+		if mb.is_cursor_locked() {
 			mb.draw_text(font, "ESC releases the pointer", 20, 70, mb.WHITE)
 		} else {
 			mb.draw_text(font, "click to look again, ESC again to quit", 20, 70, mb.WHITE)

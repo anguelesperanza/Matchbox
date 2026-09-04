@@ -29,19 +29,19 @@ main :: proc() {
 		forward := matchbox.sprite_forward_by_rotation(tank.body)
 
 		if matchbox.is_key_held(.W) {
-			tank.body.position += forward * tank.body.speed * matchbox.delta_time()
+			tank.body.position += forward * tank.body.speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_key_held(.S) {
-			tank.body.position -= forward * tank.body.speed * matchbox.delta_time()
+			tank.body.position -= forward * tank.body.speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_key_held(.A) {
-			tank.body.rotation -= tank.rotation_speed * matchbox.delta_time()
+			tank.body.rotation -= tank.rotation_speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_key_held(.D) {
-			tank.body.rotation += tank.rotation_speed * matchbox.delta_time()
+			tank.body.rotation += tank.rotation_speed * matchbox.get_delta_time()
 		}
 
 		if matchbox.is_mouse_pressed(.RIGHT) {

@@ -138,7 +138,7 @@ disable_fog :: proc() {
 
 // Whether a game has set any lights. Mostly for an example that wants to say so
 // on screen.
-lighting_active :: proc() -> bool {
+is_lighting_active :: proc() -> bool {
 	return mbi.renderer.lighting.flags.x > 0
 }
 

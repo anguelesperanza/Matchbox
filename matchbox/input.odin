@@ -360,7 +360,7 @@ set_cursor_locked :: proc(locked: bool) {
 }
 
 // Whether the pointer is currently locked to the window.
-cursor_locked :: proc() -> bool {
+is_cursor_locked :: proc() -> bool {
 	return sdl.GetWindowRelativeMouseMode(mbi.window)
 }
 
@@ -382,7 +382,7 @@ is_key_pressed :: proc(key:sdl.Scancode) -> bool {
 }
 
 // True every frame the key is down, including the first. What movement wants,
-// and what to multiply by `delta_time`.
+// and what to multiply by `get_delta_time`.
 is_key_held :: proc(key:sdl.Scancode) -> bool {
 	return mbi.input.keys[key].pressing
 }
@@ -505,7 +505,7 @@ capture_mouse :: proc() {
 
 	A modal is what needs this. It takes the pointer at the top of the frame so
 	nothing underneath answers a click, and then has to give it back before it
-	draws its own buttons -- which ask mouse_captured() like every other button
+	draws its own buttons -- which ask is_mouse_captured() like every other button
 	and would otherwise be as dead as the screen behind them.
 */
 release_mouse :: proc() {
@@ -520,7 +520,7 @@ release_mouse :: proc() {
 	Order matters: this only knows about widgets that have already run, so the
 	thing that opens out has to be drawn before the things it covers.
 */
-mouse_captured :: proc() -> bool {
+is_mouse_captured :: proc() -> bool {
 	return mbi.input.mouse.captured
 }
 

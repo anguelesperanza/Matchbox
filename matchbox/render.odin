@@ -206,7 +206,7 @@ begin_drawing :: proc() {
 		GetWindowSize, which reports points, and window_width then disagreed with
 		the thing being drawn into.
 
-		Nothing looked broken, which is why it went unnoticed: screen_dims feeds
+		Nothing looked broken, which is why it went unnoticed: get_screen_dims feeds
 		this to the vertex shader as the divisor, so a full-width rect still
 		reached the edge of the window. What was lost was the resolution that was
 		asked for -- the whole frame was composed at point resolution and stretched
@@ -370,10 +370,10 @@ rect_top_left :: proc(rectangle: Rectangle) -> [2]f32 {
 	which is a bug that hides until somebody uses a pivot that is not the
 	default.
 
-	This is the one hit test. mouse_over_rect, mouse_over_button,
-	mouse_over_text_field and mouse_over_sprite all come through here.
+	This is the one hit test. is_mouse_over_rect, is_mouse_over_button,
+	is_mouse_over_text_field and is_mouse_over_sprite all come through here.
 */
-point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool {
+is_point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool {
 	top_left := rect_top_left(rectangle)
 	size     := rectangle.size
 
@@ -389,7 +389,7 @@ draw_rect :: proc(rectangle: Rectangle) {
 	vert_data := Vert_Data{
 		position = screen_pos(rect_center(rectangle)),
 		size     = screen_size(rectangle.size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
 		rotation = rectangle.rotation,

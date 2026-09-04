@@ -49,7 +49,7 @@ main :: proc() {
 		matchbox.poll_events()
 
 		if matchbox.is_key_held(.D) {
-			player.position.x += 200 * matchbox.delta_time()
+			player.position.x += 200 * matchbox.get_delta_time()
 		}
 
 		matchbox.begin_drawing()
@@ -154,19 +154,19 @@ matchbox.dropdown_overlay(&filter, options)
 ```
 
 While a list is open it calls `capture_mouse`, and `button`, `button_confirm`,
-`hover_dwell` and `Text_Field` all check `mouse_captured` for you -- so a
+`hover_dwell` and `Text_Field` all check `is_mouse_captured` for you -- so a
 button under an open list neither lights up nor answers a click. Anything
 hit-testing the mouse by hand should ask as well:
 
 ```odin
-over := matchbox.mouse_over_rect(cell) && !matchbox.mouse_captured()
+over := matchbox.is_mouse_over_rect(cell) && !matchbox.is_mouse_captured()
 ```
 
 That only reaches widgets drawn *after* the dropdown, so draw it before the
 things it covers.
 
-`point_in_rect` is the plain geometric test the rest are built on, for anything
-hit-testing something that is not the mouse.
+`is_point_in_rect` is the plain geometric test the rest are built on, for
+anything hit-testing something that is not the mouse.
 
 `examples/ui` shows all of these.
 
@@ -242,7 +242,7 @@ the next one. Nothing has to be set up -- plugging one in mid-game is handled.
 ```odin
 if matchbox.is_gamepad_connected(0) {
 	move := matchbox.get_gamepad_stick(0, .LEFT)
-	player.position += move * speed * matchbox.delta_time()
+	player.position += move * speed * matchbox.get_delta_time()
 
 	if matchbox.is_gamepad_button_pressed(0, .SOUTH) {
 		matchbox.set_gamepad_rumble(0, 0.6, 0.6, 200)
@@ -359,12 +359,12 @@ provides one that hands over to Odin's `_odin_entry_point`, so an ordinary
 
 Three things to know when writing a game that will run there. Anything you ship
 with the game must be read with `read_entire_file`, not `core:os`, because inside
-an apk it is not a file; anything the player creates belongs under `pref_path`,
-which is the one directory Android gives you; and the window size you pass to
-`init` is a request the desktop honours and Android ignores, so read
-`window_width` and `window_height` rather than assuming what you asked for. The
-first two are already true on the desktop -- Android is just where ignoring them
-stops working.
+an apk it is not a file; anything the player creates belongs under
+`get_pref_path`, which is the one directory Android gives you; and the window
+size you pass to `init` is a request the desktop honours and Android ignores,
+so read `window_width` and `window_height` rather than assuming what you asked
+for. The first two are already true on the desktop -- Android is just where
+ignoring them stops working.
 
 If nothing appears in `adb logcat`, check `adb shell getprop log.tag`. Some ROMs
 ship it set to `S`, which silences the log completely; `adb shell setprop log.tag

@@ -78,7 +78,7 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-		elapsed += mb.delta_time()
+		elapsed += mb.get_delta_time()
 
 		if mb.is_key_pressed(.I) do integer = !integer
 		if mb.is_key_pressed(.G) do grid    = !grid

@@ -17,11 +17,11 @@ package matchbox
 	the player made. The distinction worth holding on to is:
 
 	  shipped with the game   -> read_entire_file, so it works inside an apk
-	  made by the player      -> pref_path, and core:os is fine
+	  made by the player      -> get_pref_path, and core:os is fine
 
 	Which is also why writing is separate and does not take an arbitrary path.
 	There is nowhere on Android a program may simply write to; it gets a
-	directory of its own and that is all. pref_path is that directory, and on a
+	directory of its own and that is all. get_pref_path is that directory, and on a
 	desktop it is the equivalent -- AppData, Application Support, .local/share --
 	rather than the working directory, which is wherever a shortcut happened to
 	start the program.
@@ -75,7 +75,7 @@ read_entire_file :: proc(path: string, allocator := context.allocator) -> (data:
 	the app's own internal storage, which is the only place there is. Ends with a
 	separator, so a filename can be joined straight on:
 
-		dir := matchbox.pref_path("Bramble", "Cards")
+		dir := matchbox.get_pref_path("Bramble", "Cards")
 		defer delete(dir)
 		os.write_entire_file(fmt.tprintf("%ssave.json", dir), bytes)
 
@@ -86,7 +86,7 @@ read_entire_file :: proc(path: string, allocator := context.allocator) -> (data:
 
 	The result is the caller's to delete.
 */
-pref_path :: proc(org: string, app: string, allocator := context.allocator) -> string {
+get_pref_path :: proc(org: string, app: string, allocator := context.allocator) -> string {
 	c_org := strings.clone_to_cstring(org, context.temp_allocator)
 	c_app := strings.clone_to_cstring(app, context.temp_allocator)
 
@@ -111,7 +111,7 @@ pref_path :: proc(org: string, app: string, allocator := context.allocator) -> s
 
 	The result is the caller's to delete.
 */
-base_path :: proc(allocator := context.allocator) -> string {
+get_base_path :: proc(allocator := context.allocator) -> string {
 	raw := sdl.GetBasePath()
 	if raw == nil do return ""
 

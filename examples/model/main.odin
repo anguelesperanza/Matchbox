@@ -97,16 +97,16 @@ main :: proc() {
 		mb.poll_events()
 
 		if mb.is_key_pressed(.ESCAPE) {
-			if mb.cursor_locked() do mb.set_cursor_locked(false)
+			if mb.is_cursor_locked() do mb.set_cursor_locked(false)
 			else                 do mb.mbi.running = false
 		}
-		if !mb.cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
+		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
 		if mb.is_key_pressed(.B) do show_bounds = !show_bounds
 		if mb.is_key_pressed(.T) do tinted      = !tinted
 
-		if mb.cursor_locked() {
-			mb.first_person_walk(&rig, &player, 5, mb.delta_time())
+		if mb.is_cursor_locked() {
+			mb.first_person_walk(&rig, &player, 5, mb.get_delta_time())
 		}
 
 		tint := mb.RED if tinted else mb.WHITE

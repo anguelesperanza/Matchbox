@@ -173,7 +173,7 @@ shape_quad :: proc(center: [2]f32, size: [2]f32, rotation: f32, frag_data: Shape
 	vert_data := Vert_Data{
 		position = screen_pos(center),
 		size     = screen_size(size),
-		screen   = screen_dims(),
+		screen   = get_screen_dims(),
 		uv_min   = {0, 0},
 		uv_max   = {1, 1},
 		rotation = rotation,

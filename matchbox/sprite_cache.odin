@@ -135,12 +135,12 @@ sprite_cache_find :: proc(cache: ^Sprite_Cache($Key), key: Key) -> ^Sprite {
 }
 
 // Whether a key is resident, without loading it.
-sprite_cache_has :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool {
+is_sprite_cache_holding :: proc(cache: ^Sprite_Cache($Key), key: Key) -> bool {
 	return key in cache.sprites
 }
 
 // How many sprites are resident.
-sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int {
+get_sprite_cache_len :: proc(cache: ^Sprite_Cache($Key)) -> int {
 	return len(cache.sprites)
 }
 

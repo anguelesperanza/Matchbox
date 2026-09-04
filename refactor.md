@@ -264,9 +264,36 @@ first and the risky work lands on a base that is already consistent.
    that names the thing, so two steps in flight would collide on the same
    files. Small and serial beats fast and tangled.
 2. **Every step ends at the same gate:** `odin check matchbox -no-entry-point`
-   clean, `odin check` clean on all 24 examples, `python tools/gen_cheatsheet.py`
-   re-run if any public procedure changed, and a commit of its own. A step that
-   cannot pass the gate gets reverted rather than patched forward.
+   clean, `odin check` clean on all 24 examples, **`odin test matchbox` green**,
+   `python tools/gen_cheatsheet.py` re-run if any public procedure changed, and
+   a commit of its own. A step that cannot pass the gate gets reverted rather
+   than patched forward.
+
+   The test run was missing from the first three steps' gate and was added
+   after step 3 -- `matchbox/touch_test.odin` holds 7 real tests covering touch
+   slots, the letterbox transform and pinch. They pass as of step 3, but three
+   renaming steps went by without anyone checking, which is exactly the window
+   where a silently broken test would have gone unnoticed.
+
+### Progress
+
+| step | state |
+|---|---|
+| 0 -- flatten TankMovement | **done**, `24c3cfe` |
+| 1 -- type names | **done**, `69ff605` -- 74 renames, 21 files |
+| 2 -- `create_x` / `destroy_x` | **done**, `669ce87` -- 20 renames, 27 files. `destroy` group audited: 15 public members, 4 privates correctly outside |
+| 3 -- `is_x` / `get_x` | **done**, `0930c9e` -- 30 renames, 39 files |
+| 4 -- file moves | next |
+| 5-9 | not started |
+
+Two judgement calls made during the run, easy to reverse if either is wrong:
+
+- `sprite_cache_has` → **`is_sprite_cache_holding`**, not `is_in_sprite_cache`,
+  to keep the `sprite_cache_*` family clustered under the mandated prefix the
+  way `get_sprite_cache_len` does.
+- The bounding box tests **dropped their `_check` suffix** --
+  `is_bounding_box_collision` and `is_bounding_box_contact`. The suffix was
+  doing the predicate work that `is_` now does, and `is_X_check` stutters.
 
 | # | step | why here |
 |---|---|---|

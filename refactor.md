@@ -288,7 +288,42 @@ first and the risky work lands on a base that is already consistent.
 | 6 -- small dedupe | **done**, `7477aee` -- one glyph walker, `linalg.length` ×3, net -17 lines |
 | 7 -- one LRU with frame guard | **done**, `2770bac` + `1968429` -- `lru.odin` added, both caches on it, regression tests written |
 | 8 -- build camera follow and parallax | **done**, `607fe34` -- 336 procedures, 20 tests |
-| 9 -- errors | in progress, split into 9a and 9b |
+| 9a -- errors, the `ensure` sites | **done**, `f931972` + `a937030` -- `errors.odin` added, 17 of 29 converted, 12 kept |
+| 9b -- errors, the `ok: bool` sites | **done**, `05cb9e4` -- loaders migrated, "is there one?" queries kept |
+
+**The plan is complete.** All ten steps landed, each behind the same gate.
+
+### What the error convention settled on, and what it deliberately excludes
+
+`Error :: union #shared_nil { Gpu_Error, Image_Error, Argument_Error,
+File_Error, Model_Error, Skybox_Error }`. `#shared_nil` is what makes
+`err != nil` work against enums whose `None = 0`; without it every test reads
+`err != .None`, comparing against a named nothing.
+
+Three things stayed as they were, and `errors.odin` documents each so they
+read as decisions:
+
+- **Broken invariants stay `ensure`** -- 12 of them. Drawing outside a pass,
+  `end_clip` without `begin_clip`, using Matchbox before `init`. These are
+  bugs in calling code, and handing them back as values means either every
+  call site ignores them or the bug goes quiet. A quiet bug in a draw call is
+  the expensive kind. `pixel_buffer_update`'s size check was converted during
+  9a and moved back for exactly this reason -- the length is fixed by the
+  buffer's dimensions and the caller's type, so right once is right always.
+- **"Is there one?" keeps a `bool`** -- `get_pinch`, `get_primary_touch` and
+  the two `pixel_buffer_pick` procedures. Fewer than two fingers down is not
+  a failure, and an `Error` there would fire `err != nil` on the ordinary
+  state of nobody touching the screen.
+- **The private glTF readers keep theirs** -- they are threaded together with
+  `or_return` over glTF's optionals, and `.? or_return` yields a `bool` that
+  cannot propagate into an `Error` return (checked, not assumed). Converting
+  them means hand-rewriting the unwrap chains in the most delicate parsing
+  code here, for nothing a game can see: `load_model` already collapses the
+  outcome into one error at the boundary.
+
+`sprite_cache_get` also kept `^Sprite` + nil: everything it calls now returns
+an error and each is logged with the path, but the answer at a call site is
+the same for all of them -- there is no art for this key, draw nothing.
 
 **Step 8's parallax convention, settled:** `parallax_speed` is *the fraction
 of camera movement a layer follows* -- 1 moves with the world, 0.5 drifts at

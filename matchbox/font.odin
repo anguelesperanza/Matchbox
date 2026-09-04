@@ -1,18 +1,17 @@
 package matchbox
 
 import "core:math"
-import "core:strings"
-import "core:strconv"
-
-import "base:intrinsics"
-
-import "core:fmt"
 
 import stbtt "vendor:stb/truetype"
 
-// -----------------------------------------------------------------------
-// Font
-// -----------------------------------------------------------------------
+/*
+	Font
+	----
+	Baking a TTF into an atlas, and keeping a few sizes of the default one.
+
+	Drawing with a Font lives in `text.odin` -- this file is the asset and its
+	cache, that one is everything that puts glyphs on screen.
+*/
 
 // The font init bakes as mbi.font, and the one get_font bakes at other sizes.
 // Exposed so a game can build its own set out of it, or measure against it
@@ -95,207 +94,6 @@ load_font :: proc(bytes: []byte, font_size: f32) -> Font {
 // Gives the font's atlas texture and vertex buffer back to the GPU.
 destroy_font :: proc(font: ^Font) {
 	destroy_mesh(&font.mesh)
-}
-
-@(private)
-trim_plus :: proc(s: string) -> string {
-	return s[1:] if len(s) > 0 && s[0] == '+' else s
-}
-
-// An integer, without the caller building a string for it. Part of the
-// `draw_text` group.
-draw_text_i64 :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
-    buf: [256]u8
-    result := strconv.write_int(buf[:], integer, 10)
-    draw_text_string(font, result[:], x, y, color)
-}
-
-/*
-	`strconv.write_float`'s leading sign, dropped when it is a plus and kept
-	when it is a minus.
-
-	`write_float` always writes a sign, so "3.14" comes back as "+3.14" and has
-	to be trimmed. Trimming it as `result[1:]` is the obvious thing and it is
-	wrong: it takes whichever character is first, so -8.5 draws as "8.50". On a
-	position readout that is half the values on screen rendering as their own
-	mirror image, with nothing on screen to say so.
-*/
-
-draw_text_2_i64 :: proc(font: ^Font, integers:[2]i64, x:f32, y:f32, color:[4]f32, separator:string = " ") {
-	
-	buf_one: [256]u8
-	buf_two: [256]u8
-
-	result_one := strconv.write_int(buf_one[:], integers[0], 10)
-	result_two := strconv.write_int(buf_two[:], integers[1], 10)
-
-	// Temp, not the context allocator: this is a draw call, so a game showing a
-	// position every frame would otherwise leak a string per frame forever. The
-	// temp allocator is reset at the end of the frame, which is exactly as long
-	// as the text needs to live.
-	text, _ := strings.concatenate({trim_plus(result_one), separator, trim_plus(result_two)},context.temp_allocator)
-
-	draw_text_string(font = font, text = text, x = x, y = y, color = color)
-}
-
-// Two floats separated by `separator` -- a position or a size, without the
-// caller building a string for it. Part of the `draw_text` group.
-draw_text_2_float :: proc(font: ^Font, float: [2]$T, x: f32, y: f32, color: [4]f32, separator: string = " ") {
-	buf_one: [256]u8
-	buf_two: [256]u8
-
-	result_one := strconv.write_float(buf_one[:], cast(f64)float[0], 'f', 2, 64)
-	result_two := strconv.write_float(buf_two[:], cast(f64)float[1], 'f', 2, 64)
-
-	// Temp, not the context allocator: this is a draw call, so a game showing a
-	// position every frame would otherwise leak a string per frame forever. The
-	// temp allocator is reset at the end of the frame, which is exactly as long
-	// as the text needs to live.
-	text, _ := strings.concatenate({trim_plus(result_one), separator, trim_plus(result_two)},
-		context.temp_allocator)
-
-	draw_text_string(font = font, text = text, x = x, y = y, color = color)
-}
-
-
-
-// A float at two decimal places, without the caller building a string. Part of
-// the `draw_text` group.
-draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) where intrinsics.type_is_float(T) {
-    buf: [256]u8
-    result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
-    draw_text_string(font, trim_plus(result), x, y, color)
-}
-
-
-// A string at a position, in world coordinates -- so it moves with the camera
-// and scales with the letterbox. `draw_text_ui` is the one that does not.
-//
-// `x` and `y` are the left end of the baseline, not the top-left corner.
-draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	// Bound once for the whole string. The pipeline, the shared quad and the
-	// atlas are the same for every character in it -- only the uniforms differ.
-	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
-
-	// Once for the whole string, not once per glyph. A pushed uniform block stays
-	// in force for every draw after it until something pushes over it, and the
-	// colour is the same for every character -- so this was the same sixteen
-	// bytes handed over twenty times for a twenty character line.
-	frag_data := Font_Frag_Data{color = color}
-	push_frag_uniform(&frag_data, size_of(frag_data))
-
-	cursor_x := x
-	cursor_y := y
-
-	for ch in text {
-		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
-			continue
-		}
-
-		q: stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - FONT_FIRST_GLYPH, &cursor_x, &cursor_y, &q, true)
-
-		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
-		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
-
-		vert_data := Vert_Data{
-			position = screen_pos(pos),
-			size     = screen_size(size),
-			screen   = get_screen_dims(),
-			uv_min   = {q.s0, q.t0},
-			uv_max   = {q.s1, q.t1},
-		}
-
-		push_quad(&vert_data, nil, 0)
-	}
-}
-
-// Draws a string, an integer or a float, so a game does not build a string for
-// a number it wants on screen.
-draw_text :: proc {
-	draw_text_string,
-	draw_text_i64,
-	draw_text_float,
-	draw_text_2_float,
-}
-
-// How much room `text` takes up when drawn with draw_text.
-//
-// The height is the font's ascent plus descent rather than the extent of these
-// particular glyphs, so "Play" and "Play Card" measure the same height and a
-// line of text does not shift about vertically as its content changes.
-measure_text :: proc(font: ^Font, text: string) -> [2]f32 {
-	width: f32
-	for ch in text {
-		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
-			continue
-		}
-		width += font.baked_chars[cast(int)ch - FONT_FIRST_GLYPH].xadvance
-	}
-	return {width, font.ascent + font.descent}
-}
-
-// Screen-space text — coordinates and glyph size are in actual window pixels,
-// draw_scale is NOT applied.  Use this for HUD / UI text when set_logical_size
-// is active, so the font renders at its native baked size instead of being
-// upscaled by the logical-resolution multiplier.
-draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	// Bound once for the whole string, as in draw_text_string, and the colour
-	// pushed once for the same reason.
-	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
-
-	frag_data := Font_Frag_Data{color = color}
-	push_frag_uniform(&frag_data, size_of(frag_data))
-
-	cursor_x := x
-	cursor_y := y
-
-	for ch in text {
-		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
-			continue
-		}
-
-		q: stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - FONT_FIRST_GLYPH, &cursor_x, &cursor_y, &q, true)
-
-		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
-		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
-
-		// No screen_pos / screen_size here: that is what makes this the UI
-		// variant, drawing at the font's baked size in window pixels.
-		vert_data := Vert_Data{
-			position = pos,
-			size     = size,
-			screen   = get_screen_dims(),
-			uv_min   = {q.s0, q.t0},
-			uv_max   = {q.s1, q.t1},
-		}
-
-		push_quad(&vert_data, nil, 0)
-	}
-}
-
-// An integer in screen coordinates. Part of the `draw_text_ui` group.
-draw_text_ui_int :: proc(font: ^Font, integer: i64, x: f32, y: f32, color: [4]f32) {
-    buf: [256]u8
-    result := strconv.write_int(buf[:], integer, 10)
-    draw_text_ui_string(font, result[:], x, y, color)
-}
-
-// A float in screen coordinates, two decimal places. Part of the
-// `draw_text_ui` group.
-draw_text_ui_f32 :: proc(font: ^Font, float: f32, x: f32, y: f32, color: [4]f32) {
-    buf: [256]u8
-    result := strconv.write_float(buf[:], cast(f64)float, 'f', 2, 64)
-    draw_text_ui_string(font, trim_plus(result), x, y, color)
-}
-
-// `draw_text`, but in screen coordinates: fixed to the window and untouched by
-// the camera. What a HUD, a score or a debug readout wants.
-draw_text_ui :: proc {
-    draw_text_ui_string,
-    draw_text_ui_int,
-    draw_text_ui_f32,
 }
 
 // -----------------------------------------------------------------------

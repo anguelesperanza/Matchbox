@@ -43,14 +43,3 @@ destroy :: proc {
 	destroy_text_field,
 	destroy_sprite_cache,
 }
-
-/*
-	Frees the sheet an animated sprite draws from.
-
-	There was no such procedure: a game holding an Animated_Sprite had to know
-	that the thing to free was the clip inside it, and reach past the sprite to
-	do it. Every other type in the group frees itself.
-*/
-destroy_animated_sprite :: proc(sprite: ^Animated_Sprite) {
-	destroy_animation_clip(&sprite.clip)
-}

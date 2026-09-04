@@ -14,19 +14,20 @@ any.
 
 ## Contents
 
-- [Getting started](#getting-started) -- 18
+- [Getting started](#getting-started) -- 17
 - [Input](#input) -- 42
-- [2D drawing](#2d-drawing) -- 56
+- [2D drawing](#2d-drawing) -- 57
 - [Text and fonts](#text-and-fonts) -- 21
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
-- [3D cameras](#3d-cameras) -- 45
+- [3D cameras](#3d-cameras) -- 42
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 33
+- [Animation](#animation) -- 26
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
+- [Other](#other) -- 10
 
 ## Getting started
 
@@ -67,11 +68,6 @@ Loads a shader off disk.
 destroy :: proc
 ```
 destroy ------- One name for giving anything back.
-
-```odin
-destroy_animated_sprite :: proc(sprite: ^Animated_Sprite)
-```
-Frees the sheet an animated sprite draws from.
 
 ### `clock.odin`
 
@@ -512,6 +508,15 @@ sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32
 Returns the forward direction vector of a sprite based on its current rotation.
 
 ```odin
+look_at_sprite :: proc(
+	sprite: Sprite,
+	target: [2]f32,
+	forward: Sprite_Forward = .TOP,
+) -> f32
+```
+Returns the angle (radians) needed to face a sprite's visual center toward target.
+
+```odin
 sprite_set_frame :: proc(
 	sprite: ^Sprite,
 	col,
@@ -761,6 +766,18 @@ destroy_font :: proc(font: ^Font)
 Gives the font's atlas texture and vertex buffer back to the GPU.
 
 ```odin
+get_font :: proc(size: f32) -> ^Font
+```
+The default font baked at `size` pixels.
+
+```odin
+get_font_cache_len :: proc() -> int
+```
+How many extra sizes are resident, not counting the default one.
+
+### `text.odin`
+
+```odin
 draw_text_i64 :: proc(
 	font: ^Font,
 	integer: i64,
@@ -864,18 +881,6 @@ A float in screen coordinates, two decimal places.
 draw_text_ui :: proc
 ```
 `draw_text`, but in screen coordinates: fixed to the window and untouched by the camera.
-
-```odin
-get_font :: proc(size: f32) -> ^Font
-```
-The default font baked at `size` pixels.
-
-```odin
-get_font_cache_len :: proc() -> int
-```
-How many extra sizes are resident, not counting the default one.
-
-### `text.odin`
 
 ```odin
 wrap_text :: proc(
@@ -1702,31 +1707,6 @@ third_person_walk :: proc(
 ```
 Input, the move, and the follow -- the whole frame, for a character nothing else is driving.
 
-### `look_at.odin`
-
-```odin
-look_at_point :: proc(
-	from: [2]f32,
-	target: [2]f32,
-	forward: Sprite_Forward = .TOP,
-) -> f32
-```
-Returns the angle (radians) needed to face from a point toward target.
-
-```odin
-look_at_sprite :: proc(
-	sprite: Sprite,
-	target: [2]f32,
-	forward: Sprite_Forward = .TOP,
-) -> f32
-```
-Returns the angle (radians) needed to face a sprite's visual center toward target.
-
-```odin
-look_at :: proc
-```
-The angle that points something at a target, given either a plain position or a sprite -- see the two procedures above for which side counts as forward.
-
 ### `math3d.odin`
 
 ```odin
@@ -2098,6 +2078,11 @@ destroy_animation_clip :: proc(clip: ^Animation_Clip)
 Gives the clip's sheet texture back to the GPU.
 
 ```odin
+destroy_animated_sprite :: proc(sprite: ^Animated_Sprite)
+```
+Frees the sheet an animated sprite draws from.
+
+```odin
 switch_animation :: proc(
 	sprite: ^Animated_Sprite,
 	clip: Animation_Clip,
@@ -2228,50 +2213,6 @@ update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32)
 ```
 Advances the clip and works out this frame's matrices.
 
-### `lerp.odin`
-
-```odin
-create_lerp_move :: proc(position: [2]f32, duration: f32) -> Lerp_Move
-```
-Creates a Lerp_Move anchored at position.
-
-```odin
-lerp_move_to :: proc(lerp: ^Lerp_Move, current_position: [2]f32, dest: [2]f32)
-```
-Sets a new destination.
-
-```odin
-update_lerp_move :: proc(lerp: ^Lerp_Move, delta_time: f32) -> [2]f32
-```
-Advances the lerp by delta_time and returns the new position.
-
-### `timer.odin`
-
-```odin
-start_cooldown :: proc(cooldown: ^Cooldown_Timer, duration: f32)
-```
-Starts the cooldown.
-
-```odin
-update_cooldown :: proc(cooldown: ^Cooldown_Timer, delta_time: f32)
-```
-Advances the cooldown by delta_time.
-
-```odin
-is_cooldown_done :: proc(cooldown: Cooldown_Timer) -> bool
-```
-Returns true once the cooldown has fully elapsed.
-
-```odin
-reset_cooldown :: proc(cooldown: ^Cooldown_Timer)
-```
-Resets remaining back to the original duration, restarting the countdown.
-
-```odin
-stop_cooldown :: proc(cooldown: ^Cooldown_Timer)
-```
-Immediately expires the cooldown (sets remaining to 0).
-
 ## Render targets
 
 ### `render_target.odin`
@@ -2342,4 +2283,62 @@ A grid coordinate as an index into a row-major array of `width` columns.
 is_mouse_over_sprite :: proc(sprite:Sprite) -> bool
 ```
 Whether the pointer is over a sprite.
+
+## Other
+
+### `utility.odin`
+
+```odin
+start_cooldown :: proc(cooldown: ^Cooldown_Timer, duration: f32)
+```
+Starts the cooldown.
+
+```odin
+update_cooldown :: proc(cooldown: ^Cooldown_Timer, delta_time: f32)
+```
+Advances the cooldown by delta_time.
+
+```odin
+is_cooldown_done :: proc(cooldown: Cooldown_Timer) -> bool
+```
+Returns true once the cooldown has fully elapsed.
+
+```odin
+reset_cooldown :: proc(cooldown: ^Cooldown_Timer)
+```
+Resets remaining back to the original duration, restarting the countdown.
+
+```odin
+stop_cooldown :: proc(cooldown: ^Cooldown_Timer)
+```
+Immediately expires the cooldown (sets remaining to 0).
+
+```odin
+create_lerp_move :: proc(position: [2]f32, duration: f32) -> Lerp_Move
+```
+Creates a Lerp_Move anchored at position.
+
+```odin
+lerp_move_to :: proc(lerp: ^Lerp_Move, current_position: [2]f32, dest: [2]f32)
+```
+Sets a new destination.
+
+```odin
+update_lerp_move :: proc(lerp: ^Lerp_Move, delta_time: f32) -> [2]f32
+```
+Advances the lerp by delta_time and returns the new position.
+
+```odin
+look_at_point :: proc(
+	from: [2]f32,
+	target: [2]f32,
+	forward: Sprite_Forward = .TOP,
+) -> f32
+```
+Returns the angle (radians) needed to face from a point toward target.
+
+```odin
+look_at :: proc
+```
+The angle that points something at a target, given either a plain position or a sprite.
 

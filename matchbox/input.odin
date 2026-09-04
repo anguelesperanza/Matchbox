@@ -245,65 +245,16 @@ poll_events :: proc() {
 		}
 	}
 
-	/*
-		Frame limiting, against an absolute deadline.
-
-		Two things were wrong with waiting for "the frame time minus however long
-		this frame took". The wait went through sdl.Delay, which takes whole
-		milliseconds, so a rate that is not a whole number of them -- a Game Boy
-		frame is 16.742706 ms -- lost the remainder every frame. And, which
-		matters more, nothing ever made up for a wait that came back late: the
-		error was measured fresh each frame and any overshoot was simply kept.
-
-		Measured over 180 frames at a Game Boy's 16.742706 ms, that ran 1.4 to
-		1.6 percent fast -- about 60.6 fps against a target of 59.7275, and
-		repeatable to within a fifth of a percent run to run, so it was the model
-		and not noise. The version below comes in at 0.22 percent under.
-
-		So the deadline is absolute and advances by exactly one period whatever
-		the last frame cost, which lets a long frame be followed by a short wait
-		and leaves the average where it was asked to be. DelayPrecise takes
-		nanoseconds and spins down the last fraction rather than handing the whole
-		wait to the scheduler.
-
-		The catch-up limit is what keeps that from turning into a stampede. A
-		window dragged for two seconds would otherwise leave a deadline two
-		seconds in the past and a hundred frames owed, and the loop would run flat
-		out with no wait at all trying to serve them. Past four frames behind the
-		debt is written off and the deadline starts again from now.
-	*/
-	if mbi.target_frame_time > 0 && mbi.ts_freq > 0 {
-		period := u64(f64(mbi.target_frame_time) * f64(mbi.ts_freq))
-		now    := sdl.GetPerformanceCounter()
-
-		switch {
-		case mbi.next_frame_ts == 0, now > mbi.next_frame_ts + period * 4:
-			mbi.next_frame_ts = now + period
-
-		case now < mbi.next_frame_ts:
-			wait := f64(mbi.next_frame_ts - now) / f64(mbi.ts_freq)
-			sdl.DelayPrecise(u64(wait * 1_000_000_000))
-			fallthrough
-
-		case:
-			mbi.next_frame_ts += period
-		}
-	}
+	// Sleeps out whatever is left of the frame's budget. See clock.odin -- this
+	// has to happen before the touch state is closed off below, which is why
+	// the clock's two halves are two procedures rather than one.
+	clock_wait_for_frame()
 
 	// After every event has been seen, so a tap that starts and ends inside one
 	// frame is still visible to the frame it happened in.
 	touches_end_frame()
 
-	last_ts := mbi.now_ts
-	mbi.now_ts = sdl.GetPerformanceCounter()
-
-	// Seconds elapsed since the previous poll_events, clamped so a slow/stalled
-	// frame can't teleport everything. Without this, delta_time stays 0 and the
-	// whole game appears frozen on the first frame.
-	mbi.delta_time = min(
-		mbi.max_delta_time,
-		f32(f64((mbi.now_ts - last_ts) * 1000) / f64(mbi.ts_freq)) / 1000.0,
-	)
+	clock_tick()
 }
 
 // Mouse position in logical screen space, matching the coordinates you draw

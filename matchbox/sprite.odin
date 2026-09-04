@@ -348,6 +348,26 @@ sprite_forward_by_rotation :: proc(sprite: Sprite) -> [2]f32 {
 	return [2]f32{s, -c}
 }
 
+// Which side of the sprite image is its forward-facing direction at rotation 0.
+Sprite_Forward :: enum {
+    TOP,    // top of the image faces the target  (default — suits top-down sprites)
+    RIGHT,  // right side of the image faces the target
+    BOTTOM, // bottom of the image faces the target
+    LEFT,   // left side of the image faces the target
+}
+
+// Returns the angle (radians) needed to face a sprite's visual center toward target.
+// Uses position + pivot * size so rotation is always computed from the correct origin.
+// forward controls which side of the sprite is treated as its forward direction.
+//
+// The inverse of `sprite_forward_by_rotation` above: that one reads a sprite's
+// rotation and gives the direction it faces, this one takes a direction and
+// gives the rotation that would face it.
+look_at_sprite :: proc(sprite: Sprite, target: [2]f32, forward: Sprite_Forward = .TOP) -> f32 {
+	center := sprite.position + sprite.pivot * sprite.size
+	return look_at_point(center, target, forward)
+}
+
 
 // Selects a single tile from a sprite sheet by its column and row (0-indexed).
 // Also corrects sprite.size to one tile so the bounding box is right.

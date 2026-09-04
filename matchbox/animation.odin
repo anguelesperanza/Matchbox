@@ -98,7 +98,7 @@ load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, row
 	takes them: `#load` puts the art inside the executable, which is what makes
 	it work unchanged inside an Android apk.
 
-		clip, ok := mb.load_animation_frames({
+		clip, err := mb.load_animation_frames({
 			#load("art/run_0.png"), #load("art/run_1.png"), #load("art/run_2.png"),
 		}, 0.1)
 
@@ -116,18 +116,21 @@ load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, row
 	frame the artist drew smaller stays where they put it. The cell size is the
 	largest frame in the set, which is also what the sprite's `size` becomes.
 
-	Returns `ok = false` if the set is empty or a frame fails to decode, rather
-	than taking the process down the way `create_sprite` does. Frames are asset
-	data and a game may reasonably want to carry on without one.
+	Returns an error if the set is empty or a frame fails to decode, rather than
+	taking the process down. Frames are asset data and a game may reasonably
+	want to carry on without one. The error says which happened: `.No_Frames`
+	for an empty set, and whatever `load_image` reported for a frame that would
+	not decode -- passed through rather than flattened, so the log and the
+	return value agree about the cause.
 */
 load_animation_frames :: proc(
 	frames:            [][]byte,
 	seconds_per_frame: f32,
 	columns:           i32 = 0,
-) -> (clip: Animation_Clip, ok: bool) {
+) -> (clip: Animation_Clip, err: Error) {
 	if len(frames) == 0 {
 		log.error("load_animation_frames: no frames")
-		return {}, false
+		return {}, Argument_Error.No_Frames
 	}
 
 	images := make([]Image, len(frames), context.temp_allocator)
@@ -140,10 +143,10 @@ load_animation_frames :: proc(
 
 	frame_w, frame_h: i32
 	for bytes, i in frames {
-		image, decoded := load_image(bytes, context.temp_allocator)
-		if !decoded {
+		image, decode_err := load_image(bytes, context.temp_allocator)
+		if decode_err != nil {
 			log.errorf("load_animation_frames: frame %v did not decode", i)
-			return {}, false
+			return {}, decode_err
 		}
 
 		images[i] = image
@@ -179,11 +182,10 @@ load_animation_frames :: proc(
 		}
 	}
 
-	// Reported and folded into `ok`; migrating this one to an Error is step 9b.
 	mesh, mesh_err := create_mesh_from_pixels(slice.to_bytes(sheet), sheet_w, frame_h * rows)
 	if mesh_err != nil {
 		log.errorf("load_animation_frames: could not upload the packed sheet: %v", mesh_err)
-		return {}, false
+		return {}, mesh_err
 	}
 
 	return Animation_Clip{
@@ -194,7 +196,7 @@ load_animation_frames :: proc(
 		seconds_per_frame = seconds_per_frame,
 		frame_w           = f32(frame_w),
 		frame_h           = f32(frame_h),
-	}, true
+	}, nil
 }
 
 /*
@@ -203,7 +205,7 @@ load_animation_frames :: proc(
 	`#load_directory` is a compile-time builtin and needs a literal path, so it
 	has to be written at the call site -- matchbox cannot call it for you:
 
-		clip, ok := mb.load_animation_directory(#load_directory("art/walk"), 0.1)
+		clip, err := mb.load_animation_directory(#load_directory("art/walk"), 0.1)
 
 	**Two things make the raw builtin's output unusable**, and both are handled
 	here. It returns *every* file in the folder, so a stray `notes.txt` or a
@@ -228,7 +230,7 @@ load_animation_directory :: proc(
 	seconds_per_frame: f32,
 	columns:           i32 = 0,
 	suffixes:          []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"},
-) -> (clip: Animation_Clip, ok: bool) {
+) -> (clip: Animation_Clip, err: Error) {
 	keep := make([dynamic]runtime.Load_Directory_File, 0, len(files), context.temp_allocator)
 
 	for file in files {
@@ -243,7 +245,7 @@ load_animation_directory :: proc(
 
 	if len(keep) == 0 {
 		log.errorf("load_animation_directory: none of the %v file(s) look like images", len(files))
-		return {}, false
+		return {}, Argument_Error.No_Frames
 	}
 
 	slice.sort_by(keep[:], proc(a, b: runtime.Load_Directory_File) -> bool {

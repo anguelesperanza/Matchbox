@@ -119,7 +119,7 @@ The size everything 2D is measured against this frame.
 read_entire_file :: proc(
 	path: string,
 	allocator := context.allocator) -> (data: []byte,
-	ok: bool,
+	err: Error,
 )
 ```
 Reads a whole file into memory.
@@ -675,7 +675,7 @@ The same three points joined by a line `thickness` pixels wide.
 load_image :: proc(
 	bytes: []byte,
 	allocator := context.allocator) -> (image: Image,
-	ok: bool,
+	err: Error,
 )
 ```
 Decodes an image held in memory.
@@ -684,13 +684,18 @@ Decodes an image held in memory.
 load_image_from_file :: proc(
 	path: string,
 	allocator := context.allocator) -> (image: Image,
-	ok: bool,
+	err: Error,
 )
 ```
 The same, read from a path.
 
 ```odin
-image_size :: proc(bytes: []byte) -> (width, height, channels: i32, ok: bool)
+image_size :: proc(
+	bytes: []byte) -> (width,
+	height,
+	channels: i32,
+	err: Error,
+)
 ```
 How big an image is without decoding it.
 
@@ -1934,12 +1939,12 @@ Whether a game has set any lights.
 ### `skybox.odin`
 
 ```odin
-load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, ok: bool)
+load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, err: Error)
 ```
 An equirectangular panorama, from a 2:1 image.
 
 ```odin
-load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, ok: bool)
+load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, err: Error)
 ```
 A cube map, from the six faces of a horizontal cross.
 
@@ -2029,7 +2034,7 @@ A grid of lines on the ground plane, centred on the origin.
 ### `model_load.odin`
 
 ```odin
-load_model :: proc(path: string) -> (model: Model, ok: bool)
+load_model :: proc(path: string) -> (model: Model, err: Error)
 ```
 Loads a model from a `.gltf` or `.glb` file.
 
@@ -2072,7 +2077,7 @@ load_animation_frames :: proc(
 	frames: [][]byte,
 	seconds_per_frame: f32,
 	columns: i32 = 0) -> (clip: Animation_Clip,
-	ok: bool,
+	err: Error,
 )
 ```
 A clip from frames that arrived as separate image files.
@@ -2083,7 +2088,7 @@ load_animation_directory :: proc(
 	seconds_per_frame: f32,
 	columns: i32 = 0,
 	suffixes: []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) -> (clip: Animation_Clip,
-	ok: bool,
+	err: Error,
 )
 ```
 A clip from a whole folder of frames, in the order a person would read them.

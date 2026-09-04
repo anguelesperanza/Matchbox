@@ -796,8 +796,8 @@ load_shader :: proc(path: string, stage: sdl.GPUShaderStage, num_samplers: u32 =
 	// Through SDL, so a shader shipped inside an apk is reachable. Still a panic
 	// rather than a false, unlike the content loaders: a missing shader is a
 	// broken build rather than a broken file somebody chose.
-	data, read := read_entire_file(full, context.allocator)
-	if !read {
+	data, read_err := read_entire_file(full, context.allocator)
+	if read_err != nil {
 		panic("Cannot read shader file")
 	}
 

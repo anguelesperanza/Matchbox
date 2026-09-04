@@ -87,7 +87,7 @@ main :: proc() {
 
 		// ---- open a real file into the canvas ------------------------------
 		if mb.is_key_pressed(.O) {
-			if img, ok := mb.load_image_from_file("art/ember.png"); ok {
+			if img, err := mb.load_image_from_file("art/ember.png"); err == nil {
 				defer mb.destroy(&img)
 
 				// Nearest-sampled to fit, keeping its shape. Sampling by hand

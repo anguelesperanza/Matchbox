@@ -55,15 +55,14 @@ import gltf "./gltf2"
 	Without that a model built out of parts -- a stove with its doors as
 	separate nodes -- arrives as a heap at the origin.
 
-	Returns `ok = false` and logs on a file that cannot be read or parsed. A
-	missing model is a shipping mistake rather than a crash.
+	Returns a `File_Error` when the path could not be read and
+	`Model_Error.Parse_Failed` when it could but the contents are not glTF. A
+	missing model is a shipping mistake rather than a crash, and telling the two
+	apart is the difference between "you forgot to copy the file" and "the
+	export is wrong".
 */
-load_model :: proc(path: string) -> (model: Model, ok: bool) {
-	bytes, read := read_entire_file(path, context.allocator)
-	if !read {
-		log.errorf("could not read model %s", path)
-		return {}, false
-	}
+load_model :: proc(path: string) -> (model: Model, err: Error) {
+	bytes := read_entire_file(path, context.allocator) or_return
 	defer delete(bytes)
 
 	// GLB copies its binary chunks out of `bytes` during parse, so freeing them
@@ -81,14 +80,14 @@ load_model :: proc(path: string) -> (model: Model, ok: bool) {
 	// with paths.
 	dir := filepath.dir(path)
 
-	data, err := gltf.parse(bytes, {is_glb = is_glb, gltf_dir = dir})
-	if err != nil {
-		log.errorf("could not parse model %s: %v", path, err)
-		return {}, false
+	data, parse_err := gltf.parse(bytes, {is_glb = is_glb, gltf_dir = dir})
+	if parse_err != nil {
+		log.errorf("could not parse model %s: %v", path, parse_err)
+		return {}, Model_Error.Parse_Failed
 	}
 	defer gltf.unload(data)
 
-	return model_from_gltf(data), true
+	return model_from_gltf(data), nil
 }
 
 // Everything after the parse: walk the scene, build the parts, measure the

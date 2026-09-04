@@ -60,8 +60,12 @@ main :: proc() {
 	}
 
 	for &prop in props {
-		prop.model, prop.loaded = mb.load_model(prop.path)
-		if !prop.loaded do continue
+		model, err := mb.load_model(prop.path)
+		if err != nil {
+			fmt.eprintfln("could not load %s: %v", prop.path, err)
+			continue
+		}
+		prop.model, prop.loaded = model, true
 
 		// Sat on the ground using the model's own bounds rather than by hand.
 		// These files are authored around all sorts of origins -- the pot's is

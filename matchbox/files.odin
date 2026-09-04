@@ -40,32 +40,35 @@ import sdl "vendor:sdl3"
 	on a desktop and is meaningless on Android, so anything shipped with the game
 	should be asked for by a relative path.
 
-	Returns ok = false and logs rather than panicking. A file that will not open
-	is a content problem, and every caller here already has something sensible to
-	do about it -- the sprite cache draws nothing, the image loader reports it.
+	Returns `File_Error.Read_Failed` and logs rather than panicking. A file that
+	will not open is a content problem, and every caller here already has
+	something sensible to do about it -- the sprite cache draws nothing, the
+	image loader reports it. SDL's own account of what went wrong goes to the
+	log, since the distinction between missing, locked and unreadable changes
+	nothing a game can do.
 
 	The bytes are copied into `allocator` so they are freed with `delete` like
 	anything else, rather than handed back as SDL's allocation with a rule about
 	which free to call.
 */
-read_entire_file :: proc(path: string, allocator := context.allocator) -> (data: []byte, ok: bool) {
+read_entire_file :: proc(path: string, allocator := context.allocator) -> (data: []byte, err: Error) {
 	c_path := strings.clone_to_cstring(path, context.temp_allocator)
 
 	size: uint
 	loaded := sdl.LoadFile(c_path, &size)
 	if loaded == nil {
 		log.errorf("could not read %s: %s", path, sdl.GetError())
-		return nil, false
+		return nil, File_Error.Read_Failed
 	}
 	defer sdl.free(loaded)
 
 	// A real file of no bytes is not an error, and neither is an empty asset.
-	if size == 0 do return nil, true
+	if size == 0 do return nil, nil
 
 	data = make([]byte, int(size), allocator)
 	copy(data, (cast([^]byte)loaded)[:size])
 
-	return data, true
+	return data, nil
 }
 
 /*

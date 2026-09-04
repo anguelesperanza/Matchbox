@@ -74,6 +74,16 @@ create_sprite_cache :: proc($Key: typeid, limit: int = 0, allocator := context.a
 
 	The pointer itself is good for the frame it was asked in: the cache will not
 	evict something it handed out this frame, however small the limit.
+
+	**This is the one loader that reports failure as `nil` rather than as an
+	`Error`, and it stays that way.** Everything it calls returns one -- the
+	read, the decode, the upload -- and each is logged here with the path that
+	caused it. What it does not do is hand the error on, because the answer at
+	a call site is the same for all of them: there is no art for this key, so
+	draw nothing. `if art := sprite_cache_get(...); art != nil` says that in
+	one line, where a second return value would be checked on every lookup and
+	acted on by none of them. A pointer that may be nil is already an answer to
+	"is it there"; wrapping it in an error would be saying so twice.
 */
 sprite_cache_get :: proc(cache: ^Sprite_Cache($Key), key: Key, path: string, scale: f32 = 1) -> ^Sprite {
 	if existing := lru_get(&cache.lru, key); existing != nil {
@@ -83,8 +93,8 @@ sprite_cache_get :: proc(cache: ^Sprite_Cache($Key), key: Key, path: string, sca
 	// Through SDL rather than core:os, so `path` reaches an apk's assets on
 	// Android as well as a file on a desktop. read_entire_file has already
 	// logged whatever went wrong.
-	bytes, ok := read_entire_file(path, context.allocator)
-	if !ok do return nil
+	bytes, read_err := read_entire_file(path, context.allocator)
+	if read_err != nil do return nil
 	defer delete(bytes)
 
 	sprite := new(Sprite)

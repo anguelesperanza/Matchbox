@@ -59,10 +59,10 @@ main :: proc() {
 
 	mb.set_escape_key(.UNKNOWN)
 
-	panorama, panorama_ok := mb.load_skybox_panorama(PANORAMA)
-	cubemap,  cubemap_ok  := mb.load_skybox_cubemap(CUBEMAP)
+	panorama, panorama_err := mb.load_skybox_panorama(PANORAMA)
+	cubemap,  cubemap_err  := mb.load_skybox_cubemap(CUBEMAP)
 
-	if !panorama_ok && !cubemap_ok {
+	if panorama_err != nil && cubemap_err != nil {
 		fmt.eprintln("neither sky loaded -- set PANORAMA and CUBEMAP at the top of this file")
 		return
 	}
@@ -83,7 +83,7 @@ main :: proc() {
 		eye_offset = {0, EYE_HEIGHT, 0},
 	)
 
-	showing_cubemap := !panorama_ok
+	showing_cubemap := panorama_err != nil
 	tint            := mb.WHITE
 
 	mb.set_cursor_locked(true)
@@ -102,7 +102,7 @@ main :: proc() {
 
 		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
-		if mb.is_key_pressed(.SPACE) && panorama_ok && cubemap_ok {
+		if mb.is_key_pressed(.SPACE) && panorama_err == nil && cubemap_err == nil {
 			showing_cubemap = !showing_cubemap
 		}
 

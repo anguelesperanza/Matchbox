@@ -64,8 +64,14 @@ main :: proc() {
 	}
 
 	for &prop in props {
-		prop.model, prop.loaded = mb.load_model(prop.path)
-		if prop.loaded do prop.position.y = -prop.model.bounds_min.y * prop.scale
+		model, err := mb.load_model(prop.path)
+		if err != nil {
+			fmt.eprintfln("could not load %s: %v", prop.path, err)
+			continue
+		}
+
+		prop.model, prop.loaded = model, true
+		prop.position.y = -prop.model.bounds_min.y * prop.scale
 	}
 
 	defer for &prop in props {

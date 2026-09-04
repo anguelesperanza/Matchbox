@@ -30,6 +30,24 @@ package matchbox
 	stays an `ensure` that stops the program where the mistake is. Handing
 	those back as values would mean either every call site ignoring them or the
 	bug going quiet, and a quiet bug in a draw call is the expensive kind.
+
+	Two other things keep a `bool` instead, for two different reasons.
+
+	`get_pinch`, `get_primary_touch` and the two `pixel_buffer_pick`
+	procedures answer **"is there one?"** rather than **"did it work?"** --
+	fewer than two fingers down, nothing being touched, a point outside the
+	buffer. None of those is a failure, and an `Error` would fire `err != nil`
+	on the entirely ordinary state of nobody touching the screen.
+
+	The glTF readers in `model_load.odin` and `model_skin_load.odin` --
+	`accessor_span`, `image_view_bytes`, `read_scalars` and the rest -- keep
+	theirs because they are private, because most of what they report is "the
+	file does not have this" rather than a fault, and because they are threaded
+	together with `or_return` over glTF's optionals. `.? or_return` yields a
+	`bool` and cannot propagate into an `Error` return, so converting them
+	means rewriting those unwrap chains by hand in the most delicate parsing
+	code here, in exchange for nothing a game can see: `load_model` already
+	turns the whole outcome into one error at the boundary.
 */
 
 // Anything the graphics driver refused. None of these are things a game did
@@ -49,7 +67,45 @@ Gpu_Error :: enum {
 // is why it comes back rather than stopping anything.
 Image_Error :: enum {
 	None = 0,
+	Empty_Input,       // nothing to decode
 	Decode_Failed,
+	Impossible_Size,   // decoded, but to a width or height of zero or less
+	Header_Unreadable, // the dimensions could not be read without decoding
+}
+
+/*
+	A file that could not be read.
+
+	One member, because from the caller's side there is one answer: the bytes
+	are not there. Whether the path was wrong, the file was locked or the asset
+	is missing from the apk changes nothing a game can do about it, and SDL's
+	own message says which -- it goes to the log where somebody diagnosing it
+	will look, rather than into a member nobody switches on.
+*/
+File_Error :: enum {
+	None = 0,
+	Read_Failed,
+}
+
+// A model file that was found but could not be understood. The read succeeded
+// and the parse did not, which is a different problem from a missing file and
+// worth telling apart -- one is a shipping mistake, the other a bad export.
+Model_Error :: enum {
+	None = 0,
+	Parse_Failed,
+}
+
+/*
+	An image that loaded but is not laid out the way a sky needs.
+
+	Only the cube map can fail this way. A panorama that is not 2:1 loads
+	anyway and warns, because a slightly-off ratio is a legitimate crop --
+	whereas a cross that is not four cells by three cannot be sliced into six
+	faces at all.
+*/
+Skybox_Error :: enum {
+	None = 0,
+	Not_A_Cross,
 }
 
 /*
@@ -64,10 +120,14 @@ Argument_Error :: enum {
 	Empty_Size,        // a width or height of zero or less
 	Not_Enough_Pixels, // fewer bytes than width * height * 4
 	No_Geometry,       // a mesh with no vertices, or no indices
+	No_Frames,         // an animation with no frames to pack into a sheet
 }
 
 Error :: union #shared_nil {
 	Gpu_Error,
 	Image_Error,
 	Argument_Error,
+	File_Error,
+	Model_Error,
+	Skybox_Error,
 }

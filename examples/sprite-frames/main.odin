@@ -18,8 +18,8 @@ main :: proc() {
 	// what is left so that coin_10 would follow coin_9 rather than coin_1.
 	// `load_animation_frames` is the explicit form when the frames are named
 	// individually or come from more than one place.
-	clip, ok := matchbox.load_animation_directory(#load_directory("assets"), 0.08)
-	if !ok do return
+	clip, err := matchbox.load_animation_directory(#load_directory("assets"), 0.08)
+	if err != nil do return
 	defer matchbox.destroy_animation_clip(&clip)
 
 	// Sized from the clip, so the frame size is never written out here and cannot

@@ -676,7 +676,7 @@ One pixel, or {0,0,0,0} when the coordinates are off the image.
 ```odin
 destroy_image :: proc(image: ^Image)
 ```
-Frees the pixels.
+Frees the pixels, through the allocator they came from.
 
 ### `pixel_buffer.odin`
 

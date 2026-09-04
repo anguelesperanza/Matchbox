@@ -110,16 +110,15 @@ load_animation_frames :: proc(
 
 	images := make([]Image, len(frames), context.temp_allocator)
 
-	// Decoded through the context allocator and freed here, not through the temp
-	// one: `load_image` takes an allocator but `destroy_image` does not, so it
-	// always frees with `context.allocator`. Handing it temp-allocated pixels is
-	// a bad free that the default allocators shrug off and a tracking allocator
-	// reports -- in a game that did nothing wrong.
+	// Freed here rather than left for the frame's `free_all`, so a game that
+	// loads a hundred clips at startup does not hold every decoded frame of all
+	// of them at once. An Image carries the allocator its pixels came from, so
+	// this gives them back to the temp allocator rather than to the heap.
 	defer for &image in images do destroy_image(&image)
 
 	frame_w, frame_h: i32
 	for bytes, i in frames {
-		image, decoded := load_image(bytes)
+		image, decoded := load_image(bytes, context.temp_allocator)
 		if !decoded {
 			log.errorf("load_animation_frames: frame %v did not decode", i)
 			return {}, false

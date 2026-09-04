@@ -33,6 +33,8 @@ package matchbox
 		stbi.write_png("out.png", w, h, 4, raw_data(pixels), w * 4)
 */
 
+import "base:runtime"
+
 import "core:log"
 
 import stbi "vendor:stb/image"
@@ -57,6 +59,19 @@ Image :: struct {
 	// transparency to begin with, which an editor wants when it decides what to
 	// save back out.
 	channels: i32,
+
+	/*
+		The allocator `pixels` came from, so `destroy_image` can give them back
+		to it. Set by `load_image`; not something to write by hand.
+
+		A slice does not carry its allocator the way a map does, so without this
+		`destroy_image` had to assume `context.allocator` -- which made
+		`load_image(bytes, context.temp_allocator)` a bad free that the default
+		allocators shrug off and a tracking allocator reports, in a game that did
+		nothing wrong. The allocator belongs with the pixels it owns rather than
+		as a second argument every caller has to remember.
+	*/
+	allocator: runtime.Allocator,
 }
 
 /*
@@ -102,7 +117,13 @@ load_image :: proc(bytes: []byte, allocator := context.allocator) -> (image: Ima
 
 	copy(pixels, (cast([^][4]u8)decoded)[:count])
 
-	return Image{pixels = pixels, width = width, height = height, channels = channels}, true
+	return Image{
+		pixels    = pixels,
+		width     = width,
+		height    = height,
+		channels  = channels,
+		allocator = allocator,
+	}, true
 }
 
 /*
@@ -147,11 +168,21 @@ image_pixel :: proc(image: Image, x, y: int) -> [4]u8 {
 	return image.pixels[y * int(image.width) + x]
 }
 
-// Frees the pixels. Reachable through `destroy`.
-destroy_image :: proc(image: ^Image) {
-	delete(image.pixels)
+/*
+	Frees the pixels, through the allocator they came from. Reachable through
+	`destroy`.
 
-	image.pixels = nil
-	image.width  = 0
-	image.height = 0
+	Safe on an Image that was never loaded -- a zero one has no pixels and no
+	allocator, and calling `delete` with a nil allocator procedure would fault
+	rather than do nothing.
+*/
+destroy_image :: proc(image: ^Image) {
+	if image.pixels != nil && image.allocator.procedure != nil {
+		delete(image.pixels, image.allocator)
+	}
+
+	image.pixels    = nil
+	image.width     = 0
+	image.height    = 0
+	image.allocator = {}
 }

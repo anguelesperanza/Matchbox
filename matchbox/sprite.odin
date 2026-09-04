@@ -128,12 +128,115 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32 {
 	}
 }
 
-// Destroys every layer of a parallax set. The layers own their meshes, unlike
-// cache-backed sprites, so this is the right way to take one down.
+// -----------------------------------------------------------------------
+// Parallax
+// -----------------------------------------------------------------------
+
+/*
+	Layers that move with the camera at different rates, which is what reads as
+	depth in a 2D scene.
+
+	`parallax_speed` is **the fraction of the camera's movement a layer
+	follows**: 1 moves with the world exactly as an ordinary sprite does, 0.5
+	drifts at half the rate and so looks further away, and 0 is pinned to the
+	screen -- an infinitely distant backdrop.
+
+		sky := mb.create_parallax()
+		mb.parallax_add(&sky, backdrop, 0)     // never moves
+		mb.parallax_add(&sky, hills,    0.3)
+		mb.parallax_add(&sky, trees,    0.7)
+
+		mb.begin_drawing_2d()
+		mb.draw_parallax(sky)                  // back to front, before the world
+		mb.draw_sprite(player)
+		mb.end_drawing_2d()
+
+	**This only means anything inside `begin_drawing_2d`/`end_drawing_2d`**,
+	because the effect is defined against the camera offset that `screen_pos`
+	applies. Drawn outside one, every layer falls back to its own position and
+	the set is just a list of sprites -- which is the honest answer, since with
+	no camera there is no movement to be a fraction of.
+
+	**On the direction of the number.** It reads the way it does everywhere else
+	-- a bigger `parallax_speed` moves more -- and the alternative was to make it
+	a depth, where 0 meant the world plane and 1 meant pinned. That version has
+	the tidier zero value, matching how `Body.tint` and `scale` treat theirs as
+	"behave normally". It was rejected because it would invert the meaning of a
+	universally understood name: `parallax_speed = 1` would have meant *does not
+	move*, and every person who had met parallax anywhere else would have had it
+	backwards. The field's raw zero therefore means pinned, which only comes up
+	if a set is assembled by hand rather than through `parallax_add`.
+*/
+create_parallax :: proc(allocator := context.allocator) -> Parallax_Sprites {
+	return Parallax_Sprites{sprites = make([dynamic]Sprite, allocator)}
+}
+
+/*
+	Adds a layer, drawn in front of everything already in the set.
+
+	`speed` is written onto the sprite, so it is the one place a layer's depth
+	is stated and the sprite does not have to be built with it. It defaults to
+	1 -- moving with the world -- rather than to the field's own zero, because
+	a layer added without a stated depth should behave like an ordinary sprite
+	rather than silently pinning itself to the screen. Say `0` when that is
+	what is wanted; it is the more striking effect and worth being explicit
+	about.
+*/
+parallax_add :: proc(set: ^Parallax_Sprites, sprite: Sprite, speed: f32 = 1) {
+	layer := sprite
+	layer.parallax_speed = speed
+	append(&set.sprites, layer)
+}
+
+/*
+	Draws every layer, first to last, so the set is ordered back to front.
+
+	There is no `update_parallax` to pair with this, and that is deliberate. The
+	offset is a pure function of where the camera is right now, so working it
+	out at draw time means a layer cannot drift out of step with the camera,
+	drawing twice gives the same picture twice, and a skipped or doubled frame
+	changes nothing. The alternative -- advancing each layer's `position` by the
+	camera's movement every frame -- accumulates floating-point error, needs the
+	previous camera position kept somewhere, and quietly desynchronises if
+	anything ever calls it other than exactly once per frame.
+
+	A layer's own `position` therefore keeps meaning what it says: where that
+	layer sits in the world, not where it happens to have scrolled to.
+*/
+draw_parallax :: proc(set: Parallax_Sprites) {
+	for layer in set.sprites {
+		drawn := layer
+		drawn.position = parallax_position(layer)
+		draw_sprite(drawn)
+	}
+}
+
+/*
+	Where a layer is drawn, given where the camera is.
+
+	`screen_pos` subtracts the camera position from everything drawn through it,
+	so placing a layer at `base + camera * (1 - speed)` lands it at
+	`base - camera * speed` on screen -- moving at exactly `speed` of the
+	camera's movement, which is the whole definition. At `speed` 1 the two
+	cancel and the layer is an ordinary world-space sprite; at 0 the offset
+	cancels the camera entirely and the layer holds still.
+*/
+@(private)
+parallax_position :: proc(sprite: Sprite) -> [2]f32 {
+	if !mbi.camera.active do return sprite.position
+	return sprite.position + mbi.camera.position * (1 - sprite.parallax_speed)
+}
+
+// Destroys every layer of a parallax set, and the set's own storage. The layers
+// own their meshes, unlike cache-backed sprites, so this is the right way to
+// take one down.
 destroy_parallax :: proc(parallax_sprites: ^Parallax_Sprites) {
 	for &i in parallax_sprites.sprites {
 		destroy_sprite(&i)
 	}
+
+	delete(parallax_sprites.sprites)
+	parallax_sprites.sprites = nil
 }
 
 /*

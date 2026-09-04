@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 332 of them -- with its arguments
+Every public procedure in the package -- 336 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -16,9 +16,9 @@ any.
 
 - [Getting started](#getting-started) -- 17
 - [Input](#input) -- 42
-- [2D drawing](#2d-drawing) -- 57
+- [2D drawing](#2d-drawing) -- 60
 - [Text and fonts](#text-and-fonts) -- 21
-- [2D cameras](#2d-cameras) -- 3
+- [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 42
 - [3D drawing](#3d-drawing) -- 26
@@ -441,9 +441,24 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32
 The middle of the sprite in world coordinates.
 
 ```odin
+create_parallax :: proc(allocator := context.allocator) -> Parallax_Sprites
+```
+Layers that move with the camera at different rates, which is what reads as depth in a 2D scene.
+
+```odin
+parallax_add :: proc(set: ^Parallax_Sprites, sprite: Sprite, speed: f32 = 1)
+```
+Adds a layer, drawn in front of everything already in the set.
+
+```odin
+draw_parallax :: proc(set: Parallax_Sprites)
+```
+Draws every layer, first to last, so the set is ordered back to front.
+
+```odin
 destroy_parallax :: proc(parallax_sprites: ^Parallax_Sprites)
 ```
-Destroys every layer of a parallax set.
+Destroys every layer of a parallax set, and the set's own storage.
 
 ```odin
 draw_sprite :: proc(sprite: Sprite)
@@ -955,6 +970,11 @@ Activates the camera transform for all subsequent draw calls.
 end_drawing_2d :: proc()
 ```
 Deactivates the camera transform.
+
+```odin
+camera_follow :: proc(target: [2]f32, delta_time: f32)
+```
+Eases the camera toward `target`, once per frame.
 
 ```odin
 get_mouse_world_pos :: proc() -> [2]f32

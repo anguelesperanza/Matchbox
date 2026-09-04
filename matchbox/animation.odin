@@ -274,6 +274,53 @@ natural_less :: proc(a, b: string) -> bool {
 	return len(a) - i < len(b) - j
 }
 
+/*
+	A sprite ready to play `clip`, with everything that is not obviously yours
+	already set.
+
+	`create_animated_sprite` does this for a sheet, but it loads the sheet too,
+	so there was no way to get a seated sprite from a clip you already have --
+	and building one by hand walks straight into two fields whose zero value
+	means *invisible*. `scale` of 0 gives a sprite sized 0x0, and `tint` of
+	`{0,0,0,0}` is transparent black. Either one draws nothing, with no error and
+	no log line to say why. That cost somebody an afternoon, which is why this
+	exists.
+
+		sprite := mb.animated_sprite_of(clip, scale = 4)
+		sprite.position = {100, 100}
+
+	Only `position` is left at zero, because that is a decision rather than an
+	oversight. Note that `draw_animated_sprite` adds `pivot * size`, so
+	`position` is the top-left corner and a centred pivot draws half a frame
+	right and down of it.
+
+	The uv window is seeded to the first frame, so a sprite drawn before its
+	first `update_animation` shows frame 0 rather than a zero-width sample of the
+	sheet's top-left texel.
+
+	`scale` of 0 or less is treated as 1, as `sprite_of` does -- a caller who
+	leaves it out wants a sprite, not an invisible one.
+*/
+animated_sprite_of :: proc(clip: AnimationClip, scale: f32 = 1) -> AnimatedSprite {
+	final_scale := scale
+	if final_scale <= 0 do final_scale = 1
+
+	sprite: AnimatedSprite
+	sprite.clip  = clip
+	sprite.scale = final_scale
+	sprite.size  = {clip.frame_w * final_scale, clip.frame_h * final_scale}
+	sprite.pivot = {0.5, 0.5}
+	sprite.tint  = WHITE
+
+	if clip.cols > 0 && clip.rows > 0 {
+		sprite.current_frame = clip.frame_start
+		sprite.uv_min = {0, 0}
+		sprite.uv_max = {1 / f32(clip.cols), 1 / f32(clip.rows)}
+	}
+
+	return sprite
+}
+
 // Gives the clip's sheet texture back to the GPU. A clip shared between
 // sprites is destroyed once, not once per sprite.
 destroy_animation_clip :: proc(clip: ^AnimationClip) {

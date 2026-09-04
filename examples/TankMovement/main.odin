@@ -1,6 +1,6 @@
 package wip
 
-import "../../../matchbox"
+import "../../matchbox"
 
 Tank :: struct {
 	body:matchbox.Sprite,

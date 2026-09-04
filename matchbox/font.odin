@@ -111,33 +111,25 @@ destroy_font :: proc(font: ^Font) {
 	cache with a bigger number in it.
 
 	Eviction is least-recently-used, and never touches a size that has been
-	asked for during the current frame -- see font_cache_trim.
+	asked for during the current frame -- see `lru_trim` in `lru.odin`.
 */
-// Kept as a name rather than reached for through FONT_DEFAULTS at every use,
-// because this one is compared against a length in a loop.
-@(private)
-font_cache_limit :: proc() -> int { return FONT_DEFAULTS.cache_limit }
-
-@(private)
-Cached_Font :: struct {
-	font:    ^Font,
-	used_on: u64, // the frame it was last handed out
-}
 
 /*
 	Every baked size of the default font, and the order they were last asked
 	for.
 
-	The two are one thing: the map answers "have we got this size", the slice
-	answers "which size goes first when we are over the limit", and neither is
-	meaningful without the other. They lived at package scope until the cleanup
-	pass; they are state belonging to `mbi` like everything else.
+	`Lru_Cache` in `lru.odin`, shared with `Sprite_Cache`: the map answers "have
+	we got this size", the order list answers "which size goes first when we are
+	over the limit", and neither is meaningful without the other. This lived at
+	package scope until the cleanup pass; it is state belonging to `mbi` like
+	everything else.
+
+	A zero value is usable, which is why nothing constructs this -- the limit
+	comes from `FONT_DEFAULTS` at each trim rather than being stored, and
+	`destroy_font` is handed over the same way.
 */
 @(private)
-Font_Cache :: struct {
-	sizes: map[i32]Cached_Font,
-	order: [dynamic]i32, // least recently used first
-}
+Font_Cache :: Lru_Cache(i32, Font)
 
 /*
 	The default font baked at `size` pixels.
@@ -180,22 +172,18 @@ get_font :: proc(size: f32) -> ^Font {
 	// megabyte of atlas to say the same thing.
 	if f32(px) == FONT_DEFAULTS.size do return &mbi.font
 
-	if cached, found := mbi.font_cache.sizes[px]; found {
-		cached.used_on = mbi.frame
-		mbi.font_cache.sizes[px] = cached
-		font_cache_touch(px)
-		return cached.font
+	if cached := lru_get(&mbi.font_cache, px); cached != nil {
+		return cached
 	}
 
 	font  := new(Font)
 	font^ = load_font(DEFAULT_FONT_BYTES, f32(px))
 
-	mbi.font_cache.sizes[px] = Cached_Font{font = font, used_on = mbi.frame}
-	append(&mbi.font_cache.order, px)
+	lru_put(&mbi.font_cache, px, font)
 
 	// After inserting rather than before, so nothing is thrown out to make room
 	// for something that then turns out to be resident already.
-	font_cache_trim()
+	lru_trim(&mbi.font_cache, FONT_DEFAULTS.cache_limit, destroy_font)
 
 	return font
 }
@@ -203,62 +191,12 @@ get_font :: proc(size: f32) -> ^Font {
 // How many extra sizes are resident, not counting the default one. For an
 // example or a debug overlay that wants to show the cache doing its job.
 get_font_cache_len :: proc() -> int {
-	return len(mbi.font_cache.sizes)
-}
-
-@(private)
-font_cache_touch :: proc(px: i32) {
-	for k, i in mbi.font_cache.order {
-		if k == px {
-			ordered_remove(&mbi.font_cache.order, i)
-			append(&mbi.font_cache.order, px)
-			return
-		}
-	}
-}
-
-/*
-	Evicts from the least-recently-used end until the limit is met.
-
-	Stops at anything used during the current frame, whatever the limit says.
-	A screen drawing seven sizes would otherwise free the atlas belonging to a
-	pointer it handed out moments earlier and is still drawing through -- the
-	cache would be doing exactly what it was told and the game would be reading
-	a released texture. Going one over the limit for a frame is the cheaper
-	mistake, and the extra is collected as soon as the screen stops asking.
-*/
-@(private)
-font_cache_trim :: proc() {
-	for len(mbi.font_cache.order) > font_cache_limit() {
-		oldest := mbi.font_cache.order[0]
-
-		if cached, found := mbi.font_cache.sizes[oldest]; found {
-			// `mbi.frame > 0` matters: it is 0 until the first poll_events, and
-			// so is every used_on recorded before then. Without it, sizes baked
-			// during setup all look like they are in use by the frame that has
-			// not started yet, and the limit does nothing at exactly the moment
-			// a game is most likely to ask for a dozen sizes at once.
-			if mbi.frame > 0 && cached.used_on == mbi.frame do return
-
-			destroy_font(cached.font)
-			free(cached.font)
-			delete_key(&mbi.font_cache.sizes, oldest)
-		}
-
-		ordered_remove(&mbi.font_cache.order, 0)
-	}
+	return lru_len(&mbi.font_cache)
 }
 
 // Frees every cached size. Called by cleanup; a game does not need to.
 @(private)
 destroy_font_cache :: proc() {
-	for _, cached in mbi.font_cache.sizes {
-		destroy_font(cached.font)
-		free(cached.font)
-	}
-
-	delete(mbi.font_cache.sizes)
-	delete(mbi.font_cache.order)
-
+	lru_destroy(&mbi.font_cache, destroy_font)
 	mbi.font_cache = {}
 }

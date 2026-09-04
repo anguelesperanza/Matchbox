@@ -181,7 +181,7 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 	// in force for every draw after it until something pushes over it, and the
 	// colour is the same for every character -- so this was the same sixteen
 	// bytes handed over twenty times for a twenty character line.
-	frag_data := FontFragData{color = color}
+	frag_data := Font_Frag_Data{color = color}
 	push_frag_uniform(&frag_data, size_of(frag_data))
 
 	cursor_x := x
@@ -198,7 +198,7 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
-		vert_data := VertData{
+		vert_data := Vert_Data{
 			position = screen_pos(pos),
 			size     = screen_size(size),
 			screen   = screen_dims(),
@@ -244,7 +244,7 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 	// pushed once for the same reason.
 	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
 
-	frag_data := FontFragData{color = color}
+	frag_data := Font_Frag_Data{color = color}
 	push_frag_uniform(&frag_data, size_of(frag_data))
 
 	cursor_x := x
@@ -263,7 +263,7 @@ draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4
 
 		// No screen_pos / screen_size here: that is what makes this the UI
 		// variant, drawing at the font's baked size in window pixels.
-		vert_data := VertData{
+		vert_data := Vert_Data{
 			position = pos,
 			size     = size,
 			screen   = screen_dims(),

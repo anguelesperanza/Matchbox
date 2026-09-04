@@ -13,7 +13,7 @@
     draw_outline_proportional passes the same fraction on both axes to keep the
     old behaviour where an outline should scale with its shape.
 
-    Must match matchbox.OutlineFragData.
+    Must match matchbox.Outline_Frag_Data.
 */
 cbuffer FragData : register(b0, space3)
 {

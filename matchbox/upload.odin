@@ -201,10 +201,10 @@ push_frag_uniform :: proc(frag_data: rawptr, frag_size: u32) {
 	true.
 */
 @(private)
-push_quad :: proc(vert_data: ^VertData, frag_data: rawptr, frag_size: u32) {
+push_quad :: proc(vert_data: ^Vert_Data, frag_data: rawptr, frag_size: u32) {
 	r := &mbi.renderer
 
-	sdl.PushGPUVertexUniformData(r.cmd, 0, vert_data, size_of(VertData))
+	sdl.PushGPUVertexUniformData(r.cmd, 0, vert_data, size_of(Vert_Data))
 
 	// sprite.frag declares no uniform buffer, so there is nothing to push and
 	// pushing anyway would be handing data to a slot the shader does not have.
@@ -219,7 +219,7 @@ push_quad :: proc(vert_data: ^VertData, frag_data: rawptr, frag_size: u32) {
 @(private)
 draw_quad :: proc(
 	pipeline:  ^sdl.GPUGraphicsPipeline,
-	vert_data: ^VertData,
+	vert_data: ^Vert_Data,
 	frag_data: rawptr,
 	frag_size: u32,
 	texture:   ^sdl.GPUTexture = nil,

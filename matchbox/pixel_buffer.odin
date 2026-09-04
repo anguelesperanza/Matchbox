@@ -168,7 +168,7 @@ pixel_buffer_update :: proc(buffer: ^Pixel_Buffer, pixels: []$T) {
 	or flashed without touching the pixels.
 */
 draw_pixel_buffer :: proc(buffer: ^Pixel_Buffer, dest: Rectangle, tint: [4]f32 = WHITE) {
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(rect_center(dest)),
 		size     = screen_size(dest.size),
 		screen   = screen_dims(),

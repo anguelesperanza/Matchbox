@@ -69,7 +69,7 @@ destroy :: proc
 destroy ------- One name for giving anything back.
 
 ```odin
-destroy_animated_sprite :: proc(sprite: ^AnimatedSprite)
+destroy_animated_sprite :: proc(sprite: ^Animated_Sprite)
 ```
 Frees the sheet an animated sprite draws from.
 
@@ -445,7 +445,7 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32
 The middle of the sprite in world coordinates.
 
 ```odin
-destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites)
+destroy_parallax :: proc(parallax_sprites: ^Parallax_Sprites)
 ```
 Destroys every layer of a parallax set.
 
@@ -1704,7 +1704,7 @@ Input, the move, and the follow -- the whole frame, for a character nothing else
 look_at_point :: proc(
 	from: [2]f32,
 	target: [2]f32,
-	forward: SpriteForward = .Top,
+	forward: Sprite_Forward = .TOP,
 ) -> f32
 ```
 Returns the angle (radians) needed to face from a point toward target.
@@ -1713,7 +1713,7 @@ Returns the angle (radians) needed to face from a point toward target.
 look_at_sprite :: proc(
 	sprite: Sprite,
 	target: [2]f32,
-	forward: SpriteForward = .Top,
+	forward: Sprite_Forward = .TOP,
 ) -> f32
 ```
 Returns the angle (radians) needed to face a sprite's visual center toward target.
@@ -2028,7 +2028,7 @@ create_animated_sprite :: proc(
 	seconds_per_frame: f32,
 	scale: f32 = 1,
 	looping := true,
-) -> AnimatedSprite
+) -> Animated_Sprite
 ```
 A sprite that plays frames off a sheet, in one call.
 
@@ -2041,7 +2041,7 @@ load_animation :: proc(
 	rows: i32,
 	frame_count: i32,
 	seconds_per_frame: f32,
-) -> AnimationClip
+) -> Animation_Clip
 ```
 The clip on its own, without a sprite wrapped round it.
 
@@ -2049,7 +2049,7 @@ The clip on its own, without a sprite wrapped round it.
 load_animation_frames :: proc(
 	frames: [][]byte,
 	seconds_per_frame: f32,
-	columns: i32 = 0) -> (clip: AnimationClip,
+	columns: i32 = 0) -> (clip: Animation_Clip,
 	ok: bool,
 )
 ```
@@ -2060,7 +2060,7 @@ load_animation_directory :: proc(
 	files: []runtime.Load_Directory_File,
 	seconds_per_frame: f32,
 	columns: i32 = 0,
-	suffixes: []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) -> (clip: AnimationClip,
+	suffixes: []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"}) -> (clip: Animation_Clip,
 	ok: bool,
 )
 ```
@@ -2068,44 +2068,44 @@ A clip from a whole folder of frames, in the order a person would read them.
 
 ```odin
 animation_range :: proc(
-	clip: AnimationClip,
+	clip: Animation_Clip,
 	first: i32,
 	last: i32,
 	seconds_per_frame: f32 = 0,
-) -> AnimationClip
+) -> Animation_Clip
 ```
 A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of frames -- given as the first and last frame, inclusive, and clamped to the frames the sheet actually has.
 
 ```odin
 animated_sprite_of :: proc(
-	clip: AnimationClip,
+	clip: Animation_Clip,
 	scale: f32 = 1,
 	looping := true,
-) -> AnimatedSprite
+) -> Animated_Sprite
 ```
 A sprite ready to play `clip`, with everything that is not obviously yours already set.
 
 ```odin
-destroy_animation_clip :: proc(clip: ^AnimationClip)
+destroy_animation_clip :: proc(clip: ^Animation_Clip)
 ```
 Gives the clip's sheet texture back to the GPU.
 
 ```odin
 switch_animation :: proc(
-	sprite: ^AnimatedSprite,
-	clip: AnimationClip,
+	sprite: ^Animated_Sprite,
+	clip: Animation_Clip,
 	looping := true,
 )
 ```
 Puts a different clip on a sprite and restarts it from frame zero.
 
 ```odin
-update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32)
+update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32)
 ```
 Advances the sprite's frame and works out its uv window.
 
 ```odin
-draw_animated_sprite :: proc(sprite: AnimatedSprite)
+draw_animated_sprite :: proc(sprite: Animated_Sprite)
 ```
 Draws the current frame.
 
@@ -2224,44 +2224,44 @@ Advances the clip and works out this frame's matrices.
 ### `lerp.odin`
 
 ```odin
-create_lerp_move :: proc(position: [2]f32, duration: f32) -> LerpMove
+create_lerp_move :: proc(position: [2]f32, duration: f32) -> Lerp_Move
 ```
-Creates a LerpMove anchored at position.
+Creates a Lerp_Move anchored at position.
 
 ```odin
-lerp_move_to :: proc(lerp: ^LerpMove, current_position: [2]f32, dest: [2]f32)
+lerp_move_to :: proc(lerp: ^Lerp_Move, current_position: [2]f32, dest: [2]f32)
 ```
 Sets a new destination.
 
 ```odin
-update_lerp_move :: proc(lerp: ^LerpMove, delta_time: f32) -> [2]f32
+update_lerp_move :: proc(lerp: ^Lerp_Move, delta_time: f32) -> [2]f32
 ```
 Advances the lerp by delta_time and returns the new position.
 
 ### `timer.odin`
 
 ```odin
-start_cooldown :: proc(cooldown: ^CooldownTimer, duration: f32)
+start_cooldown :: proc(cooldown: ^Cooldown_Timer, duration: f32)
 ```
 Starts the cooldown.
 
 ```odin
-update_cooldown :: proc(cooldown: ^CooldownTimer, delta_time: f32)
+update_cooldown :: proc(cooldown: ^Cooldown_Timer, delta_time: f32)
 ```
 Advances the cooldown by delta_time.
 
 ```odin
-is_cooldown_done :: proc(cooldown: CooldownTimer) -> bool
+is_cooldown_done :: proc(cooldown: Cooldown_Timer) -> bool
 ```
 Returns true once the cooldown has fully elapsed.
 
 ```odin
-reset_cooldown :: proc(cooldown: ^CooldownTimer)
+reset_cooldown :: proc(cooldown: ^Cooldown_Timer)
 ```
 Resets remaining back to the original duration, restarting the countdown.
 
 ```odin
-stop_cooldown :: proc(cooldown: ^CooldownTimer)
+stop_cooldown :: proc(cooldown: ^Cooldown_Timer)
 ```
 Immediately expires the cooldown (sets remaining to 0).
 

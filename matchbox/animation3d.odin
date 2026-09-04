@@ -17,7 +17,7 @@ package matchbox
 	is the same reason `draw_model` takes a `Transform` rather than storing one.
 
 	The names here are `Model_`-prefixed or `_3d`-flavoured because 2D sprite
-	animation already owns the plain ones: `AnimationClip`, `update_animation`
+	animation already owns the plain ones: `Animation_Clip`, `update_animation`
 	and `load_animation` in `animation.odin` are the sprite ones and are
 	unrelated to any of this.
 */

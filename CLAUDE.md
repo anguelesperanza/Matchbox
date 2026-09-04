@@ -26,8 +26,9 @@ Player_State :: enum {
   they are.
 
 Single-word type names need no separator, so `Sprite`, `Camera`, `Font` and
-`Mesh` are already right. It is the multi-word ones that drift: `AnimatedSprite`
-wants to be `Animated_Sprite`, `VertData` wants to be `Vert_Data`.
+`Mesh` are already right. It is the multi-word ones to watch: the separator is
+not optional, so `Animated_Sprite` and `Vert_Data` rather than running the
+words together.
 
 SDL's own enums are used as they come -- Matchbox leans on `sdl.Scancode`,
 `sdl.GamepadButton` and `sdl.MouseButtonFlag` rather than wrapping them, and
@@ -57,13 +58,12 @@ Two carve-outs, because the prefixes describe *reading*:
   and `wrap_text` derive an answer rather than fetch one, and
   `get_measure_text` would say the opposite.
 
-**Why it matters here:** the package carries both spellings of the type rule,
-and the worst of it is inside one family in one file -- `types.odin` has
-`Sprite_Frag_Data`, `Shape_Frag_Data` and `Rect_Frag_Data` sitting next to
-`FontFragData`, `OutlineFragData` and `VertData`. Same purpose, same file, two
-conventions. Values are in better shape: 18 of the 19 enums are already
-`SCREAMING_CASE`, and `SpriteForward` is the one exception on both counts.
-Anything you touch, bring to the rules above.
+**Why it matters here:** the package used to carry both spellings, and the
+worst of it was inside one family in one file -- the uniform blocks in
+`types.odin` were split between `Sprite_Frag_Data` and a run-together form,
+same purpose and same file. That has been swept, so the rules above describe
+what is there now rather than an aspiration. Keep it that way: a single new
+type in the old shape puts the file back to two conventions.
 
 ## Group like data into structs
 

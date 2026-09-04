@@ -130,7 +130,7 @@ sprite_center :: proc(sprite: Sprite) -> [2]f32 {
 
 // Destroys every layer of a parallax set. The layers own their meshes, unlike
 // cache-backed sprites, so this is the right way to take one down.
-destroy_parallax :: proc(parallax_sprites: ^ParallaxSprites) {
+destroy_parallax :: proc(parallax_sprites: ^Parallax_Sprites) {
 	for &i in parallax_sprites.sprites {
 		destroy_sprite(&i)
 	}
@@ -161,7 +161,7 @@ draw_sprite :: proc(sprite: Sprite) {
 	if sprite.flip_x do uv_min.x, uv_max.x = uv_max.x, uv_min.x
 	if sprite.flip_y do uv_min.y, uv_max.y = uv_max.y, uv_min.y
 
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
 		screen   = screen_dims(),
@@ -259,7 +259,7 @@ draw_outline_proportional :: proc(center: [2]f32, size: [2]f32, color: [4]f32, f
 
 @(private)
 draw_outline_uv :: proc(center: [2]f32, size: [2]f32, color: [4]f32, border: [2]f32, rotation: f32) {
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(center),
 		size     = screen_size(size),
 		screen   = screen_dims(),
@@ -268,7 +268,7 @@ draw_outline_uv :: proc(center: [2]f32, size: [2]f32, color: [4]f32, border: [2]
 		rotation = rotation,
 	}
 
-	frag_data := OutlineFragData{
+	frag_data := Outline_Frag_Data{
 		color  = color,
 		border = border,
 	}

@@ -5,7 +5,7 @@ package matchbox
 	-----
 	Frame timing. Updated once per poll_events.
 
-	This is engine timing -- see timer.odin for CooldownTimer, which is a
+	This is engine timing -- see timer.odin for Cooldown_Timer, which is a
 	gameplay utility built on top of delta_time.
 */
 

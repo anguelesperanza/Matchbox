@@ -251,7 +251,7 @@ draw_post :: proc(target: Render_Target, effect: Post_Effect = .NONE, grid: [2]f
 	// Window pixels, not logical ones: this is the finished frame going to the
 	// screen, so `set_logical_size`'s letterbox has already been accounted for
 	// by whatever drew into the target.
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = size * 0.5,
 		size     = size,
 		screen   = size,

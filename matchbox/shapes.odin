@@ -170,7 +170,7 @@ logical_per_pixel :: proc() -> f32 {
 shape_quad :: proc(center: [2]f32, size: [2]f32, rotation: f32, frag_data: Shape_Frag_Data) {
 	frag_data := frag_data
 
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(center),
 		size     = screen_size(size),
 		screen   = screen_dims(),

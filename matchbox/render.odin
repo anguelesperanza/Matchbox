@@ -88,7 +88,7 @@ Pipelines :: struct {
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
-// this, which is why MatchboxInfo keeps it behind `mbi.renderer` instead of
+// this, which is why Matchbox_Info keeps it behind `mbi.renderer` instead of
 // promoting the fields.
 Renderer :: struct {
 	device:    ^sdl.GPUDevice,
@@ -386,7 +386,7 @@ point_in_rect :: proc(point: [2]f32, rectangle: Rectangle) -> bool {
 draw_rect :: proc(rectangle: Rectangle) {
 	ensure_pass()
 
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(rect_center(rectangle)),
 		size     = screen_size(rectangle.size),
 		screen   = screen_dims(),

@@ -30,7 +30,7 @@ Vertex :: struct {
 // 48 bytes: (position,size) (screen,uv_min) (uv_max,rotation,pad).
 // Shared by every draw -- sprites, rects, outlines and glyphs all go through
 // the one vertex shader, so the separate FontVertData is gone.
-VertData :: struct #align(16) {
+Vert_Data :: struct #align(16) {
 	position: [2]f32,
 	size:     [2]f32,
 	screen:   [2]f32,
@@ -42,7 +42,7 @@ VertData :: struct #align(16) {
 
 // 32 bytes: (tint) (desaturate, pad).
 //
-// Flipping is not in here -- that is a swap of uv_min/uv_max in VertData. What
+// Flipping is not in here -- that is a swap of uv_min/uv_max in Vert_Data. What
 // is, is the tint, which a sprite had no way of carrying at all: the only way
 // to dim one was a translucent rectangle drawn over the top, which is an extra
 // draw that can only ever darken.
@@ -86,14 +86,14 @@ Shape_Kind :: enum {
 //
 // `border` is a half-extent in UV given per axis, not the single fraction the
 // old version took. See draw_outline for why that changed.
-OutlineFragData :: struct #align(16) {
+Outline_Frag_Data :: struct #align(16) {
 	color:  [4]f32,
 	border: [2]f32,
 	_pad:   [2]f32,
 }
 
 // 16 bytes.
-FontFragData :: struct #align(16) {
+Font_Frag_Data :: struct #align(16) {
 	color: [4]f32,
 }
 
@@ -236,7 +236,7 @@ Lighting_Data :: struct #align(16) {
 	flags:     [4]f32, // x how many lights are set, y 1 when fog is on
 }
 
-// GPU handle bundle — shared by Sprite, AnimationClip, and Font.
+// GPU handle bundle — shared by Sprite, Animation_Clip, and Font.
 //
 // The quad's vertices and indices used to live here, one identical copy per
 // mesh. There is now a single shared quad on the Renderer, so all a mesh owns
@@ -249,7 +249,7 @@ Mesh :: struct {
 	height:  i32,
 }
 
-// Transform + physics + uv — shared by Sprite and AnimatedSprite.
+// Transform + physics + uv — shared by Sprite and Animated_Sprite.
 // No stored bounding_box: it is derived on demand by sprite_bounds().
 Body :: struct {
 	position:             [2]f32,
@@ -296,7 +296,7 @@ Rectangle :: struct {
 	pivot:    [2]f32,
 }
 
-ParallaxSprites :: struct {
+Parallax_Sprites :: struct {
 	sprites:[dynamic]Sprite
 }
 
@@ -307,7 +307,7 @@ ParallaxSprites :: struct {
 // `display` and `clock` are `using` so the fields games reach for most often
 // stay flat: `mbi.delta_time`, `mbi.width`, `mbi.window`. `renderer` is left
 // qualified because it is internal plumbing that games should not touch.
-MatchboxInfo :: struct {
+Matchbox_Info :: struct {
 	using display: Display,  // window, logical resolution, letterbox transform
 	using clock:   Clock,    // frame timing
 	renderer:      Renderer, // shaders, descriptor pool, per-frame GPU state
@@ -341,7 +341,7 @@ MatchboxInfo :: struct {
 //
 // Consequence worth knowing: one global means one window. Matchbox cannot run
 // two independent instances in a process.
-mbi: MatchboxInfo
+mbi: Matchbox_Info
 
 // -----------------------------------------------------------------------
 // Constants

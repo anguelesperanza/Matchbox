@@ -3,7 +3,7 @@
 // here -- the old test.vert and font.vert had identical bodies and differed
 // only in the field order of their uniform block.
 //
-// Uniform layout must match matchbox.VertData exactly. Each float2 pair fills
+// Uniform layout must match matchbox.Vert_Data exactly. Each float2 pair fills
 // one 16-byte register: (position,size) (screen,uv_min) (uv_max,rotation,pad).
 cbuffer VertData : register(b0, space1)
 {

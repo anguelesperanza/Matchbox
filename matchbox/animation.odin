@@ -11,7 +11,7 @@ import "core:strings"
 // Animation
 // -----------------------------------------------------------------------
 
-AnimationClip :: struct {
+Animation_Clip :: struct {
 	using mesh:        Mesh,
 	cols:              i32,
 	rows:              i32,
@@ -23,9 +23,9 @@ AnimationClip :: struct {
 	offset:            [2]f32,
 }
 
-AnimatedSprite :: struct {
+Animated_Sprite :: struct {
 	using body:    Body,
-	clip:          AnimationClip,
+	clip:          Animation_Clip,
 	current_frame: i32,
 	accumulator:   f32,
 
@@ -51,8 +51,8 @@ AnimatedSprite :: struct {
 	clears `playing`, which a game checks (`!sprite.playing`) to know it has
 	finished.
 */
-create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1, looping := true) -> AnimatedSprite {
-    sprite: AnimatedSprite
+create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32, scale: f32 = 1, looping := true) -> Animated_Sprite {
+    sprite: Animated_Sprite
     sprite.clip    = load_animation(bytes, frame_w, frame_h, cols, rows, frame_count, seconds_per_frame)
     sprite.scale   = scale
     sprite.size    = {frame_w * scale, frame_h * scale}
@@ -66,8 +66,8 @@ create_animated_sprite :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: 
 // The clip on its own, without a sprite wrapped round it. What to use when
 // several sprites play the same sheet, or when a sprite switches between clips
 // -- see `switch_animation`.
-load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> AnimationClip {
-	return AnimationClip{
+load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, rows: i32, frame_count: i32, seconds_per_frame: f32) -> Animation_Clip {
+	return Animation_Clip{
 		mesh              = create_mesh(bytes),
 		cols              = cols,
 		rows              = rows,
@@ -84,7 +84,7 @@ load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, row
 	`load_animation` wants one sheet. Art does not always come that way -- an
 	exporter that writes `run_00.png` through `run_07.png` is as common as one
 	that writes a strip -- so this packs them into a sheet at load time and hands
-	back an ordinary `AnimationClip`. Everything downstream is unchanged:
+	back an ordinary `Animation_Clip`. Everything downstream is unchanged:
 	`switch_animation`, `update_animation` and `destroy_animation_clip` do not
 	know the difference.
 
@@ -118,7 +118,7 @@ load_animation_frames :: proc(
 	frames:            [][]byte,
 	seconds_per_frame: f32,
 	columns:           i32 = 0,
-) -> (clip: AnimationClip, ok: bool) {
+) -> (clip: Animation_Clip, ok: bool) {
 	if len(frames) == 0 {
 		log.error("load_animation_frames: no frames")
 		return {}, false
@@ -173,7 +173,7 @@ load_animation_frames :: proc(
 		}
 	}
 
-	return AnimationClip{
+	return Animation_Clip{
 		mesh              = create_mesh_from_pixels(slice.to_bytes(sheet), sheet_w, frame_h * rows),
 		cols              = cols,
 		rows              = rows,
@@ -215,7 +215,7 @@ load_animation_directory :: proc(
 	seconds_per_frame: f32,
 	columns:           i32 = 0,
 	suffixes:          []string = {".png", ".jpg", ".jpeg", ".bmp", ".tga"},
-) -> (clip: AnimationClip, ok: bool) {
+) -> (clip: Animation_Clip, ok: bool) {
 	keep := make([dynamic]runtime.Load_Directory_File, 0, len(files), context.temp_allocator)
 
 	for file in files {
@@ -323,11 +323,11 @@ natural_less :: proc(a, b: string) -> bool {
 	the single frame `first`, which is visibly stuck rather than empty.
 */
 animation_range :: proc(
-	clip:              AnimationClip,
+	clip:              Animation_Clip,
 	first:             i32,
 	last:              i32,
 	seconds_per_frame: f32 = 0,
-) -> AnimationClip {
+) -> Animation_Clip {
 	total := max(clip.cols * clip.rows, 1)
 
 	begin := clamp(first, 0, total - 1)
@@ -359,7 +359,7 @@ animation_range :: proc(
 	again rather than staying stuck on its last frame.
 */
 @(private)
-seat_first_frame :: proc(sprite: ^AnimatedSprite) {
+seat_first_frame :: proc(sprite: ^Animated_Sprite) {
 	clip := sprite.clip
 	if clip.cols <= 0 || clip.rows <= 0 do return
 
@@ -403,11 +403,11 @@ seat_first_frame :: proc(sprite: ^AnimatedSprite) {
 
 	`looping = false` makes it a one-shot -- see `create_animated_sprite`.
 */
-animated_sprite_of :: proc(clip: AnimationClip, scale: f32 = 1, looping := true) -> AnimatedSprite {
+animated_sprite_of :: proc(clip: Animation_Clip, scale: f32 = 1, looping := true) -> Animated_Sprite {
 	final_scale := scale
 	if final_scale <= 0 do final_scale = 1
 
-	sprite: AnimatedSprite
+	sprite: Animated_Sprite
 	sprite.clip    = clip
 	sprite.scale   = final_scale
 	sprite.size    = {clip.frame_w * final_scale, clip.frame_h * final_scale}
@@ -422,7 +422,7 @@ animated_sprite_of :: proc(clip: AnimationClip, scale: f32 = 1, looping := true)
 
 // Gives the clip's sheet texture back to the GPU. A clip shared between
 // sprites is destroyed once, not once per sprite.
-destroy_animation_clip :: proc(clip: ^AnimationClip) {
+destroy_animation_clip :: proc(clip: ^Animation_Clip) {
 	destroy_mesh(&clip.mesh)
 }
 
@@ -433,7 +433,7 @@ destroy_animation_clip :: proc(clip: ^AnimationClip) {
 // animation being stuck on its first frame forever -- and without a finished
 // one-shot being restarted just because the state machine is still asking for
 // it. Ask for a *different* clip to play it again.
-switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip, looping := true) {
+switch_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping := true) {
     /*
         What makes two clips the same: the sheet *and* the stretch of it being
         played. The texture alone used to decide, which was right while every
@@ -477,7 +477,7 @@ switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip, looping :
 // `switch_animation` or `animated_sprite_of`.
 //
 // The 2D one. `update_animator` is the skeletal equivalent.
-update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
+update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32) {
     if sprite.playing {
         sprite.accumulator += delta_time
         if sprite.accumulator >= sprite.clip.seconds_per_frame {
@@ -523,10 +523,10 @@ update_animation :: proc(sprite: ^AnimatedSprite, delta_time: f32) {
 
 // Draws the current frame. `update_animation` decides which frame that is, so
 // a sprite drawn without being updated shows the same one forever.
-draw_animated_sprite :: proc(sprite: AnimatedSprite) {
+draw_animated_sprite :: proc(sprite: Animated_Sprite) {
 	draw_center := sprite.position + sprite.pivot * sprite.size + sprite.clip.offset
 
-	vert_data := VertData{
+	vert_data := Vert_Data{
 		position = screen_pos(draw_center),
 		size     = screen_size(sprite.size),
 		screen   = screen_dims(),

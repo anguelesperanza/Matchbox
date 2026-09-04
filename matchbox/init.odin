@@ -389,11 +389,11 @@ init :: proc(title: string, width: i32, height: i32) {
 	// The uniform structs are pushed straight at shader cbuffers, and a
 	// mismatch shows up as wrong geometry or colour rather than an error.
 	// Cheaper to find out here.
-	#assert(size_of(VertData)        == 48)
+	#assert(size_of(Vert_Data)        == 48)
 	#assert(size_of(Sprite_Frag_Data) == 32)
 	#assert(size_of(Shape_Frag_Data)  == 48)
-	#assert(size_of(OutlineFragData) == 32)
-	#assert(size_of(FontFragData)    == 16)
+	#assert(size_of(Outline_Frag_Data) == 32)
+	#assert(size_of(Font_Frag_Data)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
 	#assert(size_of(Vertex3D)        == 32)
 	#assert(size_of(Mesh_Vert_Data)  == 192)

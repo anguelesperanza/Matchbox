@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 341 of them -- with its arguments
+Every public procedure in the package -- 332 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -26,7 +26,7 @@ any.
 - [Animation](#animation) -- 33
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
-- [Tiled maps](#tiled-maps) -- 12
+- [Tiled maps](#tiled-maps) -- 3
 
 ## Getting started
 
@@ -2319,72 +2319,6 @@ Plays the sound once, immediately.
 
 ## Tiled maps
 
-### `tiled.odin`
-
-```odin
-tiled_load_level :: proc(level:string) -> Tiled
-```
-Reads a Tiled `.tmj` map off disk and parses it.
-
-```odin
-tiled_find_layer :: proc(level: Tiled, name: string) -> (TiledLayer, bool)
-```
-Returns the TiledLayer whose name matches `name`.
-
-```odin
-tiled_find_objects :: proc(
-	level: Tiled,
-	layer_name: string) -> ([]TiledObjectLayer,
-	bool,
-)
-```
-Returns the object list from the layer whose name matches `layer_name`.
-
-```odin
-tiled_get_spawn_position :: proc(
-	level: Tiled,
-	layer_name: string,
-	scale: f32,
-	sprite_size: [2]f32,
-) -> [2]f32
-```
-Returns the world-space position for a sprite spawned at the first object in the layer named `layer_name`.
-
-```odin
-tiled_resolve_x_collision :: proc(
-	body: ^Body,
-	collisions: []TiledObjectLayer,
-	dx: ^f32,
-	scale: f32,
-)
-```
-Stops a body at the first solid object in its way horizontally, adjusting `dx` in place.
-
-```odin
-tiled_resolve_y_collision :: proc(
-	body: ^Body,
-	collisions: []TiledObjectLayer,
-	vy: ^f32,
-	scale: f32,
-)
-```
-The vertical half of the pair, adjusting `vy` in place.
-
-```odin
-draw_tiled_layer :: proc(
-	layer:TiledLayer,
-	tileset:Sprite,
-	tile_width:int,
-	tile_height:int,
-)
-```
-Draw tiled layer to the screen.
-
-```odin
-draw_tiled_layers :: proc(level: Tiled, tileset: Sprite)
-```
-Draw every visible tile layer in the level.
-
 ### `collisions.odin`
 
 ```odin
@@ -2401,16 +2335,4 @@ A grid coordinate as an index into a row-major array of `width` columns.
 mouse_over_sprite :: proc(sprite:Sprite) -> bool
 ```
 Whether the pointer is over a sprite.
-
-### `procedural_generation.odin`
-
-```odin
-random_walk :: proc(
-	size:[2]int,
-	start: [2]f32,
-	steps: int,
-	stride: f32,
-) -> []u8
-```
-A drunkard's-walk map: `steps` moves from `start`, carving out the cells it passes through.
 

@@ -6,8 +6,8 @@ package matchbox
 	Skeletal animation: a hierarchy of joints, a set of clips that move them,
 	and the matrix palette a skinning vertex shader needs.
 
-	`3d.md` listed this under "Not doing", with the note that the first game
-	wanting a character to walk is what starts it. This is that.
+	Deliberately left out of the original 3D plan, on the reasoning that the
+	first game wanting a character to walk is what starts it. This is that.
 
 	**The split is the same one the cameras use.** A `Model` holds what came out
 	of the file and never changes: the skeleton's rest pose, its hierarchy, and

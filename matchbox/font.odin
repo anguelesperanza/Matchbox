@@ -333,7 +333,7 @@ Cached_Font :: struct {
 	The two are one thing: the map answers "have we got this size", the slice
 	answers "which size goes first when we are over the limit", and neither is
 	meaningful without the other. They lived at package scope until the cleanup
-	in `cleanup.md`; they are state belonging to `mbi` like everything else.
+	pass; they are state belonging to `mbi` like everything else.
 */
 @(private)
 Font_Cache :: struct {

@@ -195,7 +195,7 @@ current_target_size :: proc() -> [2]f32 {
 	The effects Matchbox ships.
 
 	They are shaders compiled into the framework rather than something a game
-	supplies -- see D3 in 3d.md. A game that wants a look not in this list asks
+	supplies. A game that wants a look not in this list asks
 	for it to be added; everything goes through `create_pipeline`, so the door
 	is open, but a general shader API is not what this is.
 */

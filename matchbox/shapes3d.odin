@@ -135,8 +135,8 @@ draw_cube_wires :: proc(position: [3]f32, size: [3]f32, color: [4]f32 = BLACK, r
 		aabb := b3.Shape_GetAABB(shape)
 		matchbox.draw_bounds_wires(aabb.lowerBound, aabb.upperBound, matchbox.RED)
 
-	Matchbox owns no bounding box type of its own and is not getting one -- see
-	D7 in 3d.md -- so this takes two plain vectors and stays ignorant of
+	Matchbox owns no bounding box type of its own and is not getting one, so
+	this takes two plain vectors and stays ignorant of
 	whichever library produced them.
 */
 draw_bounds_wires :: proc(lower, upper: [3]f32, color: [4]f32 = WHITE) {

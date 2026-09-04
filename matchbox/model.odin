@@ -9,7 +9,7 @@ package matchbox
 	model is the case that could not.
 
 	The name is `Model` and not `Mesh` because `Mesh` is already the texture
-	holder that `Sprite` embeds -- see D6 in 3d.md. A Model is what one file
+	holder that `Sprite` embeds. A Model is what one file
 	loads into: several parts, each with its own geometry and its own material,
 	because a glTF scene routinely has more than one of both.
 

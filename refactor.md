@@ -7,6 +7,252 @@ touching something load-bearing.
 
 ---
 
+## Decisions taken, 2026-09-04
+
+Settled. The reasoning behind each is in the section named alongside it;
+anything in this file *not* listed here is still open.
+
+| area | decision |
+|---|---|
+| naming | Procedures `snake_case`; types (struct/enum/union) `Pascal_Snake_Case`; enum **values** `SCREAMING_CASE`, one per line. Now in `CLAUDE.md`; see **B. Naming drift** |
+| `README.md` | **Stays.** Gets its own refactor later, once more of the above is settled |
+| input enums | **Lean on SDL3's own values, don't wrap them.** Drop the custom `Mouse_Button`; see **A. Structural** |
+| `Body` physics fields | **Keep.** Storage-only *by intent* -- games read and write them per-game. Not dead code; see **D** |
+| `examples/TankMovement` | Bring in line with the other examples; `src/` is not used any more; see **E** |
+| finished markdown | Deleted -- see below |
+| code organisation | Group logically; the moves in **File organization** and the file splits stand |
+| constructors / destructors | `create_x` and `destroy_x`; `load_x` reserved for importing a thing that already exists. See **Decisions, round two** |
+| errors | Return `(value, err)` like `core:os`; replaces `ensure`. See **Decisions, round two** |
+| caches | One generic LRU, carrying `Font_Cache`'s frame guard |
+| `tiled.odin`, `procedural_generation.odin`, `maps.odin` | **Deleted** -- moved to other packages, or empty |
+| `timer` / `lerp` / `look_at` | Fold into `utility.odin`, re-review later |
+| `gltf2`, Android tooling | Keep; own re-review after this refactor |
+| predicates / getters | `is_` on procs returning `bool`, `get_` on procs returning stored data; verbs and computations keep their names |
+| `camera_follow`, parallax | **Build both.** See **Decisions, round two** |
+| SDL3 / SDL3_GPU | Stay, unless the rendering backend itself changes |
+| 2D / 3D render split | Stays as it is |
+
+### Markdown removed, 2026-09-04
+
+Deleted because the work they describe is finished and they were never
+anything but plans for it. All recoverable from git history if a piece of the
+reasoning is wanted back:
+
+- `sdl3-gpu-migration.md` -- the no_gfx_api → SDL3_GPU migration, done.
+- `cleanup.md` -- the previous cleanup/refactor pass, done. (`CLAUDE.md`'s
+  pointer to it now points here instead.)
+- `cleanup-testing.md` -- the by-hand test checklist for that same pass.
+- `3d.md` -- the "adding 3D to Matchbox" plan. 3D is built. Note it also
+  carried a risk register and a "not doing, and what each would take"
+  section; if that list is still wanted, lift it out of git rather than
+  restoring the whole file.
+- `candidates.md` -- the intake list of things a game had written for itself.
+  Every entry is DONE, "probably not" (decided against), or "already done".
+
+**`improvements.md` stays, trimmed.** Decided: keep whatever is still an
+improvement waiting to be made -- the `# Not Started` backlog (the clip-aware
+hit test, batching quads into one draw, window sizing, reducing system usage)
+and the Android account `README.md` links into. Everything else goes, which
+means the ~1200-line `# Completed` log. **Not done yet.**
+
+## Decisions, round two (2026-09-04)
+
+The second pass of answers. Together with the table above, this leaves nothing
+open.
+
+### Constructors: `create_x`, and `load_x` means something different
+
+`create_x` is the constructor, where `x` is the thing being made --
+`create_sprite`. `load_x` is *not* a synonym for it: `load_model` imports a
+thing that already exists whole, where `create_sprite` only imports the image
+and leaves the rest of the values to be set here. Keep that distinction.
+
+So the renames are: `sprite_cache_make` → `create_sprite_cache`,
+`layout_make` → `create_layout`, `camera3d_at` → `create_camera3d`,
+`transform_at` → `create_transform`, `first_person_camera` /
+`third_person_camera` → `create_first_person_camera` /
+`create_third_person_camera`, `point_light` / `directional_light` →
+`create_point_light` / `create_directional_light`, `grid_fit` →
+`create_grid`, and the `cube_model` / `plane_model` / `sphere_model` /
+`cube_wires_model` / `grid_model` family → `create_cube_model` and so on.
+
+`sprite_of` and `animated_sprite_of` build from a thing already in hand (a
+`Mesh`, an `Animation_Clip`), and there is already a `_from_` suffix in the
+package for exactly that -- `create_sprite_from_pixels`,
+`create_mesh_from_pixels`. So: `create_sprite_from_mesh` and
+`create_animated_sprite_from_clip`.
+
+### Destructors: always `destroy_x`, and into the group
+
+`destroy_x`, never `x_destroy`. So `sprite_cache_destroy` →
+`destroy_sprite_cache`, `font_cache_destroy` → `destroy_font_cache`,
+`shapes3d_destroy` → `destroy_shapes3d`.
+
+**Every new `destroy_x` goes into the `destroy :: proc{...}` group** in
+`destroy.odin`, so a game can call `matchbox.destroy(&thing)` and let the
+compiler pick. One caveat to apply with judgement: `font_cache_destroy` and
+`shapes3d_destroy` are `@(private)` and called by `cleanup`, not by games --
+they still get renamed, but a private procedure has no business in a group
+whose whole purpose is to be called from outside.
+
+### Errors: return them, don't `ensure`
+
+Follow the shape `core:os` uses -- return the value *and* an error, and let
+the caller decide:
+
+```odin
+some_proc :: proc() -> (data: Data, err: Err)
+
+result, err := some_proc()
+if err != nil {
+	// deal with it
+}
+```
+
+The error type is whatever the situation calls for. Note `err != nil`
+implies a `union` rather than an `enum` -- an enum would want `.None` and a
+`err != .None` test -- so the error types here should be unions.
+
+**This replaces the `ensure(...)` calls**, which currently abort the process
+on a failure the caller was never given the chance to handle. Where the
+failure comes from something we don't control and it reports differently --
+an SDL call returning `bool` -- use whatever convention that thing offers
+rather than wrapping it.
+
+Worth knowing before starting: this is the widest-reaching change on the
+list. `create_sprite`, `create_mesh`, `upload_buffer`, `create_gpu_texture`
+and the rest currently return a bare value, so every call site in the package,
+every example, and the README's front-page snippet all change shape with them.
+
+### Caches: one LRU, with the frame guard
+
+Unify `Sprite_Cache` and `Font_Cache` onto one generic LRU, and the unified
+one carries `Font_Cache`'s frame guard -- nothing asked for during the current
+frame is ever what gets evicted. That closes the `Sprite_Cache` hole where a
+second `get` in a frame can free what the first one returned.
+
+### Files leaving now
+
+- **`tiled.odin` -- deleted.** Moved out to a package that will handle Tiled,
+  LDtk and other level formats together. No example used it, so nothing else
+  went with it.
+- **`procedural_generation.odin` -- deleted**, along with
+  `examples/random-walk`, which was its only caller. The code now lives in
+  `DreamCartographer/2d/randomwalk/randomwalk.odin`.
+- **`maps.odin` -- deleted.** The empty placeholder.
+
+### Files staying, in a utility file
+
+`timer.odin`, `lerp.odin` and `look_at.odin` fold into a single
+`utility.odin`, **marked for re-review after this refactor** rather than
+moved out now.
+
+Measured before deciding, since the question was whether removing them would
+cost anything (hits inside `games/farlite-test/Matchbox/` are a vendored copy
+of this repo and don't count):
+
+| file | real use | verdict |
+|---|---|---|
+| `timer.odin` | `games/rpg-rougelike/main.odin` uses `start_cooldown`, `update_cooldown`, `is_cooldown_done` | **in live use** -- removing it breaks a real game |
+| `lerp.odin` | nothing, anywhere | dead weight, but harmless |
+| `look_at.odin` | only `examples/TankMovement` | near-dead |
+
+So `timer.odin` is the one with an actual customer; the other two are being
+kept on the strength of being small rather than used.
+
+### Sprite math lives in `sprite.odin`
+
+Any math that acts on a sprite goes in `sprite.odin`. That settles the
+`look_at` split: `look_at_sprite` moves to `sprite.odin` next to
+`sprite_forward_by_rotation` (its inverse), and `look_at_point` -- which takes
+two plain vectors and knows nothing about sprites -- goes to `utility.odin`
+with the rest.
+
+### Marked for later, deliberately
+
+- **`gltf2`** -- an external package brought in. Stays; **re-review after this
+  refactor** to bring it in line with Matchbox conventions.
+- **The Android build tooling** -- wants an audit of its own, after this
+  refactor.
+
+### `improvements.md`
+
+Keep whatever is still an improvement waiting to be made; remove everything
+else. That means the `# Completed` log goes.
+
+### Predicates and getters: `is_` and `get_`
+
+`is_` on procedures returning a `bool`; `get_` on procedures returning data.
+This does not touch `create_x` / `load_x`, which have their own rule above.
+
+The renames that follow, grouped so the sweep can be done in one pass:
+
+**To `is_`** -- `cursor_locked`, `touch_active`, `lighting_active`,
+`mouse_captured`, `scroll_needed`, `confirm_button_armed`, `dropdown_is_open`,
+`modal_is_open`, `model_is_skinned`, `in_drawing_3d`, `sprite_cache_has`,
+`point_in_rect`, `mouse_over_rect`, `mouse_over_button`, `mouse_over_sprite`,
+`mouse_over_text_field`, `bounding_box_collision_check`,
+`bounding_box_contact_check`, `modal_dismissed`.
+
+**To `get_`** -- `delta_time`, `frame_count`, `screen_dims`, `status_text`,
+`scroll_max`, `text_field_string`, `sprite_cache_len`, `font_cache_len`,
+`current_target_size`, `base_path`, `pref_path`.
+
+**Two carve-outs**, now written into `CLAUDE.md`, because both prefixes
+describe *reading* and some procedures are not reads:
+
+1. **Immediate-mode procedures that act and report** keep their verb.
+   `button` draws a button and answers whether it was clicked -- `is_button`
+   would describe it wrongly. Same for `button_confirm`, `dropdown`,
+   `context_menu`, `slider`, `slider_int`, `modal_begin`, `hover_dwell`, and
+   `play_animation` (which returns whether the clip was found).
+2. **Computations are not getters.** `measure_text`, `measure_text_wrapped`,
+   `wrap_text`, `line_height`, `text_block_height`, `rect_center`,
+   `rect_top_left`, `model_center`, `model_size`, `sprite_bounds`,
+   `sprite_center`, `screen_pos`, `screen_size`, `camera3d_forward`,
+   `direction_from_angles`, `walk_direction`, `look_at_point`, `dimmed`,
+   `slider_snap`, `hover_progress` and `status_alpha` all derive an answer
+   from their arguments rather than fetch a stored one. `get_measure_text`
+   would say the opposite of what it does.
+
+The line is *reading stored state* versus *doing* or *deriving*.
+
+### Build both: camera follow and parallax
+
+**`camera_follow`.** Build it, so the easing maths lives in one place rather
+than being re-remembered at each call site:
+
+```odin
+camera_follow :: proc(target: [2]f32, delta_time: f32)
+// mbi.camera.position += (target - mbi.camera.position) * follow_speed * delta_time
+```
+
+`follow_speed` on `Camera` is what it reads. Recommended to give `Camera3D`
+the same treatment in the same pass -- `camera3d_follow` currently snaps
+straight to the orbit position with no damping term -- though that half was
+not explicitly decided.
+
+**Parallax.** Build it: `update_parallax` / `draw_parallax` scrolling each
+layer by its `parallax_speed` against camera movement, so distant layers move
+slower.
+
+**And a correction to how it was flagged.** This file listed
+`Sprite.parallax_speed` under "dead" because nothing in the package reads it.
+That reasoning was wrong for the same reason it was wrong about `Body`'s
+physics fields: a field the *game* drives is not dead just because the
+framework does not read it. The genuine finding was narrower -- parallax has
+no update or draw procedure at all, so the field cannot do anything yet. Once
+those exist, Matchbox will read `parallax_speed` when rendering and updating
+the effect, and the field is doing its job.
+
+## Open questions
+
+**None.** Every question this review raised has been answered -- see
+*Decisions taken* and *Decisions, round two* above. New ones go here as they
+come up.
+
+---
+
 ## 2D and 3D: the split is deliberate, not drift
 
 **Origin:** Matchbox started 2D-only; 3D was added later for a separate
@@ -70,10 +316,15 @@ Small and already mostly realised, not a case for merging the render paths:
   no shared machinery forced between them. This is the right amount of
   overlap -- keep extending it by analogy rather than trying to unify the
   types.
-- `Camera` (2D) and `Camera3D` could likely share a couple of small concepts --
-  `Camera` has `follow_speed` for a lerp-follow that `Camera3D` may want too.
-  Worth a look, but as a small shared-field/behaviour question, not a
-  render-path merge. **Not yet investigated in depth.**
+- `Camera` (2D) and `Camera3D` could likely share a couple of small concepts,
+  but **correction, 2026-09-04: it's not `follow_speed` as first noted here.**
+  Checked and `Camera.follow_speed` is dead on the 2D side -- declared,
+  documented as "used for lerp," never read by anything (see the redundancy
+  section below). `Camera3D` doesn't have a lerp-follow either:
+  `camera3d_follow` (`camera3d.odin:517`) snaps the camera straight to the
+  orbit position every call, no damping term. So neither camera has a working
+  smoothed follow today; if one gets built, build it once and decide which
+  side owns the concept, rather than reading this note as "3D already has it."
 
 ### Places to check when a rendering refactor does happen
 
@@ -106,22 +357,17 @@ per-frame snapshot. It is never exposed as a subscribe/publish API. If a
 future change starts threading callbacks or a message queue through here,
 that is the event package's job, not this one's.
 
-**Files to move out once their destination package exists:**
+**Status of everything this section flagged** (resolved in *Decisions, round
+two* above):
 
-| file | lines | what it is | destination |
-|---|---|---|---|
-| `sound.odin` | 40 | WAV load/play via SDL audio | audio package |
-| `collisions.odin` | 41 | grid-index helpers + `mouse_over_sprite`; no actual collision detection despite the name | **confirmed for removal** -- physics package, once it exists (keep `mouse_over_sprite` here -- see below) |
-| `tiled.odin` | 242 | Tiled (TMJ) JSON map-format parser | a content/level package |
-| `procedural_generation.odin` | 64 | drunkard's-walk cave/maze generator; its own comment already says "rendering data must be done on a game by game basis" | a world-gen or content package |
-| `timer.odin` | 40 | `CooldownTimer` -- `clock.odin`'s own comment calls this "a gameplay utility built on top of delta_time" as distinct from engine timing | a gameplay-utility package |
-| `lerp.odin` | 43 | `LerpMove`, position tweening | a gameplay-utility package |
-| `look_at.odin` | 41 | angle-to-face-a-target math; draws nothing, reads no input | a gameplay-utility package |
-
-**`maps.odin` (16 lines) is a clean delete regardless of the above** -- it is
-an empty placeholder whose own comment says "WIP as may not need and may
-remove... reminder to fill this out or to delete this later." Nothing
-references it. This one doesn't need a destination package decided first.
+| file | what happened |
+|---|---|
+| `tiled.odin` | **deleted** -- moved to a package covering Tiled, LDtk and other formats |
+| `procedural_generation.odin` | **deleted** with `examples/random-walk`; now `DreamCartographer/2d/randomwalk/` |
+| `maps.odin` | **deleted** -- empty placeholder |
+| `timer.odin`, `lerp.odin`, `look_at.odin` | fold into `utility.odin`, re-review later. `look_at_sprite` goes to `sprite.odin` instead (sprite math lives there) |
+| `sound.odin` (40 lines) | **still to move**, to an audio package once one exists |
+| `collisions.odin` (41 lines) | **still to move**, to a physics package once one exists -- keep `mouse_over_sprite` here, see below |
 
 **Judgement calls, not scope creep -- checked and left alone:**
 
@@ -244,3 +490,296 @@ others that happen to share the file:
 None of these three are urgent; they're organization, not a bug or a scope
 violation. Flagged so the big pass has a ready-made list rather than having
 to rediscover the section boundaries from scratch.
+
+---
+
+## SDL3 and SDL3_GPU stay, unless the rendering framework itself changes
+
+Considered 2026-09-04: dropping SDL3 as the window/input layer in favour of
+native per-platform windowing (Win32, X11, Cocoa), while keeping SDL3_GPU for
+rendering.
+
+**Verdict: no, not while SDL3_GPU is the renderer.** Checked against the
+actual `vendor:sdl3` bindings rather than assumed:
+
+- `ClaimWindowForGPUDevice` (`sdl3_gpu.odin:895`) takes an `^Window` -- there
+  is no variant taking a raw native handle instead. `GetGPUDeviceProperties`
+  (`sdl3_gpu.odin:830`) only exposes name/driver-string metadata, not the
+  underlying `VkDevice`/`ID3D12Device`, so there is no way to pull the native
+  device out and build a swapchain by hand against a natively-created window.
+  SDL3_GPU's presentation path is hard-wired to `SDL_Window*` with no
+  supported escape hatch.
+- A partial path exists -- `CreateWindowWithProperties` can *wrap* a window
+  created with raw Win32/X11/Cocoa calls (`PROP_WINDOW_CREATE_WIN32_HWND_POINTER`
+  etc., `sdl3_video.odin:289-297`) -- but whether a wrapped foreign window
+  keeps correct size/DPI state for the swapchain without SDL's own event pump
+  running is unverified (would need SDL's own source, not just the bindings,
+  to answer).
+- Input is the more expensive half regardless: `gamepad.odin` leans on SDL's
+  controller-mapping database (`gamecontrollerdb.txt`) to turn whatever a
+  physical pad reports into a consistent layout. Dropping SDL for input means
+  reimplementing that per platform (XInput, evdev, macOS GameController) or
+  keeping SDL for gamepads while hand-rolling keyboard/mouse -- worse than
+  either alone.
+
+**So: SDL3 and SDL3_GPU stay as they are.** This is only worth reopening if
+the rendering framework itself changes -- e.g. a future move off SDL3_GPU to
+something else for rendering would remove the constraint that forces the
+window layer to stay SDL3 too. Don't re-litigate the windowing question on
+its own; it's downstream of the rendering-backend question, not independent
+of it.
+
+---
+
+## More redundancy, found on a broader pass (2026-09-04)
+
+Went looking past the font.odin/text.odin case for other files doing the same
+thing twice, or a package-level constant that had crept back in since the
+earlier cleanup pass. The constants check came back clean -- every top-level
+`::` left in the package is still one of the documented exceptions (array
+sizes, a `*_DEFAULTS` struct, a colour, `DEFAULT_FONT_BYTES`). No TODO/FIXME/
+HACK markers anywhere either. Three real things did turn up:
+
+**`draw_text_string` and `draw_text_ui_string` are ~35 lines of near-identical
+code** (`font.odin:175-211` and `font.odin:242-276`). Same `bind_quad_state`
+call, same `FontFragData` push, same glyph loop calling `GetBakedQuad`, same
+`pos`/`size` computation from the baked quad -- the *entire* difference
+between them is one pair of lines inside the loop:
+
+```
+position = screen_pos(pos),   size = screen_size(size),   // world-space
+position = pos,                size = size,                // UI-space
+```
+
+Worth collapsing into one private glyph-walking proc parameterised on
+whether to apply `screen_pos`/`screen_size` (or taking the already-computed
+`position`/`size` as a callback), with `draw_text_string` and
+`draw_text_ui_string` becoming thin callers. This is the same fix as the
+`draw_text_*` file-location one, just inside the proc bodies instead of
+between files -- worth doing in the same pass since it's the same code.
+
+**2D vector length is hand-rolled three separate times**, each slightly
+differently, instead of calling `linalg.length` -- which the codebase already
+uses correctly for 3D vectors (`math3d.odin:133`, `camera3d.odin:534`):
+
+- `gamepad.odin:293` -- `math.sqrt(raw.x * raw.x + raw.y * raw.y)`
+- `touch.odin:147` -- a private `vec_length` wrapping `sdl.sqrtf(v.x*v.x + v.y*v.y)`
+- `shapes.odin:35` -- `math.sqrt(delta.x * delta.x + delta.y * delta.y)`
+
+`linalg.length` is generic over vector size, so all three collapse to
+`linalg.length(v)` -- which also removes `touch.odin`'s private `vec_length`
+entirely and stops it being the one place in the package going through
+`sdl.sqrtf` instead of `core:math` like everywhere else.
+
+**`Camera.follow_speed` (`camera.odin:16`) is a dead field.** It's declared
+and commented "How fast the camera will follow the position (used for
+lerp)," but nothing in the package reads it -- no `camera_follow` proc exists
+for 2D, no example sets it to anything but its zero value. See the corrected
+note in the 2D/3D section above: `Camera3D`'s `camera3d_follow` doesn't lerp
+either, it snaps, so this isn't a case of the field being 3D's job instead --
+it's unimplemented on both sides. Either build the lerp-follow the comment
+promises (`lerp.odin`'s `LerpMove` is the existing pattern to match) or pull
+the field until it is built; a documented-but-inert field is the kind of
+thing that costs someone an hour assuming it works.
+
+**Checked and found already good, not a problem:** `ui.odin`'s three
+timeout-driven widgets (`Hover`, `Confirm_Button`, `Status_Line`) all
+correctly share the one private `seconds_since` helper rather than
+reimplementing elapsed-time math each -- this is the redundancy check working
+as intended, not everything it looked at turned up an issue.
+
+---
+
+# Full-package review (2026-09-04)
+
+A pass over the whole package rather than one question at a time. Findings
+are grouped by what kind of work they are, because they don't all want the
+same pass: naming is one mechanical sweep, the dead fields are deletions, and
+the structural ones each want thinking about separately.
+
+## A. Structural
+
+**`init` is 320 lines and `poll_events` is 215** (`init.odin:352`,
+`input.odin:97`) -- the two procedures a game touches first are the two
+longest in the package. `init` is window creation, device creation, shader
+loading, six pipeline builds, sampler creation, quad upload, font baking and
+logger install, in sequence, in one body. `create_pipeline` (156) and
+`first_person_walk` (153) are next. These are the natural extraction targets;
+see also the file-split list above, since `init.odin` splitting into
+lifecycle + pipeline construction and `init` shrinking are the same job.
+
+**`poll_events` does the clock's work.** `clock.odin` owns the `Clock` struct
+and the accessors (`delta_time`, `get_time`, `set_target_fps`,
+`frame_count`), but every line that *updates* those fields -- the absolute
+deadline frame limiter and the `delta_time` computation -- lives in
+`input.odin:248-306`. Same misplacement as `draw_text_*` in `font.odin`:
+the file owns the data and a sibling owns the logic. A `clock_tick()` /
+`clock_wait_for_frame()` in `clock.odin`, called from `poll_events`, would
+put them back together and take ~60 lines out of the longest input procedure.
+
+**Three error-handling conventions for the same class of failure.** Creating
+a GPU resource that the driver might refuse is handled three ways:
+
+| convention | used by | what a caller sees |
+|---|---|---|
+| `ensure(...)` -- abort | `upload_buffer`, `create_gpu_texture`, `create_mesh` | process dies at the failure |
+| `(value, ok: bool)` | `load_image`, `load_model`, `load_skybox_*`, `read_entire_file` | handled at the call site |
+| log + zero value | `create_render_target`, `sprite_cache_get`, `ensure_depth_texture` | nothing, until later |
+
+`create_render_target` is the one that stings: it logs, returns a zeroed
+struct, and the failure only surfaces as an unrelated-looking `ensure` inside
+`begin_drawing_target` ("render target was never created") at the next frame.
+Pick one rule -- "a resource the game asked for by name returns `ok`, an
+internal one `ensure`s" is a defensible line -- and apply it.
+
+**SDL types leak through the public API, inconsistently.** `Mouse_Button` is
+Matchbox's own enum, but `is_key_pressed` takes `sdl.Scancode` and
+`is_gamepad_button_pressed` takes `sdl.GamepadButton`. So two of the three
+input devices hand SDL's vocabulary to games and one doesn't.
+
+**Decided: lean on SDL3's values everywhere, don't wrap them.** SDL3 is
+staying (see the SDL3 section above), so wrapping its enums buys nothing but
+a translation layer to maintain. The work:
+
+- Delete `Mouse_Button` (`input.odin:58`) and use `sdl.MouseButtonFlag`,
+  which is already an enum with `.LEFT`, `.MIDDLE`, `.RIGHT`, `.X1`, `.X2`
+  (`vendor/sdl3/sdl3_mouse.odin:43`).
+- Call sites are unaffected -- `is_mouse_pressed(.LEFT)` still infers.
+- **This gains the two side buttons for free.** `poll_events` currently
+  switches SDL's button id into the custom enum and drops anything that
+  isn't left/middle/right on the floor (`input.odin:170-177`, the
+  `valid = false` path), so X1/X2 clicks are silently discarded today.
+- `mbi.input.mouse.buttons` is `[Mouse_Button]Key_State`, so the array
+  changes shape with the enum -- check nothing indexes it by integer.
+
+## B. Naming drift
+
+None of these are bugs; together they're what makes the API hard to guess at.
+One mechanical sweep fixes all of them, and it wants doing in one go rather
+than opportunistically, because half-converted is worse than either end.
+
+**Decided 2026-09-04, and now written into `CLAUDE.md`:**
+
+- Procedures are `snake_case`.
+- Types -- struct, enum, union -- are `Pascal_Snake_Case`.
+- Enum **values** are `SCREAMING_CASE`, one to a line:
+  `Player_State :: enum { LEFT, RIGHT, UP, DOWN }`, written out vertically.
+
+That settles the first bullet below: every multi-word *type* not already in
+`Pascal_Snake_Case` gets renamed. The value rule is mostly a matter of
+writing down what the package already does -- 18 of the 19 enums are already
+`SCREAMING_CASE` with one value per line.
+
+**`SpriteForward` (`look_at.odin:10`) is the single exception, and it is wrong
+on both counts:** the type name wants to be `Sprite_Forward`, and its values
+(`.Top`, `.Right`, `.Bottom`, `.Left`) want to be `.TOP`, `.RIGHT`,
+`.BOTTOM`, `.LEFT`. Four call sites in the same file. Note this file is also
+slated to leave for a gameplay-utility package (see the scope section) -- fix
+it wherever it ends up, not twice.
+
+The constructor / destructor / predicate spellings below are **not** settled
+by any of this and still want a decision each -- `create_X` versus `X_make`
+versus `X_of` is a question about what reads best, not about case.
+
+- **Two type-naming conventions.** ~60 types use Odin's `Snake_Pascal`
+  (`Render_Target`, `Key_State`, `Model_Part`); ~15 multi-word types don't
+  (`AnimatedSprite`, `AnimationClip`, `CooldownTimer`, `LerpMove`,
+  `MatchboxInfo`, `ParallaxSprites`, `SpriteForward`, `TiledLayer`,
+  `VertData`). Worst inside one family in one file: `types.odin` has
+  `Sprite_Frag_Data`, `Shape_Frag_Data`, `Rect_Frag_Data`, `Mesh_Frag_Data`
+  and `Post_Frag_Data` next to `FontFragData`, `OutlineFragData` and
+  `VertData` -- same purpose, same file, two spellings.
+- **Four constructor spellings:** `create_X` (`create_sprite`,
+  `create_render_target`), `X_make` (`layout_make`, `sprite_cache_make`),
+  `X_of` (`sprite_of`, `animated_sprite_of`), `X_at` (`camera3d_at`,
+  `transform_at`). `load_X` is legitimately its own category (it reads
+  bytes); the other four are the same operation under four names.
+- **Two destructor orders:** `destroy_X` (15 of them) against `X_destroy`
+  (`sprite_cache_destroy`, `font_cache_destroy`, `shapes3d_destroy`). The
+  `destroy :: proc{...}` group in `destroy.odin` lists both orders together,
+  which is where it's most visible.
+- **Three predicate shapes:** `is_X` (17 procs), `X_is_Y`
+  (`dropdown_is_open`, `modal_is_open`, `model_is_skinned`), and bare
+  adjective (`cursor_locked`, `mouse_captured`, `touch_active`,
+  `lighting_active`, `scroll_needed`).
+- **`get_` prefix only in the input subsystem.** `get_mouse_position`,
+  `get_gamepad_stick`, `get_touch`, `get_text_input` -- but `delta_time()`,
+  `screen_dims()`, `measure_text()`, `model_center()`, `status_text()`
+  elsewhere. That split is *almost* a rule ("input reads use `get_`"); it
+  just isn't written down anywhere, so it reads as inconsistency.
+
+## C. Redundancy
+
+**Two LRU caches, and they disagree about safety.** `Sprite_Cache`
+(`sprite_cache.odin`) and `Font_Cache` (`font.odin:339`) are the same
+structure -- a map, a `[dynamic]` order list, a limit -- and
+`sprite_cache_touch` / `font_cache_touch` are line-for-line the same
+algorithm. The difference is the one that matters: `font_cache_trim`
+**never evicts something used during the current frame**, and says why
+("a screen drawing seven sizes would otherwise free the atlas belonging to a
+pointer it handed out moments earlier"). `sprite_cache_trim` has no such
+guard, so with `limit = 1` the second `sprite_cache_get` of a frame frees the
+sprite the first one returned. The docs cover it ("copy it before moving it
+about") so it isn't a live bug, but one sibling learned a lesson the other
+hasn't. Either unify them onto one generic LRU, or at minimum give
+`Sprite_Cache` the same frame guard.
+
+**Every load-time upload gets its own command buffer.** `upload_buffer` and
+`upload_texture_region` each `AcquireGPUCommandBuffer` → copy pass → 
+`SubmitGPUCommandBuffer`. A game loading a hundred sprites does a hundred
+submits. `load_animation_frames` already packs frames into one sheet
+specifically to avoid per-frame binds, so this cost is clearly on the radar;
+batching startup uploads onto one command buffer is the same idea one level
+down. Note the warning already in `upload.odin:84-88` -- `pixel_buffer.odin`
+deliberately does *not* share this path, and must keep not sharing it.
+
+Also note the two upload procs share ~12 lines of identical
+create/map/copy/unmap/submit around a single differing SDL call. Borderline
+against the "three similar lines" rule; worth folding only if the batching
+work above touches them anyway.
+
+## D. Dead and half-built
+
+Three things declared but never wired up. **All three are resolved** -- the
+first two by building them, the third by recognising it was never a problem:
+
+- **`Sprite.parallax_speed` (`sprite.odin:15`) and `Parallax_Sprites`**
+  (`types.odin:299`, a `[dynamic]Sprite` whose only implemented procedure is
+  `destroy_parallax`). **Decided: build it** -- `update_parallax` /
+  `draw_parallax`, scrolling each layer by its speed against camera movement.
+  Note the original framing here was wrong: "nothing reads `parallax_speed`"
+  was offered as evidence it was dead, but the field is game-facing storage,
+  so the framework not reading it proves nothing -- the same mistake this file
+  made about `Body` below. The real finding was only that there is no update
+  or draw procedure, so the field cannot do anything yet.
+- **`Camera.follow_speed`** -- declared and documented, never read.
+  **Decided: build it**, as `camera_follow(target, delta_time)`, so the easing
+  maths lives in one place. `Camera3D` should probably get the same, since
+  `camera3d_follow` snaps.
+- ~~**`Body`'s physics fields**~~ -- **raised and resolved 2026-09-04: these
+  stay.** `velocity`, `speed`, `jump_force` and `on_ground` are never read
+  inside the package, but that is the design, not an oversight: they are
+  storage the *game* reads and writes, which is what `examples/camera-2d`
+  and `examples/TankMovement` do. Not dead code, and not something the
+  physics split should strip out. Left here so the next review doesn't
+  re-flag it.
+
+## E. Repo hygiene
+
+**`examples/TankMovement` is laid out unlike the other 24.** It has
+`src/main.odin` plus `build/` and `build.bat`, where every other example is a
+flat `main.odin`. The consequence is not cosmetic: `odin check
+examples/TankMovement` fails with "empty directory that contains no .odin
+files", so the one example with a different shape is the one silently skipped
+by the "then the examples" check `CLAUDE.md` asks for.
+
+**Decided: flatten it to match the others.** `src/` is the old project
+structure and is not used any more. Move `src/main.odin` up to
+`examples/TankMovement/main.odin`, and take `build/` and `build.bat` with it
+-- no other example carries a build script. After that it is covered by the
+same `odin check examples/*` sweep as everything else.
+
+**Root markdown: done, 2026-09-04.** Five finished planning documents removed
+-- see *Markdown removed* at the top of this file for what went and why.
+`improvements.md` is the one left needing a decision (live backlog on top of a
+long completed log, and `README.md` links into it).

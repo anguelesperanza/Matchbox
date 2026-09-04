@@ -2068,12 +2068,12 @@ A clip from a whole folder of frames, in the order a person would read them.
 ```odin
 animation_range :: proc(
 	clip: AnimationClip,
-	start: i32,
-	count: i32,
+	first: i32,
+	last: i32,
 	seconds_per_frame: f32 = 0,
 ) -> AnimationClip
 ```
-A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of frames -- clamped to the frames the sheet actually has.
+A stretch of a sheet as a clip of its own -- walk, idle and jump off one set of frames -- given as the first and last frame, inclusive, and clamped to the frames the sheet actually has.
 
 ```odin
 animated_sprite_of :: proc(

@@ -286,8 +286,16 @@ first and the risky work lands on a base that is already consistent.
 | 4 -- file moves | **done**, `14fa9c7` -- `utility.odin` created, `timer`/`lerp`/`look_at` deleted, clock logic out of `poll_events` |
 | 5 -- input onto SDL values | **done**, `415800f` -- `Mouse_Button` deleted for `sdl.MouseButtonFlag` |
 | 6 -- small dedupe | **done**, `7477aee` -- one glyph walker, `linalg.length` ×3, net -17 lines |
-| 7 -- one LRU with frame guard | next |
-| 8-9 | not started |
+| 7 -- one LRU with frame guard | **done**, `2770bac` + `1968429` -- `lru.odin` added, both caches on it, regression tests written |
+| 8 -- build camera follow and parallax | next |
+| 9 -- errors | **pause here for review before starting** |
+
+Step 7's guard was proved rather than assumed, twice over. The old code was
+stashed and the same scenario run against it: it failed on the first
+assertion with `len: 1` -- the first sprite freed while the caller still held
+the pointer. That is the bug, reproduced. The fix was then verified
+independently, and the three tests now living in `sprite_cache_test.odin`
+keep it that way. Neither cache had any test coverage before this.
 
 **Step 5 fixed a real bug, not just a naming inconsistency.** The old handler
 switched SDL's button id into the three-member enum and set `valid = false`

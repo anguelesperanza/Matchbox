@@ -275,6 +275,76 @@ natural_less :: proc(a, b: string) -> bool {
 }
 
 /*
+	A stretch of a sheet as a clip of its own -- walk, idle and jump off one set
+	of frames -- clamped to the frames the sheet actually has.
+
+		sheet, _ := mb.load_animation_directory(#load_directory("art/hero"), 0.1)
+		idle := mb.animation_range(sheet, 0,  4, 0.25)
+		walk := mb.animation_range(sheet, 4,  6, 0.10)
+		jump := mb.animation_range(sheet, 10, 6, 0.05)
+
+	A view, not a copy: the returned clip points at the same texture, so this
+	costs no upload and no VRAM, and a game may make as many as it likes.
+
+	**Destroy the sheet, not the ranges.** They share its texture, so passing
+	each to `destroy_animation_clip` would free the same texture several times.
+	This is the same rule that already applies to one clip shared between several
+	sprites, and the reason `destroy_animation_clip` takes the clip rather than
+	the sprite.
+
+	`seconds_per_frame` of 0 keeps the sheet's, which is usually right for
+	ranges cut from one animation and usually wrong for ranges that are different
+	moves -- a walk and a jump rarely run at the same rate.
+
+	A range is clamped to the frames that exist rather than refused, because the
+	common way to get this wrong is an off-by-one at the end of a sheet, and a
+	clip one frame short is a great deal easier to see than a silent failure.
+*/
+animation_range :: proc(
+	clip:              AnimationClip,
+	start:             i32,
+	count:             i32,
+	seconds_per_frame: f32 = 0,
+) -> AnimationClip {
+	total := clip.cols * clip.rows
+
+	out := clip
+	out.frame_start = clamp(start, 0, max(total - 1, 0))
+	out.frame_count = clamp(count, 1, max(total - out.frame_start, 1))
+
+	if seconds_per_frame > 0 do out.seconds_per_frame = seconds_per_frame
+
+	return out
+}
+
+/*
+	Puts a sprite on the first frame of its clip, uv window included.
+
+	Shared by `animated_sprite_of` and `switch_animation` because they have to
+	agree: a sprite whose `current_frame` says one thing and whose uv window
+	shows another is wrong on screen and right in the debugger, which is the
+	worst pair to chase.
+
+	The first frame is `frame_start`, not 0. For a range cut out of the middle of
+	a sheet those differ, and using 0 draws a frame belonging to some other
+	animation.
+*/
+@(private)
+seat_first_frame :: proc(sprite: ^AnimatedSprite) {
+	clip := sprite.clip
+	if clip.cols <= 0 || clip.rows <= 0 do return
+
+	sprite.current_frame = clip.frame_start
+	sprite.accumulator   = 0
+
+	col := clip.frame_start % clip.cols
+	row := clip.frame_start / clip.cols
+
+	sprite.uv_min = {f32(col)     / f32(clip.cols), f32(row)     / f32(clip.rows)}
+	sprite.uv_max = {f32(col + 1) / f32(clip.cols), f32(row + 1) / f32(clip.rows)}
+}
+
+/*
 	A sprite ready to play `clip`, with everything that is not obviously yours
 	already set.
 
@@ -312,11 +382,7 @@ animated_sprite_of :: proc(clip: AnimationClip, scale: f32 = 1) -> AnimatedSprit
 	sprite.pivot = {0.5, 0.5}
 	sprite.tint  = WHITE
 
-	if clip.cols > 0 && clip.rows > 0 {
-		sprite.current_frame = clip.frame_start
-		sprite.uv_min = {0, 0}
-		sprite.uv_max = {1 / f32(clip.cols), 1 / f32(clip.rows)}
-	}
+	seat_first_frame(&sprite)
 
 	return sprite
 }
@@ -333,13 +399,33 @@ destroy_animation_clip :: proc(clip: ^AnimationClip) {
 // call this every frame from a state machine without the animation being stuck
 // on its first frame forever.
 switch_animation :: proc(sprite: ^AnimatedSprite, clip: AnimationClip) {
-    // Same sheet means same clip: the texture handle identifies it now that
-    // there are no descriptor-pool ids to compare.
-    if sprite.clip.texture == clip.texture do return
-    sprite.clip          = clip
-    sprite.current_frame = 0
-    sprite.accumulator   = 0
-    sprite.size          = {clip.frame_w * sprite.scale, clip.frame_h * sprite.scale}
+    /*
+        What makes two clips the same: the sheet *and* the stretch of it being
+        played. The texture alone used to decide, which was right while every
+        clip owned its own sheet and silently wrong the moment `animation_range`
+        existed -- walk and idle cut from one sheet share a texture, so a game
+        asking to switch between them got no switch at all and no complaint.
+
+        Speed is deliberately not part of it. A game nudging seconds_per_frame
+        to match its own pace wants that to take effect, not to restart the
+        animation from its first frame.
+    */
+    same := sprite.clip.texture     == clip.texture     &&
+            sprite.clip.frame_start == clip.frame_start &&
+            sprite.clip.frame_count == clip.frame_count
+
+    if same {
+        // The clip is the one already playing, but its tuning may have moved.
+        sprite.clip.seconds_per_frame = clip.seconds_per_frame
+        return
+    }
+    sprite.clip = clip
+    sprite.size = {clip.frame_w * sprite.scale, clip.frame_h * sprite.scale}
+
+    // Not frame 0: a range starting at 4 left on frame 0 is outside its own
+    // cycle, and update_animation's wrap arithmetic then lands somewhere that
+    // belongs to neither animation.
+    seat_first_frame(sprite)
 }
 
 // Advances the sprite's frame and works out its uv window. Call once a frame,

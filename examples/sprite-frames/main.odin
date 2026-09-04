@@ -28,10 +28,11 @@ main :: proc() {
 	coin := matchbox.animated_sprite_of(clip, scale = 4)
 	coin.position = {480 - coin.size.x, 240 - coin.size.y}
 
-	// The same clip on a second sprite, running at its own speed: a clip holds
-	// the art, a sprite holds where it has got to.
-	slow := matchbox.animated_sprite_of(clip, scale = 2)
-	slow.clip.seconds_per_frame = 0.25
+	// Half the sheet, at a third of the speed. A range is a view onto the same
+	// texture -- no second upload -- which is how a walk, an idle and a jump come
+	// off one sheet. Destroy the sheet only; the ranges share its texture.
+	half := matchbox.animation_range(clip, 0, 4, 0.25)
+	slow := matchbox.animated_sprite_of(half, scale = 2)
 	slow.position = {760, 400}
 
 	for matchbox.is_running() {
@@ -51,9 +52,14 @@ main :: proc() {
 		matchbox.draw_text(&matchbox.mbi.font,
 			"eight separate PNGs, packed into one sheet at load", 60, 80, matchbox.WHITE)
 		matchbox.draw_text(&matchbox.mbi.font,
-			"frame", 60, 460, matchbox.WHITE)
+			"whole sheet, frame", 60, 460, matchbox.WHITE)
 		matchbox.draw_text(&matchbox.mbi.font,
-			cast(i64)coin.current_frame, 160, 460, matchbox.WHITE)
+			cast(i64)coin.current_frame, 340, 460, matchbox.WHITE)
+
+		matchbox.draw_text(&matchbox.mbi.font,
+			"range 0..3, frame", 500, 460, matchbox.WHITE)
+		matchbox.draw_text(&matchbox.mbi.font,
+			cast(i64)slow.current_frame, 780, 460, matchbox.WHITE)
 
 		matchbox.end_drawing()
 	}

@@ -284,8 +284,19 @@ first and the risky work lands on a base that is already consistent.
 | 2 -- `create_x` / `destroy_x` | **done**, `669ce87` -- 20 renames, 27 files. `destroy` group audited: 15 public members, 4 privates correctly outside |
 | 3 -- `is_x` / `get_x` | **done**, `0930c9e` -- 30 renames, 39 files |
 | 4 -- file moves | **done**, `14fa9c7` -- `utility.odin` created, `timer`/`lerp`/`look_at` deleted, clock logic out of `poll_events` |
-| 5 -- input onto SDL values | next |
-| 6-9 | not started |
+| 5 -- input onto SDL values | **done**, `415800f` -- `Mouse_Button` deleted for `sdl.MouseButtonFlag` |
+| 6 -- small dedupe | next |
+| 7-9 | not started |
+
+**Step 5 fixed a real bug, not just a naming inconsistency.** The old handler
+switched SDL's button id into the three-member enum and set `valid = false`
+for anything else, so `.X1` and `.X2` -- the side buttons, ids 4 and 5 -- fell
+into the default arm and skipped the state update entirely. Side-button clicks
+were silently discarded, and nothing else in the event switch caught them. They
+work now. The replacement maps arithmetically (`MouseButtonFlag(button - 1)`,
+since SDL numbers from 1 and the enum from 0) behind a range check that is
+load-bearing: `button` is a `Uint8`, and a mouse with more than five buttons
+reports ids with no enum member, which would index past the array.
 
 Step 4's clock extraction was the one place a silent behavioural change could
 have hidden, so it was checked line by line: `clock_wait_for_frame` and

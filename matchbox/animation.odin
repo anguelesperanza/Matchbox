@@ -1,5 +1,8 @@
 package matchbox
 
+import "core:log"
+import "core:slice"
+
 
 // -----------------------------------------------------------------------
 // Animation
@@ -57,6 +60,113 @@ load_animation :: proc(bytes: []byte, frame_w: f32, frame_h: f32, cols: i32, row
 		frame_w           = frame_w,
 		frame_h           = frame_h,
 	}
+}
+
+/*
+	A clip from frames that arrived as separate image files.
+
+	`load_animation` wants one sheet. Art does not always come that way -- an
+	exporter that writes `run_00.png` through `run_07.png` is as common as one
+	that writes a strip -- so this packs them into a sheet at load time and hands
+	back an ordinary `AnimationClip`. Everything downstream is unchanged:
+	`switch_animation`, `update_animation` and `destroy_animation_clip` do not
+	know the difference.
+
+	Frames are encoded bytes, not paths, for the same reason `create_sprite`
+	takes them: `#load` puts the art inside the executable, which is what makes
+	it work unchanged inside an Android apk.
+
+		clip, ok := mb.load_animation_frames({
+			#load("art/run_0.png"), #load("art/run_1.png"), #load("art/run_2.png"),
+		}, 0.1)
+
+	**Packing rather than a texture per frame** costs one upload at load and
+	saves a bind per draw. `draw_animated_sprite` binds the clip's texture on
+	every call, so a screen of twenty characters is twenty binds either way with
+	a sheet, and twenty binds *plus* a texture switch per frame without one.
+
+	`columns` lays the grid out; 0 picks a roughly square one. A single row is
+	the obvious choice and the wrong one at scale: a row of a hundred 256-pixel
+	frames is 25,600 pixels wide, past the 16,384 limit common hardware imposes,
+	and the upload fails for reasons that have nothing to do with the art.
+
+	Frames of different sizes are **padded to the largest, not stretched**, so a
+	frame the artist drew smaller stays where they put it. The cell size is the
+	largest frame in the set, which is also what the sprite's `size` becomes.
+
+	Returns `ok = false` if the set is empty or a frame fails to decode, rather
+	than taking the process down the way `create_sprite` does. Frames are asset
+	data and a game may reasonably want to carry on without one.
+*/
+load_animation_frames :: proc(
+	frames:            [][]byte,
+	seconds_per_frame: f32,
+	columns:           i32 = 0,
+) -> (clip: AnimationClip, ok: bool) {
+	if len(frames) == 0 {
+		log.error("load_animation_frames: no frames")
+		return {}, false
+	}
+
+	images := make([]Image, len(frames), context.temp_allocator)
+
+	// Decoded through the context allocator and freed here, not through the temp
+	// one: `load_image` takes an allocator but `destroy_image` does not, so it
+	// always frees with `context.allocator`. Handing it temp-allocated pixels is
+	// a bad free that the default allocators shrug off and a tracking allocator
+	// reports -- in a game that did nothing wrong.
+	defer for &image in images do destroy_image(&image)
+
+	frame_w, frame_h: i32
+	for bytes, i in frames {
+		image, decoded := load_image(bytes)
+		if !decoded {
+			log.errorf("load_animation_frames: frame %v did not decode", i)
+			return {}, false
+		}
+
+		images[i] = image
+		frame_w = max(frame_w, image.width)
+		frame_h = max(frame_h, image.height)
+	}
+
+	count := i32(len(frames))
+
+	cols := columns
+	if cols <= 0 {
+		// Roughly square, so the sheet grows in both directions rather than off
+		// the end of what the hardware will take.
+		cols = 1
+		for cols * cols < count do cols += 1
+	}
+	cols = min(cols, count)
+	rows := (count + cols - 1) / cols
+
+	// Zeroed, so the padding around a frame smaller than the cell is
+	// transparent rather than whatever the allocator last held.
+	sheet := make([][4]u8, int(frame_w) * int(cols) * int(frame_h) * int(rows),
+		context.temp_allocator)
+
+	sheet_w := frame_w * cols
+	for image, i in images {
+		ox := (i32(i) % cols) * frame_w
+		oy := (i32(i) / cols) * frame_h
+
+		for y in 0 ..< image.height {
+			copy(sheet[(oy + y) * sheet_w + ox:][:image.width],
+			     image.pixels[y * image.width:][:image.width])
+		}
+	}
+
+	return AnimationClip{
+		mesh              = create_mesh_from_pixels(slice.to_bytes(sheet), sheet_w, frame_h * rows),
+		cols              = cols,
+		rows              = rows,
+		frame_count       = count,
+		seconds_per_frame = seconds_per_frame,
+		frame_w           = f32(frame_w),
+		frame_h           = f32(frame_h),
+	}, true
 }
 
 // Gives the clip's sheet texture back to the GPU. A clip shared between

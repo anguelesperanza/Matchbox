@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 336 of them -- with its arguments
+Every public procedure in the package -- 338 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -17,13 +17,13 @@ any.
 - [Getting started](#getting-started) -- 18
 - [Input](#input) -- 42
 - [2D drawing](#2d-drawing) -- 56
-- [Text and fonts](#text-and-fonts) -- 20
+- [Text and fonts](#text-and-fonts) -- 21
 - [2D cameras](#2d-cameras) -- 3
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 45
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 29
+- [Animation](#animation) -- 30
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 12
@@ -770,6 +770,18 @@ draw_text_i64 :: proc(
 )
 ```
 An integer, without the caller building a string for it.
+
+```odin
+draw_text_2_i64 :: proc(
+	font: ^Font,
+	integers:[2]i64,
+	x:f32,
+	y:f32,
+	color:[4]f32,
+	separator:string = " ",
+)
+```
+`strconv.write_float`'s leading sign, dropped when it is a plus and kept when it is a minus.
 
 ```odin
 draw_text_2_float :: proc(
@@ -2031,6 +2043,16 @@ load_animation :: proc(
 ) -> AnimationClip
 ```
 The clip on its own, without a sprite wrapped round it.
+
+```odin
+load_animation_frames :: proc(
+	frames: [][]byte,
+	seconds_per_frame: f32,
+	columns: i32 = 0) -> (clip: AnimationClip,
+	ok: bool,
+)
+```
+A clip from frames that arrived as separate image files.
 
 ```odin
 destroy_animation_clip :: proc(clip: ^AnimationClip)

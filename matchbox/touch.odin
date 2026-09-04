@@ -29,6 +29,8 @@ package matchbox
 	`is_touch_active` is how a screen makes them.
 */
 
+import "core:math/linalg"
+
 import sdl "vendor:sdl3"
 
 // Ten, which is as many fingers as anybody has. Fixed, so the slots cost no
@@ -137,15 +139,10 @@ get_pinch :: proc() -> (distance: f32, change: f32, ok: bool) {
 
 	if found < 2 do return 0, 0, false
 
-	now  := vec_length(second.position - first.position)
-	then := vec_length((second.position - second.delta) - (first.position - first.delta))
+	now  := linalg.length(second.position - first.position)
+	then := linalg.length((second.position - second.delta) - (first.position - first.delta))
 
 	return now, now - then, true
-}
-
-@(private)
-vec_length :: proc(v: [2]f32) -> f32 {
-	return sdl.sqrtf(v.x * v.x + v.y * v.y)
 }
 
 // -----------------------------------------------------------------------

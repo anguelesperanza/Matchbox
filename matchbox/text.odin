@@ -108,11 +108,20 @@ draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) w
 }
 
 
-// A string at a position, in world coordinates -- so it moves with the camera
-// and scales with the letterbox. `draw_text_ui` is the one that does not.
-//
-// `x` and `y` are the left end of the baseline, not the top-left corner.
-draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
+/*
+	The glyph loop, walked once per string for either coordinate space.
+
+	`world_space` is the entire difference between the two public drawers. True
+	runs each glyph through `screen_pos` / `screen_size`, so the text moves with
+	the camera and scales with the letterbox. False leaves the numbers in window
+	pixels, which is what draws a HUD at the font's baked size -- *not* applying
+	the transform is what makes something the UI variant.
+
+	The two were thirty-five lines of identical code either side of that one
+	choice, which is two places to fix a glyph bug and one of them to forget.
+*/
+@(private)
+draw_glyphs :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32, world_space: bool) {
 	// Bound once for the whole string. The pipeline, the shared quad and the
 	// atlas are the same for every character in it -- only the uniforms differ.
 	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
@@ -139,8 +148,8 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
 
 		vert_data := Vert_Data{
-			position = screen_pos(pos),
-			size     = screen_size(size),
+			position = screen_pos(pos)   if world_space else pos,
+			size     = screen_size(size) if world_space else size,
 			screen   = get_screen_dims(),
 			uv_min   = {q.s0, q.t0},
 			uv_max   = {q.s1, q.t1},
@@ -148,6 +157,14 @@ draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f3
 
 		push_quad(&vert_data, nil, 0)
 	}
+}
+
+// A string at a position, in world coordinates -- so it moves with the camera
+// and scales with the letterbox. `draw_text_ui` is the one that does not.
+//
+// `x` and `y` are the left end of the baseline, not the top-left corner.
+draw_text_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
+	draw_glyphs(font, text, x, y, color, world_space = true)
 }
 
 // Draws a string, an integer or a float, so a game does not build a string for
@@ -180,39 +197,7 @@ measure_text :: proc(font: ^Font, text: string) -> [2]f32 {
 // is active, so the font renders at its native baked size instead of being
 // upscaled by the logical-resolution multiplier.
 draw_text_ui_string :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32) {
-	// Bound once for the whole string, as in draw_text_string, and the colour
-	// pushed once for the same reason.
-	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
-
-	frag_data := Font_Frag_Data{color = color}
-	push_frag_uniform(&frag_data, size_of(frag_data))
-
-	cursor_x := x
-	cursor_y := y
-
-	for ch in text {
-		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
-			continue
-		}
-
-		q: stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(font.baked_chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - FONT_FIRST_GLYPH, &cursor_x, &cursor_y, &q, true)
-
-		pos  := [2]f32{(q.x0 + q.x1) * 0.5, (q.y0 + q.y1) * 0.5}
-		size := [2]f32{q.x1 - q.x0, q.y1 - q.y0}
-
-		// No screen_pos / screen_size here: that is what makes this the UI
-		// variant, drawing at the font's baked size in window pixels.
-		vert_data := Vert_Data{
-			position = pos,
-			size     = size,
-			screen   = get_screen_dims(),
-			uv_min   = {q.s0, q.t0},
-			uv_max   = {q.s1, q.t1},
-		}
-
-		push_quad(&vert_data, nil, 0)
-	}
+	draw_glyphs(font, text, x, y, color, world_space = false)
 }
 
 // An integer in screen coordinates. Part of the `draw_text_ui` group.

@@ -21,6 +21,7 @@ package matchbox
 */
 
 import "core:math"
+import "core:math/linalg"
 
 /*
 	A straight line `thickness` pixels wide.
@@ -32,7 +33,7 @@ import "core:math"
 */
 draw_line :: proc(from: [2]f32, to: [2]f32, color: [4]f32, thickness: f32 = 1) {
 	delta  := to - from
-	length := math.sqrt(delta.x * delta.x + delta.y * delta.y)
+	length := linalg.length(delta)
 	if length <= 0 do return
 
 	// atan2 of a y-down delta and a y-down rotation agree: the vertex shader

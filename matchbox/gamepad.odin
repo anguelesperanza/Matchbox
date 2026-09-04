@@ -19,7 +19,7 @@ package matchbox
 	fall behind the way a queue can.
 */
 
-import "core:math"
+import "core:math/linalg"
 
 import sdl "vendor:sdl3"
 
@@ -290,7 +290,7 @@ get_gamepad_stick :: proc(pad: int, stick: Gamepad_Stick) -> [2]f32 {
 	case .RIGHT: raw = {get_gamepad_axis(pad, .RIGHTX), get_gamepad_axis(pad, .RIGHTY)}
 	}
 
-	magnitude := math.sqrt(raw.x * raw.x + raw.y * raw.y)
+	magnitude := linalg.length(raw)
 	deadzone  := mbi.input.gamepad_deadzone
 
 	if magnitude <= deadzone || magnitude <= 0 do return {0, 0}

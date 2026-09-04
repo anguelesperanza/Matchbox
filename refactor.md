@@ -253,6 +253,95 @@ come up.
 
 ---
 
+# Execution plan
+
+On branch `refactor`. Ordered so the mechanical, compiler-checked work lands
+first and the risky work lands on a base that is already consistent.
+
+**Two rules for the whole run:**
+
+1. **Steps run one at a time, not in parallel.** A rename touches every file
+   that names the thing, so two steps in flight would collide on the same
+   files. Small and serial beats fast and tangled.
+2. **Every step ends at the same gate:** `odin check matchbox -no-entry-point`
+   clean, `odin check` clean on all 24 examples, `python tools/gen_cheatsheet.py`
+   re-run if any public procedure changed, and a commit of its own. A step that
+   cannot pass the gate gets reverted rather than patched forward.
+
+| # | step | why here |
+|---|---|---|
+| 0 | Flatten `examples/TankMovement` | It is the one example the check sweep skips; every later step needs all 24 verifiable |
+| 1 | Type names → `Pascal_Snake_Case` | Mechanical, compiler-caught, and makes everything after easier to read |
+| 2 | `create_x` / `destroy_x` renames | Same, and the `destroy` group gets its missing members |
+| 3 | `is_x` / `get_x` renames | Same again; finishes the naming sweep in one run so nothing is half-converted |
+| 4 | File moves, no logic change | Now that names are settled, move procedures to the files they belong in |
+| 5 | Input onto SDL's values | Drops `Mouse_Button`, gains X1/X2 |
+| 6 | Small dedupe | The two text drawers, and `linalg.length` for the three hand-rolled ones |
+| 7 | One LRU with the frame guard | Closes the `Sprite_Cache` eviction hole |
+| 8 | Build `camera_follow` and parallax | New behaviour, on a settled base |
+| 9 | Errors: `(value, err)` replacing `ensure` | Widest blast radius, so it goes last and lands on stable names |
+
+### Step detail
+
+**0. TankMovement.** `src/main.odin` → `main.odin`; drop `build/` and
+`build.bat` (no other example ships one).
+
+**1. Types.** `AnimatedSprite`, `AnimationClip`, `CooldownTimer`,
+`FontFragData`, `OutlineFragData`, `VertData`, `LerpMove`, `MatchboxInfo`,
+`ParallaxSprites`, `SpriteForward` → `Animated_Sprite`, `Animation_Clip`,
+`Cooldown_Timer`, `Font_Frag_Data`, `Outline_Frag_Data`, `Vert_Data`,
+`Lerp_Move`, `Matchbox_Info`, `Parallax_Sprites`, `Sprite_Forward`. Also
+`Sprite_Forward`'s values (`.Top`, `.Right`, `.Bottom`, `.Left`) →
+`SCREAMING_CASE`, since it is the one enum whose values break the rule. The
+HLSL in `matchbox/shaders` names `matchbox.VertData` in comments -- update
+those too, but do **not** rerun `build_shaders`: a comment cannot change
+compiled output, and recompiling with a different `dxc` would churn every
+`.spv` and `.dxil` for nothing.
+
+**2. Constructors and destructors.** `create_x` per the rule, keeping
+`load_x` for things that arrive whole. `sprite_of` →
+`create_sprite_from_mesh`, `animated_sprite_of` →
+`create_animated_sprite_from_clip`. `sprite_cache_destroy`,
+`font_cache_destroy`, `shapes3d_destroy` → `destroy_x` form, and every
+*public* `destroy_x` joins the `destroy :: proc{...}` group -- the two private
+ones do not, since the group exists to be called from outside.
+
+**3. Predicates and getters.** The two lists under *Predicates and getters*
+above, with the carve-outs: procedures that act and report keep their verb,
+and computations are not getters.
+
+**4. Moves.** `draw_text_*` / `measure_text` / `draw_text_ui_*` / `trim_plus`
+from `font.odin` to `text.odin`; `destroy_animated_sprite` from `destroy.odin`
+to `animation.odin`; a new `utility.odin` absorbing `timer.odin`, `lerp.odin`
+and `look_at_point`, with `look_at_sprite` going to `sprite.odin` instead; and
+the frame limiter plus `delta_time` computation out of `poll_events` into a
+`clock.odin` procedure.
+
+**5. Input.** Delete `Mouse_Button`, use `sdl.MouseButtonFlag`. Check nothing
+indexes `mbi.input.mouse.buttons` by integer, and let X1/X2 through the
+`poll_events` switch that currently drops them.
+
+**6. Dedupe.** One private glyph walker behind `draw_text_string` and
+`draw_text_ui_string`. `linalg.length` at `gamepad.odin:293`,
+`touch.odin:147` and `shapes.odin:35`, removing `vec_length`.
+
+**7. Cache.** One generic LRU used by both caches, carrying the frame guard.
+
+**8. Features.** `camera_follow(target, delta_time)`; `update_parallax` /
+`draw_parallax`. Consider the same easing for `camera3d_follow`.
+
+**9. Errors.** `(value, err)` with union error types, replacing `ensure`.
+Expect every call site, every example and the README snippet to move with it.
+
+### Deferred past this run
+
+The file splits (`ui.odin`, `camera3d.odin`, `init.odin`), batching load-time
+uploads onto one command buffer, the `gltf2` conventions review, the Android
+tooling audit, and the physics/audio packages that `collisions.odin` and
+`sound.odin` are waiting on.
+
+---
+
 ## 2D and 3D: the split is deliberate, not drift
 
 **Origin:** Matchbox started 2D-only; 3D was added later for a separate

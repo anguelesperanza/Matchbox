@@ -26,6 +26,25 @@ its combo rules and cancel policy are genuinely the game's business. The
 problem is that it is doing a second job -- sequencing clips -- that belongs
 here.
 
+## Settled before starting
+
+| question | answer |
+|---|---|
+| the multi-frame advance fix | **done here**, as part of step 1 -- if the other session's fix lands too, the merge is the same change twice and resolves trivially |
+| `MAX_ANIMATION_QUEUE` | **4** -- one spare over the deepest chain in the game today, ~260 bytes a sprite |
+| where the work lands | **branch `animation`**, PR when done, as the refactor did |
+| `queue_animation`'s `looping` | **no default** -- the caller states it. `switch_animation` defaults it to `true` and a queued clip usually wants `false`, so either default is inconsistent with something and both fail silently |
+| `switch_animation` and the queue | **clears it** -- a hurt animation interrupting a jump must not resume the chain afterwards |
+| `is_animation_in_window` bounds | **inclusive both ends**, matching `animation_range` |
+| `get_animation_progress` | includes the accumulator fraction, so it moves smoothly rather than in steps; reads 1.0 on a finished one-shot |
+| a full queue | drops the new entry and logs, rather than silently overwriting |
+
+**A naming correction to this document's first draft.** It proposed
+`is_animation_frame_passed`, which returns a `bool` and so breaks the `is_` rule
+in `CLAUDE.md`. The precedent settles it without bending anything:
+`is_key_pressed` already means "went down *this frame*", so a this-frame
+question is squarely `is_`. The procedure is **`is_animation_frame_passed`**.
+
 ## Scope
 
 Two features, both in `matchbox/animation.odin`, plus one gap to close.
@@ -49,7 +68,7 @@ Replaces arithmetic the game currently does by hand.
 get_animation_frame    :: proc(sprite: Animated_Sprite) -> i32   // 0-based within the clip
 get_animation_progress :: proc(sprite: Animated_Sprite) -> f32   // 0..1 through the clip
 is_animation_in_window :: proc(sprite: Animated_Sprite, first, last: i32) -> bool
-did_animation_pass_frame :: proc(sprite: Animated_Sprite, frame: i32) -> bool
+is_animation_frame_passed :: proc(sprite: Animated_Sprite, frame: i32) -> bool
 ```
 
 The first three are stateless reads of `current_frame` and `accumulator`.
@@ -57,7 +76,7 @@ The first three are stateless reads of `current_frame` and `accumulator`.
 every call site, and `is_animation_in_window` is the cancel-window test the
 game writes as `frames_into_clip >= frame_count - cancel_window`.
 
-**`did_animation_pass_frame` is the one with a subtlety**, and it is worth
+**`is_animation_frame_passed` is the one with a subtlety**, and it is worth
 getting right rather than discovering later. Once `update_animation` advances
 *more than one frame per call* -- which is the fix for the frame-rate bug, and
 may already be in flight elsewhere -- a single update can cross frames 3, 4 and
@@ -74,13 +93,13 @@ Animated_Sprite gains:
     stepped:        i32   // frames advanced during the last update, 0 if none
 ```
 
-`did_animation_pass_frame` then answers over the span, wrapping with the clip:
+`is_animation_frame_passed` then answers over the span, wrapping with the clip:
 `stepped == 0` is false, `stepped >= frame_count` is true (the update crossed
 the whole clip), and otherwise it walks the span. Two `i32` per sprite.
 
 ### Named markers: deliberately not yet
 
-`did_animation_pass_frame(&s, 4)` is a magic number where
+`is_animation_frame_passed(&s, 4)` is a magic number where
 `animation_event(&s, "hit_active")` would read better, and per-clip marker data
 is a real thing a fighting game wants. It is **not** in this pass, for one
 concrete reason: markers would be an owned slice on `Animation_Clip`, and
@@ -179,7 +198,7 @@ public API moves.
 
 1. **Frame queries.** Four procedures, two new fields, tests for the span
    arithmetic including the wrap and the whole-clip-crossed case. Land after
-   the multi-frame advance fix, or with it -- `did_animation_pass_frame` is
+   the multi-frame advance fix, or with it -- `is_animation_frame_passed` is
    only meaningfully testable once an update can cross more than one frame.
 2. **`replay_animation`.** Smallest of the three; unblocks the combo retrigger
    immediately.

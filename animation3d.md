@@ -248,5 +248,7 @@ the public API moves.
 - `CLAUDE.md` — house style, notably **no callbacks** (a layer reports its state
   by being asked, never by calling back) and no new package-level constants
   beyond array sizes.
-- `animation.md` — the 2D work this follows, whose `switch_animation` /
-  `replay_animation` pair is the model for step 0.
+- The 2D animation work this follows, merged in PR #13. Its `switch_animation`
+  (idempotent — safe to call every frame) and `replay_animation` (explicit
+  restart) pair is the model for step 0, and `matchbox/animation.odin` is where
+  to read how they behave.

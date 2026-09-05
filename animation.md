@@ -40,7 +40,7 @@ here.
 | a full queue | drops the new entry and logs, rather than silently overwriting |
 
 **A naming correction to this document's first draft.** It proposed
-`is_animation_frame_passed`, which returns a `bool` and so breaks the `is_` rule
+`did_animation_pass_frame`, which returns a `bool` and so breaks the `is_` rule
 in `CLAUDE.md`. The precedent settles it without bending anything:
 `is_key_pressed` already means "went down *this frame*", so a this-frame
 question is squarely `is_`. The procedure is **`is_animation_frame_passed`**.
@@ -122,7 +122,7 @@ The bigger win for the game's codebase.
 ```odin
 MAX_ANIMATION_QUEUE :: 4   // an array size, which CLAUDE.md sanctions
 
-queue_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping := false)
+queue_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping: bool)
 clear_animation_queue :: proc(sprite: ^Animated_Sprite)
 ```
 
@@ -147,8 +147,7 @@ definition site and was rejected: it puts a pointer into game-owned memory
 inside a type that is copied by value and shared by `animation_range`, so a
 clip outliving its `next` is a dangling read rather than a mistake, and every
 range view would silently inherit the chain. The queue costs about 260 bytes
-per sprite at depth 4 and has no lifetime question in it. **Pick the depth
-deliberately** -- 3 covers the deepest sequence in the game today.
+per sprite at depth 4 and has no lifetime question in it.
 
 ---
 

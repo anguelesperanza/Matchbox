@@ -284,10 +284,9 @@ public API moves.
 
 ## After this
 
-The 3D side, where the real gap is **layered animation with bone masking** --
-playing a reload on the upper body while a run plays on the lower. `Animator`
-holds exactly one playback plus one crossfade source, so today a game needs a
-clip per (movement × action) pair, which does not scale past a couple of
-weapons. `sample_pose` already writes into an arbitrary buffer, so the
-composition end is well placed for it; the design work is masks and layer
-order. Its own plan, once this lands.
+**The 3D side, now planned separately in `animation3d.md`** -- layered
+animation with bone masking, so a reload can play on the upper body while a run
+carries on underneath. That document is written to be picked up cold on another
+machine, and includes a prerequisite bug fix (`play_animation` restarts the clip
+on every call, so a state machine that asks for its current animation each frame
+freezes the character on frame one).

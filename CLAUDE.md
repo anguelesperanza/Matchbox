@@ -90,6 +90,31 @@ already public and moving it would break callers (`Animator` embeds
 **Why:** it is easier to hold in your head. One name to pass, one place to look,
 and no chance of half-updated state.
 
+## No callbacks
+
+Matchbox does not hand a game's procedure back to it later. Nothing here takes
+an `on_finished`, a listener, or a handler, and nothing should.
+
+Ask instead. The framework is immediate-mode from end to end -- `is_key_pressed`
+is polled rather than delivered, `draw_sprite` retains nothing -- so anything
+that wants to know a thing happened asks on the frame it cares:
+
+```odin
+if !sprite.playing        { /* the one-shot finished */ }
+if mb.is_key_pressed(.D)  { /* the key went down */ }
+```
+
+**Why:** a callback is tedious out of proportion to what it buys. It inverts
+control, so the game reads inside-out; it drags in lifetimes, because a handler
+outliving the thing it points at is a crash rather than a mistake; and it needs
+answers about ordering and re-entrancy -- what happens when a handler starts an
+animation, or destroys the sprite that called it -- that polling never has to
+ask. The one thing callbacks genuinely give you is not missing an event on a
+frame nobody looked, and that is cheaper to solve by keeping the answer
+readable for the frame it belongs to.
+
+This is a rule about Matchbox's own API, not about what a game does internally.
+
 ## No new package-level constants or globals
 
 Configuration rides in as a defaulted struct, not as a top-level constant:

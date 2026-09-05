@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 336 of them -- with its arguments
+Every public procedure in the package -- 343 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -23,7 +23,7 @@ any.
 - [3D cameras](#3d-cameras) -- 42
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 26
+- [Animation](#animation) -- 33
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
@@ -2132,9 +2132,52 @@ switch_animation :: proc(
 Puts a different clip on a sprite and restarts it from frame zero.
 
 ```odin
+replay_animation :: proc(sprite: ^Animated_Sprite)
+```
+Starts the current clip again from its first frame.
+
+```odin
+queue_animation :: proc(
+	sprite: ^Animated_Sprite,
+	clip: Animation_Clip,
+	looping: bool,
+)
+```
+Lines a clip up to play when the current one finishes.
+
+```odin
+clear_animation_queue :: proc(sprite: ^Animated_Sprite)
+```
+Forgets everything lined up behind the current clip, which carries on playing.
+
+```odin
 update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32)
 ```
 Advances the sprite's frame and works out its uv window.
+
+```odin
+get_animation_frame :: proc(sprite: Animated_Sprite) -> i32
+```
+Which frame of the clip is showing, counting from 0.
+
+```odin
+get_animation_progress :: proc(sprite: Animated_Sprite) -> f32
+```
+How far through the clip playback is, 0 to 1.
+
+```odin
+is_animation_in_window :: proc(
+	sprite: Animated_Sprite,
+	first,
+	last: i32,
+) -> bool
+```
+Whether playback is somewhere in `first ..= last`, counting from 0.
+
+```odin
+is_animation_frame_passed :: proc(sprite: Animated_Sprite, frame: i32) -> bool
+```
+Whether the last `update_animation` crossed *into* `frame`, counting from 0.
 
 ```odin
 draw_animated_sprite :: proc(sprite: Animated_Sprite)

@@ -189,6 +189,39 @@ flag to make an unrelated check fire.
 
 ---
 
+## Progress
+
+| step | state |
+|---|---|
+| 1 -- the clock fix and the frame queries | **done**, `03e3eb5` -- 340 procedures, 27 tests |
+| 2 -- `replay_animation` and the queue | next, together: both go through `seat_first_frame` |
+| 3 -- an example | not started |
+
+**Step 1 took the fix as arithmetic rather than a loop**, which was a
+deliberate deviation and the better answer. `steps := i32(accumulator /
+seconds_per_frame)` gives identical catch-up in O(1), where a loop leaves a
+hang reachable from a large `delta_time` -- and `update_animation` takes that
+as an argument, so nothing guarantees `poll_events` clamped it first.
+`advance_playback` already works this way on the skeletal side.
+
+`seconds_per_frame <= 0` **freezes the clip** rather than stepping once a call.
+It is the zero value of `Animation_Clip`, so it is the state a hand-built clip
+arrives in, and stepping once a call would run it at whatever rate the game
+renders at -- silent, plausible, and the same class of bug as the one being
+fixed. Standing still is what sends somebody to look at the clip data.
+
+Two behaviours confirmed by hand afterwards, because both would break
+`farlite-test` silently if wrong:
+
+- A frame crossed **in the middle** of a multi-frame step reports as passed --
+  a 0.35s update over a 0.1s clip crosses 1, 2 and 3, and all three answer
+  true while 0 and 4 answer false. The starting frame is not "entered", which
+  is the distinction a naive equality check gets wrong.
+- A one-shot landing **exactly** on its last frame keeps `playing = true`, and
+  only the step that would go past clears it, reporting `stepped = 0`. That is
+  the original semantics preserved: the last frame gets its full duration, and
+  every `if !playing` in a game keeps meaning what it meant.
+
 ## Steps
 
 Same gate as the refactor: `odin check matchbox -no-entry-point`, all 24

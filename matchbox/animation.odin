@@ -23,6 +23,26 @@ Animation_Clip :: struct {
 	offset:            [2]f32,
 }
 
+/*
+	How deep a chain of clips can be lined up behind the one playing.
+
+	An array size, which is the exception `CLAUDE.md` allows -- Odin needs a
+	compile-time constant for a fixed bound, and a fixed bound is what keeps
+	the queue out of the allocator. Four covers the longest sequence a game has
+	wanted so far (a jump's begin, rise and loop) with one spare, and costs
+	about 260 bytes on every `Animated_Sprite`.
+*/
+MAX_ANIMATION_QUEUE :: 4
+
+// One clip waiting its turn, with the `looping` it should start under. The
+// pair travels together because a queued clip is nearly always a one-shot
+// while the last of a chain nearly always loops, and splitting them would
+// mean a second array to keep in step.
+Queued_Animation :: struct {
+	clip:    Animation_Clip,
+	looping: bool,
+}
+
 Animated_Sprite :: struct {
 	using body:    Body,
 	clip:          Animation_Clip,
@@ -48,6 +68,17 @@ Animated_Sprite :: struct {
 	*/
 	previous_frame: i32,
 	stepped:        i32,
+
+	/*
+		Clips lined up behind this one, oldest first.
+
+		`queue_len` is how many of the array are real; entries past it are
+		stale copies and are never read. Polled state like everything else here
+		-- nothing registers a handler and nothing is called back when a clip
+		ends. See `queue_animation`.
+	*/
+	queue:     [MAX_ANIMATION_QUEUE]Queued_Animation,
+	queue_len: int,
 }
 
 /*
@@ -499,6 +530,18 @@ switch_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping
         sprite.looping = looping
         return
     }
+    /*
+        A real switch abandons whatever was lined up behind the old clip.
+
+        This is the interruption case -- a character hit mid-jump switches to
+        the hurt clip -- and resuming the jump's remaining chain after it would
+        be a character that finishes a jump it stopped making. Cleared here
+        rather than in the `same` branch above, so a state machine calling this
+        every frame for the clip already playing does not wipe a queue it set
+        up alongside.
+    */
+    clear_animation_queue(sprite)
+
     sprite.clip    = clip
     sprite.size    = {clip.frame_w * sprite.scale, clip.frame_h * sprite.scale}
     sprite.looping = looping
@@ -510,6 +553,93 @@ switch_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping
     seat_first_frame(sprite)
 }
 
+/*
+	Starts the current clip again from its first frame.
+
+	The verb `switch_animation` deliberately does not have. Asking it for the
+	clip already playing does nothing, which is what lets a state machine call
+	it every frame -- but it leaves a game with no way to retrigger the clip it
+	is already on. A fighting game throwing the same jab twice needs exactly
+	that, and the alternative was making `switch_animation` restart on every
+	call, which would break every state machine that leans on its idempotence.
+
+	The queue is left alone: replaying the clip in hand is not abandoning what
+	was lined up behind it, unlike a switch to something else.
+*/
+replay_animation :: proc(sprite: ^Animated_Sprite) {
+	seat_first_frame(sprite)
+}
+
+/*
+	Lines a clip up to play when the current one finishes.
+
+	What a sequence of clips is made of. A jump that is three clips -- the
+	crouch, the launch, then the airborne loop -- is data rather than a state
+	machine counting frames:
+
+		mb.switch_animation(player, anim.jump_begin, looping = false)
+		mb.queue_animation(player, anim.jump_up,   false)
+		mb.queue_animation(player, anim.jump_rise, true)
+
+	`looping` has no default on purpose. `switch_animation` defaults it to
+	true, and a queued clip is usually a one-shot handing on to the next, so
+	either default would be quietly wrong somewhere and both fail silently --
+	an animation that loops forever where it should have moved on, or one that
+	stops dead where it should have held. Saying it at the call site costs a
+	word and cannot be got wrong invisibly.
+
+	**Only a clip that finishes pulls the next one**, so queueing behind a
+	looping clip lines up something that will never be reached -- a loop has no
+	end to fire on. That is deliberate rather than an oversight: the last clip
+	of a chain is the one that loops.
+
+	A full queue drops what it was handed and says so. Growing it would mean an
+	allocation on a per-sprite array, and overwriting would lose whichever clip
+	the game thought it had queued -- both quieter than the log.
+*/
+queue_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping: bool) {
+	if sprite.queue_len >= MAX_ANIMATION_QUEUE {
+		log.errorf("animation queue is full at %v; dropped the clip being queued",
+			MAX_ANIMATION_QUEUE)
+		return
+	}
+
+	sprite.queue[sprite.queue_len] = Queued_Animation{clip = clip, looping = looping}
+	sprite.queue_len += 1
+}
+
+// Forgets everything lined up behind the current clip, which carries on
+// playing. `switch_animation` does this for you when it changes clip.
+clear_animation_queue :: proc(sprite: ^Animated_Sprite) {
+	sprite.queue_len = 0
+}
+
+/*
+	Moves the front of the queue onto the sprite and starts it.
+
+	Shares `switch_animation`'s tail rather than repeating it, so a clip that
+	arrives by queue is seated exactly as one that arrives by switch -- size
+	recomputed for the new frame dimensions, and `seat_first_frame` for the
+	rest.
+
+	Shifting the array rather than keeping a head index: the queue is four
+	deep, so the copy is three entries at worst and the alternative is two
+	indices to keep in step for no measurable gain.
+*/
+@(private)
+pop_queued_animation :: proc(sprite: ^Animated_Sprite) {
+	next := sprite.queue[0]
+
+	for i in 1 ..< sprite.queue_len do sprite.queue[i - 1] = sprite.queue[i]
+	sprite.queue_len -= 1
+
+	sprite.clip    = next.clip
+	sprite.size    = {next.clip.frame_w * sprite.scale, next.clip.frame_h * sprite.scale}
+	sprite.looping = next.looping
+
+	seat_first_frame(sprite)
+}
+
 // Advances the sprite's frame and works out its uv window. Call once a frame,
 // before drawing.
 //
@@ -517,8 +647,11 @@ switch_animation :: proc(sprite: ^Animated_Sprite, clip: Animation_Clip, looping
 // what a game watches (`!sprite.playing`) to know a one-shot has finished --
 // the same signal `update_animator`'s `playing` gives for the skeletal system.
 // Once stopped, further calls recompute the same uv window and do nothing
-// else, so a flip toggled after the fact still takes -- restart with
-// `switch_animation` or `create_animated_sprite_from_clip`.
+// else, so a flip toggled after the fact still takes -- `replay_animation`
+// starts the same clip again, `switch_animation` moves to a different one.
+//
+// A one-shot that finishes with something queued behind it hands over to it
+// here rather than stopping. See `queue_animation`.
 //
 // The 2D one. `update_animator` is the skeletal equivalent.
 update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32) {
@@ -572,6 +705,35 @@ update_animation :: proc(sprite: ^Animated_Sprite, delta_time: f32) {
                 sprite.current_frame = clip.frame_start + clip.frame_count - 1
                 sprite.playing       = false
                 sprite.accumulator   = 0
+
+                /*
+                    The clip ran out, so whatever was queued behind it takes
+                    over -- here, inside the branch that ends a one-shot,
+                    rather than anywhere `playing` happens to be false.
+
+                    The difference matters: a game pauses a sprite by clearing
+                    `playing`, and a pause with a chain still pending must not
+                    skip to the next clip. Popping only where the clock ran the
+                    clip out separates "finished" from "stopped" exactly.
+
+                    The cost is that queueing onto a sprite whose clip has
+                    *already* finished never starts -- there is no finish left
+                    to fire on. Use `switch_animation` to start one from a
+                    standstill; the queue is for what comes after something
+                    still playing.
+
+                    `seat_first_frame` inside the pop clears `previous_frame`
+                    and `stepped`, so this update reports nothing crossed. That
+                    is the honest answer rather than a lost one:
+                    `is_animation_frame_passed` asks about `sprite.clip`, and
+                    by the time anything can ask, that is the incoming clip,
+                    which has crossed nothing. Keeping the outgoing span would
+                    measure `previous_frame` against the old clip's
+                    `frame_start` and test it against the new clip's
+                    `frame_count` -- two index spaces mixed, giving answers
+                    about frames that were never played.
+                */
+                if sprite.queue_len > 0 do pop_queued_animation(sprite)
             } else {
                 sprite.stepped       = steps
                 sprite.current_frame = clip.frame_start + (rel + steps) % clip.frame_count

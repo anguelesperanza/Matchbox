@@ -195,7 +195,31 @@ flag to make an unrelated check fire.
 |---|---|
 | 1 -- the clock fix and the frame queries | **done**, `03e3eb5` -- 340 procedures, 27 tests |
 | 2 -- `replay_animation` and the queue | **done**, `2676ef4` -- 343 procedures, 35 tests |
-| 3 -- an example | next |
+| 3 -- an example | **done**, `94985b1` -- `examples/animation-chain`, 25 examples now |
+
+**The 2D work in this document is complete.** It can be deleted once the branch
+merges, the way `3d.md` was -- except for the *After this* section below, which
+is the starting point for the 3D layering work and wants moving into a plan of
+its own rather than losing.
+
+**The example found a real interaction while being written**, which is worth
+keeping in mind because a game will hit it: pressing the start key *during* the
+first stage of a chain asks `switch_animation` for the clip already playing, so
+it takes the idempotent branch -- the chain does not restart, the queue is not
+cleared, and the two queue calls stack duplicates until the queue fills.
+Measured at queue length **4** with the frame stuck at 1. The fix is the reason
+both verbs exist: `clear_animation_queue`, then `switch_animation`, then
+`replay_animation`, which covers a fresh start and a restart-during-play with
+the same three lines.
+
+A second thing the example documents and a game should know: **only a clip that
+finishes pulls the next one**, so anything queued behind a looping clip is
+unreachable. The last entry of a chain is the one that loops.
+
+**Not seen running.** The example compiles and its numbers were checked
+headlessly, but this session has no display or GPU, so nothing visual in it has
+been observed -- layout, colours, and whether the window indicator reads
+clearly behind the sprite are all reasoned rather than seen.
 
 **Step 2's real decision was where the pop lives:** inside the branch that
 ends a one-shot, not anywhere `playing` is false. A game pauses by clearing

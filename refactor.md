@@ -589,10 +589,13 @@ Small and already mostly realised, not a case for merging the render paths:
 - The two animation systems (`animation.odin` 2D, `animation3d.odin`
   skeletal) mirror each other in shape on purpose --
   `update_animation`/`update_animator`, and now `playing`/`looping` on both
-  (added 2026-09-04, see the 2D-animation-finished work). Same vocabulary,
-  no shared machinery forced between them. This is the right amount of
-  overlap -- keep extending it by analogy rather than trying to unify the
-  types.
+  (added 2026-09-04, see the 2D-animation-finished work). Extended again
+  2026-09-05: `play_animation` is now idempotent for the clip already
+  playing, the same way `switch_animation` is, and `replay_animation_3d`
+  pairs with `replay_animation` as the explicit-restart verb neither
+  idempotent form has. See `animation3d.md`. Same vocabulary, no shared
+  machinery forced between them. This is the right amount of overlap --
+  keep extending it by analogy rather than trying to unify the types.
 - `Camera` (2D) and `Camera3D` could likely share a couple of small concepts,
   but **correction, 2026-09-04: it's not `follow_speed` as first noted here.**
   Checked and `Camera.follow_speed` is dead on the 2D side -- declared,

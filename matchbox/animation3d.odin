@@ -194,29 +194,69 @@ Animation_Blend :: struct {
 	after; `from` is the same as `locals` for whatever is being faded out, and
 	is untouched when nothing is. `palettes` is what the shader reads -- one per
 	part, because a skinned part's palette depends on the node its mesh hangs
-	off as well as on the skin.
+	off as well as on the skin. `layer_locals` is the same idea as `from`, one
+	scratch buffer per layer, so a layer's own sample has somewhere to live
+	before it is mixed into `locals`.
 */
 Animation_Pose :: struct {
-	locals:   []Transform,
-	from:     []Transform,
-	globals:  []matrix[4, 4]f32,
-	palettes: [][]matrix[4, 4]f32,
+	locals:       []Transform,
+	from:         []Transform,
+	globals:      []matrix[4, 4]f32,
+	palettes:     [][]matrix[4, 4]f32,
+	layer_locals: [MAX_ANIMATION_LAYERS][]Transform,
 }
 
 /*
-	One character's playback: what is playing, what it is fading from, and the
-	matrices that come out of both.
+	How many layers an animator can play at once, on top of its base clip.
+
+	An array size, which is the exception `CLAUDE.md` allows. Two covers the
+	case that motivated layering at all -- one action (a reload) over one base
+	(whatever the legs are doing). Every layer costs a `[]Transform` and a
+	`[]bool` per animator, per character, so this rises only if a real need
+	appears for a third.
+*/
+MAX_ANIMATION_LAYERS :: 2
+
+/*
+	One clip driving a masked subset of the skeleton, on top of the base.
+
+	`mask` is node_count long and says which nodes this layer owns; it is a
+	copy handed in by `play_animation_layer`, not a reference to the caller's
+	own slice -- `Animation_Clip` already shares ownership with
+	`animation_range` on the 2D side, where `destroy_animated_sprite` frees the
+	clip unconditionally and two sprites cut from one sheet double-release, so
+	a borrowed mask here was not worth repeating for 80 bools.
+
+	`weight` is 0..1 and is the game's to set (`set_animation_layer_weight`),
+	not something this animates on its own -- see `animation3d.md` for why a
+	fade is three lines in the game rather than a field here. `active` is
+	separate from `playing`: an inactive layer is skipped by the composition
+	loop entirely, whatever its playback thinks it is doing, which is what
+	makes `stop_animation_layer` free.
+*/
+Animation_Layer :: struct {
+	using playback: Animation_Playback,
+	mask:           []bool,
+	weight:         f32,
+	active:         bool,
+}
+
+/*
+	One character's playback: what is playing, what it is fading from, the
+	layers riding on top, and the matrices that come out of all three.
 
 	The playback is `using`, so `animator.playing` and `animator.time` are
 	reachable without going through a second name -- a game asks whether the
-	animator is playing, not whether its playback is. The other two are grouped
-	because a game has no reason to reach into either.
+	animator is playing, not whether its playback is. The rest are grouped
+	because a game has no reason to reach into any of them directly; `layers`
+	is addressed by index through `play_animation_layer` and its companions.
 */
 Animator :: struct {
 	using playback: Animation_Playback,
 
-	blend: Animation_Blend,
-	pose:  Animation_Pose,
+	blend:  Animation_Blend,
+	pose:   Animation_Pose,
+	layers: [MAX_ANIMATION_LAYERS]Animation_Layer,
 }
 
 /*
@@ -263,6 +303,16 @@ create_animator :: proc(
 	animator.blend.elapsed = 0
 	animator.blend.from    = Animation_Playback{clip = -1}
 
+	// Every layer gets its scratch pose and its mask storage up front, sized
+	// to this model's skeleton, whether or not a game ever plays anything on
+	// it -- an unused layer is `active == false` and costs nothing beyond the
+	// allocation.
+	for i in 0 ..< MAX_ANIMATION_LAYERS {
+		animator.layers[i].playback = Animation_Playback{clip = -1, speed = 1, looping = true}
+		animator.layers[i].mask     = make([]bool, node_count)
+		animator.pose.layer_locals[i] = make([]Transform, node_count)
+	}
+
 	for part, i in model.parts {
 		if part.skin < 0 || part.skin >= len(model.skeleton.skins) do continue
 		animator.pose.palettes[i] = make([]matrix[4, 4]f32, len(model.skeleton.skins[part.skin].joints))
@@ -285,6 +335,11 @@ destroy_animator :: proc(animator: ^Animator) {
 	delete(animator.pose.globals)
 	delete(animator.pose.from)
 	delete(animator.pose.locals)
+
+	for i in 0 ..< MAX_ANIMATION_LAYERS {
+		delete(animator.pose.layer_locals[i])
+		delete(animator.layers[i].mask)
+	}
 
 	animator^ = Animator{playback = {clip = -1, speed = 1, looping = true}}
 }
@@ -579,18 +634,33 @@ play_animation :: proc(animator: ^Animator, model: Model, name: string, looping:
 	return true
 }
 
-// The same by index, for a game that resolved the name once and kept it.
+/*
+	The same by index, for a game that resolved the name once and kept it.
+
+	Asking for the clip already on the animator does nothing but sync
+	`looping` -- it does not restart it, even a finished one-shot. This is
+	what lets a state machine call `play_animation("Walk")` every frame
+	without freezing the character on frame one, which is exactly what it
+	used to do: the time reset below ran unconditionally, so re-asking for the
+	current clip mid-stride snapped it back to its first frame every call.
+	Ask for a *different* clip to fade to it, or `replay_animation_3d` to
+	retrigger this one on purpose.
+*/
 play_animation_index :: proc(animator: ^Animator, model: Model, index: int, looping: bool = true) {
 	if index < 0 || index >= len(model.animations) do return
 
+	if animator.clip == index {
+		animator.looping = looping
+		return
+	}
+
 	/*
 		Start a fade, unless there is nothing to fade from or the game has asked
-		for none. Re-playing the clip already running is left alone: it is how a
-		one-shot is retriggered, and fading a clip into itself would cross-fade
-		its end with its beginning for no reason.
+		for none. The same-clip case is handled above and never reaches here, so
+		this is always a change of clip.
 	*/
 	if animator.blend.enabled && animator.blend.duration > 0 &&
-	   animator.playing && animator.clip >= 0 && animator.clip != index {
+	   animator.playing && animator.clip >= 0 {
 
 		if animator.blend.active {
 			/*
@@ -621,6 +691,154 @@ play_animation_index :: proc(animator: ^Animator, model: Model, index: int, loop
 // should look like; `play_animation` again to restart from the top.
 stop_animation :: proc(animator: ^Animator) {
 	animator.playing = false
+}
+
+/*
+	Starts the current clip again from its first frame.
+
+	The verb `play_animation` deliberately does not have, now that it is
+	idempotent for the clip already playing (see its doc comment). A fighting
+	game throwing the same jab twice needs a way to retrigger a clip on
+	purpose, and this is it -- no fade, since crossfading a clip into itself
+	would mix its end with its own beginning for no reason. Mirrors
+	`replay_animation` on the 2D side.
+*/
+replay_animation_3d :: proc(animator: ^Animator) {
+	animator.time    = 0
+	animator.playing = true
+}
+
+// -----------------------------------------------------------------------
+// Layer masks
+// -----------------------------------------------------------------------
+
+/*
+	Every node at or below `root` in the hierarchy -- the mask for "everything
+	from the spine up" or "everything from the hip down".
+
+	Built in one pass over `skeleton.order`, which is already sorted so a
+	parent always precedes its children: mark `root`, then walk the order and
+	let a marked parent mark its child. No recursion and no depth walk per
+	node, because the sort already did that work at load.
+
+	The result is node_count long and owned by the caller -- `play_animation_layer`
+	copies it into the layer rather than keeping this slice, so it is safe (and
+	expected) to free after that call.
+*/
+animation_mask_below :: proc(model: Model, root: u32, allocator := context.allocator) -> []bool {
+	mask := make([]bool, len(model.skeleton.rest), allocator)
+
+	if int(root) >= len(mask) do return mask
+	mask[root] = true
+
+	for n in model.skeleton.order {
+		parent := model.skeleton.parents[n]
+		if parent >= 0 && mask[parent] do mask[n] = true
+	}
+
+	return mask
+}
+
+/*
+	A mask covering exactly the named nodes, for a set that is not one clean
+	subtree -- a face and a hand rig for a full-body wince, say.
+
+	A name `node_index` cannot find is skipped and logged rather than failing
+	the whole mask, on the same reasoning `node_index` itself gives for asking
+	a caller to check `found`: a typo here should be diagnosable, not a mask
+	that silently covers nothing.
+*/
+animation_mask_named :: proc(model: Model, names: []string, allocator := context.allocator) -> []bool {
+	mask := make([]bool, len(model.skeleton.rest), allocator)
+
+	for name in names {
+		node, found := node_index(model, name)
+		if !found {
+			log.errorf("animation_mask_named: model has no node named %q", name)
+			continue
+		}
+		mask[node] = true
+	}
+
+	return mask
+}
+
+// -----------------------------------------------------------------------
+// Layers
+// -----------------------------------------------------------------------
+
+/*
+	Starts `name` playing on `layer`, masked to `mask`.
+
+	`mask` is copied into the layer, sized to this animator's skeleton -- see
+	`Animation_Layer`'s doc comment for why a reference is not offered instead.
+	A wrongly-sized mask (built against a different model) fails rather than
+	reading past the end of it or silently covering the wrong nodes.
+
+	Idempotent for the clip already playing on this layer, exactly as
+	`play_animation` is for the base: asking again does not restart it, so a
+	state machine can drive a layer the same way it drives the base clip. The
+	mask is still refreshed either way, since a game may want to widen or
+	narrow what a layer owns without restarting the clip on it.
+
+	A layer starts at whatever weight it already had -- 0 for one that has
+	never played -- so a game fades it in with `set_animation_layer_weight`
+	rather than popping straight to full strength. `stop_animation_layer`
+	leaves the weight as it was too, for the same reason.
+*/
+play_animation_layer :: proc(animator: ^Animator, model: Model, layer: int, name: string, mask: []bool, looping: bool = true) -> bool {
+	if layer < 0 || layer >= MAX_ANIMATION_LAYERS {
+		log.errorf("play_animation_layer: layer %v is out of range 0..<%v", layer, MAX_ANIMATION_LAYERS)
+		return false
+	}
+
+	index, found := animation_index(model, name)
+	if !found {
+		log.errorf("model has no animation named %q", name)
+		return false
+	}
+
+	L := &animator.layers[layer]
+
+	if len(mask) != len(L.mask) {
+		log.errorf("play_animation_layer: mask is %v nodes, model skeleton is %v", len(mask), len(L.mask))
+		return false
+	}
+	copy(L.mask, mask)
+
+	if L.clip == index {
+		L.looping = looping
+		L.active  = true
+		return true
+	}
+
+	L.playback = Animation_Playback{clip = index, speed = 1, looping = looping, playing = true}
+	L.active   = true
+	return true
+}
+
+// Stops a layer where it is and drops it from the composition -- the masked
+// joints fall back to whatever the base (or a layer beneath it) says, on the
+// very next update. Mirrors `stop_animation`: nothing here is torn down, so
+// `play_animation_layer` on the same layer picks up cleanly.
+stop_animation_layer :: proc(animator: ^Animator, layer: int) {
+	if layer < 0 || layer >= MAX_ANIMATION_LAYERS do return
+	animator.layers[layer].active = false
+}
+
+/*
+	Sets how strongly `layer` overrides its masked joints, 0 (off) to 1 (full
+	override). Not clamped here -- `update_animator` clamps at the point it is
+	used, so a game overshooting while easing a fade does not need to guard
+	against it, but reads `animator.layers[i].weight` back exactly as set.
+
+	Ramping this over time is the game's job, in three lines
+	(`weight += dt / fade_duration`) -- see `animation3d.md` for why that is
+	not built in here.
+*/
+set_animation_layer_weight :: proc(animator: ^Animator, layer: int, weight: f32) {
+	if layer < 0 || layer >= MAX_ANIMATION_LAYERS do return
+	animator.layers[layer].weight = weight
 }
 
 /*
@@ -684,6 +902,31 @@ update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32) {
 			nobody would look for it.
 		*/
 		if t >= 1 do animator.blend.active = false
+	}
+
+	/*
+		Layers, after the base and its own blend have settled into `locals` and
+		before the hierarchy is resolved -- see `animation3d.md` for why this is
+		the one place layering has to touch. Each layer samples into its own
+		scratch buffer and is mixed in through its mask; an inactive or
+		zero-weight layer does not even advance its clock, which is what makes
+		an unused layer free.
+
+		Layers do not crossfade their own clips the way the base does -- a
+		switch on a layer snaps. Worth it only if that turns out to matter in
+		practice, per `animation3d.md`.
+	*/
+	for &layer, i in animator.layers {
+		if !layer.active || layer.weight <= 0 do continue
+
+		advance_playback(&layer.playback, model, delta_time)
+		sample_pose(model, layer.playback, animator.pose.layer_locals[i])
+
+		w := clamp(layer.weight, 0, 1)
+		for n in 0 ..< len(animator.pose.locals) {
+			if !layer.mask[n] do continue
+			animator.pose.locals[n] = transform_mix(animator.pose.locals[n], animator.pose.layer_locals[i][n], w)
+		}
 	}
 
 	animator_resolve(animator, model)

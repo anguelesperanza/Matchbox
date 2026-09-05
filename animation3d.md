@@ -241,6 +241,28 @@ the public API moves.
    new asset rather than a new example file.
 4. **Validate on a real character** — the part that needs the assets and the eye.
 
+## Progress
+
+| step | state |
+|---|---|
+| 0 — the restart-on-every-call fix | **done** — `play_animation` and `play_animation_index` are idempotent for the clip already playing, changing only `looping`; `replay_animation_3d` added for an explicit restart. Tested: a clock that had advanced is unchanged by re-asking for the current clip, and `replay_animation_3d` puts it back to zero. |
+| 1 — masks | **done** — `animation_mask_below`, one pass over `skeleton.order` exactly as planned above. `animation_mask_named` added alongside it, for a set that is not one clean subtree. Tested against the five-node synthetic skeleton: a subtree, a leaf, and a named set. |
+| 2 — layers | **done** — `Animation_Layer`, `MAX_ANIMATION_LAYERS :: 2`, the scratch buffers in `create_animator`/`destroy_animator`, the composition loop in `update_animator`, and `play_animation_layer`/`stop_animation_layer`/`set_animation_layer_weight`. Tested: weight 1 overrides only the masked joints, weight 0 changes nothing, weight 0.5 lands on `transform_mix`'s own answer, an inactive layer never advances its clock, and a layer is idempotent the same way the base clip is. |
+| 3 — an example | **not started** — needs a rig with a sensible upper-body split, which is not among the existing assets. |
+| 4 — validate on a real character | **not started** — needs the Windows machine, the assets, and the eye. |
+
+**One validation guard beyond the plan's pseudocode**: `play_animation_layer`
+rejects a mask whose length does not match the skeleton's node count, rather
+than letting `copy` silently truncate it. A mask built against the wrong model
+would otherwise cover an arbitrary prefix of the real one's nodes without
+saying so.
+
+**Not seen running.** Everything above is checked against a synthetic
+skeleton — `odin check matchbox -no-entry-point` and `odin test matchbox` both
+pass, and the `model` example still builds against the changed `Animator` and
+`Animation_Pose` — but nothing in this document has been watched play against
+a real rig. Steps 3 and 4 are exactly that gap.
+
 ## Related
 
 - `refactor.md` — the standing decisions for this package, including the rule

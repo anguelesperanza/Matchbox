@@ -248,8 +248,8 @@ the public API moves.
 | 0 — the restart-on-every-call fix | **done** — `play_animation` and `play_animation_index` are idempotent for the clip already playing, changing only `looping`; `replay_animation_3d` added for an explicit restart. Tested: a clock that had advanced is unchanged by re-asking for the current clip, and `replay_animation_3d` puts it back to zero. |
 | 1 — masks | **done** — `animation_mask_below`, one pass over `skeleton.order` exactly as planned above. `animation_mask_named` added alongside it, for a set that is not one clean subtree. Tested against the five-node synthetic skeleton: a subtree, a leaf, and a named set. |
 | 2 — layers | **done** — `Animation_Layer`, `MAX_ANIMATION_LAYERS :: 2`, the scratch buffers in `create_animator`/`destroy_animator`, the composition loop in `update_animator`, and `play_animation_layer`/`stop_animation_layer`/`set_animation_layer_weight`. Tested: weight 1 overrides only the masked joints, weight 0 changes nothing, weight 0.5 lands on `transform_mix`'s own answer, an inactive layer never advances its clock, and a layer is idempotent the same way the base clip is. |
-| 3 — an example | **not started** — needs a rig with a sensible upper-body split, which is not among the existing assets. |
-| 4 — validate on a real character | **not started** — needs the Windows machine, the assets, and the eye. |
+| 3 — an example | **not started, in Matchbox's own `examples/`** — the rig that motivated this (see step 4) belongs to a separate game project and is not an asset this repository can bundle. |
+| 4 — validate on a real character | **done, against `games/third-person-game`** — a real VRoid rig (80 nodes, 13 skins) with `Pistol_Reload` and locomotion clips that are exactly the case this document opens with. See below. |
 
 **One validation guard beyond the plan's pseudocode**: `play_animation_layer`
 rejects a mask whose length does not match the skeleton's node count, rather
@@ -257,11 +257,40 @@ than letting `copy` silently truncate it. A mask built against the wrong model
 would otherwise cover an arbitrary prefix of the real one's nodes without
 saying so.
 
-**Not seen running.** Everything above is checked against a synthetic
-skeleton — `odin check matchbox -no-entry-point` and `odin test matchbox` both
-pass, and the `model` example still builds against the changed `Animator` and
-`Animation_Pose` — but nothing in this document has been watched play against
-a real rig. Steps 3 and 4 are exactly that gap.
+**Validated against a real character.** `games/third-person-game` (one
+directory up from this repo) has a VRoid rig with a `spine_02` joint sitting
+right where "upper body" should start -- above the pelvis and both thighs,
+below both clavicles and the neck -- and a `Pistol_Reload` clip alongside its
+six locomotion clips. `main.odin` there now has `update_reload_layer`: holding
+R plays `Pistol_Reload` on `animation_mask_below(model, spine_02)` while
+whatever locomotion state is on the base keeps running, with the weight
+ramped over 0.2s rather than snapping.
+
+Measured with a scratch harness (built, run, and deleted; not kept as part of
+either repository) that ran two animators over the same second of
+`Walk_Formal` -- one with the reload layer at weight 1, one without -- and
+compared `thigh_l`'s pose between them: **position and rotation matched to
+five decimal places**, confirming zero leakage from the layer into a masked-out
+joint. `upperarm_r` and `hand_r` rotations diverged from a layer-free baseline
+by 0.169 and 0.108 respectively (a same-clip diff was ~0.001, so this is
+real movement, not float noise) -- the reload is visibly a different clip on
+the arm than `Walk_Formal`'s own arm swing. `spine_02` itself barely moved
+(0.0011): a reload is an arm-and-hand action on this rig, not a torso one,
+which is a fact about the clip rather than a problem with the mask -- `spine_02`
+was still confirmed inside the mask directly, and `thigh_l` outside it.
+
+The game's `main.odin` needed three mechanical renames to build against
+current `main` at all (`load_model`/`load_skybox_cubemap` returning `Error`
+rather than `bool`, `create_third_person_camera`/`create_first_person_camera`,
+`get_delta_time`) -- the vendored Matchbox clone there had been sitting well
+behind this repository since before the `create_x`/`get_x` prefix pass, not
+specifically behind this branch. Fixed alongside the pull to `animation-3d`.
+
+**Not yet seen rendered.** The numbers above were read out of
+`animator.pose.locals` programmatically, the way `is_animation_frame_passed`'s
+own test suite works -- correct by measurement, but nobody has watched the
+character's arm actually reload on screen while the legs keep walking. That
+last, purely visual check is the only piece of step 4 still open.
 
 ## Related
 
@@ -274,3 +303,8 @@ a real rig. Steps 3 and 4 are exactly that gap.
   (idempotent — safe to call every frame) and `replay_animation` (explicit
   restart) pair is the model for step 0, and `matchbox/animation.odin` is where
   to read how they behave.
+- `games/third-person-game` (one directory up from this repo) — the actual
+  game that step 4's validation ran against, and the real-world source of the
+  "reload over a run" case this whole document opens with. Its `main.odin`
+  has `update_reload_layer`, which is the smallest real caller of
+  `play_animation_layer` that exists anywhere right now.

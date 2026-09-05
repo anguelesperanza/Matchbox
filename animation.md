@@ -194,8 +194,27 @@ flag to make an unrelated check fire.
 | step | state |
 |---|---|
 | 1 -- the clock fix and the frame queries | **done**, `03e3eb5` -- 340 procedures, 27 tests |
-| 2 -- `replay_animation` and the queue | next, together: both go through `seat_first_frame` |
-| 3 -- an example | not started |
+| 2 -- `replay_animation` and the queue | **done**, `2676ef4` -- 343 procedures, 35 tests |
+| 3 -- an example | next |
+
+**Step 2's real decision was where the pop lives:** inside the branch that
+ends a one-shot, not anywhere `playing` is false. A game pauses by clearing
+that flag, and a pause with a chain pending must not skip ahead. Confirmed by
+hand -- pausing mid-clip with one queued leaves the queue at 1 and the frame
+where it stopped, however many updates go by.
+
+**The cost of that, and it is a real edge:** queueing onto a clip that has
+*already* finished never starts, because there is no finish left to fire on.
+Also confirmed -- the entry sits in the queue forever. `switch_animation` is
+the verb for starting from a standstill. Worth knowing: a cheap guard would be
+possible, since `!playing && queue_len == 0` at the moment of queueing means
+precisely "this will never fire" and cannot false-positive on the ordinary
+switch-then-queue pattern. Not added; noted in case the edge ever bites.
+
+`switch_animation` clears the queue **only in its non-`same` branch**. Clearing
+in the idempotent branch would wipe a pending chain every frame a state machine
+re-asked for the clip already playing -- which is the exact call pattern that
+branch exists to serve, and is how the jump chain is started.
 
 **Step 1 took the fix as arithmetic rather than a loop**, which was a
 deliberate deviation and the better answer. `steps := i32(accumulator /

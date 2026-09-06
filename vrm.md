@@ -68,11 +68,28 @@ names, node indices straight into the node array:
  {"bone": "leftUpperLeg", "node": 101, ...}, ...]
 ```
 
-Node 1 is `J_Bip_C_Hips`, which agrees with the skeleton dump. So step 1's
-facing correction and step 2's 0.0 parsing can both be checked against a real
-file; **the 1.0 object form has no asset here and can only be covered
-synthetically** until one turns up. Its `extensionsRequired` is empty, so this
-particular file would load even under a strict reader.
+Node 1 is `J_Bip_C_Hips`, which agrees with the skeleton dump. Its
+`extensionsRequired` is empty, so this particular file would load even under a
+strict reader.
+
+**A VRM 1.0 file arrived after the work landed** -- `character1.vrm`, the same
+character re-exported: `VRMC_vrm` at specVersion 1.0, `humanBones` in the
+object form with 54 keys, 150 nodes, and `VRMC_springBone` /
+`VRMC_materials_mtoon` alongside. Both versions were then checked through
+`load_model` against raw values read out of the files independently, and the
+pair make one discriminating test rather than two separate ones:
+
+```
+                       raw in file    what load_model reports
+character.vrm  (0.0)     -0.1086            +0.1086   correction applied
+character1.vrm (1.0)     +0.1086            +0.1086   correction not applied
+```
+
+That is `leftUpperArm`'s world X. The 0.0 file is turned and the 1.0 file is
+left alone, and both land in the same place -- which is the whole point of
+step 1, and would have failed loudly in one direction or the other if the
+version check were inverted or missing. All nine probed humanoid bones
+resolved on both files, from the array form and the object form respectively.
 
 ### The two skeletons do not share a rest pose
 

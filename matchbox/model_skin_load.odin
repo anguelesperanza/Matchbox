@@ -398,6 +398,25 @@ read_joints :: proc(
 	texture coordinates, and for the same reason. A vertex with no weights at
 	all gets `{1, 0, 0, 0}` rather than four zeroes, because four zeroes
 	collapse the vertex onto the origin and take the triangle with it.
+
+	**Renormalised on the way in, and that is not defensive tidying -- it is the
+	fix for a real symptom.** The skinning shader builds `w0*M0 + w1*M1 +
+	w2*M2 + w3*M3` and uses the result as-is; with the weights summing to `s`
+	that puts the vertex at `s` times its correct model-space position, pulled
+	toward the model's origin. glTF requires the four to sum to one, and the
+	files that break it are not malformed -- they carry `WEIGHTS_1`, a *second*
+	set of four influences that Matchbox does not read. A vertex with five
+	influences therefore arrives here summing to less than one and lands short.
+
+	The symptom is specific enough to name: on a character rig the origin sits
+	on the ground between the feet, so a foot vertex with a fifth influence
+	stays at ground level while the walk cycle lifts the foot around it. One
+	vertex, stuck to the floor, and only while moving -- standing still it is
+	already at origin height and nothing looks wrong.
+
+	Normalising here rather than in the shader is deliberate: it is once at
+	load instead of a divide on every vertex of every frame, and it is the same
+	choice `read_quaternions` above already makes.
 */
 @(private)
 read_weights :: proc(
@@ -432,6 +451,36 @@ read_weights :: proc(
 			log.error("unsupported joint weight type")
 			return out
 		}
+	}
+
+	/*
+		Say so when the file carries influences we are dropping.
+
+		Renormalising below makes the mesh look right, but it is not what the
+		artist authored: the fifth influence is gone and its say has been
+		redistributed across the four that remain. That is a good trade and a
+		bad silence, so it is reported once per primitive rather than left for
+		somebody to find by eye.
+	*/
+	if _, more := attributes["WEIGHTS_1"]; more {
+		log.warnf(
+			"this mesh weights vertices to more than four joints; matchbox reads the first four and renormalises, so the rest are dropped")
+	}
+
+	// Renormalised so the four sum to one -- see the note above this
+	// procedure for what an unnormalised set does to a vertex.
+	for &w in out {
+		sum := w[0] + w[1] + w[2] + w[3]
+
+		// A vertex the file leaves entirely unweighted. Pinned to the first
+		// joint rather than scaled to nothing, which is the same answer the
+		// no-WEIGHTS_0 case above gives and for the same reason.
+		if sum <= 0 {
+			w = {1, 0, 0, 0}
+			continue
+		}
+
+		if sum != 1 do w = {w[0] / sum, w[1] / sum, w[2] / sum, w[3] / sum}
 	}
 
 	return out

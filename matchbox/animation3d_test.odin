@@ -354,3 +354,51 @@ test_play_animation_layer_does_not_reset_time_for_the_current_clip :: proc(t: ^t
 
 	testing.expect_value(t, animator.layers[0].time, before)
 }
+
+// -----------------------------------------------------------------------
+// Skin weights
+// -----------------------------------------------------------------------
+
+/*
+	The skinning shader uses the weight sum unscaled, so a set summing to `s`
+	puts the vertex at `s` times its correct position -- pulled toward the
+	model's origin. These pin the renormalisation that stops it.
+
+	`read_weights` needs a glTF document to read from, which a synthetic
+	skeleton cannot provide, so this tests the arithmetic the loader applies
+	rather than the loader's plumbing: the same normalise, over the cases that
+	reach it.
+*/
+@(test)
+test_weights_renormalise_to_one :: proc(t: ^testing.T) {
+	// A vertex with a fifth influence in WEIGHTS_1: the four here sum short.
+	w := [4]f32{0.4, 0.3, 0.1, 0.05}
+	sum := w[0] + w[1] + w[2] + w[3]
+	testing.expect(t, sum < 1, "setup: this set should sum short of one")
+
+	normalised := [4]f32{w[0] / sum, w[1] / sum, w[2] / sum, w[3] / sum}
+	total := normalised[0] + normalised[1] + normalised[2] + normalised[3]
+
+	testing.expect(t, abs(total - 1) < 1e-6,
+		"a short set must sum to one after normalising, or the vertex lands short of where it belongs")
+
+	// The proportions between joints are what the artist authored -- only the
+	// missing influence's share is redistributed, not the balance.
+	testing.expect(t, abs(normalised[0] / normalised[1] - w[0] / w[1]) < 1e-6,
+		"normalising must not change the ratio between two joints' say")
+}
+
+@(test)
+test_unweighted_vertex_pins_rather_than_collapses :: proc(t: ^testing.T) {
+	// Four zeroes would make the skin matrix zero and put the vertex on the
+	// model origin, taking its triangle with it.
+	w := [4]f32{0, 0, 0, 0}
+	sum := w[0] + w[1] + w[2] + w[3]
+
+	out := w
+	if sum <= 0 do out = {1, 0, 0, 0}
+
+	testing.expect_value(t, out, [4]f32{1, 0, 0, 0})
+	testing.expect(t, out[0] + out[1] + out[2] + out[3] == 1,
+		"an unweighted vertex must still sum to one, pinned to the first joint")
+}

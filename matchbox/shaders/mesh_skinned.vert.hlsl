@@ -53,10 +53,21 @@ VSOutput main(VSInput input)
         and it keeps the two using provably the same deformation, which four
         separate sums would only do by coincidence.
 
-        The weights are used as they arrive. glTF requires them to sum to one
-        and every exporter honours it; normalising here would hide a broken file
-        rather than let it look broken, and cost a rsqrt on every vertex of
-        every frame to do it.
+        The weights are used as they arrive, because they were normalised at
+        load -- see `read_weights` in model_skin_load.odin.
+
+        This comment used to say they arrive summing to one because glTF
+        requires it and every exporter honours it. That was wrong, and the way
+        it was wrong is worth keeping: a file may carry WEIGHTS_1, a second set
+        of four influences that Matchbox does not read, so a vertex with five
+        influences reaches here summing to less than one through no fault of
+        the exporter. This sum is used unscaled, so such a vertex lands at `s`
+        times its correct position -- dragged toward the model's origin, which
+        on a character is on the ground between the feet.
+
+        Normalising is still the wrong thing to do *here*: it is a divide on
+        every vertex of every frame to fix something that cannot change after
+        load.
     */
     float4x4 skin =
         input.weight.x * joints[input.joint.x] +

@@ -2367,7 +2367,8 @@ The node playing `bone` in this model's humanoid map, if the file said so.
 
 ```odin
 load_animation_source :: proc(
-	path: string) -> (source: Animation_Source,
+	path: string,
+	rest_pose_path := "") -> (source: Animation_Source,
 	err: Error,
 )
 ```

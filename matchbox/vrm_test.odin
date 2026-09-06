@@ -553,6 +553,56 @@ test_retarget_appends_rather_than_replacing :: proc(t: ^testing.T) {
 	}
 }
 
+/*
+	Adopting a rest pose replaces the transforms of same-named bones and
+	nothing else -- node indices in particular survive, because the tracks
+	that name them have to stay valid.
+
+	The case this exists for is a clip file whose own rest is not the pose its
+	clips were authored against; see `load_animation_source`. Getting it wrong
+	by rebuilding the skeleton instead of only its rest would leave every
+	track pointing at the wrong bone, which is loud, but getting it wrong by
+	matching on index instead of name would be silent.
+*/
+@(test)
+test_adopt_rest_pose_replaces_by_name_only :: proc(t: ^testing.T) {
+	pose :: proc(y: f32) -> Transform {
+		return Transform{position = {0, y, 0}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}}
+	}
+
+	// Deliberately in a different order, and one bone short, so a match by
+	// index would give different answers from a match by name.
+	reference := Skeleton{
+		parents = slice.clone([]i32{-1, 0}),
+		rest    = slice.clone([]Transform{pose(20), pose(10)}),
+		order   = slice.clone([]u32{0, 1}),
+		names   = slice.clone([]string{strings.clone("b"), strings.clone("a")}),
+	}
+	defer destroy_skeleton(&reference)
+
+	skeleton := Skeleton{
+		parents = slice.clone([]i32{-1, 0, 1}),
+		rest    = slice.clone([]Transform{pose(1), pose(2), pose(3)}),
+		order   = slice.clone([]u32{0, 1, 2}),
+		names   = slice.clone([]string{strings.clone("a"), strings.clone("b"), strings.clone("c")}),
+	}
+	defer destroy_skeleton(&skeleton)
+
+	adopt_rest_pose(&skeleton, reference)
+
+	// "a" and "b" take the reference's values, found by name rather than slot.
+	testing.expect_value(t, skeleton.rest[0].position.y, f32(10))
+	testing.expect_value(t, skeleton.rest[1].position.y, f32(20))
+
+	// "c" has no counterpart and keeps what it had rather than being zeroed.
+	testing.expect_value(t, skeleton.rest[2].position.y, f32(3))
+
+	// Everything that is not the rest is untouched -- the tracks depend on it.
+	testing.expect_value(t, len(skeleton.parents), 3)
+	testing.expect_value(t, skeleton.parents[2], i32(1))
+	testing.expect_value(t, skeleton.names[2], "c")
+}
+
 // A scale track has no case to retarget it and is dropped rather than
 // guessed at -- vrm.md measured none in the pipeline this was built for, and
 // a wrong guess here would silently misscale a character.

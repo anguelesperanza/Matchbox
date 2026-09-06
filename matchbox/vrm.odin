@@ -551,10 +551,45 @@ Animation_Source :: struct {
 	or `.gltf` (or, since both are GLB containers underneath, a `.vrm`) --
 	without paying for a mesh upload this is never going to draw.
 
+	`rest_pose_path` is the answer to a problem that will otherwise ruin a
+	retarget quietly, and it is worth understanding before ignoring it.
+	`retarget_animations` transfers a bone's *deviation from its rest pose*,
+	which is only meaningful if the two rigs' rest poses depict the same
+	physical pose. A rig exported alongside its animations frequently does not
+	have the rest one would expect: the file this was built against stores
+	arms-down with a wide stance, while the character it retargets onto is a
+	T-pose with its feet under its hips. Retargeting between those two
+	directly gives a character that walks with its arms held straight out and
+	its legs crossed -- correct arithmetic on a false premise.
+
+	So: point `rest_pose_path` at a file holding the *same rig* in the same
+	pose the destination is in, and its rest is used in place of the clip
+	file's own. Only the rest changes; the clips, and the node indices their
+	tracks name, stay this file's. Both files must share a world frame, which
+	two exports of one rig from one tool do.
+
 	Errors match `load_model`'s: a `File_Error` for a path that could not be
 	read, `Model_Error.Parse_Failed` for one that could but is not glTF.
 */
-load_animation_source :: proc(path: string) -> (source: Animation_Source, err: Error) {
+load_animation_source :: proc(path: string, rest_pose_path := "") -> (source: Animation_Source, err: Error) {
+	source.skeleton, source.animations = parse_animation_file(path) or_return
+
+	if rest_pose_path != "" {
+		reference, ref_animations := parse_animation_file(rest_pose_path) or_return
+		defer destroy_animations(ref_animations)
+		defer destroy_skeleton(&reference)
+
+		adopt_rest_pose(&source.skeleton, reference)
+	}
+
+	return source, nil
+}
+
+// The parse `load_animation_source` needs twice when it is given a separate
+// rest pose to read -- once for the clips, once for the pose they should be
+// measured against.
+@(private)
+parse_animation_file :: proc(path: string) -> (skeleton: Skeleton, animations: []Model_Animation, err: Error) {
 	bytes := read_entire_file(path, context.allocator) or_return
 	defer delete(bytes)
 
@@ -565,14 +600,53 @@ load_animation_source :: proc(path: string) -> (source: Animation_Source, err: E
 	data, parse_err := gltf.parse(bytes, {is_glb = is_glb, gltf_dir = dir})
 	if parse_err != nil {
 		log.errorf("could not parse animation source %s: %v", path, parse_err)
-		return {}, Model_Error.Parse_Failed
+		return {}, nil, Model_Error.Parse_Failed
 	}
 	defer gltf.unload(data)
 
-	return Animation_Source{
-		skeleton   = build_skeleton(data),
-		animations = build_animations(data),
-	}, nil
+	return build_skeleton(data), build_animations(data), nil
+}
+
+/*
+	Replaces a skeleton's rest transforms with those of the same-named bones in
+	`reference`, leaving everything else -- node indices, parents, order, skins
+	-- alone, so the tracks that name those indices stay valid.
+
+	Matched by name through a map rather than a search per bone, for the reason
+	`print_skeleton` builds one: eighty bones against eighty is six thousand
+	string compares to do it the direct way, once, for nothing.
+
+	A bone the reference does not carry keeps the rest it had. That is the
+	right way round: the reference is usually a skeleton-only export of the
+	same rig and may legitimately lack the clip file's mesh nodes, and a bone
+	with no counterpart is better left as authored than zeroed.
+*/
+@(private)
+adopt_rest_pose :: proc(skeleton: ^Skeleton, reference: Skeleton) {
+	if len(reference.rest) == 0 {
+		log.error("the rest pose file has no skeleton; keeping the clip file's own rest")
+		return
+	}
+
+	by_name := make(map[string]int, len(reference.names), context.temp_allocator)
+	defer delete(by_name)
+
+	for name, i in reference.names {
+		if name == "" do continue
+		if _, taken := by_name[name]; taken do continue // first wins, as node_index does
+		by_name[name] = i
+	}
+
+	replaced := 0
+	for name, i in skeleton.names {
+		if name == "" do continue
+		if j, found := by_name[name]; found {
+			skeleton.rest[i] = reference.rest[j]
+			replaced += 1
+		}
+	}
+
+	log.infof("adopted a rest pose for %v of %v bones", replaced, len(skeleton.names))
 }
 
 // Gives an `Animation_Source`'s skeleton and clips back. Joins the `destroy`

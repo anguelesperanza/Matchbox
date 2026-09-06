@@ -287,6 +287,57 @@ correspondence measured above is what buys the cheap version.
   inert degrade: visible and still, not wrong.
 - **A source bone with no destination counterpart** -- its track is dropped.
 
+### The premise the maths rests on, which this document originally missed
+
+**Corrected after the first render.** The conjugation above is right and was
+implemented correctly, and the result was still wrong on screen: the character
+walked with its arms held straight out and its legs crossed.
+
+The measurements in *The two skeletons do not share a rest pose* established
+that corresponding bones differ by 100-170 degrees, and this document
+concluded the conjugation would absorb that. It absorbs the wrong half. What
+it absorbs is the two rigs' differing **bone axis conventions**. What it
+cannot absorb is the two rests being different **physical poses**, because
+transferring a deviation-from-rest only means anything if both rests depict
+the same configuration of a body. Measured, they do not:
+
+```
+                 arm y, shoulder -> hand        foot x vs thigh x
+character.vrm    1.274 -> 1.274  flat, T-pose   0.077 vs 0.077  under the hips
+animations.glb   1.301 -> 0.934  falling, down  0.175 vs 0.067  splayed wide
+```
+
+So a walk that keeps the source's arms near *its* rest transfers as "keep the
+arms near the destination's rest" -- and the destination's rest is a T-pose.
+Leg motion measured against a wide stance, applied to a narrow one, pulls the
+feet inward past each other. Both reported symptoms fall out of the one cause.
+
+**The fix is to make the premise true rather than to change the maths**:
+`load_animation_source` takes an optional `rest_pose_path`, and uses that
+file's rest in place of the clip file's own. Mesh2Motion will export the rig
+on its own in a T-pose, which is what the example passes. Only the rest is
+adopted -- node indices stay the clip file's, so the tracks that name them
+stay valid -- and the two files must share a world frame, which was checked:
+both put `root` at the same -90-degree X (a Z-up-to-Y-up convention) with
+identity above it.
+
+Measured before and after, sampling the retargeted `Walk`:
+
+```
+          hand y (shoulder is 1.274)   left foot x   right foot x   crossed
+before    1.23 - 1.30  at/above it        -0.08         +0.10       10 of 10
+after     0.80 - 0.88  hanging            +0.07         -0.09        0 of 10
+```
+
+**What this does not solve.** Adopting a rest works because a T-pose export of
+the same rig was available. Two rigs in genuinely different poses with no such
+file still need the rest poses aligned per bone -- rotating each source bone's
+rest direction onto its destination counterpart's, which is the "T-pose
+matching" step a general retargeter has. Direction alignment would fix the
+swing; the twist about each bone's own axis needs a second reference axis or
+the hand roll stays wrong. Not built, because the file that removes the need
+for it exists.
+
 ### Naming: where the correspondence comes from
 
 The destination side is free once step 2 lands: the VRM humanoid block already

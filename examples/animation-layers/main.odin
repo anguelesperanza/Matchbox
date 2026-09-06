@@ -71,6 +71,18 @@ MODEL_PATH :: "assets/character.vrm"
 CLIPS_PATH :: "assets/animations.glb"
 
 /*
+	The same rig as the clips, exported on its own in a T-pose.
+
+	Needed because retargeting carries a bone's deviation from its rest, which
+	only means anything if both rests are the same physical pose -- and the
+	clip file's own rest is arms-down with a wide stance, where this character
+	is a T-pose with its feet under its hips. Retargeting straight from the
+	clip file gives a character that walks with its arms held out and its legs
+	crossed. See `load_animation_source`.
+*/
+REST_POSE_PATH :: "assets/exported-model.glb"
+
+/*
 	A VRM faces -z once loaded: 1.0 files already do, and a 0.0 file is turned
 	to match at import (`vrm.odin`). So this is knowledge about the *format*
 	rather than about one particular export, which is why it can be named here
@@ -149,7 +161,7 @@ main :: proc() {
 		`Model_Animation` data on `model`, so everything below this line is the
 		same code it was when the character carried its own animation.
 	*/
-	clips, clips_err := mb.load_animation_source(CLIPS_PATH)
+	clips, clips_err := mb.load_animation_source(CLIPS_PATH, REST_POSE_PATH)
 	if clips_err != nil {
 		fmt.eprintfln("could not load %s: %v", CLIPS_PATH, clips_err)
 		return

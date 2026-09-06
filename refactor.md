@@ -1096,6 +1096,12 @@ one material, and the character that found this has 66 joints in its skin and
 no primitive using more than 37 — but it is a constraint, and it is enforced
 with a log line rather than a guarantee.
 
+**The shader's declared array is shrunk to match, done 2026-09-06 on
+Windows.** It had said `float4x4 joints[128]` for a day — deliberately
+harmless, since nothing indexed past 63 — while the machine that could sign a
+`.dxil` was elsewhere. It now says `joints[64]`, both `.spv` and `.dxil`
+rebuilt from the same source and committed together.
+
 **A single primitive using more than 64 distinct joints is unsupported today.**
 A dense one-piece character mesh, or a rig with hair and cloth bones weighted
 across one primitive, would hit it.

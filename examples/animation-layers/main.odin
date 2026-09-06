@@ -135,10 +135,6 @@ main :: proc() {
 
 	player_position := [3]f32{0, 0, 0}
 
-	// TEMPORARY, with the draw below: B swaps the animator for nil so the
-	// character renders in its bind pose. Delete both once the artifact it is
-	// chasing is understood.
-
 	// Everything else -- angles, distance, framing, steering -- exactly as
 	// `examples/third-person` sets it up. See that example for why these are
 	// the defaults.
@@ -154,7 +150,6 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
-
 		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
@@ -231,8 +226,6 @@ main :: proc() {
 		// the bind pose would put the feet somewhere other than y=0, and this
 		// is the same correction `third-person-game` applies for the same file.
 		ground_offset := [3]f32{0, -model.bounds_min.y * MODEL_SCALE, 0}
-
-
 		mb.draw_model(model, mb.Transform{
 			position = player_position + ground_offset,
 			rotation = mb.facing_rotation(rig.facing - MODEL_FORWARD),

@@ -198,11 +198,10 @@ MAX_JOINTS :: 64
 	buffer, bound with `SDL_BindGPUVertexStorageBuffers`, has no such ceiling
 	and is what this should become.
 
-	The shader declares `float4x4 joints[128]`, which is now larger than what is
-	pushed. That is deliberate and harmless: nothing indexes past 63 any more,
-	and shrinking the declaration would mean a shader rebuild, which on Linux
-	emits `.spv` only and would leave the committed `.dxil` behind. Do it on
-	Windows, or when the storage buffer lands.
+	The shader declares `float4x4 joints[64]` to match, done 2026-09-06 on
+	Windows -- shrinking it needed a rebuild of both `.spv` and `.dxil`, and
+	Linux's `dxc` cannot sign the latter. It had been left at 128 for a day,
+	which was harmless rather than wrong: nothing indexes past 63.
 */
 Skin_Vert_Data :: struct #align(16) {
 	joints: [MAX_JOINTS]matrix[4, 4]f32,

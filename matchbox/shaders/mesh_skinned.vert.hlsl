@@ -7,7 +7,7 @@
     model is lit, fogged and textured by exactly the code an unskinned one is.
 
     Uniform layout must match matchbox.Mesh_Vert_Data and matchbox.Skin_Vert_Data
-    exactly: 192 bytes in b0, then 8192 bytes of joint matrices in b1.
+    exactly: 192 bytes in b0, then 4096 bytes of joint matrices in b1.
 */
 #pragma pack_matrix(column_major)
 
@@ -18,13 +18,24 @@ cbuffer Mesh_Vert_Data : register(b0, space1)
     float4x4 normal_matrix;
 };
 
-// One matrix per joint, already the product of the joint's global transform and
-// its inverse bind matrix -- see animator_resolve. The shader does no hierarchy
-// walking: by the time a matrix arrives here it is the whole answer for that
-// joint, and all that is left is the weighted sum.
+/*
+    One matrix per joint, already the product of the joint's global transform
+    and its inverse bind matrix -- see animator_resolve. The shader does no
+    hierarchy walking: by the time a matrix arrives here it is the whole answer
+    for that joint, and all that is left is the weighted sum.
+
+    64, not some rounder or larger number: SDL's Vulkan backend binds this
+    uniform with range = 4096 bytes regardless of what is pushed, which is
+    exactly 64 matrices, and reading past what is bound is undefined there
+    (merely zero on D3D12, which is what let this run wrong on Linux and look
+    fine on Windows for a while). See MAX_JOINTS in types.odin for the rest of
+    that story, and Model_Part.joint_map for how a rig with more than 64
+    joints still fits: a part's palette holds only the joints it uses, not
+    the whole skin, so index 64 is never actually named.
+*/
 cbuffer Skin_Vert_Data : register(b1, space1)
 {
-    float4x4 joints[128];
+    float4x4 joints[64];
 };
 
 struct VSInput

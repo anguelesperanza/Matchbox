@@ -1042,6 +1042,16 @@ animator_resolve :: proc(animator: ^Animator, model: Model) {
 			mesh_inverse = linalg.inverse(animator.pose.globals[part.node])
 		}
 
+		/*
+			Identity first, so a slot that cannot be resolved leaves its
+			vertices where they are rather than on the origin. `make` zeroes,
+			and a zero matrix is not a harmless default here -- it is the one
+			value that collapses a vertex and drags its triangles with it.
+		*/
+		for j in 0 ..< len(animator.pose.palettes[i]) {
+			animator.pose.palettes[i][j] = linalg.MATRIX4F32_IDENTITY
+		}
+
 		// Indexed by the part's compact slot, not by the skin's joint number:
 		// `joint_map` is what turns one into the other, and a vertex names the
 		// compact one.

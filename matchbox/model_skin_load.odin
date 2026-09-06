@@ -108,12 +108,18 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 			}
 		}
 
-		if len(joints) > MAX_JOINTS {
-			log.errorf("skin has %v joints, more than MAX_JOINTS (%v); the excess are dropped and the mesh will tear",
-				len(joints), MAX_JOINTS)
-			joints       = joints[:MAX_JOINTS]
-			inverse_bind = inverse_bind[:MAX_JOINTS]
-		}
+		/*
+			The skin keeps every joint it declares, however many that is.
+
+			This used to truncate to MAX_JOINTS, which was right while a part's
+			palette was the skin's palette. It is not any more: a part carries
+			only the joints it uses (see `Model_Part.joint_map`), so MAX_JOINTS
+			limits how many *distinct joints one primitive* may touch, not how
+			many a skeleton may have. Truncating here left `skin.joints` too
+			short for `animator_resolve` to look a compact slot back up, which
+			silently left that palette entry a zero matrix -- and a zero matrix
+			collapses every vertex using it onto the origin.
+		*/
 
 		skeleton.skins[i] = Model_Skin{joints = joints, inverse_bind = inverse_bind}
 	}

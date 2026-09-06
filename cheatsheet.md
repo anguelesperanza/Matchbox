@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 343 of them -- with its arguments
+Every public procedure in the package -- 349 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -23,7 +23,7 @@ any.
 - [3D cameras](#3d-cameras) -- 42
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
-- [Animation](#animation) -- 33
+- [Animation](#animation) -- 39
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
@@ -2290,6 +2290,55 @@ The same by index, for a game that resolved the name once and kept it.
 stop_animation :: proc(animator: ^Animator)
 ```
 Stops where it is.
+
+```odin
+replay_animation_3d :: proc(animator: ^Animator)
+```
+Starts the current clip again from its first frame.
+
+```odin
+animation_mask_below :: proc(
+	model: Model,
+	root: u32,
+	allocator := context.allocator,
+) -> []bool
+```
+Every node at or below `root` in the hierarchy -- the mask for "everything from the spine up" or "everything from the hip down".
+
+```odin
+animation_mask_named :: proc(
+	model: Model,
+	names: []string,
+	allocator := context.allocator,
+) -> []bool
+```
+A mask covering exactly the named nodes, for a set that is not one clean subtree -- a face and a hand rig for a full-body wince, say.
+
+```odin
+play_animation_layer :: proc(
+	animator: ^Animator,
+	model: Model,
+	layer: int,
+	name: string,
+	mask: []bool,
+	looping: bool = true,
+) -> bool
+```
+Starts `name` playing on `layer`, masked to `mask`.
+
+```odin
+stop_animation_layer :: proc(animator: ^Animator, layer: int)
+```
+Stops a layer where it is and drops it from the composition -- the masked joints fall back to whatever the base (or a layer beneath it) says, on the very next update.
+
+```odin
+set_animation_layer_weight :: proc(
+	animator: ^Animator,
+	layer: int,
+	weight: f32,
+)
+```
+Sets how strongly `layer` overrides its masked joints, 0 (off) to 1 (full override).
 
 ```odin
 update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32)

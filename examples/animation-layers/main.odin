@@ -135,6 +135,11 @@ main :: proc() {
 
 	player_position := [3]f32{0, 0, 0}
 
+	// TEMPORARY, with the draw below: B swaps the animator for nil so the
+	// character renders in its bind pose. Delete both once the artifact it is
+	// chasing is understood.
+	bind_pose := false
+
 	// Everything else -- angles, distance, framing, steering -- exactly as
 	// `examples/third-person` sets it up. See that example for why these are
 	// the defaults.
@@ -150,6 +155,8 @@ main :: proc() {
 
 	for mb.is_running() {
 		mb.poll_events()
+
+		if mb.is_key_pressed(.B) do bind_pose = !bind_pose
 		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
@@ -226,17 +233,35 @@ main :: proc() {
 		// the bind pose would put the feet somewhere other than y=0, and this
 		// is the same correction `third-person-game` applies for the same file.
 		ground_offset := [3]f32{0, -model.bounds_min.y * MODEL_SCALE, 0}
+
+		/*
+			TEMPORARY, for chasing a Vulkan-only skinning artifact -- delete
+			with `bind_pose` and its key below once it has served its purpose.
+
+			Passing nil draws the bind pose with an identity palette, so the
+			animator, the clips, the layers and every matrix they produce are
+			out of the picture. If the artifact survives that, nothing about
+			the animation is causing it and the fault is in the vertex data or
+			the draw itself; if it disappears, the palette is what to chase.
+		*/
+		posed: ^mb.Animator = &animator
+		if bind_pose do posed = nil
+
 		mb.draw_model(model, mb.Transform{
 			position = player_position + ground_offset,
 			rotation = mb.facing_rotation(rig.facing - MODEL_FORWARD),
 			scale    = {MODEL_SCALE, MODEL_SCALE, MODEL_SCALE},
-		}, mb.WHITE, &animator)
+		}, mb.WHITE, posed)
 
 		mb.end_drawing_3d()
 
 		font := &mb.mbi.font
 		mb.draw_text(font, "WASD to run, mouse to orbit, wheel to zoom, shift to sprint", 20, 40, mb.WHITE)
 		mb.draw_text(font, "hold R to reload -- upper body only, legs keep moving", 20, 70, mb.WHITE)
+		mb.draw_text(font,
+			bind_pose ? "B: BIND POSE (no animator) -- temporary bug probe" \
+			          : "B: bind pose off -- temporary bug probe",
+			20, 130, bind_pose ? mb.ORANGE : mb.LIGHTGRAY)
 
 		if mb.is_cursor_locked() {
 			mb.draw_text(font, "ESC releases the pointer", 20, 100, mb.WHITE)

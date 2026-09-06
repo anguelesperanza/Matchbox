@@ -502,6 +502,57 @@ test_retarget_keeps_keyframe_times_exactly :: proc(t: ^testing.T) {
 	for time, i in times do testing.expect_value(t, retargeted_times[i], time)
 }
 
+/*
+	Retargeting adds to what a model already has rather than standing in for
+	it -- a locomotion set from one file and a combat set from another both
+	land, and a model that arrived with clips of its own keeps them.
+
+	A VRM has no clips, so for the case this was built for appending and
+	replacing look identical; this is the test that tells them apart, and the
+	reason it exists is that replacing loses the first source's work silently.
+*/
+@(test)
+test_retarget_appends_rather_than_replacing :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	// What a glTF model would arrive carrying, unlike a VRM.
+	dst.animations = slice.clone([]Model_Animation{
+		{name = strings.clone("existing"), duration = 0, tracks = {}},
+	})
+
+	one_clip :: proc(name: string) -> []Model_Animation {
+		return slice.clone([]Model_Animation{
+			{
+				name = strings.clone(name), duration = 0,
+				tracks = slice.clone([]Animation_Track{
+					{
+						node = 1, path = .ROTATION, interpolation = .STEP,
+						times = slice.clone([]f32{0}),
+						quats = slice.clone([]quaternion128{transform_rotation({0, 1, 0}, 0.3)}),
+					},
+				}),
+			},
+		})
+	}
+
+	src.animations = one_clip("walk")
+	testing.expect_value(t, retarget_animations(&dst, src, names), 1)
+
+	// A second source file, arriving separately the way a second clip set does.
+	destroy_animations(src.animations)
+	src.animations = one_clip("punch")
+	testing.expect_value(t, retarget_animations(&dst, src, names), 1)
+
+	testing.expect_value(t, len(dst.animations), 3)
+
+	for want in ([]string{"existing", "walk", "punch"}) {
+		if _, found := animation_index(dst, want); !found {
+			testing.expectf(t, false, "%q should have survived the second retarget", want)
+		}
+	}
+}
+
 // A scale track has no case to retarget it and is dropped rather than
 // guessed at -- vrm.md measured none in the pipeline this was built for, and
 // a wrong guess here would silently misscale a character.

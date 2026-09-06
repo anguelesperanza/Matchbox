@@ -140,6 +140,13 @@ main :: proc() {
 	// chasing is understood.
 	bind_pose := false
 
+	// TEMPORARY, with bind_pose: G hides the grid, H hides the blocks, J hides
+	// the character. Between them they say which thing the artifact belongs
+	// to, which is the question the bind pose left open.
+	show_grid   := true
+	show_blocks := true
+	show_model  := true
+
 	// Everything else -- angles, distance, framing, steering -- exactly as
 	// `examples/third-person` sets it up. See that example for why these are
 	// the defaults.
@@ -156,7 +163,10 @@ main :: proc() {
 	for mb.is_running() {
 		mb.poll_events()
 
-		if mb.is_key_pressed(.B) do bind_pose = !bind_pose
+		if mb.is_key_pressed(.B) do bind_pose   = !bind_pose
+		if mb.is_key_pressed(.G) do show_grid   = !show_grid
+		if mb.is_key_pressed(.H) do show_blocks = !show_blocks
+		if mb.is_key_pressed(.J) do show_model  = !show_model
 		dt := mb.get_delta_time()
 
 		if mb.is_key_pressed(.ESCAPE) {
@@ -222,11 +232,13 @@ main :: proc() {
 		mb.begin_drawing_3d(rig.camera)
 
 		mb.draw_plane({0, 0, 0}, {60, 60}, {0.42, 0.47, 0.40, 1})
-		mb.draw_grid(slices = 30, spacing = 2, color = {1, 1, 1, 0.20})
+		if show_grid do mb.draw_grid(slices = 30, spacing = 2, color = {1, 1, 1, 0.20})
 
-		for block in blocks {
-			mb.draw_cube(block.position, block.size, block.color)
-			mb.draw_cube_wires(block.position, block.size, mb.BLACK)
+		if show_blocks {
+			for block in blocks {
+				mb.draw_cube(block.position, block.size, block.color)
+				mb.draw_cube_wires(block.position, block.size, mb.BLACK)
+			}
 		}
 
 		// Not frame 0 of `model.bounds_min.y`: a rest pose that is not also
@@ -247,11 +259,13 @@ main :: proc() {
 		posed: ^mb.Animator = &animator
 		if bind_pose do posed = nil
 
-		mb.draw_model(model, mb.Transform{
-			position = player_position + ground_offset,
-			rotation = mb.facing_rotation(rig.facing - MODEL_FORWARD),
-			scale    = {MODEL_SCALE, MODEL_SCALE, MODEL_SCALE},
-		}, mb.WHITE, posed)
+		if show_model {
+			mb.draw_model(model, mb.Transform{
+				position = player_position + ground_offset,
+				rotation = mb.facing_rotation(rig.facing - MODEL_FORWARD),
+				scale    = {MODEL_SCALE, MODEL_SCALE, MODEL_SCALE},
+			}, mb.WHITE, posed)
+		}
 
 		mb.end_drawing_3d()
 
@@ -262,6 +276,9 @@ main :: proc() {
 			bind_pose ? "B: BIND POSE (no animator) -- temporary bug probe" \
 			          : "B: bind pose off -- temporary bug probe",
 			20, 130, bind_pose ? mb.ORANGE : mb.LIGHTGRAY)
+		mb.draw_text(font,
+			fmt.tprintf("G grid %v   H blocks %v   J character %v", show_grid, show_blocks, show_model),
+			20, 160, mb.LIGHTGRAY)
 
 		if mb.is_cursor_locked() {
 			mb.draw_text(font, "ESC releases the pointer", 20, 100, mb.WHITE)

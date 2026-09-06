@@ -1063,3 +1063,75 @@ same `odin check examples/*` sweep as everything else.
 -- see *Markdown removed* at the top of this file for what went and why.
 `improvements.md` is the one left needing a decision (live backlog on top of a
 long completed log, and `README.md` links into it).
+
+---
+
+## The joint palette wants a storage buffer
+
+Recorded 2026-09-06, after a Vulkan-only skinning artifact that took six wrong
+theories to corner. The immediate bug is fixed; the ceiling underneath it is
+not, and this is the note for whoever meets it.
+
+### The ceiling
+
+**SDL's Vulkan backend binds a uniform buffer with `range = MAX_UBO_SECTION_SIZE`,
+which is `4096`** (`src/gpu/vulkan/SDL_gpu_vulkan.c:71`). That is 4KB — exactly
+**64 matrices** — however much is pushed. The constant exists only in that
+backend; D3D12 uses `UNIFORM_BUFFER_SIZE` of 32768 with no sectioning.
+
+Measured rather than inferred: forcing every vertex to joint **63** renders a
+clean bind pose, and forcing every vertex to joint **64** destroys the whole
+model. And the consequence is asymmetric in the worst way — an out-of-range
+uniform read is *defined* on D3D12, returning zero, and *undefined* on Vulkan.
+So the same file skinned correctly on Windows and threw geometry across the
+room on Linux, with nothing in either log.
+
+### What was done instead, and why it is not enough
+
+`MAX_JOINTS` is 64, and each part carries a palette of only the joints it uses
+(`Model_Part.joint_map`), so a rig with more joints than that still works as
+long as no single primitive touches more than 64 distinct ones. That is a real
+constraint rather than a formality — a primitive is usually one body part or
+one material, and the character that found this has 66 joints in its skin and
+no primitive using more than 37 — but it is a constraint, and it is enforced
+with a log line rather than a guarantee.
+
+**A single primitive using more than 64 distinct joints is unsupported today.**
+A dense one-piece character mesh, or a rig with hair and cloth bones weighted
+across one primitive, would hit it.
+
+### The fix
+
+Move the palette off the uniform and onto a storage buffer, bound with
+`SDL_BindGPUVertexStorageBuffers`. Storage buffers have no 4KB sectioning, so
+the cap disappears and `joint_map` becomes an optimisation rather than a
+requirement.
+
+What it touches:
+
+- **The shader.** `cbuffer Skin_Vert_Data` becomes a `StructuredBuffer<float4x4>`.
+- **The pipeline.** The shader create-info must declare a vertex storage
+  buffer, which `create_pipeline` does not do today.
+- **The upload.** A uniform push is per-draw and free; a storage buffer needs
+  memory the GPU can read and a way to write a palette per part per frame
+  without stalling. That is the real work, and the reason this was not the
+  first answer.
+
+**Do it on Windows.** It requires a shader rebuild, and `build_shaders.sh`
+emits DXIL only there — `dxc` on Linux can produce the container but cannot
+sign it, and unsigned DXIL is refused by D3D12 outside developer mode. Building
+here would leave the committed `.dxil` behind its `.hlsl`, which is the
+desync hazard recorded further up this file.
+
+### Worth keeping from the hunt
+
+- **A zero matrix is not a harmless default in a palette.** `make` zeroes, and
+  a zero matrix collapses every vertex using it onto the origin. Unresolvable
+  slots are filled with the identity, and `animation3d_test.odin` pins that.
+- **Platform-specific bugs with clean data want bisection, not theory.** Six
+  mechanisms were proposed and rejected; what found it was four one-run
+  experiments that each halved the search space — bind pose, then object
+  visibility, then which vertex attribute, then a single joint index against
+  its neighbour. Two earlier tests proved nothing because they carried hidden
+  preconditions, which is worse than no test: they took the right answer off
+  the table for several hours.

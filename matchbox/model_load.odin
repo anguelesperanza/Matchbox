@@ -346,54 +346,82 @@ skinned_primitive_part :: proc(
 		vertex pinned to the root joint is a visible seam rather than a
 		character stretched across the map.
 	*/
-	joint_limit := u32(MAX_JOINTS)
-	if skin >= 0 && skin < len(data.skins) {
-		joint_limit = u32(min(len(data.skins[skin].joints), MAX_JOINTS))
-	}
+	/*
+		A compact palette for this part alone.
+
+		A vertex's joint index names a slot in the *skin*, and a rig's skin
+		routinely has more joints than the 64 a Vulkan-bound uniform can show
+		(see MAX_JOINTS). But a primitive is usually one body part or one
+		material and touches far fewer: the character this was found on has 66
+		joints in its skin and no primitive using more than 37 of them.
+
+		So each part gets a palette holding only the joints it uses, and its
+		vertices are rewritten to index that. `joint_map` carries a compact slot
+		back to the skin's joint so `animator_resolve` can fill it.
+	*/
+	skin_joints := 0
+	if skin >= 0 && skin < len(data.skins) do skin_joints = len(data.skins[skin].joints)
+
+	compact := make(map[u32]u32, context.temp_allocator)
+	defer delete(compact)
+
+	order := make([dynamic]u32, 0, MAX_JOINTS)
 
 	out_of_range := 0
+	overflowed   := false
 
 	vertices = make([]Vertex3D_Skinned, count, context.temp_allocator)
 	for i in 0 ..< count {
 		joint  := joints[i]
 		weight := weights[i]
 
-		/*
-			The weight goes with the joint index, and this used to keep it.
-
-			Setting the index to 0 and leaving its weight alone does not drop
-			the influence, which is what the message below claims -- it *moves*
-			it, onto whatever joint 0 happens to be. On a character that is the
-			root or the hips, so a vertex out at the ankle keeps a share of its
-			say and is dragged toward the pelvis, taking its triangles with it
-			as a spike. One vertex is enough to see.
-		*/
 		dropped := false
 		for k in 0 ..< 4 {
-			if joint[k] >= joint_limit {
+			/*
+				A zero-weight slot is still indexed by the shader and then
+				multiplied by nothing, so it only has to be *valid*. Slot 0
+				always exists, and pointing it there keeps every index inside
+				the palette without inventing an influence.
+			*/
+			if weight[k] <= 0 {
+				joint[k] = 0
+				continue
+			}
+
+			if int(joint[k]) >= skin_joints {
 				joint[k]  = 0
 				weight[k] = 0
 				dropped   = true
 				out_of_range += 1
+				continue
 			}
+
+			slot, known := compact[joint[k]]
+			if !known {
+				if len(order) >= MAX_JOINTS {
+					// More distinct joints in one primitive than the palette
+					// holds. The influence is dropped rather than aimed at a
+					// slot that means something else.
+					overflowed = true
+					joint[k]   = 0
+					weight[k]  = 0
+					dropped    = true
+					continue
+				}
+				slot = u32(len(order))
+				compact[joint[k]] = slot
+				append(&order, joint[k])
+			}
+			joint[k] = slot
 		}
 
-		/*
-			Dropping a weight leaves the four summing short, and the skinning
-			shader uses that sum unscaled -- so the vertex would land at `s`
-			times its correct position, pulled toward the model's origin. The
-			same trap `read_weights` renormalises against, reached from the
-			other direction: that normalise runs before this, so this has to
-			put the sum back itself.
-		*/
+		// Dropping a weight leaves the four summing short, and the shader uses
+		// that sum unscaled -- see read_weights.
 		if dropped {
 			sum := weight[0] + weight[1] + weight[2] + weight[3]
 			if sum > 0 {
 				weight = {weight[0] / sum, weight[1] / sum, weight[2] / sum, weight[3] / sum}
 			} else {
-				// Every influence this vertex had was out of range. Pinned to
-				// the first joint, which is a visible seam rather than a
-				// vertex on the origin dragging a triangle to the floor.
 				joint  = {0, 0, 0, 0}
 				weight = {1, 0, 0, 0}
 			}
@@ -407,14 +435,6 @@ skinned_primitive_part :: proc(
 			weights = weight,
 		}
 
-		/*
-			TEMPORARY diagnostic -- delete with SKIN_DIAG above.
-
-			Mode 3 (both) removed the artifact, so one of these two attributes
-			is arriving wrong on Vulkan. Modes 1 and 2 say which: 1 keeps the
-			real weights and 2 keeps the real joints, and the one that still
-			shows it is the culprit.
-		*/
 		when SKIN_DIAG == 1 || SKIN_DIAG == 3 do vertices[i].joints  = {0, 0, 0, 0}
 		when SKIN_DIAG == 2 || SKIN_DIAG == 3 do vertices[i].weights = {1, 0, 0, 0}
 		when SKIN_DIAG == 5 {
@@ -427,9 +447,17 @@ skinned_primitive_part :: proc(
 		}
 	}
 
+	// At least one slot, so a part whose influences were all dropped still has
+	// the identity entry its vertices now point at.
+	if len(order) == 0 do append(&order, u32(0))
+
 	if out_of_range > 0 {
-		log.errorf("skinned primitive names %v joint indices past the skin's %v joints; those weights were dropped",
-			out_of_range, joint_limit)
+		log.errorf("skinned primitive names %v joint indices past the skin's %v joints; those influences were dropped",
+			out_of_range, skin_joints)
+	}
+	if overflowed {
+		log.errorf("skinned primitive uses more than %v distinct joints; the excess influences were dropped and the mesh will tear",
+			MAX_JOINTS)
 	}
 
 	indices := read_indices(data, primitive, count)
@@ -437,9 +465,11 @@ skinned_primitive_part :: proc(
 	err: Error
 	part, err = upload_skinned_mesh(vertices, indices, skin, node)
 	if err != nil {
+		delete(order)
 		log.errorf("could not upload a skinned mesh primitive: %v", err)
 		return {}, nil, false
 	}
+	part.joint_map = order[:]
 
 	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
 

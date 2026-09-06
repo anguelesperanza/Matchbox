@@ -167,22 +167,28 @@ Vertex3D_Skinned :: struct {
 	32768 and has no such sectioning, which is why this was invisible on
 	Windows and broke on Linux.
 
-	So on Vulkan a rig may name joints 0..63 and no further, whatever this says.
-	This was set to 64 for a while to test whether that ceiling explained a
-	skinning artifact on one model; it did not, and 64 was strictly worse --
-	that rig has 66 joints, so two were dropped for nothing. Back at 128, which
-	is honest about D3D12 and over-promises on Vulkan.
+	**Confirmed by measurement, not inference.** Forcing every vertex to joint
+	63 renders a clean bind pose; forcing every vertex to joint 64 destroys the
+	whole model. 63 is the last matrix inside the 4KB, 64 is the first outside
+	it, and an out-of-range uniform read is defined on D3D12 (zero) and
+	undefined on Vulkan -- which is why one backend absorbed it and the other
+	threw geometry across the room.
 
-	**A rig above 64 joints is still wrong on Vulkan** and wants the palette
-	moved to a storage buffer, which has no such cap. Nothing has hit it yet:
-	the model that prompted this uses joints up to 64 and its highest, `ball_r`,
-	carries only 180 vertices.
+	So this is 64: the number Vulkan can actually deliver, not the number the
+	block would like to hold.
+
+	**A rig with more joints than this still works**, because a *part* only
+	needs a palette of the joints it uses, not of the whole skin. See
+	`Model_Part.joint_map`: the character that found this has 66 joints in its
+	skin and no primitive touching more than 37. What is not supported is a
+	single primitive using more than 64 distinct joints, which is reported at
+	load. Lifting that needs the palette on a storage buffer, which has no cap.
 */
-MAX_JOINTS :: 128
+MAX_JOINTS :: 64
 
 /*
-	8192 bytes: the joint matrix palette, pushed once per skinned part. Only
-	the first 4096 of them survive the trip on Vulkan -- see MAX_JOINTS above.
+	4096 bytes: the joint matrix palette, pushed once per skinned part, and
+	exactly what SDL's Vulkan backend can bind -- see MAX_JOINTS above.
 
 	This said "a fixed array rather than a storage buffer ... it keeps the
 	backend requirements to what SDL guarantees everywhere". That reasoning
@@ -192,10 +198,11 @@ MAX_JOINTS :: 128
 	buffer, bound with `SDL_BindGPUVertexStorageBuffers`, has no such ceiling
 	and is what this should become.
 
-	The shader declares `float4x4 joints[128]` to match. Changing either means
-	changing both, and a shader rebuild -- which on Linux emits `.spv` only, so
-	the committed `.dxil` would fall out of step. Do it on Windows, or when the
-	storage buffer lands.
+	The shader declares `float4x4 joints[128]`, which is now larger than what is
+	pushed. That is deliberate and harmless: nothing indexes past 63 any more,
+	and shrinking the declaration would mean a shader rebuild, which on Linux
+	emits `.spv` only and would leave the committed `.dxil` behind. Do it on
+	Windows, or when the storage buffer lands.
 */
 Skin_Vert_Data :: struct #align(16) {
 	joints: [MAX_JOINTS]matrix[4, 4]f32,

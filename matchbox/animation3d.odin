@@ -315,7 +315,7 @@ create_animator :: proc(
 
 	for part, i in model.parts {
 		if part.skin < 0 || part.skin >= len(model.skeleton.skins) do continue
-		animator.pose.palettes[i] = make([]matrix[4, 4]f32, len(model.skeleton.skins[part.skin].joints))
+		animator.pose.palettes[i] = make([]matrix[4, 4]f32, len(part.joint_map))
 	}
 
 	// The bind pose, so a character drawn before its first `update_animator` is
@@ -1042,9 +1042,14 @@ animator_resolve :: proc(animator: ^Animator, model: Model) {
 			mesh_inverse = linalg.inverse(animator.pose.globals[part.node])
 		}
 
-		for joint, j in skin.joints {
-			if int(joint) >= len(animator.pose.globals) do continue
-			animator.pose.palettes[i][j] = mesh_inverse * animator.pose.globals[joint] * skin.inverse_bind[j]
+		// Indexed by the part's compact slot, not by the skin's joint number:
+		// `joint_map` is what turns one into the other, and a vertex names the
+		// compact one.
+		for slot, j in part.joint_map {
+			if int(slot) >= len(skin.joints) do continue
+			node := skin.joints[slot]
+			if int(node) >= len(animator.pose.globals) do continue
+			animator.pose.palettes[i][j] = mesh_inverse * animator.pose.globals[node] * skin.inverse_bind[slot]
 		}
 	}
 }

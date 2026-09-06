@@ -65,6 +65,21 @@ Model_Part :: struct {
 	*/
 	skin:        int,
 	node:        u32,
+
+	/*
+		Which of the skin's joints this part actually uses, in the order its
+		vertices name them. A vertex's `joints` index into *this*, not into the
+		skin -- so a part touching 37 of a rig's 66 joints carries a palette 37
+		long and never names an index above 36.
+
+		This exists because the palette is a uniform block and SDL's Vulkan
+		backend binds one with `range = 4096`, which is exactly 64 matrices. A
+		rig with more joints than that is ordinary; a *primitive* using more
+		than 64 of them is not, since a primitive is usually one body part or
+		one material. Compacting per part is what keeps an ordinary rig inside
+		an unforgiving ceiling.
+	*/
+	joint_map:   []u32,
 }
 
 /*
@@ -174,6 +189,7 @@ destroy_model :: proc(model: ^Model) {
 	defer delete(released)
 
 	for &part in model.parts {
+		delete(part.joint_map)
 		if part.vertices != nil do sdl.ReleaseGPUBuffer(device, part.vertices)
 		if part.indices  != nil do sdl.ReleaseGPUBuffer(device, part.indices)
 

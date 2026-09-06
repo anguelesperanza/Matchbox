@@ -38,6 +38,11 @@ import stbi "vendor:stb/image"
 
 import gltf "./gltf2"
 
+// TEMPORARY: see the block in skinned_primitive_part. Built with
+// -define:SKIN_DIAG_FLATTEN=true, every vertex is pinned to joint 0, which
+// with a nil animator makes the shader's skin matrix exactly the identity.
+SKIN_DIAG_FLATTEN :: #config(SKIN_DIAG_FLATTEN, false)
+
 // -----------------------------------------------------------------------
 // Loading
 // -----------------------------------------------------------------------
@@ -385,6 +390,21 @@ skinned_primitive_part :: proc(
 			uv      = uvs[i],
 			joints  = joint,
 			weights = weight,
+		}
+
+		/*
+			TEMPORARY diagnostic -- delete with SKIN_DIAG_FLATTEN below.
+
+			Pins every vertex to joint 0 at full weight. With a nil animator
+			the palette is all identity, so this makes the shader's skin matrix
+			exactly the identity for every vertex, whatever the joint and
+			weight attributes would otherwise have read. If an artifact
+			survives that, the fault is in the position attribute or the draw;
+			if it goes, the joint or weight attributes are arriving wrong.
+		*/
+		if SKIN_DIAG_FLATTEN {
+			vertices[i].joints  = {0, 0, 0, 0}
+			vertices[i].weights = {1, 0, 0, 0}
 		}
 	}
 

@@ -140,9 +140,11 @@ proc(d: f32 = DEFAULTS.duration)  // a field of one
 ### The exceptions, and they are narrow
 
 - **Array sizes.** Odin needs a compile-time constant for a fixed array bound.
-  `MAX_JOINTS`, `MAX_LIGHTS`, `MAX_TOUCHES`, `MAX_GAMEPADS`, `MAX_TEXT_INPUT`,
+  `MAX_LIGHTS`, `MAX_TOUCHES`, `MAX_GAMEPADS`, `MAX_TEXT_INPUT`,
   `MAX_CLIP_DEPTH`, `FONT_GLYPH_COUNT`, `STATUS_MAX_BYTES` all size arrays and
-  stay as they are
+  stay as they are. (`MAX_JOINTS` was one of these and is gone: the joint
+  palette moved to a storage buffer, which has no fixed size to declare --
+  see `refactor.md`.)
 - **Embedded data.** `DEFAULT_FONT_BYTES` is a `#load` and cannot be anything
   else
 - **Colours.** `WHITE`, `BLACK`, `MAROON` and the rest stay loose on purpose.

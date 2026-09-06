@@ -234,9 +234,6 @@ draw_model :: proc(
 
 	frag_data := Mesh_Frag_Data{tint = tint}
 
-	// Reused across the parts rather than declared inside the loop: it is eight
-	// kilobytes, and a fresh one per part would be eight kilobytes of stack
-	// zeroed thirteen times for a character.
 	skin_data: Skin_Vert_Data
 
 	for part, part_index in model.parts {
@@ -285,34 +282,73 @@ draw_model :: proc(
 		sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
 
 		if skinned {
-			/*
-				The palette this part's shader reads. Identity for every joint
-				unless an animator was passed with one worked out for this part,
-				which is what makes a skinned model drawn without an animator
-				come out in its bind pose: a joint matrix of identity leaves the
-				vertex exactly where the file put it.
+			joint_buffer: ^sdl.GPUBuffer
 
-				The whole block is pushed, used entries or not. A cbuffer array
-				is a fixed size to the shader, and a short push leaves whatever
-				the last one wrote in the entries past the end -- which is a
-				character stretched across the map the moment two models with
-				different joint counts are drawn in the same frame.
-			*/
-			for i in 0 ..< MAX_JOINTS do skin_data.joints[i] = linalg.MATRIX4F32_IDENTITY
-
-			if animator != nil && part_index < len(animator.pose.palettes) {
-				palette := animator.pose.palettes[part_index]
-				for m, i in palette {
-					if i >= MAX_JOINTS do break
-					skin_data.joints[i] = m
-				}
+			if animator != nil && part_index < len(animator.pose.palettes) && animator.pose.joint_buffer != nil {
+				joint_buffer = animator.pose.joint_buffer
+			} else {
+				/*
+					No animator, or one with nothing skinned for this part --
+					draw in the bind pose rather than reading whatever buffer a
+					previous draw left bound, which would be a different
+					character's palette or nothing at all. This is what makes a
+					skinned model drawn without an animator come out arms-out
+					rather than crashing or reading garbage: a joint matrix of
+					identity leaves every vertex exactly where the file put it.
+				*/
+				joint_buffer = ensure_identity_joint_buffer(model.total_joints)
 			}
 
+			// Could not even allocate the identity fallback -- skip the part
+			// rather than bind nothing and let the shader read undefined memory.
+			if joint_buffer == nil do continue
+
+			if r.bound_joint_buffer != joint_buffer {
+				sdl.BindGPUVertexStorageBuffers(r.pass, 0, &joint_buffer, 1)
+				r.bound_joint_buffer = joint_buffer
+			}
+
+			skin_data.joint_offset = part.joint_offset
 			sdl.PushGPUVertexUniformData(r.cmd, 1, &skin_data, size_of(skin_data))
 		}
 
 		sdl.DrawGPUIndexedPrimitives(r.pass, part.index_count, 1, 0, 0, 0)
 	}
+}
+
+/*
+	The all-identity fallback for drawing a skinned model with no animator, or
+	whose animator has nothing skinned for the part being drawn.
+
+	Grown on demand and never shrunk: the common case is the same handful of
+	rigs hitting this path over and over (in a finished game, usually none --
+	this is the "you forgot the animator" path from draw_model's doc comment),
+	so paying for one allocation the first time a model that big is drawn this
+	way is cheaper than a fresh one on every such draw. `count` only ever needs
+	to reach the biggest model drawn without an animator so far; the content is
+	identity everywhere, so a smaller model reading into the tail of a buffer
+	sized for a bigger one is still correct.
+*/
+@(private)
+ensure_identity_joint_buffer :: proc(count: int) -> ^sdl.GPUBuffer {
+	r := &mbi.renderer
+	if count <= 0 do return nil
+	if r.identity_joints != nil && r.identity_joints_count >= count do return r.identity_joints
+
+	data := make([]matrix[4, 4]f32, count, context.temp_allocator)
+	for i in 0 ..< count do data[i] = linalg.MATRIX4F32_IDENTITY
+
+	buffer, err := upload_buffer(raw_data(data), u32(count) * size_of(matrix[4, 4]f32), {.GRAPHICS_STORAGE_READ})
+	if err != nil {
+		log.errorf("could not create the identity joint buffer: %v", err)
+		return nil
+	}
+
+	if r.identity_joints != nil do sdl.ReleaseGPUBuffer(r.device, r.identity_joints)
+	r.identity_joints       = buffer
+	r.identity_joints_count = count
+
+	return buffer
 }
 
 // A model at a position, at one scale on every axis and unturned. What most

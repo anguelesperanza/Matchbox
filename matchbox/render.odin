@@ -130,10 +130,17 @@ Renderer :: struct {
 	// buffer, however many of them ran back to back with identical state. A
 	// screen of two thousand rects is one pipeline and one quad, described two
 	// thousand times.
-	bound_pipeline: ^sdl.GPUGraphicsPipeline,
-	bound_texture:  ^sdl.GPUTexture,
-	bound_sampler:  ^sdl.GPUSampler,
-	bound_quad:     bool, // the shared vertex and index buffers, which never change
+	bound_pipeline:     ^sdl.GPUGraphicsPipeline,
+	bound_texture:      ^sdl.GPUTexture,
+	bound_sampler:      ^sdl.GPUSampler,
+	bound_quad:         bool, // the shared vertex and index buffers, which never change
+	bound_joint_buffer: ^sdl.GPUBuffer, // a skinned model's palette; see draw_model
+
+	// The all-identity fallback for a skinned model drawn with no animator --
+	// see draw_model. Grown, never shrunk, so the common case of drawing the
+	// same handful of rigs pays for one allocation rather than one a draw.
+	identity_joints:       ^sdl.GPUBuffer,
+	identity_joints_count: int,
 
 	// 3D. The depth texture is made the first time a game asks for a 3D pass
 	// and remade when the window changes size, so a program that never draws
@@ -176,10 +183,11 @@ Renderer :: struct {
 @(private)
 bind_cache_reset :: proc() {
 	r := &mbi.renderer
-	r.bound_pipeline = nil
-	r.bound_texture  = nil
-	r.bound_sampler  = nil
-	r.bound_quad     = false
+	r.bound_pipeline     = nil
+	r.bound_texture      = nil
+	r.bound_sampler      = nil
+	r.bound_quad         = false
+	r.bound_joint_buffer = nil
 }
 
 // -----------------------------------------------------------------------

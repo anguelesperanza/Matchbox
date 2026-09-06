@@ -27,6 +27,8 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
+import sdl "vendor:sdl3"
+
 // -----------------------------------------------------------------------
 // What comes out of the file
 // -----------------------------------------------------------------------
@@ -192,11 +194,21 @@ Animation_Blend :: struct {
 
 	`locals` is this frame's pose before the hierarchy is applied and `globals`
 	after; `from` is the same as `locals` for whatever is being faded out, and
-	is untouched when nothing is. `palettes` is what the shader reads -- one per
-	part, because a skinned part's palette depends on the node its mesh hangs
-	off as well as on the skin. `layer_locals` is the same idea as `from`, one
+	is untouched when nothing is. `layer_locals` is the same idea as `from`, one
 	scratch buffer per layer, so a layer's own sample has somewhere to live
 	before it is mixed into `locals`.
+
+	`joint_data` is every skinned part's palette, back to back in one flat
+	buffer -- `palettes[i]` is a slice *into* it at `model.parts[i].joint_offset`,
+	not its own allocation, so freeing this animator deletes `joint_data` once
+	rather than once per part. One CPU array in this shape is what makes one
+	GPU upload possible: `joint_buffer` is its device-side twin, rewritten
+	through the persistent `joint_transfer` staging buffer every
+	`update_animator`, and what `draw_model` binds as a vertex storage buffer
+	instead of pushing a palette per part. See `types.odin`'s `Skin_Vert_Data`
+	and `refactor.md`'s "storage buffer" note for why: the uniform this
+	replaced was capped at 64 matrices on Vulkan and not on D3D12, which is a
+	character that skins correctly on one machine and tears on the other.
 */
 Animation_Pose :: struct {
 	locals:       []Transform,
@@ -204,6 +216,10 @@ Animation_Pose :: struct {
 	globals:      []matrix[4, 4]f32,
 	palettes:     [][]matrix[4, 4]f32,
 	layer_locals: [MAX_ANIMATION_LAYERS][]Transform,
+
+	joint_data:     []matrix[4, 4]f32,
+	joint_buffer:   ^sdl.GPUBuffer,
+	joint_transfer: ^sdl.GPUTransferBuffer,
 }
 
 /*
@@ -313,15 +329,51 @@ create_animator :: proc(
 		animator.pose.layer_locals[i] = make([]Transform, node_count)
 	}
 
+	/*
+		One flat array for every skinned part's palette, sliced up per
+		`joint_offset` rather than allocated per part -- see `Animation_Pose`'s
+		doc comment for why. `model.total_joints` is 0 for a model with a
+		skeleton but nothing actually skinned (unusual, but not a contradiction),
+		and a zero-length buffer is left as nil rather than an empty allocation.
+	*/
+	if model.total_joints > 0 {
+		animator.pose.joint_data = make([]matrix[4, 4]f32, model.total_joints)
+	}
+
 	for part, i in model.parts {
 		if part.skin < 0 || part.skin >= len(model.skeleton.skins) do continue
-		animator.pose.palettes[i] = make([]matrix[4, 4]f32, len(part.joint_map))
+		count := len(part.joint_map)
+		animator.pose.palettes[i] = animator.pose.joint_data[part.joint_offset:][:count]
 	}
 
 	// The bind pose, so a character drawn before its first `update_animator` is
 	// a character rather than a heap of triangles at the origin.
 	copy(animator.pose.locals, model.skeleton.rest)
 	animator_resolve(&animator, model)
+
+	/*
+		The GPU half of the palette, created here so the very first draw --
+		before this animator's first `update_animator` -- already has a real
+		buffer to bind rather than nothing. Guarded on `device`, not on
+		`frame_active`: this runs at setup time, typically before the frame
+		loop has drawn anything, and `animation3d_test.odin` creates animators
+		with no renderer at all, which must stay exactly as headless as it is
+		today.
+	*/
+	if model.total_joints > 0 && mbi.renderer.device != nil {
+		size := u32(model.total_joints) * size_of(matrix[4, 4]f32)
+
+		buffer, err := upload_buffer(raw_data(animator.pose.joint_data), size, {.GRAPHICS_STORAGE_READ})
+		if err != nil {
+			log.errorf("could not create a joint buffer: %v", err)
+		} else {
+			animator.pose.joint_buffer = buffer
+			animator.pose.joint_transfer = sdl.CreateGPUTransferBuffer(mbi.renderer.device, {
+				usage = .UPLOAD,
+				size  = size,
+			})
+		}
+	}
 
 	return animator
 }
@@ -330,7 +382,9 @@ create_animator :: proc(
 // for is untouched -- several animators share one, and the skeleton and clips
 // belong to the model.
 destroy_animator :: proc(animator: ^Animator) {
-	for palette in animator.pose.palettes do delete(palette)
+	// One delete, not one per part: every palette is a slice into this rather
+	// than its own allocation -- see Animation_Pose's doc comment.
+	delete(animator.pose.joint_data)
 	delete(animator.pose.palettes)
 	delete(animator.pose.globals)
 	delete(animator.pose.from)
@@ -339,6 +393,11 @@ destroy_animator :: proc(animator: ^Animator) {
 	for i in 0 ..< MAX_ANIMATION_LAYERS {
 		delete(animator.pose.layer_locals[i])
 		delete(animator.layers[i].mask)
+	}
+
+	if device := mbi.renderer.device; device != nil {
+		if animator.pose.joint_buffer   != nil do sdl.ReleaseGPUBuffer(device, animator.pose.joint_buffer)
+		if animator.pose.joint_transfer != nil do sdl.ReleaseGPUTransferBuffer(device, animator.pose.joint_transfer)
 	}
 
 	animator^ = Animator{playback = {clip = -1, speed = 1, looping = true}}
@@ -850,6 +909,14 @@ set_animation_layer_weight :: proc(animator: ^Animator, layer: int, weight: f32)
 
 	A non-looping clip stops on its last frame and clears `playing`, which is
 	what a game watches to know a one-shot has finished.
+
+	For a skinned model this also rewrites the animator's joint buffer on the
+	GPU -- see `Animation_Pose`'s doc comment. That upload runs on its own
+	command buffer rather than the frame's, specifically so this may be called
+	anywhere, before `begin_drawing` included, exactly as every example already
+	does; there is no ordering requirement to learn. It is a no-op before
+	`matchbox.init` (as in a headless test) and for a model with nothing
+	skinned.
 */
 update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32) {
 	if !is_model_skinned(model) do return
@@ -930,6 +997,14 @@ update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32) {
 	}
 
 	animator_resolve(animator, model)
+
+	if animator.pose.joint_buffer != nil && mbi.renderer.device != nil {
+		size := u32(len(animator.pose.joint_data)) * size_of(matrix[4, 4]f32)
+		if err := rewrite_buffer(animator.pose.joint_buffer, animator.pose.joint_transfer,
+			raw_data(animator.pose.joint_data), size); err != nil {
+			log.errorf("could not update a joint buffer: %v", err)
+		}
+	}
 }
 
 /*

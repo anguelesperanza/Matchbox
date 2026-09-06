@@ -1066,11 +1066,12 @@ long completed log, and `README.md` links into it).
 
 ---
 
-## The joint palette wants a storage buffer
+## The joint palette moved to a storage buffer
 
 Recorded 2026-09-06, after a Vulkan-only skinning artifact that took six wrong
-theories to corner. The immediate bug is fixed; the ceiling underneath it is
-not, and this is the note for whoever meets it.
+theories to corner. **Done, same day.** Left here as the record of the ceiling
+that motivated it and what actually got built, for whoever next touches
+skinning and wonders why the palette is shaped the way it is.
 
 ### The ceiling
 
@@ -1086,48 +1087,66 @@ uniform read is *defined* on D3D12, returning zero, and *undefined* on Vulkan.
 So the same file skinned correctly on Windows and threw geometry across the
 room on Linux, with nothing in either log.
 
-### What was done instead, and why it is not enough
+### The stopgap that came first
 
-`MAX_JOINTS` is 64, and each part carries a palette of only the joints it uses
-(`Model_Part.joint_map`), so a rig with more joints than that still works as
-long as no single primitive touches more than 64 distinct ones. That is a real
-constraint rather than a formality — a primitive is usually one body part or
-one material, and the character that found this has 66 joints in its skin and
-no primitive using more than 37 — but it is a constraint, and it is enforced
-with a log line rather than a guarantee.
+For about a day: `MAX_JOINTS` at 64, each part carrying a palette of only the
+joints it uses (`Model_Part.joint_map`), so a rig with more joints than that
+still worked as long as no single primitive touched more than 64 distinct
+ones — real for an ordinary rig (the character that found this has 66 joints
+in its skin and no primitive using more than 37) but still a cap, enforced
+with a log line rather than a guarantee. The shader's declared array was
+shrunk from `joints[128]` to `joints[64]` to match, on Windows, since Linux's
+`dxc` cannot sign a `.dxil`. All of this is superseded by what follows and is
+kept here only as the step between the bug and the fix.
 
-**The shader's declared array is shrunk to match, done 2026-09-06 on
-Windows.** It had said `float4x4 joints[128]` for a day — deliberately
-harmless, since nothing indexed past 63 — while the machine that could sign a
-`.dxil` was elsewhere. It now says `joints[64]`, both `.spv` and `.dxil`
-rebuilt from the same source and committed together.
+### The fix, built 2026-09-06
 
-**A single primitive using more than 64 distinct joints is unsupported today.**
-A dense one-piece character mesh, or a rig with hair and cloth bones weighted
-across one primitive, would hit it.
+The palette is a `StructuredBuffer<float4x4>` now, bound per character with
+`SDL_BindGPUVertexStorageBuffers`, not pushed per part with a uniform. Storage
+buffers have no 4KB sectioning, so the cap is gone outright and `joint_map`
+is purely an optimisation -- a part compacts to the joints it actually uses,
+but nothing is dropped if it doesn't fit, because there is no longer a "doesn't
+fit".
 
-### The fix
+What that touched, against the three points raised when this was only a plan:
 
-Move the palette off the uniform and onto a storage buffer, bound with
-`SDL_BindGPUVertexStorageBuffers`. Storage buffers have no 4KB sectioning, so
-the cap disappears and `joint_map` becomes an optimisation rather than a
-requirement.
-
-What it touches:
-
-- **The shader.** `cbuffer Skin_Vert_Data` becomes a `StructuredBuffer<float4x4>`.
-- **The pipeline.** The shader create-info must declare a vertex storage
-  buffer, which `create_pipeline` does not do today.
-- **The upload.** A uniform push is per-draw and free; a storage buffer needs
-  memory the GPU can read and a way to write a palette per part per frame
-  without stalling. That is the real work, and the reason this was not the
-  first answer.
-
-**Do it on Windows.** It requires a shader rebuild, and `build_shaders.sh`
-emits DXIL only there — `dxc` on Linux can produce the container but cannot
-sign it, and unsigned DXIL is refused by D3D12 outside developer mode. Building
-here would leave the committed `.dxil` behind its `.hlsl`, which is the
-desync hazard recorded further up this file.
+- **The shader.** `cbuffer Skin_Vert_Data` (4096 bytes of matrices) became
+  `StructuredBuffer<float4x4> joints` at `t0, space0` -- SDL_GPU's fixed HLSL
+  slot for a vertex stage's first storage buffer, the same way vertex uniforms
+  are always `space1`. `Skin_Vert_Data` itself didn't disappear; it shrank to
+  one `uint joint_offset`, still pushed at `b1` -- see the next point.
+- **The pipeline.** `create_builtin_shader` gained a `num_storage_buffers`
+  parameter; the skinned vertex shader declares one.
+- **The upload.** This was "the real work" and the reason a uniform was tried
+  first. One buffer per *character* (`Animation_Pose.joint_buffer`), holding
+  every skinned part's palette back to back -- `Model_Part.joint_offset` is a
+  running sum over a model's parts, computed once at load since it is the
+  model's number, not any one animator's, and `joint_offset` in the shader is
+  what turns a part-local vertex index back into a real one. `update_animator`
+  rewrites the whole buffer every frame through a persistent transfer buffer
+  (`rewrite_buffer` in upload.odin), on its own command buffer rather than the
+  frame's -- which is what let this drop into every existing call site with
+  no ordering change: `update_animator` still runs wherever it always did,
+  before `begin_drawing` included, because the upload never touches `r.cmd`
+  and SDL_GPU's one queue keeps it ordered ahead of the draw that reads it
+  by submission order alone. The alternative -- piggybacking the upload on the
+  frame's own command buffer, the way `pixel_buffer_update` does for a texture
+  -- was rejected because `draw_model` is the only place with a render pass
+  reliably open, and a copy pass cannot be recorded while one is; doing it
+  there would mean closing and reopening the 3D pass mid-model, invalidating
+  every cached bind (`bind_cache_reset`) and needing the interrupted pass's
+  depth target to have been opened with `store_op = .STORE` instead of the
+  `.DONT_CARE` it uses today. Solvable, but a second render-pass edge case for
+  a benefit (sharing one command buffer) that submission ordering already
+  gives for free.
+- **The nil-animator fallback.** `draw_model`'s "no animator draws the bind
+  pose" promise had nowhere to read from once the palette lived on the
+  animator rather than being pushed fresh each call -- an all-identity uniform
+  doesn't exist to fall back to any more. Replaced with a grown-not-shrunk
+  global identity storage buffer (`ensure_identity_joint_buffer`), sized to
+  whatever model has needed it so far and reused across every model that hits
+  this path, since it is content-free: identity is identity regardless of
+  which model's `joint_offset` indexes into it.
 
 ### Worth keeping from the hunt
 

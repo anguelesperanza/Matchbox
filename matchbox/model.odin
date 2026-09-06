@@ -72,14 +72,26 @@ Model_Part :: struct {
 		skin -- so a part touching 37 of a rig's 66 joints carries a palette 37
 		long and never names an index above 36.
 
-		This exists because the palette is a uniform block and SDL's Vulkan
-		backend binds one with `range = 4096`, which is exactly 64 matrices. A
-		rig with more joints than that is ordinary; a *primitive* using more
-		than 64 of them is not, since a primitive is usually one body part or
-		one material. Compacting per part is what keeps an ordinary rig inside
-		an unforgiving ceiling.
+		Originally forced by a 4096-byte Vulkan uniform ceiling of exactly 64
+		matrices; the palette is a storage buffer now and that ceiling is gone
+		(see `joint_offset` and `refactor.md`'s "storage buffer" note), but the
+		compacting stays. It is still a real memory saving -- this character has
+		66 joints in its skin and no primitive using more than 37 of them -- and
+		costs nothing now that nothing is dropped to make it fit.
 	*/
-	joint_map:   []u32,
+	joint_map:    []u32,
+
+	/*
+		Where this part's palette starts in its animator's joint buffer, in
+		matrices. Every part of a model shares one buffer -- one upload, one
+		bind, per character per frame, rather than one of each per part -- and
+		this is the offset that tells the shader which slice is this part's.
+
+		A property of the model, computed once at load as a running sum over
+		`parts` in order, not of any one animator: two animators of the same
+		model agree on it without either being asked.
+	*/
+	joint_offset: u32,
 }
 
 /*
@@ -101,6 +113,12 @@ Model :: struct {
 	// clips, and neither changes once loaded. What moves is an `Animator`.
 	skeleton:   Skeleton,
 	animations: []Model_Animation,
+
+	// The sum of every part's `joint_map`, i.e. how many matrices one
+	// animator's joint buffer holds for this model. 0 for a model with no
+	// skin. Computed alongside `joint_offset`, for the same reason: it is the
+	// model's own number, not any one animator's.
+	total_joints: int,
 }
 
 // The middle of the model's own bounds, and how big it is. What a game hands to

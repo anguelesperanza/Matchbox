@@ -6,8 +6,8 @@
     shaders do not know or care which vertex shader fed them, and a skinned
     model is lit, fogged and textured by exactly the code an unskinned one is.
 
-    Uniform layout must match matchbox.Mesh_Vert_Data and matchbox.Skin_Vert_Data
-    exactly: 192 bytes in b0, then 4096 bytes of joint matrices in b1.
+    Uniform layout must match matchbox.Mesh_Vert_Data exactly: 192 bytes in
+    b0. Skin_Vert_Data in b1 is one uint now -- see below.
 */
 #pragma pack_matrix(column_major)
 
@@ -24,18 +24,26 @@ cbuffer Mesh_Vert_Data : register(b0, space1)
     hierarchy walking: by the time a matrix arrives here it is the whole answer
     for that joint, and all that is left is the weighted sum.
 
-    64, not some rounder or larger number: SDL's Vulkan backend binds this
-    uniform with range = 4096 bytes regardless of what is pushed, which is
-    exactly 64 matrices, and reading past what is bound is undefined there
-    (merely zero on D3D12, which is what let this run wrong on Linux and look
-    fine on Windows for a while). See MAX_JOINTS in types.odin for the rest of
-    that story, and Model_Part.joint_map for how a rig with more than 64
-    joints still fits: a part's palette holds only the joints it uses, not
-    the whole skin, so index 64 is never actually named.
+    A storage buffer, not a uniform -- SDL's Vulkan backend binds a uniform
+    with range capped at exactly 64 matrices regardless of what is pushed,
+    which is undefined past that point on Vulkan and merely zero on D3D12.
+    That asymmetry is why the same file once skinned correctly on Windows and
+    threw geometry across the room on Linux; see `refactor.md`. A storage
+    buffer has no such cap.
+
+    One buffer holds every skinned part of one character back to back, not
+    one palette each -- `joint_offset` below is which slice is this part's.
+    `t0, space0` is SDL_GPU's fixed HLSL slot for a vertex stage's first
+    storage buffer, the same way vertex uniforms are always `space1`.
 */
+StructuredBuffer<float4x4> joints : register(t0, space0);
+
+// Where this part's palette starts in `joints`. Every vertex's `joint` field
+// below is local to the part (0..joint_map count-1 on the Odin side); this is
+// what turns that back into a real index into the shared buffer.
 cbuffer Skin_Vert_Data : register(b1, space1)
 {
-    float4x4 joints[64];
+    uint joint_offset;
 };
 
 struct VSInput
@@ -81,10 +89,10 @@ VSOutput main(VSInput input)
         load.
     */
     float4x4 skin =
-        input.weight.x * joints[input.joint.x] +
-        input.weight.y * joints[input.joint.y] +
-        input.weight.z * joints[input.joint.z] +
-        input.weight.w * joints[input.joint.w];
+        input.weight.x * joints[joint_offset + input.joint.x] +
+        input.weight.y * joints[joint_offset + input.joint.y] +
+        input.weight.z * joints[joint_offset + input.joint.z] +
+        input.weight.w * joints[joint_offset + input.joint.w];
 
     float4 skinned_pos    = mul(skin, float4(input.pos, 1.0));
     float3 skinned_normal = mul(skin, float4(input.normal, 0.0)).xyz;

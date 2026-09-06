@@ -17,6 +17,49 @@ import "base:runtime"
 import sdl "vendor:sdl3"
 
 /*
+	Rewrites an existing device buffer from `data`, through a transfer buffer
+	the caller keeps and reuses -- the per-frame counterpart to `upload_buffer`
+	below, which makes a new device buffer and a throwaway transfer buffer
+	every time it is called.
+
+	`cycle` on both the map and the upload: the whole buffer is being replaced
+	and nothing already in it is worth waiting for, which is what keeps a
+	per-frame rewrite from stalling on the GPU still reading last frame's copy
+	-- the same reasoning `pixel_buffer_update` gives for its own texture-shaped
+	version of this.
+
+	Recorded on a command buffer of its own rather than the frame's, so the
+	caller is not tied to being called between `begin_drawing` and
+	`end_drawing` -- correct for anything computed before the frame starts,
+	which `update_animator` is. Submission order on the one queue SDL_GPU
+	exposes here is what keeps this ordered before whatever draw call reads
+	the buffer next, without needing to share a command buffer to prove it.
+*/
+@(private)
+rewrite_buffer :: proc(buffer: ^sdl.GPUBuffer, transfer: ^sdl.GPUTransferBuffer, data: rawptr, size: u32) -> Error {
+	device := mbi.renderer.device
+
+	dst := sdl.MapGPUTransferBuffer(device, transfer, true)
+	if dst == nil do return Gpu_Error.Transfer_Buffer_Map_Failed
+	runtime.mem_copy(dst, data, int(size))
+	sdl.UnmapGPUTransferBuffer(device, transfer)
+
+	cmd  := sdl.AcquireGPUCommandBuffer(device)
+	pass := sdl.BeginGPUCopyPass(cmd)
+	sdl.UploadToGPUBuffer(
+		pass,
+		{transfer_buffer = transfer, offset = 0},
+		{buffer = buffer, offset = 0, size = size},
+		true,
+	)
+	sdl.EndGPUCopyPass(pass)
+
+	if !sdl.SubmitGPUCommandBuffer(cmd) do return Gpu_Error.Submit_Failed
+
+	return nil
+}
+
+/*
 	Creates a device-local buffer and fills it from `data`.
 
 	Every failure here is the driver refusing an allocation, so they come back

@@ -124,12 +124,24 @@ model_from_gltf :: proc(data: ^gltf.Data) -> Model {
 		return {}
 	}
 
+	// Every skinned part gets a slice of one shared joint buffer, laid out
+	// here as a running sum over the parts in order -- see `joint_offset`'s
+	// doc comment on Model_Part. An unskinned part (skin < 0) keeps offset 0
+	// and contributes nothing to the total; nothing ever reads its offset.
+	total_joints: u32 = 0
+	for &part in parts {
+		if part.skin < 0 do continue
+		part.joint_offset = total_joints
+		total_joints += u32(len(part.joint_map))
+	}
+
 	return Model{
-		parts      = parts[:],
-		bounds_min = low,
-		bounds_max = high,
-		skeleton   = build_skeleton(data),
-		animations = build_animations(data),
+		parts        = parts[:],
+		bounds_min   = low,
+		bounds_max   = high,
+		skeleton     = build_skeleton(data),
+		animations   = build_animations(data),
+		total_joints = int(total_joints),
 	}
 }
 
@@ -316,29 +328,17 @@ skinned_primitive_part :: proc(
 	weights := read_weights(data, primitive.attributes, count)
 
 	/*
-		How many joints the palette this part will be drawn with actually holds.
-		A vertex naming a joint past that reads off the end of a cbuffer array,
-		which is not a crash and not a validation error -- it is whatever the
-		last draw left there, so the character has one limb somewhere else
-		entirely and nothing says why.
-
-		Out of range is either a file whose skin and mesh disagree or a misread
-		accessor on this side. Clamped to zero and reported once, because a
-		vertex pinned to the root joint is a visible seam rather than a
-		character stretched across the map.
-	*/
-	/*
 		A compact palette for this part alone.
 
 		A vertex's joint index names a slot in the *skin*, and a rig's skin
-		routinely has more joints than the 64 a Vulkan-bound uniform can show
-		(see MAX_JOINTS). But a primitive is usually one body part or one
-		material and touches far fewer: the character this was found on has 66
-		joints in its skin and no primitive using more than 37 of them.
-
-		So each part gets a palette holding only the joints it uses, and its
-		vertices are rewritten to index that. `joint_map` carries a compact slot
-		back to the skin's joint so `animator_resolve` can fill it.
+		routinely has more joints than any one primitive touches: the character
+		this was found on has 66 joints in its skin and no primitive using more
+		than 37 of them. So each part gets a palette holding only the joints it
+		uses, and its vertices are rewritten to index that -- `joint_map` carries
+		a compact slot back to the skin's joint so `animator_resolve` can fill
+		it. Unbounded: the palette is a storage buffer now (see `joint_offset`
+		on `Model_Part`), so there is no longer a limit on how many distinct
+		joints one primitive may name.
 	*/
 	skin_joints := 0
 	if skin >= 0 && skin < len(data.skins) do skin_joints = len(data.skins[skin].joints)
@@ -346,10 +346,9 @@ skinned_primitive_part :: proc(
 	compact := make(map[u32]u32, context.temp_allocator)
 	defer delete(compact)
 
-	order := make([dynamic]u32, 0, MAX_JOINTS)
+	order := make([dynamic]u32, 0, min(skin_joints, 64))
 
 	out_of_range := 0
-	overflowed   := false
 
 	vertices = make([]Vertex3D_Skinned, count, context.temp_allocator)
 	for i in 0 ..< count {
@@ -379,16 +378,6 @@ skinned_primitive_part :: proc(
 
 			slot, known := compact[joint[k]]
 			if !known {
-				if len(order) >= MAX_JOINTS {
-					// More distinct joints in one primitive than the palette
-					// holds. The influence is dropped rather than aimed at a
-					// slot that means something else.
-					overflowed = true
-					joint[k]   = 0
-					weight[k]  = 0
-					dropped    = true
-					continue
-				}
 				slot = u32(len(order))
 				compact[joint[k]] = slot
 				append(&order, joint[k])
@@ -425,10 +414,6 @@ skinned_primitive_part :: proc(
 	if out_of_range > 0 {
 		log.errorf("skinned primitive names %v joint indices past the skin's %v joints; those influences were dropped",
 			out_of_range, skin_joints)
-	}
-	if overflowed {
-		log.errorf("skinned primitive uses more than %v distinct joints; the excess influences were dropped and the mesh will tear",
-			MAX_JOINTS)
 	}
 
 	indices := read_indices(data, primitive, count)

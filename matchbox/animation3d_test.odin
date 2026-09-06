@@ -426,6 +426,7 @@ test_palette_is_filled_through_the_joint_map :: proc(t: ^testing.T) {
 	// A part using two of the skeleton's five joints, deliberately out of
 	// order and not starting at zero: slot 0 is joint 3, slot 1 is joint 1.
 	model.parts = slice.clone([]Model_Part{{skin = 0, node = 0, joint_map = slice.clone([]u32{3, 1})}})
+	model.total_joints = len(model.parts[0].joint_map) // joint_offset 0 is already the zero value, correct for the one part
 	defer {
 		for &part in model.parts do delete(part.joint_map)
 		delete(model.parts)
@@ -460,6 +461,7 @@ test_unresolvable_palette_slots_are_identity :: proc(t: ^testing.T) {
 
 	// Slot 1 names a joint the skin does not have.
 	model.parts = slice.clone([]Model_Part{{skin = 0, node = 0, joint_map = slice.clone([]u32{0, 99})}})
+	model.total_joints = len(model.parts[0].joint_map)
 	defer {
 		for &part in model.parts do delete(part.joint_map)
 		delete(model.parts)
@@ -473,4 +475,141 @@ test_unresolvable_palette_slots_are_identity :: proc(t: ^testing.T) {
 
 	testing.expect(t, anim.pose.palettes[0][1] == linalg.MATRIX4F32_IDENTITY,
 		"an unresolvable slot must be the identity, never a zero matrix")
+}
+
+/*
+	Two parts share one animator's joint buffer now instead of each carrying
+	its own palette -- see Animation_Pose's doc comment on `joint_data`. This
+	pins that `joint_offset` actually separates them: writing to one part's
+	palette must never reach into the other's, however they are laid out.
+*/
+@(test)
+test_two_parts_get_non_overlapping_slices_of_the_joint_buffer :: proc(t: ^testing.T) {
+	model := test_model()
+	defer destroy_model(&model)
+
+	// Part 0 takes joints {0, 1} at offset 0; part 1 takes {3, 4} starting
+	// right after it, at offset 2 -- computed here the way model_from_gltf
+	// does it for a real file, as a running sum over the parts in order.
+	model.parts = slice.clone([]Model_Part{
+		{skin = 0, node = 0, joint_map = slice.clone([]u32{0, 1}), joint_offset = 0},
+		{skin = 0, node = 0, joint_map = slice.clone([]u32{3, 4}), joint_offset = 2},
+	})
+	model.total_joints = 4
+	defer {
+		for &part in model.parts do delete(part.joint_map)
+		delete(model.parts)
+		model.parts = nil
+	}
+
+	anim := create_animator(model)
+	defer destroy_animator(&anim)
+
+	testing.expect_value(t, len(anim.pose.joint_data), 4)
+	testing.expect_value(t, len(anim.pose.palettes[0]), 2)
+	testing.expect_value(t, len(anim.pose.palettes[1]), 2)
+
+	// Distinguishable, deliberately not real skinning matrices -- this is
+	// checking the slicing, not animator_resolve's math, which the tests
+	// above already cover.
+	anim.pose.palettes[0][0] = linalg.MATRIX4F32_IDENTITY
+	anim.pose.palettes[0][1] = linalg.MATRIX4F32_IDENTITY
+	sentinel := matrix[4, 4]f32{
+		9, 0, 0, 0,
+		0, 9, 0, 0,
+		0, 0, 9, 0,
+		0, 0, 0, 9,
+	}
+	anim.pose.palettes[1][0] = sentinel
+	anim.pose.palettes[1][1] = sentinel
+
+	testing.expect(t, anim.pose.palettes[0][0] == linalg.MATRIX4F32_IDENTITY,
+		"writing part 1's slice must not have reached back into part 0's")
+	testing.expect(t, anim.pose.palettes[0][1] == linalg.MATRIX4F32_IDENTITY,
+		"writing part 1's slice must not have reached back into part 0's")
+
+	// And the same slices, read through the flat buffer directly at the
+	// offsets a real load would have computed.
+	testing.expect(t, anim.pose.joint_data[0] == linalg.MATRIX4F32_IDENTITY, "offset 0 is part 0's first slot")
+	testing.expect(t, anim.pose.joint_data[2] == sentinel, "offset 2 is part 1's first slot")
+	testing.expect(t, anim.pose.joint_data[3] == sentinel, "offset 3 is part 1's second slot")
+}
+
+/*
+	The ceiling this redesign exists to remove: a single primitive naming more
+	than 64 distinct joints, which the old cbuffer-bound palette (4096 bytes,
+	exactly 64 matrices) could not represent at all -- see `refactor.md`'s
+	"storage buffer" note. 70 unrelated root nodes rather than a realistic
+	hierarchy, because what is under test is the buffer holding all 70, not
+	the pose math -- that is already covered above.
+*/
+@(test)
+test_a_part_may_use_more_than_64_distinct_joints :: proc(t: ^testing.T) {
+	COUNT :: 70
+
+	identity := transform_identity()
+
+	parents      := make([]i32, COUNT)
+	rest         := make([]Transform, COUNT)
+	order        := make([]u32, COUNT)
+	names        := make([]string, COUNT)
+	joints       := make([]u32, COUNT)
+	inverse_bind := make([]matrix[4, 4]f32, COUNT)
+
+	for i in 0 ..< COUNT {
+		parents[i]      = -1
+		rest[i]         = identity
+		order[i]        = u32(i)
+		names[i]        = strings.clone("")
+		joints[i]       = u32(i)
+		inverse_bind[i] = linalg.MATRIX4F32_IDENTITY
+	}
+
+	joint_map := make([]u32, COUNT)
+	for i in 0 ..< COUNT do joint_map[i] = u32(i)
+
+	// make() rather than a []T{...} literal for these two: both are freed by
+	// destroy_model/destroy_skeleton below, and a literal's backing array is
+	// this function's stack frame -- fine to read from, not safe to delete().
+	skins := make([]Model_Skin, 1)
+	skins[0] = Model_Skin{joints = joints, inverse_bind = inverse_bind}
+
+	parts := make([]Model_Part, 1)
+	parts[0] = Model_Part{skin = 0, node = 0, joint_map = joint_map}
+
+	model := Model{
+		skeleton = Skeleton{
+			parents = parents,
+			rest    = rest,
+			order   = order,
+			names   = names,
+			skins   = skins,
+		},
+		parts        = parts,
+		total_joints = COUNT,
+	}
+	defer destroy_model(&model)
+	// destroy_model only frees parts/joint_map once a GPU device exists, so it
+	// is a no-op for both here in a headless test -- see its own device==nil
+	// early return. This is what the two tests above do as well.
+	defer {
+		for &part in model.parts do delete(part.joint_map)
+		delete(model.parts)
+		model.parts = nil
+	}
+
+	anim := create_animator(model)
+	defer destroy_animator(&anim)
+
+	testing.expect_value(t, len(anim.pose.palettes[0]), COUNT)
+	testing.expect_value(t, len(anim.pose.joint_data), COUNT)
+
+	update_animator(&anim, model, 0.1)
+
+	// Every one of the 70 resolved to its own joint's rest pose -- none
+	// silently dropped the way a 64-slot cap would have.
+	for i in 0 ..< COUNT {
+		testing.expect(t, anim.pose.palettes[0][i] == linalg.MATRIX4F32_IDENTITY,
+			"every joint should resolve rather than be dropped for being past a cap that no longer exists")
+	}
 }

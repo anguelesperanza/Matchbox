@@ -127,10 +127,11 @@ write_report_file :: proc(path: string, text: string) -> bool {
 */
 @(private)
 create_builtin_shader :: proc(
-	spirv, dxil:         []u8,
-	stage:               sdl.GPUShaderStage,
-	num_samplers:        u32,
-	num_uniform_buffers: u32 = 1,
+	spirv, dxil:          []u8,
+	stage:                sdl.GPUShaderStage,
+	num_samplers:         u32,
+	num_uniform_buffers:  u32 = 1,
+	num_storage_buffers:  u32 = 0,
 ) -> ^sdl.GPUShader {
 	formats := sdl.GetGPUShaderFormats(mbi.renderer.device)
 
@@ -145,13 +146,14 @@ create_builtin_shader :: proc(
 	}
 
 	shader := sdl.CreateGPUShader(mbi.renderer.device, {
-		code_size           = len(code),
-		code                = raw_data(code),
-		entrypoint          = "main",
-		format              = format,
-		stage               = stage,
-		num_samplers        = num_samplers,
-		num_uniform_buffers = num_uniform_buffers,
+		code_size            = len(code),
+		code                 = raw_data(code),
+		entrypoint           = "main",
+		format               = format,
+		stage                = stage,
+		num_samplers         = num_samplers,
+		num_uniform_buffers  = num_uniform_buffers,
+		num_storage_buffers  = num_storage_buffers,
 	})
 
 	if shader == nil {
@@ -515,10 +517,12 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.mesh_textured = create_builtin_shader(
 		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 1, 2)
 
-	// Two uniform buffers rather than one: the three matrices every mesh vertex
-	// shader takes, and the joint palette behind them.
+	// Two uniform buffers -- the three matrices every mesh vertex shader
+	// takes, and the joint offset behind them -- plus one storage buffer: the
+	// joint palette itself, unbounded, where a uniform capped at 64 matrices
+	// on Vulkan. See Skin_Vert_Data in types.odin.
 	mbi.renderer.shaders.mesh_skinned = create_builtin_shader(
-		#load("shaders/mesh_skinned.vert.spv"), #load("shaders/mesh_skinned.vert.dxil"), .VERTEX, 0, 2)
+		#load("shaders/mesh_skinned.vert.spv"), #load("shaders/mesh_skinned.vert.dxil"), .VERTEX, 0, 2, 1)
 
 	mbi.renderer.shaders.skybox = create_builtin_shader(
 		#load("shaders/skybox.vert.spv"), #load("shaders/skybox.vert.dxil"), .VERTEX, 0)
@@ -753,6 +757,12 @@ cleanup :: proc() {
 	if mbi.renderer.depth_texture != nil {
 		sdl.ReleaseGPUTexture(device, mbi.renderer.depth_texture)
 		mbi.renderer.depth_texture = nil
+	}
+
+	// Only ever made if a skinned model was drawn with no animator.
+	if mbi.renderer.identity_joints != nil {
+		sdl.ReleaseGPUBuffer(device, mbi.renderer.identity_joints)
+		mbi.renderer.identity_joints = nil
 	}
 
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)

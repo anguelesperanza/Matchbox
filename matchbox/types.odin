@@ -124,22 +124,35 @@ Vertex3D :: struct {
 	A vertex of a skinned mesh: the same three attributes, plus the four joints
 	that move it and how much each of them gets a say.
 
-	56 bytes, against Vertex3D's 32. A separate type and a separate pipeline
+	64 bytes, against Vertex3D's 32. A separate type and a separate pipeline
 	rather than two more fields on Vertex3D, because every cube, plane, sphere
 	and unskinned model in every game would otherwise carry twenty-four bytes of
 	zeroes per vertex for a feature it does not use. The line pipeline set the
 	precedent: a part knows what it is and the draw call picks accordingly.
 
 	`joints` indexes the *skin's joint list*, not the node list -- see
-	`Model_Skin`. u16 because glTF allows either byte or short and a short is
-	what an exporter reaches for past 255 joints; the shader takes them as
-	floats either way, since a cbuffer array cannot be indexed by anything else.
+	`Model_Skin`. glTF stores them as bytes or shorts and they are widened to
+	`u32` here, to match the `uint4` the shader declares exactly.
+
+	**They used to be `u16`, fed through a `USHORT4` vertex format, and that
+	cost a long hunt.** The shader's input is a 32-bit `uint4`, so a 16-bit
+	format leaves the fetch to widen -- which D3D12 did correctly and Vulkan
+	did not, on the same data, from the same file. The symptom was a handful of
+	vertices reading joint indices far outside the palette, and since an
+	out-of-range uniform read is defined on D3D12 (zero) and undefined on
+	Vulkan, one backend absorbed it and the other threw a vertex across the
+	room. Matching the widths removes the conversion, and with it the
+	divergence.
+
+	It also makes the vertex 64 bytes rather than 56, so `joints` lands at
+	offset 32 and `weights` at 48 -- both 16-byte aligned, where the old layout
+	had a stride no wider alignment divided.
 */
 Vertex3D_Skinned :: struct {
 	pos:     [3]f32,
 	normal:  [3]f32,
 	uv:      [2]f32,
-	joints:  [4]u16,
+	joints:  [4]u32,
 	weights: [4]f32,
 }
 

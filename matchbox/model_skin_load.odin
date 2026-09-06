@@ -360,8 +360,8 @@ read_mat4 :: proc(data: ^gltf.Data, index: gltf.Integer) -> (out: []matrix[4, 4]
 @(private)
 read_joints :: proc(
 	data: ^gltf.Data, attributes: map[string]gltf.Integer, count: int,
-) -> [][4]u16 {
-	out := make([][4]u16, count, context.temp_allocator)
+) -> [][4]u32 {
+	out := make([][4]u32, count, context.temp_allocator)
 
 	index, present := attributes["JOINTS_0"]
 	if !present do return out
@@ -377,9 +377,10 @@ read_joints :: proc(
 		switch type {
 		case .Unsigned_Byte:
 			raw := (cast(^[4]u8)at)^
-			out[i] = {u16(raw[0]), u16(raw[1]), u16(raw[2]), u16(raw[3])}
+			out[i] = {u32(raw[0]), u32(raw[1]), u32(raw[2]), u32(raw[3])}
 		case .Unsigned_Short:
-			out[i] = (cast(^[4]u16)at)^
+			raw := (cast(^[4]u16)at)^
+			out[i] = {u32(raw[0]), u32(raw[1]), u32(raw[2]), u32(raw[3])}
 		case .Byte, .Short, .Unsigned_Int, .Float:
 			fallthrough
 		case:

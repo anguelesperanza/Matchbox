@@ -256,7 +256,7 @@ create_pipeline :: proc(
 			{location = 0, buffer_slot = 0, format = .FLOAT3,  offset = u32(offset_of(Vertex3D_Skinned, pos))},
 			{location = 1, buffer_slot = 0, format = .FLOAT3,  offset = u32(offset_of(Vertex3D_Skinned, normal))},
 			{location = 2, buffer_slot = 0, format = .FLOAT2,  offset = u32(offset_of(Vertex3D_Skinned, uv))},
-			{location = 3, buffer_slot = 0, format = .USHORT4, offset = u32(offset_of(Vertex3D_Skinned, joints))},
+			{location = 3, buffer_slot = 0, format = .UINT4,   offset = u32(offset_of(Vertex3D_Skinned, joints))},
 			{location = 4, buffer_slot = 0, format = .FLOAT4,  offset = u32(offset_of(Vertex3D_Skinned, weights))},
 		}
 		num_attributes = 5

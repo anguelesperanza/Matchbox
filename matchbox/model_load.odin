@@ -340,9 +340,9 @@ skinned_primitive_part :: proc(
 		vertex pinned to the root joint is a visible seam rather than a
 		character stretched across the map.
 	*/
-	joint_limit := u16(MAX_JOINTS)
+	joint_limit := u32(MAX_JOINTS)
 	if skin >= 0 && skin < len(data.skins) {
-		joint_limit = u16(min(len(data.skins[skin].joints), MAX_JOINTS))
+		joint_limit = u32(min(len(data.skins[skin].joints), MAX_JOINTS))
 	}
 
 	out_of_range := 0

@@ -402,3 +402,75 @@ test_unweighted_vertex_pins_rather_than_collapses :: proc(t: ^testing.T) {
 	testing.expect(t, out[0] + out[1] + out[2] + out[3] == 1,
 		"an unweighted vertex must still sum to one, pinned to the first joint")
 }
+
+// -----------------------------------------------------------------------
+// The compact per-part joint palette
+// -----------------------------------------------------------------------
+
+/*
+	A part's palette holds only the joints that part uses, and a vertex names a
+	slot in it rather than a joint in the skin -- `Model_Part.joint_map` is what
+	turns one into the other.
+
+	This exists because SDL's Vulkan backend binds a uniform with a range of
+	4096 bytes, which is exactly 64 matrices, so a rig with more joints than
+	that cannot hand the shader a palette of its whole skin. Getting the
+	indirection backwards does not fail loudly: it fills a slot from the wrong
+	joint, which reads as one limb following another.
+*/
+@(test)
+test_palette_is_filled_through_the_joint_map :: proc(t: ^testing.T) {
+	model := test_model()
+	defer destroy_model(&model)
+
+	// A part using two of the skeleton's five joints, deliberately out of
+	// order and not starting at zero: slot 0 is joint 3, slot 1 is joint 1.
+	model.parts = slice.clone([]Model_Part{{skin = 0, node = 0, joint_map = slice.clone([]u32{3, 1})}})
+	defer {
+		for &part in model.parts do delete(part.joint_map)
+		delete(model.parts)
+		model.parts = nil
+	}
+
+	anim := create_animator(model)
+	defer destroy_animator(&anim)
+
+	testing.expect_value(t, len(anim.pose.palettes[0]), 2)
+
+	// hip(3) is what "base" moves, so its palette slot must be the one that
+	// differs from the rest pose -- and it must be slot 0, not slot 3.
+	play_animation(&anim, model, "base")
+	update_animator(&anim, model, 0.1)
+
+	node_for_slot_0 := model.skeleton.skins[0].joints[model.parts[0].joint_map[0]]
+	testing.expect_value(t, node_for_slot_0, u32(3))
+
+	expected := anim.pose.globals[3] * model.skeleton.skins[0].inverse_bind[3]
+	testing.expect(t, anim.pose.palettes[0][0] == expected,
+		"slot 0 must be built from the joint its map names, not from joint 0")
+}
+
+// A slot that cannot be resolved must leave its vertices where they are. `make`
+// zeroes, and a zero matrix is the one value that collapses a vertex onto the
+// origin and drags its triangles with it -- which is how this bug looked.
+@(test)
+test_unresolvable_palette_slots_are_identity :: proc(t: ^testing.T) {
+	model := test_model()
+	defer destroy_model(&model)
+
+	// Slot 1 names a joint the skin does not have.
+	model.parts = slice.clone([]Model_Part{{skin = 0, node = 0, joint_map = slice.clone([]u32{0, 99})}})
+	defer {
+		for &part in model.parts do delete(part.joint_map)
+		delete(model.parts)
+		model.parts = nil
+	}
+
+	anim := create_animator(model)
+	defer destroy_animator(&anim)
+
+	update_animator(&anim, model, 0.1)
+
+	testing.expect(t, anim.pose.palettes[0][1] == linalg.MATRIX4F32_IDENTITY,
+		"an unresolvable slot must be the identity, never a zero matrix")
+}

@@ -38,25 +38,6 @@ import stbi "vendor:stb/image"
 
 import gltf "./gltf2"
 
-/*
-	TEMPORARY, see the block in skinned_primitive_part.
-
-	  0  off, the real data
-	  1  joints zeroed, real weights   -- isolates the weight attribute
-	  2  real joints, weights {1,0,0,0} -- isolates the joint attribute
-	  3  both, which is what proved one of them is at fault
-	  5  every joint index forced to 64 -- the first slot past the 4KB the
-	     Vulkan backend can see. With an identity palette this should render
-	     the bind pose perfectly; if the whole model explodes, index 64 is
-	     unreadable and the uniform range is the fault.
-	  6  every joint index forced to 63 -- the control for 5, the last slot
-	     that is definitely visible. This one must render cleanly.
-
-	With a nil animator the palette is all identity, so `skin` should come out
-	as the identity under every one of these. Whichever mode still shows the
-	artifact names the attribute that is arriving wrong.
-*/
-SKIN_DIAG :: #config(SKIN_DIAG, 0)
 
 // -----------------------------------------------------------------------
 // Loading
@@ -435,16 +416,6 @@ skinned_primitive_part :: proc(
 			weights = weight,
 		}
 
-		when SKIN_DIAG == 1 || SKIN_DIAG == 3 do vertices[i].joints  = {0, 0, 0, 0}
-		when SKIN_DIAG == 2 || SKIN_DIAG == 3 do vertices[i].weights = {1, 0, 0, 0}
-		when SKIN_DIAG == 5 {
-			vertices[i].joints  = {64, 64, 64, 64}
-			vertices[i].weights = {1, 0, 0, 0}
-		}
-		when SKIN_DIAG == 6 {
-			vertices[i].joints  = {63, 63, 63, 63}
-			vertices[i].weights = {1, 0, 0, 0}
-		}
 	}
 
 	// At least one slot, so a part whose influences were all dropped still has

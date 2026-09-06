@@ -146,21 +146,52 @@ Vertex3D_Skinned :: struct {
 /*
 	How many joints one skinned draw can name.
 
-	128 is 8KB of matrices, which fits inside the 16KB uniform block Vulkan
-	guarantees with room to spare, and is comfortably past what a character rig
-	needs -- the VRoid model this was written against has 66, and that is a
-	humanoid skeleton plus hair and skirt bones.
+	**Temporarily 64, to confirm a diagnosis. This is not the final answer.**
 
-	A skin with more than this loads with the excess joints dropped and says so,
-	rather than writing past the block and corrupting whatever follows it.
+	It was 128 -- 8KB of matrices -- on the reasoning that Vulkan guarantees a
+	16KB uniform block. The guarantee is real and irrelevant: SDL's Vulkan
+	backend binds a uniform buffer with `range = MAX_UBO_SECTION_SIZE`, which
+	is `4096` (`src/gpu/vulkan/SDL_gpu_vulkan.c:71`), so a shader can only ever
+	see the first **4KB — exactly 64 matrices** — however much is pushed. The
+	constant exists only in that backend; D3D12 uses `UNIFORM_BUFFER_SIZE` of
+	32768 and has no such sectioning, which is why this was invisible on
+	Windows and broke on Linux.
+
+	What it looked like: on a rig whose legs mirror each other, `ball_l` is
+	joint 59 and animates correctly, while `ball_r` is joint 64 -- the first
+	index past the 4KB line -- and its 180 vertices read a matrix that was
+	never delivered, dragging the right foot into a spike whenever the
+	character moved.
+
+	At 64 the block is 4096 bytes exactly, so every matrix the shader can see
+	is one that was sent. The cost is real: a rig with more than 64 joints now
+	has its excess clamped and reported, and this character has 66, so its
+	right toe stops bending while the left keeps working. That asymmetry is
+	the confirmation, not the fix.
+
+	The fix is a storage buffer for the palette, which has no such cap -- see
+	the note below, which this discovery contradicts.
 */
-MAX_JOINTS :: 128
+MAX_JOINTS :: 64
 
-// 8192 bytes: the joint matrix palette, pushed once per skinned part.
-//
-// A fixed array rather than a storage buffer, for the same reason the lighting
-// block is fixed: it keeps the backend requirements to what SDL guarantees
-// everywhere, and 8KB a part is nothing next to the vertex data it deforms.
+/*
+	4096 bytes: the joint matrix palette, pushed once per skinned part.
+
+	This said "a fixed array rather than a storage buffer ... it keeps the
+	backend requirements to what SDL guarantees everywhere". That reasoning
+	turned out to be backwards. The uniform path is the one that does *not*
+	work everywhere: it is capped at 4KB on Vulkan and not on D3D12, so the
+	same model skinned correctly on Windows and tore on Linux. A storage
+	buffer, bound with `SDL_BindGPUVertexStorageBuffers`, has no such ceiling
+	and is what this should become.
+
+	Note the shader still declares `float4x4 joints[128]`. That mismatch is
+	deliberate for now and harmless: the binding range was never more than
+	4096 either way, so nothing reads what is no longer pushed, and leaving the
+	HLSL alone keeps the committed `.spv` and `.dxil` in step -- DXIL cannot be
+	rebuilt on Linux. Change both together, on Windows, or when the storage
+	buffer lands.
+*/
 Skin_Vert_Data :: struct #align(16) {
 	joints: [MAX_JOINTS]matrix[4, 4]f32,
 }

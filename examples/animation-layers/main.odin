@@ -138,7 +138,10 @@ main :: proc() {
 	// TEMPORARY, with the draw below: B swaps the animator for nil so the
 	// character renders in its bind pose. Delete both once the artifact it is
 	// chasing is understood.
-	bind_pose := false
+	// TEMPORARY: any SKIN_DIAG mode implies bind pose, because the two only
+	// mean anything together -- forcing the attributes while the palette still
+	// animates just removes the deformation and proves nothing.
+	bind_pose := mb.SKIN_DIAG != 0
 
 	// TEMPORARY, with bind_pose: G hides the grid, H hides the blocks, J hides
 	// the character. Between them they say which thing the artifact belongs

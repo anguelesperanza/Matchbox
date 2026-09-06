@@ -11,16 +11,23 @@ package animation_layers_example
 	the blocks are `draw_cube`. `Model` and `Animator` are the two additions,
 	and `play_animation_layer` is the one this example exists to show.
 
-	**The character asset is not committed.** A rigged, animated humanoid is
-	tens of megabytes and this repository does not carry one -- see
-	`.gitignore`'s entry for `examples/animation-layers/assets/character.glb`.
-	Copy any glTF/GLB with a skeleton and these five clips to that path to run
-	this: `Idle_Subtle`, `Walk_Formal`, `Run_Female`, `Pistol_Aim_Neutral`,
-	`Pistol_Reload`. It also needs a node named `spine_02` -- or change
-	`UPPER_BODY_ROOT` below to whatever this model calls the equivalent joint,
-	the one that sits above the hips and below the shoulders. Without a match
-	there, the window still opens and the character still walks; R just does
-	nothing, and the log says why.
+	**It also shows what a VRM is worth**, because it is loaded as two files
+	that were never made for each other: `character.vrm` exactly as VRoid
+	Studio exported it, and a glTF holding an animation set authored against
+	an entirely different rig. `retarget_animations` joins them, and
+	`vrm_bone` is what lets the mask below name "the chest" without knowing
+	what this particular file calls that joint. See `vrm.md`.
+
+	**Neither asset is committed.** A rigged humanoid and a clip library are
+	tens of megabytes each and this repository carries neither -- see
+	`.gitignore`'s entries for `examples/animation-layers/assets/`. To run it,
+	put a VRM 0.0 or 1.0 character at `assets/character.vrm`, and at
+	`assets/animations.glb` any glTF whose bones follow the Unreal naming
+	convention (`pelvis`, `spine_01`, `upperarm_l`, ...) carrying these five
+	clips: `Idle_Subtle`, `Walk_Formal`, `Run_Female`, `Pistol_Aim_Neutral`,
+	`Pistol_Reload`. A clip set under some other convention needs its own
+	name table passed to `retarget_animations` -- `UNREAL_BONE_NAMES` is only
+	the default.
 
 	Things to try:
 
@@ -29,7 +36,7 @@ package animation_layers_example
 	    `update_locomotion`
 	  - **hold R while walking or running.** The arms swap to `Pistol_Reload`
 	    and the legs do not so much as flinch, because the layer is masked to
-	    `spine_02` and up. Let go and it fades back out over a fifth of a
+	    the chest and up. Let go and it fades back out over a fifth of a
 	    second rather than snapping
 	  - **hold R while standing still**, then start walking without letting go.
 	    The reload keeps playing on the arms the whole time the legs pick up a
@@ -56,18 +63,37 @@ TURN_KEY_SPEED :: 2.5
 CAMERA_FLOOR :: 0.4
 SHOULDER_DISTANCE :: 3.0
 
-MODEL_PATH :: "assets/character.glb"
+// The character, straight out of VRoid Studio, and a separate file holding
+// nothing but the clips. A .vrm carries no animation of its own -- see
+// `vrm.md` -- so the two arrive apart and are joined by `retarget_animations`
+// below.
+MODEL_PATH :: "assets/character.vrm"
+CLIPS_PATH :: "assets/animations.glb"
 
-// Which way this particular file's rest pose faces, and how big it comes in
-// -- properties of the asset, not of Matchbox. `third-person-game` (the game
-// this rig was pulled from) uses the same two numbers for the same file.
-MODEL_FORWARD :: math.PI * 0.5
-MODEL_SCALE   :: f32(1.0)
+/*
+	A VRM faces -z once loaded: 1.0 files already do, and a 0.0 file is turned
+	to match at import (`vrm.odin`). So this is knowledge about the *format*
+	rather than about one particular export, which is why it can be named here
+	rather than tuned by eye.
 
-// The node the upper-body mask is built from: everything at or above it
-// layers, everything below stays on the base. See this file's own doc
-// comment if your model calls the joint something else.
-UPPER_BODY_ROOT :: "spine_02"
+	Named through `Model_Facing` rather than written as an angle on purpose --
+	`facing_rotation_of`'s own doc comment records that this very model was
+	corrected by +PI/2 in one place and -PI/2 in another before anyone noticed
+	one of them subtracted.
+*/
+MODEL_FACING :: mb.Model_Facing.NEG_Z
+MODEL_SCALE  :: f32(1.0)
+
+/*
+	Where the upper-body mask starts. Asked of the file by role rather than by
+	name: a VRM's humanoid block says which of its nodes is the chest, so this
+	works on any VRM regardless of what that rig happens to call the joint.
+
+	This used to be `UPPER_BODY_ROOT :: "spine_02"` with a comment telling the
+	next person to go and find out what their own file called it. That is the
+	line `vrm_bone` exists to delete.
+*/
+UPPER_BODY_BONE :: mb.Vrm_Bone.CHEST
 
 Locomotion :: enum {
 	IDLE,
@@ -102,7 +128,7 @@ main :: proc() {
 	defer mb.cleanup()
 
 	// Matchbox's own logger, not this process's default -- otherwise a
-	// missing spine_02 or a missing clip logs into a context nothing reads.
+	// missing bone or a missing clip logs into a context nothing reads.
 	context.logger = mb.mbi.logger
 
 	mb.set_escape_key(.UNKNOWN)
@@ -115,6 +141,26 @@ main :: proc() {
 	}
 	defer mb.destroy(&model)
 
+	/*
+		The clips, from a file that is not this character: a rig with the same
+		bones in the same arrangement but its own rest pose, which is what
+		`retarget_animations` corrects for. Nothing of the source survives the
+		call except the motion -- the clips it leaves behind are ordinary
+		`Model_Animation` data on `model`, so everything below this line is the
+		same code it was when the character carried its own animation.
+	*/
+	clips, clips_err := mb.load_animation_source(CLIPS_PATH)
+	if clips_err != nil {
+		fmt.eprintfln("could not load %s: %v", CLIPS_PATH, clips_err)
+		return
+	}
+	defer mb.destroy(&clips)
+
+	if added := mb.retarget_animations(&model, clips); added == 0 {
+		fmt.eprintln("no clips retargeted -- is the character a VRM, and do its bones match the table?")
+		return
+	}
+
 	animator := mb.create_animator(model)
 	defer mb.destroy(&animator)
 
@@ -123,10 +169,10 @@ main :: proc() {
 	// keeping this slice, so nothing holds a reference past that call. See
 	// `Animation_Layer`'s doc comment in animation3d.odin.
 	upper_body_mask: []bool
-	if spine, found := mb.node_index(model, UPPER_BODY_ROOT); found {
-		upper_body_mask = mb.animation_mask_below(model, spine)
+	if chest, found := mb.vrm_bone(model, UPPER_BODY_BONE); found {
+		upper_body_mask = mb.animation_mask_below(model, chest)
 	} else {
-		log.errorf("no node named %q on this model -- R will do nothing", UPPER_BODY_ROOT)
+		log.errorf("this model has no %v bone mapped -- R will do nothing", UPPER_BODY_BONE)
 	}
 	defer delete(upper_body_mask)
 
@@ -228,7 +274,7 @@ main :: proc() {
 		ground_offset := [3]f32{0, -model.bounds_min.y * MODEL_SCALE, 0}
 		mb.draw_model(model, mb.Transform{
 			position = player_position + ground_offset,
-			rotation = mb.facing_rotation(rig.facing - MODEL_FORWARD),
+			rotation = mb.facing_rotation_of(rig.facing, MODEL_FACING),
 			scale    = {MODEL_SCALE, MODEL_SCALE, MODEL_SCALE},
 		}, mb.WHITE, &animator)
 
@@ -291,7 +337,7 @@ update_locomotion :: proc(animator: ^mb.Animator, model: mb.Model, state: ^Locom
 	would cost the game rather than the library.
 */
 update_reload_layer :: proc(animator: ^mb.Animator, model: mb.Model, mask: []bool, delta_time: f32) {
-	if mask == nil do return // spine_02 (or UPPER_BODY_ROOT) was not found; logged once in main
+	if mask == nil do return // the chest bone was not mapped; logged once in main
 
 	reloading := mb.is_key_held(.R)
 	if reloading {

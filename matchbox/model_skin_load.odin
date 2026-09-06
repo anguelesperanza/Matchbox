@@ -36,9 +36,19 @@ import gltf "./gltf2"
 	is frequently not a joint: VRoid hangs its skeleton under a root node that
 	no vertex is ever weighted to, and dropping it would lose the transform that
 	stands the character up.
+
+	`root_correction` exists for one caller: a VRM 0.0 file faces the wrong way
+	for everything else in this package (see `vrm.odin`'s `vrm_facing_correction`),
+	and it has to be baked in here rather than fixed up by the game, because a
+	game has no seam to fix it at -- `sample_pose` overwrites a track's node
+	outright and would erase a correction applied anywhere below this. Composed
+	onto a root's own rotation rather than replacing it: a file with more than
+	one root, or a root that is not already the identity, keeps whatever it had
+	and turns in addition to it. Every other caller passes the identity and pays
+	nothing -- a quaternion multiply by the identity is exact, not approximate.
 */
 @(private)
-build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
+build_skeleton :: proc(data: ^gltf.Data, root_correction := linalg.QUATERNIONF32_IDENTITY) -> Skeleton {
 	if len(data.skins) == 0 do return Skeleton{}
 
 	node_count := len(data.nodes)
@@ -87,6 +97,8 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 		}
 	}
 
+	apply_root_correction(&skeleton, root_correction)
+
 	skeleton.order = hierarchy_order(skeleton.parents)
 
 	for skin, i in data.skins {
@@ -125,6 +137,38 @@ build_skeleton :: proc(data: ^gltf.Data) -> Skeleton {
 	}
 
 	return skeleton
+}
+
+/*
+	Turns every root node an extra `correction` about its own rotation, in
+	place.
+
+	Split out of `build_skeleton` so it can be pinned down on a plain
+	`Skeleton` in a test, with no `gltf.Data` to construct just to check a
+	quaternion multiply -- see `vrm_test.odin`.
+
+	A node's parent is not fully known until every other node has had a turn
+	to name it as a child, so this runs as its own pass after `parents` is
+	completely built rather than folded into the loop that builds it; a node
+	that looks like a root partway through that loop can still gain a parent
+	on a later iteration.
+
+	Composed on the left of whatever rotation the node already had --
+	world-space, applied after the node's own -- so the turn lands on the
+	whole rig hanging off that root rather than only on its local axes. A
+	multiskeleton file with more than one root turns every one of them the
+	same way, which is what a file split into several independent armatures
+	needs.
+*/
+@(private)
+apply_root_correction :: proc(skeleton: ^Skeleton, correction: quaternion128) {
+	if correction == linalg.QUATERNIONF32_IDENTITY do return
+
+	for i in 0 ..< len(skeleton.parents) {
+		if skeleton.parents[i] < 0 {
+			skeleton.rest[i].rotation = correction * skeleton.rest[i].rotation
+		}
+	}
 }
 
 /*

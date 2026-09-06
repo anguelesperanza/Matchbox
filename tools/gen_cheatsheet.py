@@ -14,6 +14,7 @@ GROUPS = [
     ("3D drawing",       ["render3d.odin", "shapes3d.odin", "light.odin", "skybox.odin"]),
     ("Models",           ["model.odin", "model_load.odin", "model_skin_load.odin", "upload.odin"]),
     ("Animation",        ["animation.odin", "animation3d.odin", "lerp.odin", "timer.odin"]),
+    ("VRM",              ["vrm.odin"]),
     ("Render targets",   ["render_target.odin"]),
     ("Sound",            ["sound.odin"]),
     ("Tiled maps",       ["tiled.odin", "collisions.odin", "maps.odin", "procedural_generation.odin"]),

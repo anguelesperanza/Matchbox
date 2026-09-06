@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 349 of them -- with its arguments
+Every public procedure in the package -- 351 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -24,6 +24,7 @@ any.
 - [3D drawing](#3d-drawing) -- 26
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
+- [VRM](#vrm) -- 2
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
@@ -2344,6 +2345,20 @@ Sets how strongly `layer` overrides its masked joints, 0 (off) to 1 (full overri
 update_animator :: proc(animator: ^Animator, model: Model, delta_time: f32)
 ```
 Advances the clip and works out this frame's matrices.
+
+## VRM
+
+### `vrm.odin`
+
+```odin
+vrm_version :: proc(extensions: gltf.Extensions) -> Vrm_Version
+```
+Reads which VRM spec, if any, a parsed file's `extensions` object carries.
+
+```odin
+vrm_facing_correction :: proc(version: Vrm_Version) -> quaternion128
+```
+The turn a VRM file's rest pose needs before it agrees with everything else in this package.
 
 ## Render targets
 

@@ -335,11 +335,47 @@ skinned_primitive_part :: proc(
 
 	vertices = make([]Vertex3D_Skinned, count, context.temp_allocator)
 	for i in 0 ..< count {
-		joint := joints[i]
+		joint  := joints[i]
+		weight := weights[i]
+
+		/*
+			The weight goes with the joint index, and this used to keep it.
+
+			Setting the index to 0 and leaving its weight alone does not drop
+			the influence, which is what the message below claims -- it *moves*
+			it, onto whatever joint 0 happens to be. On a character that is the
+			root or the hips, so a vertex out at the ankle keeps a share of its
+			say and is dragged toward the pelvis, taking its triangles with it
+			as a spike. One vertex is enough to see.
+		*/
+		dropped := false
 		for k in 0 ..< 4 {
 			if joint[k] >= joint_limit {
-				joint[k] = 0
+				joint[k]  = 0
+				weight[k] = 0
+				dropped   = true
 				out_of_range += 1
+			}
+		}
+
+		/*
+			Dropping a weight leaves the four summing short, and the skinning
+			shader uses that sum unscaled -- so the vertex would land at `s`
+			times its correct position, pulled toward the model's origin. The
+			same trap `read_weights` renormalises against, reached from the
+			other direction: that normalise runs before this, so this has to
+			put the sum back itself.
+		*/
+		if dropped {
+			sum := weight[0] + weight[1] + weight[2] + weight[3]
+			if sum > 0 {
+				weight = {weight[0] / sum, weight[1] / sum, weight[2] / sum, weight[3] / sum}
+			} else {
+				// Every influence this vertex had was out of range. Pinned to
+				// the first joint, which is a visible seam rather than a
+				// vertex on the origin dragging a triangle to the floor.
+				joint  = {0, 0, 0, 0}
+				weight = {1, 0, 0, 0}
 			}
 		}
 
@@ -348,7 +384,7 @@ skinned_primitive_part :: proc(
 			normal  = normals[i],
 			uv      = uvs[i],
 			joints  = joint,
-			weights = weights[i],
+			weights = weight,
 		}
 	}
 

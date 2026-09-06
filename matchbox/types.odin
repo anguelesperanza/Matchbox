@@ -146,10 +146,7 @@ Vertex3D_Skinned :: struct {
 /*
 	How many joints one skinned draw can name.
 
-	**Temporarily 64, to confirm a diagnosis. This is not the final answer.**
-
-	It was 128 -- 8KB of matrices -- on the reasoning that Vulkan guarantees a
-	16KB uniform block. The guarantee is real and irrelevant: SDL's Vulkan
+	128 is 8KB of matrices. **Note a real ceiling underneath that number:** SDL's Vulkan
 	backend binds a uniform buffer with `range = MAX_UBO_SECTION_SIZE`, which
 	is `4096` (`src/gpu/vulkan/SDL_gpu_vulkan.c:71`), so a shader can only ever
 	see the first **4KB — exactly 64 matrices** — however much is pushed. The
@@ -157,25 +154,22 @@ Vertex3D_Skinned :: struct {
 	32768 and has no such sectioning, which is why this was invisible on
 	Windows and broke on Linux.
 
-	What it looked like: on a rig whose legs mirror each other, `ball_l` is
-	joint 59 and animates correctly, while `ball_r` is joint 64 -- the first
-	index past the 4KB line -- and its 180 vertices read a matrix that was
-	never delivered, dragging the right foot into a spike whenever the
-	character moved.
+	So on Vulkan a rig may name joints 0..63 and no further, whatever this says.
+	This was set to 64 for a while to test whether that ceiling explained a
+	skinning artifact on one model; it did not, and 64 was strictly worse --
+	that rig has 66 joints, so two were dropped for nothing. Back at 128, which
+	is honest about D3D12 and over-promises on Vulkan.
 
-	At 64 the block is 4096 bytes exactly, so every matrix the shader can see
-	is one that was sent. The cost is real: a rig with more than 64 joints now
-	has its excess clamped and reported, and this character has 66, so its
-	right toe stops bending while the left keeps working. That asymmetry is
-	the confirmation, not the fix.
-
-	The fix is a storage buffer for the palette, which has no such cap -- see
-	the note below, which this discovery contradicts.
+	**A rig above 64 joints is still wrong on Vulkan** and wants the palette
+	moved to a storage buffer, which has no such cap. Nothing has hit it yet:
+	the model that prompted this uses joints up to 64 and its highest, `ball_r`,
+	carries only 180 vertices.
 */
-MAX_JOINTS :: 64
+MAX_JOINTS :: 128
 
 /*
-	4096 bytes: the joint matrix palette, pushed once per skinned part.
+	8192 bytes: the joint matrix palette, pushed once per skinned part. Only
+	the first 4096 of them survive the trip on Vulkan -- see MAX_JOINTS above.
 
 	This said "a fixed array rather than a storage buffer ... it keeps the
 	backend requirements to what SDL guarantees everywhere". That reasoning
@@ -185,12 +179,10 @@ MAX_JOINTS :: 64
 	buffer, bound with `SDL_BindGPUVertexStorageBuffers`, has no such ceiling
 	and is what this should become.
 
-	Note the shader still declares `float4x4 joints[128]`. That mismatch is
-	deliberate for now and harmless: the binding range was never more than
-	4096 either way, so nothing reads what is no longer pushed, and leaving the
-	HLSL alone keeps the committed `.spv` and `.dxil` in step -- DXIL cannot be
-	rebuilt on Linux. Change both together, on Windows, or when the storage
-	buffer lands.
+	The shader declares `float4x4 joints[128]` to match. Changing either means
+	changing both, and a shader rebuild -- which on Linux emits `.spv` only, so
+	the committed `.dxil` would fall out of step. Do it on Windows, or when the
+	storage buffer lands.
 */
 Skin_Vert_Data :: struct #align(16) {
 	joints: [MAX_JOINTS]matrix[4, 4]f32,

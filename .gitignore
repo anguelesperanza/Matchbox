@@ -20,8 +20,8 @@ build/
 matchbox/android/debug.keystore
 *.apk
 
-# The animation-layers example's character. 37MB is well under GitHub's limit
-# on its own, but there is no reason to carry it in history while it is still
-# being shrunk -- the plan is to replace it with a smaller rig once one exists.
-# Copy a model to this path to run the example locally.
-examples/animation-layers/assets/character.glb
+# The animation-layers example's two assets: a VRoid character and the clip
+# library retargeted onto it. Tens of megabytes each, and both are somebody
+# else's art rather than this repository's -- see that example's own doc
+# comment for what to put at each path to run it locally.
+examples/animation-layers/assets/

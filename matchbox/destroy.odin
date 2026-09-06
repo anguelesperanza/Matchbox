@@ -42,4 +42,5 @@ destroy :: proc {
 	destroy_image,
 	destroy_text_field,
 	destroy_sprite_cache,
+	destroy_animation_source,
 }

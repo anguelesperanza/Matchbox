@@ -114,6 +114,13 @@ Model :: struct {
 	skeleton:   Skeleton,
 	animations: []Model_Animation,
 
+	// The zero value for a file with no `humanoid` block, the same way
+	// `skeleton` and `animations` are "empty unless the file had one" -- see
+	// `vrm.odin`. What this holds is a *reading* of the file's own map from a
+	// spec-defined role to a node in `skeleton`, nothing more: it costs
+	// nothing to carry on a model that never asks `vrm_bone` a question.
+	vrm_humanoid: Vrm_Humanoid,
+
 	// The sum of every part's `joint_map`, i.e. how many matrices one
 	// animator's joint buffer holds for this model. 0 for a model with no
 	// skin. Computed alongside `joint_offset`, for the same reason: it is the

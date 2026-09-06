@@ -68,7 +68,14 @@ load_model :: proc(path: string) -> (model: Model, err: Error) {
 
 	// GLB copies its binary chunks out of `bytes` during parse, so freeing them
 	// above is safe for both forms.
-	is_glb := strings.equal_fold(filepath.ext(path), ".glb")
+	//
+	// A `.vrm` is a GLB with extra JSON under `extensions` -- both VRM 0.0 and
+	// 1.0 mandate the binary container, never the JSON-plus-separate-buffers
+	// form. That is a spec promise, not a sniff, so the extension alone is
+	// enough to know how to unpack it; `model_from_gltf` is what notices the
+	// extra JSON and treats the model as a VRM one.
+	ext := filepath.ext(path)
+	is_glb := strings.equal_fold(ext, ".glb") || strings.equal_fold(ext, ".vrm")
 
 	// Only used for a model that keeps its buffers or textures in files beside
 	// it, which none of the assets this was built for do -- they embed
@@ -105,17 +112,38 @@ model_from_gltf :: proc(data: ^gltf.Data) -> Model {
 	low  := [3]f32{ max(f32),  max(f32),  max(f32)}
 	high := [3]f32{-max(f32), -max(f32), -max(f32)}
 
+	// NONE for every file that is not a VRM, at the cost of one map lookup on
+	// `data.extensions` -- see `vrm.odin`. Everything downstream of this reads
+	// as "do nothing" for that case, which is what makes VRM support free for
+	// a game that never opens one.
+	version    := vrm_version(data.extensions)
+	correction := vrm_facing_correction(version)
+
+	/*
+		The same turn, seeded two different ways for two different kinds of
+		node -- see `vrm.md`'s step 1 for why both are needed and what a file
+		with only one of them fixed looks like.
+
+		A skinned mesh's vertices never read this matrix at all (glTF says a
+		skinned mesh ignores its node's transform, and `gather_mesh` already
+		takes the skinned path around it); what turns a skinned VRM character
+		is `build_skeleton`'s `root_correction` below. This one only reaches a
+		static, unskinned node -- an accessory with no armature -- which has no
+		other path to inherit the correction through.
+	*/
+	root_matrix := transform_matrix(Transform{rotation = correction, scale = {1, 1, 1}})
+
 	// The default scene, or the first one, or -- for a file with no scene at
 	// all, which is legal -- every mesh at the origin.
 	scene_index := data.scene.? or_else 0
 
 	if len(data.scenes) > 0 && int(scene_index) < len(data.scenes) {
 		for root in data.scenes[scene_index].nodes {
-			gather_node(data, root, linalg.MATRIX4F32_IDENTITY, &parts, &uploaded, &low, &high)
+			gather_node(data, root, root_matrix, &parts, &uploaded, &low, &high)
 		}
 	} else {
 		for _, mesh_index in data.meshes {
-			gather_mesh(data, gltf.Integer(mesh_index), linalg.MATRIX4F32_IDENTITY, &parts, &uploaded, &low, &high, 0, nil)
+			gather_mesh(data, gltf.Integer(mesh_index), root_matrix, &parts, &uploaded, &low, &high, 0, nil)
 		}
 	}
 
@@ -139,9 +167,10 @@ model_from_gltf :: proc(data: ^gltf.Data) -> Model {
 		parts        = parts[:],
 		bounds_min   = low,
 		bounds_max   = high,
-		skeleton     = build_skeleton(data),
+		skeleton     = build_skeleton(data, correction),
 		animations   = build_animations(data),
 		total_joints = int(total_joints),
+		vrm_humanoid = parse_vrm_humanoid(data.extensions, version),
 	}
 }
 

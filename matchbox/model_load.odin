@@ -170,6 +170,7 @@ model_from_gltf :: proc(data: ^gltf.Data) -> Model {
 		skeleton     = build_skeleton(data, correction),
 		animations   = build_animations(data),
 		total_joints = int(total_joints),
+		vrm_humanoid = parse_vrm_humanoid(data.extensions, version),
 	}
 }
 

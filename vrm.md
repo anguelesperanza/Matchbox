@@ -338,6 +338,25 @@ swing; the twist about each bone's own axis needs a second reference axis or
 the hand roll stays wrong. Not built, because the file that removes the need
 for it exists.
 
+### A second source, checked the same way: Quaternius's Universal Animation Library
+
+Mesh2Motion is not the only pipeline `UNREAL_BONE_NAMES` fits. Quaternius's CC0
+"Universal Animation Library" packs (`UAL1_Standard.glb`, `UAL2_Standard.glb`,
+under each pack's `Unreal-Godot` folder) ship the same community UE-mannequin
+rig, measured directly against both files' node names: every bone in the table
+matches verbatim except one, `head`, which this pack spells `Head` -- see the
+extra entry next to `UNREAL_BONE_NAMES`'s own in `vrm.odin`.
+
+Unlike the Mesh2Motion export above, this rig's own rest pose did not need
+correcting. `examples/animation-layers` was pointed at `UAL1_Standard.glb`
+with `REST_POSE_PATH` left empty, and run rather than reasoned about: idle
+and walking both came out as a normal standing and walking pose against
+`character.vrm`, not the arms-out/legs-crossed failure the section above
+documents. Checked by screenshot at each state, not assumed from the bone
+names lining up -- matching names says the *mapping* is right, not that the
+*rest poses* agree, and those are the two separate things this document's own
+history got burned conflating.
+
 ### Naming: where the correspondence comes from
 
 The destination side is free once step 2 lands: the VRM humanoid block already
@@ -496,3 +515,6 @@ whenever the public API moves.
 - `CLAUDE.md` -- `load_x` imports a thing that already exists whole, which is
   why `load_model` stays the one entry point and why
   `destroy_animation_source` joins the `destroy` group.
+- `cascadeur-vroid-mapping.md` -- rigging a VRoid export in Cascadeur: which
+  Cascadeur slot takes which `J_Bip_*` bone, and why that mapping alone
+  doesn't make an exported clip retarget against `UNREAL_BONE_NAMES`.

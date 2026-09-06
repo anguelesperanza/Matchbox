@@ -465,6 +465,12 @@ Vrm_Bone_Name :: struct {
 	against `retargeted_animations.glb`, not guessed from a naming convention:
 	every name below is a node that file actually has.
 
+	The same table, `Head` entry aside, also matches Quaternius's CC0
+	"Universal Animation Library" packs (`UAL1_Standard.glb`,
+	`UAL2_Standard.glb`) verbatim -- measured the same way, against those
+	files' own node names. It is the same community UE-mannequin rig under
+	both, which is presumably why Mesh2Motion's export agrees with it.
+
 	Shipped as the default rather than required, since it is the pipeline
 	this was built for -- pass a different `[]Vrm_Bone_Name` to
 	`retarget_animations` for a source with different names. Mixamo's
@@ -477,6 +483,7 @@ UNREAL_BONE_NAMES :: []Vrm_Bone_Name{
 	{"spine_03",  .UPPER_CHEST},
 	{"neck_01",   .NECK},
 	{"head",      .HEAD},
+	{"Head",      .HEAD}, // Quaternius's Universal Animation Library capitalises this one bone; the rest of its rig matches this table verbatim
 
 	{"thigh_l", .LEFT_UPPER_LEG},
 	{"calf_l",  .LEFT_LOWER_LEG},
@@ -744,9 +751,12 @@ skeleton_node_named :: proc(skeleton: Skeleton, name: string) -> (node: u32, fou
 	with no source counterpart (every spring-bone joint, for instance) is
 	never written and keeps its rest pose -- visible and still, not wrong. A
 	source bone with no destination counterpart has its track dropped; so does
-	a scale track, since none exist in the file this was built against and
-	retargeting one would need a third case with nothing here to check it
-	against.
+	a scale track, on any bone -- retargeting one would need a third case, and
+	no source measured so far needs a character to grow or shrink mid-clip.
+	Quaternius's rig carries scale (and non-hips translation) tracks on nearly
+	every bone in every clip where the Mesh2Motion export this was first built
+	against had none, which is why the drop counts are summed and logged once
+	per call below rather than once per track -- see `vrm.md`.
 */
 retarget_animations :: proc(
 	dst:   ^Model,
@@ -808,6 +818,15 @@ retarget_animations :: proc(
 	result := make([dynamic]Model_Animation, 0, len(dst.animations) + len(src.animations))
 	for clip in dst.animations do append(&result, clip)
 
+	// Counted rather than logged inline: a rig with a scale track or a
+	// non-hips translation track on most of its bones (Quaternius's Universal
+	// Animation Library does, on nearly every bone, in every clip -- unlike
+	// the Mesh2Motion export this was first measured against) turns one
+	// warning per track into thousands of near-identical lines. One summary
+	// per call says the same thing and stays legible.
+	dropped_translation := 0
+	dropped_scale        := 0
+
 	for clip in src.animations {
 		tracks := make([dynamic]Animation_Track, 0, len(clip.tracks))
 
@@ -831,7 +850,7 @@ retarget_animations :: proc(
 
 			case .TRANSLATION:
 				if !has_hips || track.node != hips_src_node {
-					log.warnf("retarget_animations: dropping a translation track on a node other than the mapped hips; only hips translation is retargeted")
+					dropped_translation += 1
 					continue
 				}
 
@@ -849,7 +868,7 @@ retarget_animations :: proc(
 				})
 
 			case .SCALE:
-				log.warnf("retarget_animations: dropping a scale track; scale retargeting is not supported")
+				dropped_scale += 1
 				continue
 			}
 		}
@@ -868,6 +887,13 @@ retarget_animations :: proc(
 			tracks   = tracks[:],
 		})
 		added += 1
+	}
+
+	if dropped_translation > 0 {
+		log.warnf("retarget_animations: dropped %v translation track(s) on a node other than the mapped hips; only hips translation is retargeted", dropped_translation)
+	}
+	if dropped_scale > 0 {
+		log.warnf("retarget_animations: dropped %v scale track(s); scale retargeting is not supported", dropped_scale)
 	}
 
 	delete(dst.animations)

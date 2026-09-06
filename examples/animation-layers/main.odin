@@ -22,12 +22,15 @@ package animation_layers_example
 	tens of megabytes each and this repository carries neither -- see
 	`.gitignore`'s entries for `examples/animation-layers/assets/`. To run it,
 	put a VRM 0.0 or 1.0 character at `assets/character.vrm`, and at
-	`assets/animations.glb` any glTF whose bones follow the Unreal naming
-	convention (`pelvis`, `spine_01`, `upperarm_l`, ...) carrying these five
-	clips: `Idle_Subtle`, `Walk_Formal`, `Run_Female`, `Pistol_Aim_Neutral`,
-	`Pistol_Reload`. A clip set under some other convention needs its own
-	name table passed to `retarget_animations` -- `UNREAL_BONE_NAMES` is only
-	the default.
+	`assets/quaternius_ual1.glb` Quaternius's CC0 "Universal Animation
+	Library" (`UAL1_Standard.glb`, from the pack's `Unreal-Godot` folder --
+	see `vrm.md` for how this pairing was verified). It carries `Idle_Loop`,
+	`Walk_Formal_Loop`, `Sprint_Loop`, `Pistol_Aim_Neutral` and
+	`Pistol_Reload` among its clips, and its rig already matches
+	`UNREAL_BONE_NAMES` -- no separate rest-pose file needed, unlike the
+	Mesh2Motion export this example used to point at. A clip set under some
+	other naming convention needs its own name table passed to
+	`retarget_animations` -- `UNREAL_BONE_NAMES` is only the default.
 
 	Things to try:
 
@@ -68,19 +71,18 @@ SHOULDER_DISTANCE :: 3.0
 // `vrm.md` -- so the two arrive apart and are joined by `retarget_animations`
 // below.
 MODEL_PATH :: "assets/character.vrm"
-CLIPS_PATH :: "assets/animations.glb"
+CLIPS_PATH :: "assets/quaternius_ual1.glb"
 
 /*
-	The same rig as the clips, exported on its own in a T-pose.
-
-	Needed because retargeting carries a bone's deviation from its rest, which
-	only means anything if both rests are the same physical pose -- and the
-	clip file's own rest is arms-down with a wide stance, where this character
-	is a T-pose with its feet under its hips. Retargeting straight from the
-	clip file gives a character that walks with its arms held out and its legs
-	crossed. See `load_animation_source`.
+	Empty on purpose, and checked rather than assumed -- see
+	`load_animation_source`'s doc comment for the failure this guards against
+	(a Mesh2Motion export whose own rest pose was arms-down and wide-stanced,
+	not a T-pose). Quaternius's rig does not have that problem: idle, walk and
+	the reload layer all came out correctly against `character.vrm` with this
+	left blank, checked by eye against a running build rather than assumed
+	from the bone names matching. See `vrm.md`.
 */
-REST_POSE_PATH :: "assets/exported-model.glb"
+REST_POSE_PATH :: ""
 
 /*
 	A VRM faces -z once loaded: 1.0 files already do, and a 0.0 file is turned
@@ -114,9 +116,9 @@ Locomotion :: enum {
 }
 
 LOCOMOTION_CLIPS := [Locomotion]string{
-	.IDLE = "Idle_Subtle",
-	.WALK = "Walk_Formal",
-	.RUN  = "Run_Female",
+	.IDLE = "Idle_Loop",
+	.WALK = "Walk_Formal_Loop",
+	.RUN  = "Sprint_Loop",
 }
 
 RELOAD_CLIP          :: "Pistol_Reload"
@@ -136,7 +138,7 @@ blocks := []Block{
 }
 
 main :: proc() {
-	mb.init("Animation Layers", 1280, 720)
+	mb.init("Animation Layers", 1920, 1080)
 	defer mb.cleanup()
 
 	// Matchbox's own logger, not this process's default -- otherwise a

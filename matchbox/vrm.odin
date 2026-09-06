@@ -4,12 +4,13 @@ package matchbox
 	VRM
 	---
 	Reading what a `.vrm` file adds on top of an ordinary glTF one, and using
-	it to put a VRoid character on screen facing the right way.
+	it to put a VRoid character on screen facing the right way, with a name
+	for each of its bones a game can actually ask for.
 
 	See `vrm.md` in the repository root for the measurements this was written
-	against -- a VRM 0.0 file's real shape and the two skeletons' rest poses,
-	checked against `character.vrm` and a Mesh2Motion export rather than
-	against the spec alone.
+	against -- a VRM 0.0 file's real shape, the two skeletons' rest poses, and
+	the retargeting maths below, checked against `character.vrm` and a
+	Mesh2Motion export rather than against the spec alone.
 
 	**No VRM-specific parsing lives in `matchbox/gltf2`.** A `.vrm`'s extra
 	JSON already reaches here as `data.extensions`, because the vendored
@@ -19,13 +20,20 @@ package matchbox
 	`model_load.odin` reads everything else the loader does not specialise
 	for, and the vendored package needed no `MATCHBOX PATCH` at all.
 
-	This is steps 1 and 2 of `vrm.md`: the container and the facing, and the
-	humanoid bone map. Animation retargeting follows in a later commit.
+	What is deliberately not here: blend shapes, spring bone physics, MToon
+	materials, node constraints, and `meta`. See `vrm.md`'s "Not in this
+	document, and why" for each -- the short version is that spring bones and
+	MToon are out of Matchbox's rendering-and-input scope per `refactor.md`,
+	and the rest are blocked on subsystems (morph targets) this package does
+	not have yet.
 */
 
 import "core:encoding/json"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:path/filepath"
+import "core:strings"
 
 import gltf "./gltf2"
 
@@ -432,4 +440,375 @@ vrm_bone_from_name_v1 :: proc(name: string) -> Vrm_Bone {
 	}
 
 	return .NONE
+}
+
+// -----------------------------------------------------------------------
+// Step 3 -- animation from another file, retargeted
+// -----------------------------------------------------------------------
+
+/*
+	One name a source rig uses, and the humanoid role it plays.
+
+	The destination side of a retarget is free once step 2 lands -- the VRM
+	file's own `humanoid` block already says which node is `leftUpperArm`. The
+	source is an ordinary glTF export with no such block, so it needs a name
+	table instead, and this is one entry of it.
+*/
+Vrm_Bone_Name :: struct {
+	name: string,
+	bone: Vrm_Bone,
+}
+
+/*
+	Mesh2Motion's own bone names, Unreal-style -- `pelvis`, `spine_01/02/03`,
+	`clavicle_l`, `upperarm_l`, `index_01_l` and the rest. Measured directly
+	against `retargeted_animations.glb`, not guessed from a naming convention:
+	every name below is a node that file actually has.
+
+	Shipped as the default rather than required, since it is the pipeline
+	this was built for -- pass a different `[]Vrm_Bone_Name` to
+	`retarget_animations` for a source with different names. Mixamo's
+	"mixamorig:Hips" convention can be added the day something needs it.
+*/
+UNREAL_BONE_NAMES :: []Vrm_Bone_Name{
+	{"pelvis",    .HIPS},
+	{"spine_01",  .SPINE},
+	{"spine_02",  .CHEST},
+	{"spine_03",  .UPPER_CHEST},
+	{"neck_01",   .NECK},
+	{"head",      .HEAD},
+
+	{"thigh_l", .LEFT_UPPER_LEG},
+	{"calf_l",  .LEFT_LOWER_LEG},
+	{"foot_l",  .LEFT_FOOT},
+	{"ball_l",  .LEFT_TOES},
+	{"thigh_r", .RIGHT_UPPER_LEG},
+	{"calf_r",  .RIGHT_LOWER_LEG},
+	{"foot_r",  .RIGHT_FOOT},
+	{"ball_r",  .RIGHT_TOES},
+
+	{"clavicle_l", .LEFT_SHOULDER},
+	{"upperarm_l", .LEFT_UPPER_ARM},
+	{"lowerarm_l", .LEFT_LOWER_ARM},
+	{"hand_l",     .LEFT_HAND},
+	{"clavicle_r", .RIGHT_SHOULDER},
+	{"upperarm_r", .RIGHT_UPPER_ARM},
+	{"lowerarm_r", .RIGHT_LOWER_ARM},
+	{"hand_r",     .RIGHT_HAND},
+
+	{"thumb_01_l",  .LEFT_THUMB_METACARPAL},
+	{"thumb_02_l",  .LEFT_THUMB_PROXIMAL},
+	{"thumb_03_l",  .LEFT_THUMB_DISTAL},
+	{"index_01_l",  .LEFT_INDEX_PROXIMAL},
+	{"index_02_l",  .LEFT_INDEX_INTERMEDIATE},
+	{"index_03_l",  .LEFT_INDEX_DISTAL},
+	{"middle_01_l", .LEFT_MIDDLE_PROXIMAL},
+	{"middle_02_l", .LEFT_MIDDLE_INTERMEDIATE},
+	{"middle_03_l", .LEFT_MIDDLE_DISTAL},
+	{"ring_01_l",   .LEFT_RING_PROXIMAL},
+	{"ring_02_l",   .LEFT_RING_INTERMEDIATE},
+	{"ring_03_l",   .LEFT_RING_DISTAL},
+	{"pinky_01_l",  .LEFT_LITTLE_PROXIMAL},
+	{"pinky_02_l",  .LEFT_LITTLE_INTERMEDIATE},
+	{"pinky_03_l",  .LEFT_LITTLE_DISTAL},
+
+	{"thumb_01_r",  .RIGHT_THUMB_METACARPAL},
+	{"thumb_02_r",  .RIGHT_THUMB_PROXIMAL},
+	{"thumb_03_r",  .RIGHT_THUMB_DISTAL},
+	{"index_01_r",  .RIGHT_INDEX_PROXIMAL},
+	{"index_02_r",  .RIGHT_INDEX_INTERMEDIATE},
+	{"index_03_r",  .RIGHT_INDEX_DISTAL},
+	{"middle_01_r", .RIGHT_MIDDLE_PROXIMAL},
+	{"middle_02_r", .RIGHT_MIDDLE_INTERMEDIATE},
+	{"middle_03_r", .RIGHT_MIDDLE_DISTAL},
+	{"ring_01_r",   .RIGHT_RING_PROXIMAL},
+	{"ring_02_r",   .RIGHT_RING_INTERMEDIATE},
+	{"ring_03_r",   .RIGHT_RING_DISTAL},
+	{"pinky_01_r",  .RIGHT_LITTLE_PROXIMAL},
+	{"pinky_02_r",  .RIGHT_LITTLE_INTERMEDIATE},
+	{"pinky_03_r",  .RIGHT_LITTLE_DISTAL},
+}
+
+/*
+	Clips and the skeleton they were authored against, with no mesh and no GPU
+	resources -- this exists to be retargeted onto a model with
+	`retarget_animations`, not drawn.
+
+	A whole `Model` was not reused for this because loading one uploads a mesh
+	to the GPU that a retarget throws away unread -- every part, every
+	texture, work spent only to be immediately freed. The loader already
+	separates skeleton- and clip-building from part-gathering internally
+	(`build_skeleton`, `build_animations`), so this is that seam exposed
+	rather than a new one cut.
+*/
+Animation_Source :: struct {
+	skeleton:   Skeleton,
+	animations: []Model_Animation,
+}
+
+/*
+	Loads a clip set and the skeleton it was authored against, from a `.glb`
+	or `.gltf` (or, since both are GLB containers underneath, a `.vrm`) --
+	without paying for a mesh upload this is never going to draw.
+
+	Errors match `load_model`'s: a `File_Error` for a path that could not be
+	read, `Model_Error.Parse_Failed` for one that could but is not glTF.
+*/
+load_animation_source :: proc(path: string) -> (source: Animation_Source, err: Error) {
+	bytes := read_entire_file(path, context.allocator) or_return
+	defer delete(bytes)
+
+	ext := filepath.ext(path)
+	is_glb := strings.equal_fold(ext, ".glb") || strings.equal_fold(ext, ".vrm")
+	dir := filepath.dir(path)
+
+	data, parse_err := gltf.parse(bytes, {is_glb = is_glb, gltf_dir = dir})
+	if parse_err != nil {
+		log.errorf("could not parse animation source %s: %v", path, parse_err)
+		return {}, Model_Error.Parse_Failed
+	}
+	defer gltf.unload(data)
+
+	return Animation_Source{
+		skeleton   = build_skeleton(data),
+		animations = build_animations(data),
+	}, nil
+}
+
+// Gives an `Animation_Source`'s skeleton and clips back. Joins the `destroy`
+// group in `destroy.odin`, per `CLAUDE.md` -- `matchbox.destroy(&clips)`
+// resolves the same way `matchbox.destroy(&model)` does.
+destroy_animation_source :: proc(src: ^Animation_Source) {
+	destroy_skeleton(&src.skeleton)
+	destroy_animations(src.animations)
+	src.animations = nil
+}
+
+/*
+	Every node's rest pose, as a global matrix rather than the local one
+	`skeleton.rest` stores.
+
+	The retargeting maths needs a bone's rest orientation *in the file's own
+	space*, not relative to its immediate parent -- the brackets in
+	`retarget_animations` compare a source bone's rest against a destination
+	bone's rest, and two bones with unrelated parent chains only agree on
+	anything once both are expressed the same way. This is `animator_resolve`'s
+	own hierarchy walk (parents before children, via `order`), run once over
+	the rest pose alone with no animator and no palette -- the two are kept
+	separate because one runs every frame for a playing character and the
+	other runs once, at load, for a skeleton that may never be drawn.
+*/
+@(private)
+skeleton_rest_globals :: proc(skeleton: Skeleton, allocator := context.allocator) -> []matrix[4, 4]f32 {
+	globals := make([]matrix[4, 4]f32, len(skeleton.rest), allocator)
+
+	for node in skeleton.order {
+		local  := transform_matrix(skeleton.rest[node])
+		parent := skeleton.parents[node]
+
+		if parent < 0 {
+			globals[node] = local
+		} else {
+			globals[node] = globals[parent] * local
+		}
+	}
+
+	return globals
+}
+
+// A skeleton's own name lookup, the way `node_index` looks one up on a
+// `Model`. Kept separate rather than reused because `Animation_Source` has
+// no `Model` to hand `node_index` -- it is a skeleton and some clips, nothing
+// else -- and duplicating seven lines was cheaper than giving `node_index` a
+// second signature for one caller.
+@(private)
+skeleton_node_named :: proc(skeleton: Skeleton, name: string) -> (node: u32, found: bool) {
+	if name == "" do return 0, false
+
+	for n, i in skeleton.names {
+		if n == name do return u32(i), true
+	}
+	return 0, false
+}
+
+/*
+	Copies every clip in `src` onto `dst`, rewriting each track to drive the
+	bone playing the same humanoid role, and returns how many clips landed at
+	least one track.
+
+	**Why a track cannot just be pointed at a different node.** `sample_pose`
+	assigns a track's value to its node outright rather than accumulating one
+	on top of another (see that procedure's doc comment), so a rotation track
+	copied verbatim would force the destination bone into the *source rig's*
+	rest orientation instead of reproducing the source's motion. What
+	transfers between two rigs is the motion relative to each one's own rest,
+	not the raw numbers -- see `vrm.md`'s "The math, and why it is cheap here"
+	for the derivation this implements:
+
+		L_d(t) = [ G_d_parent_rest⁻¹ · G_s_parent_rest ] · L_s(t) · [ G_s_rest⁻¹ · G_d_rest ]
+
+	Both bracketed terms are constants -- rest poses, not clips -- computed once
+	per mapped bone below (`pre`, `post`) and then applied to every keyframe of
+	every clip that touches that bone. No resampling and no per-frame hierarchy
+	walk at bake time: a keyframe goes in, a keyframe comes out, at the same
+	time and with the same interpolation mode it went in with.
+
+	**Hips translation is its own case**, not a generalisation of the above.
+	Position is not rotation-invariant the way a joint's own orientation is,
+	and measured (see `vrm.md`), every translation track in a Mesh2Motion
+	export sits on the pelvis alone -- so this handles exactly that node
+	rather than building a general "retarget a translation track" path
+	nothing else needs. The rotation the pelvis's own `pre` bracket already
+	represents is reused to carry a position *delta* from the source rig's
+	parent frame into the destination's, and a scale -- the ratio of the two
+	rigs' hip rest heights -- absorbs the difference in how tall each
+	character is. A destination with no hips mapped, or a source with no
+	pelvis mapped, silently skips this case: nothing to translate without both
+	ends.
+
+	**What is dropped, and why that is the right degrade.** A destination bone
+	with no source counterpart (every spring-bone joint, for instance) is
+	never written and keeps its rest pose -- visible and still, not wrong. A
+	source bone with no destination counterpart has its track dropped; so does
+	a scale track, since none exist in the file this was built against and
+	retargeting one would need a third case with nothing here to check it
+	against.
+*/
+retarget_animations :: proc(
+	dst:   ^Model,
+	src:   Animation_Source,
+	names: []Vrm_Bone_Name = UNREAL_BONE_NAMES,
+) -> (added: int) {
+	if !is_model_skinned(dst^) || len(src.skeleton.rest) == 0 do return 0
+
+	dst_globals := skeleton_rest_globals(dst.skeleton, context.temp_allocator)
+	src_globals := skeleton_rest_globals(src.skeleton, context.temp_allocator)
+	defer delete(dst_globals, context.temp_allocator)
+	defer delete(src_globals, context.temp_allocator)
+
+	src_to_dst := make(map[u32]u32, len(names), context.temp_allocator)
+	pre        := make(map[u32]quaternion128, len(names), context.temp_allocator)
+	post       := make(map[u32]quaternion128, len(names), context.temp_allocator)
+	defer delete(src_to_dst)
+	defer delete(pre)
+	defer delete(post)
+
+	hips_src_node: u32
+	has_hips: bool
+	hips_scale: f32 = 1
+
+	for entry in names {
+		src_node, found_src := skeleton_node_named(src.skeleton, entry.name)
+		if !found_src do continue
+
+		dst_node, found_dst := vrm_bone(dst^, entry.bone)
+		if !found_dst do continue
+
+		src_to_dst[src_node] = dst_node
+
+		src_parent_rotation := linalg.QUATERNIONF32_IDENTITY
+		if p := src.skeleton.parents[src_node]; p >= 0 {
+			src_parent_rotation = transform_from_matrix(src_globals[p]).rotation
+		}
+		dst_parent_rotation := linalg.QUATERNIONF32_IDENTITY
+		if p := dst.skeleton.parents[dst_node]; p >= 0 {
+			dst_parent_rotation = transform_from_matrix(dst_globals[p]).rotation
+		}
+
+		src_rest_rotation := transform_from_matrix(src_globals[src_node]).rotation
+		dst_rest_rotation := transform_from_matrix(dst_globals[dst_node]).rotation
+
+		pre[src_node]  = linalg.quaternion_mul_quaternion(linalg.quaternion_inverse(dst_parent_rotation), src_parent_rotation)
+		post[src_node] = linalg.quaternion_mul_quaternion(linalg.quaternion_inverse(src_rest_rotation), dst_rest_rotation)
+
+		if entry.bone == .HIPS {
+			hips_src_node = src_node
+			has_hips = true
+
+			src_height := src_globals[src_node][1, 3]
+			dst_height := dst_globals[dst_node][1, 3]
+			if src_height != 0 do hips_scale = dst_height / src_height
+		}
+	}
+
+	result := make([dynamic]Model_Animation, 0, len(dst.animations) + len(src.animations))
+	for clip in dst.animations do append(&result, clip)
+
+	for clip in src.animations {
+		tracks := make([dynamic]Animation_Track, 0, len(clip.tracks))
+
+		for track in clip.tracks {
+			dst_node, mapped := src_to_dst[track.node]
+			if !mapped do continue
+
+			switch track.path {
+			case .ROTATION:
+				quats := make([]quaternion128, len(track.quats))
+				for q, i in track.quats {
+					quats[i] = linalg.quaternion_normalize(
+						linalg.quaternion_mul_quaternion(
+							linalg.quaternion_mul_quaternion(pre[track.node], q),
+							post[track.node]))
+				}
+				append(&tracks, Animation_Track{
+					node = dst_node, path = .ROTATION, interpolation = track.interpolation,
+					times = clone_track_times(track.times), quats = quats,
+				})
+
+			case .TRANSLATION:
+				if !has_hips || track.node != hips_src_node {
+					log.warnf("retarget_animations: dropping a translation track on a node other than the mapped hips; only hips translation is retargeted")
+					continue
+				}
+
+				src_rest_pos := src.skeleton.rest[track.node].position
+				dst_rest_pos := dst.skeleton.rest[dst_node].position
+
+				vectors := make([][3]f32, len(track.vectors))
+				for v, i in track.vectors {
+					delta := linalg.quaternion_mul_vector3(pre[track.node], v - src_rest_pos)
+					vectors[i] = dst_rest_pos + delta * hips_scale
+				}
+				append(&tracks, Animation_Track{
+					node = dst_node, path = .TRANSLATION, interpolation = track.interpolation,
+					times = clone_track_times(track.times), vectors = vectors,
+				})
+
+			case .SCALE:
+				log.warnf("retarget_animations: dropping a scale track; scale retargeting is not supported")
+				continue
+			}
+		}
+
+		if len(tracks) == 0 {
+			delete(tracks)
+			continue
+		}
+
+		duration: f32 = 0
+		for t in tracks do duration = max(duration, t.times[len(t.times) - 1])
+
+		append(&result, Model_Animation{
+			name     = strings.clone(clip.name),
+			duration = duration,
+			tracks   = tracks[:],
+		})
+		added += 1
+	}
+
+	delete(dst.animations)
+	dst.animations = result[:]
+
+	return added
+}
+
+// A real allocation, not a borrow of the source clip's own -- the retargeted
+// clip owns its tracks independently, so `destroy_animation_source` on the
+// source and `destroy_model` on the destination each free their own copy
+// rather than one of them freeing memory the other still points at.
+@(private)
+clone_track_times :: proc(times: []f32) -> []f32 {
+	out := make([]f32, len(times))
+	copy(out, times)
+	return out
 }

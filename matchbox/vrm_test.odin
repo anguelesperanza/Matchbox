@@ -4,11 +4,13 @@ package matchbox
 	VRM -- headless tests
 	---------------------
 	Everything here runs on hand-built data: `core:encoding/json` values
-	constructed the way `json.parse_object` would have produced them, and a
-	`Skeleton` built the way `build_skeleton` would have. No file, no GPU, no
-	window -- see `vrm.md`'s "What can be tested without a VRM asset" for why,
-	and for what is left to check against the real file instead (whether the
-	corrected facing reads right to the eye).
+	constructed the way `json.parse_object` would have produced them, and
+	`Skeleton`/`Animation_Source` structs the way `build_skeleton` would have.
+	No file, no GPU, no window -- see `vrm.md`'s "What can be tested without a
+	VRM asset" for why nearly everything here does not need `character.vrm` on
+	disk, and for what is left to check against the real files instead
+	(whether the corrected facing reads right to the eye, and whether the
+	retargeted clips look like the same motion on the new rig).
 */
 
 import "core:encoding/json"
@@ -136,6 +138,11 @@ test_apply_root_correction_identity_changes_nothing :: proc(t: ^testing.T) {
 // -----------------------------------------------------------------------
 
 /*
+	VRM 0.0's array-of-objects shape. Built by hand the way json.parse_object
+	would have, including the fact that a number always tokenizes as
+	json.Value's Float variant here (gltf2 parses with the library's default
+	parse_integers = false) -- see parse_vrm_humanoid's doc comment.
+
 	Every key and every string leaf is `strings.clone`d rather than a literal
 	handed straight to the map, so that `free_json_object` below -- which is
 	`json.destroy_value`, the same procedure `gltf2.unload` uses on a real
@@ -275,4 +282,299 @@ test_vrm_bone_not_found_on_zero_value_model :: proc(t: ^testing.T) {
 	model: Model
 	_, found := vrm_bone(model, .HIPS)
 	testing.expect(t, !found, "a model with no humanoid block must not claim node 0 for every bone")
+}
+
+// -----------------------------------------------------------------------
+// Step 3 -- retargeting
+// -----------------------------------------------------------------------
+
+/*
+	Two two-node chains -- root(0) <- bone(1) in each -- built with
+	*deliberately different* rest rotations on both nodes, the way VRoid's
+	near-axis-aligned bones and an Unreal-style rig's along-the-bone ones
+	really do disagree (see vrm.md's measured angles). If retarget_animations
+	had a bracket transposed or applied on the wrong side, this is the shape
+	of rig where it would produce a plausible-looking but wrong number rather
+	than an obvious garbage one -- which is the failure this test exists to
+	catch.
+
+	Torn down by the two destroy_ calls a game would use: destroy_model frees
+	the destination's skeleton and clips, destroy_animation_source the
+	source's.
+*/
+@(private = "file")
+retarget_fixture :: proc() -> (dst: Model, src: Animation_Source, names: []Vrm_Bone_Name) {
+	src_root_rot := transform_rotation({1, 0, 0}, 0.3)
+	src_bone_rot := transform_rotation({0, 1, 0}, 0.6)
+	dst_root_rot := transform_rotation({0, 0, 1}, 0.5)
+	dst_bone_rot := transform_rotation({1, 0, 0}, -0.8)
+
+	src = Animation_Source{
+		skeleton = Skeleton{
+			parents = slice.clone([]i32{-1, 0}),
+			rest    = slice.clone([]Transform{
+				{rotation = src_root_rot, scale = {1, 1, 1}},
+				{rotation = src_bone_rot, scale = {1, 1, 1}},
+			}),
+			order = slice.clone([]u32{0, 1}),
+			names = slice.clone([]string{strings.clone("root"), strings.clone("bone")}),
+		},
+		animations = nil,
+	}
+
+	dst = Model{
+		skeleton = Skeleton{
+			parents = slice.clone([]i32{-1, 0}),
+			rest    = slice.clone([]Transform{
+				{rotation = dst_root_rot, scale = {1, 1, 1}},
+				{rotation = dst_bone_rot, scale = {1, 1, 1}},
+			}),
+			order = slice.clone([]u32{0, 1}),
+			names = slice.clone([]string{strings.clone("dst_root"), strings.clone("dst_bone")}),
+			skins = slice.clone([]Model_Skin{{joints = slice.clone([]u32{0, 1})}}),
+		},
+	}
+	dst.vrm_humanoid.bones[Vrm_Bone.HIPS]  = u32(0)
+	dst.vrm_humanoid.bones[Vrm_Bone.SPINE] = u32(1)
+
+	names = slice.clone([]Vrm_Bone_Name{{"root", .HIPS}, {"bone", .SPINE}})
+	return dst, src, names
+}
+
+@(private = "file")
+destroy_retarget_fixture :: proc(dst: ^Model, src: ^Animation_Source, names: []Vrm_Bone_Name) {
+	destroy_model(dst)
+	destroy_animation_source(src)
+	delete(names)
+}
+
+// The property the whole conjugation exists to guarantee, stated exactly as
+// vrm.md states it: the destination bone's global orientation after
+// retargeting equals the source's own delta-from-its-rest, carried onto the
+// destination's rest. Checked by rotating a reference vector through both
+// sides independently -- not by comparing quaternion components, which a
+// sign flip (q and -q are the same rotation) would fail for no real reason.
+@(test)
+test_retarget_rotation_matches_source_delta_from_rest :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	// The source's authored pose: some arbitrary absolute local rotation for
+	// "bone", unrelated to its own rest value -- a track never stores a delta.
+	authored := transform_rotation({0, 0, 1}, 1.1)
+
+	src.animations = slice.clone([]Model_Animation{
+		{
+			name = strings.clone("clip"),
+			duration = 0,
+			tracks = slice.clone([]Animation_Track{
+				{
+					node = 1, path = .ROTATION, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					quats = slice.clone([]quaternion128{authored}),
+				},
+			}),
+		},
+	})
+
+	added := retarget_animations(&dst, src, names)
+	testing.expect_value(t, added, 1)
+	testing.expect_value(t, len(dst.animations), 1)
+	testing.expect_value(t, len(dst.animations[0].tracks), 1)
+
+	retargeted_track := dst.animations[0].tracks[0]
+	testing.expect_value(t, retargeted_track.node, u32(1))
+	L_d := retargeted_track.quats[0]
+
+	// Expected, independently: G_d(t) = [G_s(t) * G_s_rest^-1] * G_d_rest,
+	// with both roots static (no track on node 0) so G_*_parent(t) ==
+	// G_*_parent_rest.
+	G_s_parent_rest := src.skeleton.rest[0].rotation
+	G_s_rest        := linalg.quaternion_mul_quaternion(G_s_parent_rest, src.skeleton.rest[1].rotation)
+	G_s_t           := linalg.quaternion_mul_quaternion(G_s_parent_rest, authored)
+
+	G_d_parent_rest := dst.skeleton.rest[0].rotation
+	G_d_rest        := linalg.quaternion_mul_quaternion(G_d_parent_rest, dst.skeleton.rest[1].rotation)
+
+	delta := linalg.quaternion_mul_quaternion(G_s_t, linalg.quaternion_inverse(G_s_rest))
+	G_d_expected := linalg.quaternion_mul_quaternion(delta, G_d_rest)
+
+	// Actual, the way animator_resolve would compute it from the retargeted
+	// local: G_d(t) = G_d_parent_rest * L_d(t).
+	G_d_actual := linalg.quaternion_mul_quaternion(G_d_parent_rest, L_d)
+
+	reference := [3]f32{0.4, 0.7, -0.2} // arbitrary and non-axis-aligned on purpose
+	expected_v := linalg.quaternion_mul_vector3(G_d_expected, reference)
+	actual_v   := linalg.quaternion_mul_vector3(G_d_actual, reference)
+
+	testing.expect(t, linalg.length(expected_v - actual_v) < 1e-4,
+		"the retargeted bone's global orientation should match the source's delta-from-rest, carried onto the destination's rest")
+}
+
+// A destination bone with no counterpart in the name table (or whose model
+// never mapped it) is never written by a retarget and keeps exactly the rest
+// pose it already had -- the "inert degrade" vrm.md calls out for a
+// spring-bone joint.
+@(test)
+test_retarget_leaves_unmapped_destination_bone_at_rest :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	original_root_rotation := dst.skeleton.rest[0].rotation
+
+	src.animations = slice.clone([]Model_Animation{
+		{
+			name = strings.clone("clip"), duration = 0,
+			tracks = slice.clone([]Animation_Track{
+				{
+					node = 1, path = .ROTATION, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					quats = slice.clone([]quaternion128{transform_rotation({0, 0, 1}, 1.1)}),
+				},
+			}),
+		},
+	})
+
+	retarget_animations(&dst, src, names)
+
+	for track in dst.animations[0].tracks {
+		testing.expect(t, track.node != 0, "the retarget only named 'bone' -> node 1; node 0 should never be written")
+	}
+	testing.expect_value(t, dst.skeleton.rest[0].rotation, original_root_rotation)
+}
+
+// A source track naming a node the table has no entry for is dropped
+// outright, not written to node 0 or any other guess.
+@(test)
+test_retarget_drops_a_source_track_with_no_mapped_bone :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	src.animations = slice.clone([]Model_Animation{
+		{
+			name = strings.clone("clip"), duration = 0,
+			tracks = slice.clone([]Animation_Track{
+				// node 99 names nothing in "src" and nothing in `names`.
+				{
+					node = 99, path = .ROTATION, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					quats = slice.clone([]quaternion128{linalg.QUATERNIONF32_IDENTITY}),
+				},
+			}),
+		},
+	})
+
+	added := retarget_animations(&dst, src, names)
+	testing.expect_value(t, added, 0)
+	testing.expect_value(t, len(dst.animations), 0)
+}
+
+// Keyframe times survive a retarget exactly -- the conjugation touches the
+// value at each key, never the key's own time or how many of them there are.
+@(test)
+test_retarget_keeps_keyframe_times_exactly :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	times := []f32{0, 0.25, 0.9}
+
+	src.animations = slice.clone([]Model_Animation{
+		{
+			name = strings.clone("clip"), duration = 0.9,
+			tracks = slice.clone([]Animation_Track{
+				{
+					node = 1, path = .ROTATION, interpolation = .LINEAR,
+					times = slice.clone(times),
+					quats = slice.clone([]quaternion128{
+						linalg.QUATERNIONF32_IDENTITY,
+						transform_rotation({0, 1, 0}, 0.2),
+						transform_rotation({0, 1, 0}, 0.4),
+					}),
+				},
+			}),
+		},
+	})
+
+	retarget_animations(&dst, src, names)
+
+	retargeted_times := dst.animations[0].tracks[0].times
+	testing.expect_value(t, len(retargeted_times), len(times))
+	for time, i in times do testing.expect_value(t, retargeted_times[i], time)
+}
+
+// A scale track has no case to retarget it and is dropped rather than
+// guessed at -- vrm.md measured none in the pipeline this was built for, and
+// a wrong guess here would silently misscale a character.
+@(test)
+test_retarget_drops_scale_tracks :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	src.animations = slice.clone([]Model_Animation{
+		{
+			name = strings.clone("clip"), duration = 0,
+			tracks = slice.clone([]Animation_Track{
+				{
+					node = 1, path = .SCALE, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					vectors = slice.clone([][3]f32{{2, 2, 2}}),
+				},
+			}),
+		},
+	})
+
+	added := retarget_animations(&dst, src, names)
+	testing.expect_value(t, added, 0)
+}
+
+/*
+	Hips translation: the one non-rotation case. `hips_src_node` is "root"
+	here (mapped to .HIPS in the fixture) rather than some third node, so the
+	scale is exactly the ratio of the two rigs' *root* rest heights, and the
+	basis correction is `pre` for that same node -- both computed the same
+	way a real pelvis's would be.
+
+	The source rest position is nonzero on purpose, so a delta-from-rest
+	computed against the wrong origin (e.g. against zero instead of the
+	source's own rest position) would move the destination hips by the
+	authored position itself rather than by its motion, and this test would
+	catch that as a large, obviously wrong offset rather than a subtle one.
+*/
+@(test)
+test_retarget_hips_translation_scales_and_reprojects :: proc(t: ^testing.T) {
+	dst, src, names := retarget_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	src.skeleton.rest[0].position = {0, 1.0, 0}
+	dst.skeleton.rest[0].position = {0, 2.0, 0} // destination root sits twice as high at rest
+
+	authored_position := [3]f32{0, 1.1, 0} // 0.1 above the source's own rest height
+
+	src.animations = slice.clone([]Model_Animation{
+		{
+			name = strings.clone("clip"), duration = 0,
+			tracks = slice.clone([]Animation_Track{
+				{
+					node = 0, path = .TRANSLATION, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					vectors = slice.clone([][3]f32{authored_position}),
+				},
+			}),
+		},
+	})
+
+	added := retarget_animations(&dst, src, names)
+	testing.expect_value(t, added, 1)
+
+	track := dst.animations[0].tracks[0]
+	testing.expect_value(t, track.node, u32(0))
+	testing.expect_value(t, track.path, Animation_Path.TRANSLATION)
+
+	// delta = authored - src_rest = {0, 0.1, 0}; the destination root has no
+	// parent, so `pre` for it is the identity and the delta is simply scaled
+	// by dst_height / src_height == 2. Expected: dst_rest + delta*2.
+	got := track.vectors[0]
+	testing.expect(t, abs(got.y - (2.0 + 0.2)) < 1e-4,
+		"hips delta should scale by the ratio of rest heights and add onto the destination's own rest position")
+	testing.expect(t, abs(got.x) < 1e-4 && abs(got.z) < 1e-4, "no horizontal motion was authored")
 }

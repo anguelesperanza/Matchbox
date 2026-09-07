@@ -32,3 +32,18 @@ test_directional_and_point_still_pack_as_before :: proc(t: ^testing.T) {
 	p := light_uniform(create_point_light({0, 0, 0}))
 	testing.expect(t, p.target.w == 1, "a point light must still pack as kind 1")
 }
+
+// The actual path begin_shadow_pass reads from, not just light_uniform in
+// isolation -- a spotlight marked casts_shadow has to make it all the way
+// through set_lights to mbi.renderer.shadow.caster_index the same way a
+// directional light's own already does.
+@(test)
+test_spot_light_can_become_shadow_caster :: proc(t: ^testing.T) {
+	defer clear_lights()
+
+	spot := create_spot_light({0, 5, 0}, {0, -1, 0}, casts_shadow = true)
+	set_lights({spot})
+
+	testing.expect(t, mbi.renderer.shadow.caster_index == 0,
+		"a spotlight marked casts_shadow should become the shadow caster")
+}

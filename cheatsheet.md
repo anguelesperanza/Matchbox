@@ -1936,6 +1936,7 @@ create_spot_light :: proc(
 	color: [4]f32 = WHITE,
 	inner_angle: f32 = 20,
 	outer_angle: f32 = 30,
+	casts_shadow: bool = false,
 ) -> Light
 ```
 A cone of light at `position`, pointing along `direction`.

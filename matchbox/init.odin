@@ -431,8 +431,8 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Vertex3D)        == 32)
 	#assert(size_of(Mesh_Vert_Data)  == 192)
 	#assert(size_of(Mesh_Frag_Data)  == 16)
-	#assert(size_of(Light_Uniform)   == 48)
-	#assert(size_of(Lighting_Data)   == 352)
+	#assert(size_of(Light_Uniform)   == 64)
+	#assert(size_of(Lighting_Data)   == 416)
 	#assert(size_of(Post_Frag_Data)  == 32)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping

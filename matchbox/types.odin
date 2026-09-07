@@ -242,20 +242,21 @@ Light_Uniform :: struct #align(16) {
 }
 
 /*
-	480 bytes. Size measured with a scratch offset_of program, not assumed --
-	see init.odin's own size assert and this struct's history:
-	`matrix[4,4]f32` aligns to 32 bytes in Odin, not 16, whatever a struct's
-	own `#align` says, which once forced a compiler-inserted gap here that
-	`lighting.hlsli`'s cbuffer had to spend an explicit `_pad0` to reproduce.
+	1248 bytes at MAX_LIGHTS = 16, measured with a scratch offset_of program
+	each time this has grown rather than assumed -- see init.odin's own size
+	assert and this struct's history: `matrix[4,4]f32` aligns to 32 bytes in
+	Odin, not 16, whatever a struct's own `#align` says, which has forced a
+	compiler-inserted gap here before that `lighting.hlsli`'s cbuffer needed
+	an explicit `_pad0` to reproduce.
 
-	That gap is gone now, not because the 32-byte rule stopped applying, but
-	because adding `shadow_caster1` happened to land light_view_projection's
-	own offset (352) on a 32-byte boundary already -- 352 / 32 = 11 exactly --
-	so Odin has nothing to pad before it this time, and neither cbuffer needs
-	a `_pad0`. This is exactly why the number is measured freshly here rather
-	than adjusted by hand from the old one: the same change that added a
-	field could just as easily have landed on an offset that still needed
-	padding, or a different amount of it.
+	No `_pad0` is needed at this size either: `Light_Uniform` is 64 bytes, a
+	multiple of 32, so `lights` as a whole is too for any `MAX_LIGHTS` --
+	growing or shrinking that constant shifts every field after it by a
+	multiple of 32 and changes nothing about whether `light_view_projection`
+	lands on a 32-byte boundary. That stops being free the moment
+	`Light_Uniform`'s own size stops being a multiple of 32 (adding a
+	`[3]f32` instead of a `[4]f32`, say) -- measure again then rather than
+	trust this comment.
 */
 Lighting_Data :: struct #align(16) {
 	lights:               [MAX_LIGHTS]Light_Uniform,

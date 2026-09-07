@@ -22,16 +22,20 @@
     makes the layout the same on both sides by construction, which is what the
     size assert in init.odin then confirms.
 
-    Must match matchbox.Lighting_Data exactly. 480 bytes, and -- for now --
-    no explicit padding field: Odin's own `matrix[4,4]f32` aligns to 32
-    bytes, not 16, and has needed a manual pad here before to reproduce a
-    gap the Odin side got from its compiler whether asked for or not. It
-    happens not to need one at this particular size (see Lighting_Data's own
-    comment for why), which is exactly why that struct's comment says to
-    measure again rather than assume, the next time a field is added here.
+    Must match matchbox.Lighting_Data exactly. 1248 bytes at MAX_LIGHTS = 16,
+    and -- for now -- no explicit padding field: Odin's own `matrix[4,4]f32`
+    aligns to 32 bytes, not 16, and has needed a manual pad here before to
+    reproduce a gap the Odin side got from its compiler whether asked for or
+    not. It happens not to need one at this particular size (see
+    Lighting_Data's own comment for why), which is exactly why that struct's
+    comment says to measure again rather than assume, the next time a field
+    is added here -- or MAX_LIGHTS changes again.
 */
 
-#define MAX_LIGHTS 4
+// Keep in step with matchbox.MAX_LIGHTS (light.odin) -- the two are not the
+// same constant and nothing enforces they match except this comment and the
+// size assert above catching it if they ever do not.
+#define MAX_LIGHTS 16
 
 struct Light
 {

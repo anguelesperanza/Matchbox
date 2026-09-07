@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 359 of them -- with its arguments
+Every public procedure in the package -- 360 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 10
+- [Other](#other) -- 15
 
 ## Getting started
 
@@ -1921,6 +1921,7 @@ A point light at `position`.
 create_directional_light :: proc(
 	direction: [3]f32,
 	color: [4]f32 = WHITE,
+	casts_shadow := false,
 ) -> Light
 ```
 A light shining along `direction`, from nowhere in particular.
@@ -2487,6 +2488,33 @@ is_mouse_over_sprite :: proc(sprite:Sprite) -> bool
 Whether the pointer is over a sprite.
 
 ## Other
+
+### `shadow.odin`
+
+```odin
+enable_shadows :: proc(settings: Shadow_Settings = SHADOW_DEFAULTS)
+```
+Turns shadows on: builds a real shadow map at `settings.resolution` and replaces whatever texture was bound in its place -- the 1x1 placeholder `init` made, or an earlier real map from a previous call with different settings.
+
+```odin
+disable_shadows :: proc()
+```
+Back to no shadow at all -- the map itself is left alone rather than released, so a game toggling this as a debug key does not rebuild a texture every press.
+
+```odin
+is_shadows_active :: proc() -> bool
+```
+_(no doc comment)_
+
+```odin
+begin_shadow_pass :: proc() -> bool
+```
+Opens the shadow pass: works out the shadow-casting light's own view-projection, then a depth-only render pass against the shadow map, ready for whatever `draw_model` calls come next to render into it as occluders rather than as the visible scene.
+
+```odin
+end_shadow_pass :: proc()
+```
+Closes the shadow pass.
 
 ### `utility.odin`
 

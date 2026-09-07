@@ -25,6 +25,11 @@ Shaders :: struct {
 	// the unskinned one uses -- only the vertex stage differs.
 	mesh_skinned: ^sdl.GPUShader,
 
+	// The shadow pass's fragment shader -- writes nothing, paired with
+	// mesh/mesh_skinned's own vertex shaders rather than one of its own. See
+	// shadow.frag.hlsl.
+	shadow: ^sdl.GPUShader,
+
 	// The sky. One vertex shader making a triangle out of nothing, and a
 	// fragment shader per source format.
 	skybox:          ^sdl.GPUShader,
@@ -75,6 +80,12 @@ Pipelines :: struct {
 	mesh_skinned:          ^sdl.GPUGraphicsPipeline,
 	mesh_skinned_textured: ^sdl.GPUGraphicsPipeline,
 
+	// Depth-only, biased, no colour target at all -- the shadow pass. Two for
+	// the same reason mesh/mesh_skinned are two: a skinned caster needs the
+	// skeleton's own vertex shader.
+	shadow:         ^sdl.GPUGraphicsPipeline,
+	shadow_skinned: ^sdl.GPUGraphicsPipeline,
+
 	// Depth attached but neither tested nor written, so the sky is a background
 	// rather than very distant geometry.
 	skybox_panorama: ^sdl.GPUGraphicsPipeline,
@@ -85,6 +96,43 @@ Pipelines :: struct {
 	post: ^sdl.GPUGraphicsPipeline,
 	psx:  ^sdl.GPUGraphicsPipeline,
 	vhs:  ^sdl.GPUGraphicsPipeline,
+}
+
+/*
+	Everything the shadow pass owns, grouped the way the depth texture's own
+	fields on `Renderer` are not -- those predate this and are left alone,
+	but a second, sampled depth texture with its own size, format and
+	view-projection is enough state to earn its own struct rather than four
+	more loose fields.
+
+	`texture` is never nil: `init` creates a 1x1 placeholder immediately, so
+	`mesh_flat`/`mesh_textured` -- which declare this slot unconditionally,
+	for every game -- always have something valid bound, whether or not that
+	game ever calls `enable_shadows`. See shadow.odin.
+*/
+Shadow :: struct {
+	enabled:  bool,
+	settings: Shadow_Settings,
+
+	texture:    ^sdl.GPUTexture,
+	sampler:    ^sdl.GPUSampler,
+	format:     sdl.GPUTextureFormat,
+	resolution: i32,
+
+	view_projection: matrix[4, 4]f32,
+	caster_index:    int, // which of Lighting_Data.lights casts it, or -1
+
+	// A game's `casts_shadow` on each `Light`, kept here rather than on
+	// `Light_Uniform` because the GPU has no use for it -- only
+	// `recompute_shadow_caster` (light.odin) ever reads this, to find the
+	// one light `caster_index` should point at.
+	light_casts_shadow: [MAX_LIGHTS]bool,
+
+	// Whether begin_shadow_pass has already logged its "nothing to render"
+	// warning for the current stretch of no-caster/disabled frames, so a
+	// game that leaves the call in its loop with shadows off gets one line
+	// instead of one every frame.
+	warned: bool,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -163,6 +211,11 @@ Renderer :: struct {
 	mode_3d:         bool, // true between begin_drawing_3d and end_drawing_3d
 	view_projection: matrix[4, 4]f32,
 	camera3d:        Camera3D,
+
+	// The shadow map's own state, and whether draw_model is currently filling
+	// it rather than drawing the scene it will be sampled by. See shadow.odin.
+	shadow:         Shadow,
+	in_shadow_pass: bool,
 
 	// The shapes draw_cube and friends draw, built the first time one is asked
 	// for. Same reasoning as the depth texture: a game that draws no 3D should

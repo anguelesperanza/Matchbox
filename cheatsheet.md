@@ -2509,7 +2509,7 @@ Whether the pointer is over a sprite.
 ```odin
 enable_shadows :: proc(settings: Shadow_Settings = SHADOW_DEFAULTS)
 ```
-Turns shadows on: builds a real shadow map at `settings.resolution` and replaces whatever texture was bound in its place -- the 1x1 placeholder `init` made, or an earlier real map from a previous call with different settings.
+Turns shadows on: builds `MAX_SHADOW_CASTERS` real shadow maps at `settings.resolution`, one per potential caster, replacing whatever textures were bound in their place -- the 1x1 placeholders `init` made, or earlier real maps from a previous call with different settings.
 
 ```odin
 disable_shadows :: proc()
@@ -2522,9 +2522,9 @@ is_shadows_active :: proc() -> bool
 Whether enable_shadows has been called and disable_shadows has not undone it.
 
 ```odin
-begin_shadow_pass :: proc() -> bool
+begin_shadow_pass :: proc(slot: int = 0) -> bool
 ```
-Opens the shadow pass: works out the shadow-casting light's own view-projection, then a depth-only render pass against the shadow map, ready for whatever `draw_model` calls come next to render into it as occluders rather than as the visible scene.
+Opens the shadow pass for `slot` (0 or 1 -- see `MAX_SHADOW_CASTERS`): works out that slot's own caster's view-projection, then a depth-only render pass against that slot's shadow map, ready for whatever `draw_model` calls come next to render into it as occluders rather than as the visible scene.
 
 ```odin
 end_shadow_pass :: proc()

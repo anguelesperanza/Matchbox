@@ -220,10 +220,10 @@ create_pipeline :: proc(
 
 	// .INVALID means "whatever the main 3D pass's own depth buffer is",
 	// which is every caller before the shadow pass. The shadow pipelines are
-	// the one exception: their pass writes into `mbi.renderer.shadow.texture`,
-	// a separate, differently-sized, possibly differently-formatted texture,
-	// and a pipeline's depth format has to agree with the pass it runs in or
-	// SDL3 rejects it outright.
+	// the one exception: their pass writes into one of
+	// `mbi.renderer.shadow.textures`, a separate, differently-sized, possibly
+	// differently-formatted texture, and a pipeline's depth format has to
+	// agree with the pass it runs in or SDL3 rejects it outright.
 	depth_format: sdl.GPUTextureFormat = .INVALID,
 
 	// Zero for every pipeline except the shadow pair, which need a push away
@@ -432,7 +432,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Mesh_Vert_Data)  == 192)
 	#assert(size_of(Mesh_Frag_Data)  == 16)
 	#assert(size_of(Light_Uniform)   == 64)
-	#assert(size_of(Lighting_Data)   == 416)
+	#assert(size_of(Lighting_Data)   == 480)
 	#assert(size_of(Post_Frag_Data)  == 32)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
@@ -530,11 +530,11 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.mesh = create_builtin_shader(
 		#load("shaders/mesh.vert.spv"), #load("shaders/mesh.vert.dxil"), .VERTEX, 0)
 	// Two uniform buffers, not one: slot 0 is the per-draw tint and slot 1 is
-	// the lighting, which is pushed once for a whole pass. One sampler even
-	// with no texture of its own: the shadow map lighting.hlsli declares at
-	// slot 1, shared with mesh_textured -- see shadow.odin.
+	// the lighting, which is pushed once for a whole pass. Two samplers even
+	// with no texture of its own: the two shadow maps lighting.hlsli
+	// declares at slots 0/1 -- see shadow.odin's MAX_SHADOW_CASTERS.
 	mbi.renderer.shaders.mesh_flat = create_builtin_shader(
-		#load("shaders/mesh_flat.frag.spv"), #load("shaders/mesh_flat.frag.dxil"), .FRAGMENT, 1, 2)
+		#load("shaders/mesh_flat.frag.spv"), #load("shaders/mesh_flat.frag.dxil"), .FRAGMENT, 2, 2)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -546,10 +546,10 @@ init :: proc(title: string, width: i32, height: i32) {
 		#load("shaders/psx.frag.spv"), #load("shaders/psx.frag.dxil"), .FRAGMENT, 1)
 	mbi.renderer.shaders.vhs = create_builtin_shader(
 		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
-	// Two samplers: the model's base colour at slot 0, the shadow map
-	// lighting.hlsli declares at slot 1. Two uniform buffers, as above.
+	// Three samplers: the model's base colour at slot 0, the two shadow maps
+	// lighting.hlsli declares at slots 1/2. Two uniform buffers, as above.
 	mbi.renderer.shaders.mesh_textured = create_builtin_shader(
-		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 2, 2)
+		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 3, 2)
 
 	// Two uniform buffers -- the three matrices every mesh vertex shader
 	// takes, and the joint offset behind them -- plus one storage buffer: the
@@ -725,13 +725,17 @@ init :: proc(title: string, width: i32, height: i32) {
 		Clamped on both axes: nothing outside the light's own frustum should
 		wrap around and sample the opposite edge.
 
-		The 1x1 placeholder exists so mesh_flat/mesh_textured -- which declare
-		this slot unconditionally, for every game -- always have something
-		valid bound, whether or not enable_shadows is ever called. Its
-		contents are never actually read: shadow_factor only samples when
-		flags.z names a real caster, which push_lighting never sets unless
-		shadow.enabled is true, and this placeholder is what enable_shadows
-		replaces the moment it is.
+		One sampler still serves both maps -- the comparison settings are the
+		shadow system's own choice, not a per-light one.
+
+		The 1x1 placeholders (one per MAX_SHADOW_CASTERS slot) exist so
+		mesh_flat/mesh_textured -- which declare both slots unconditionally,
+		for every game -- always have something valid bound, whether or not
+		enable_shadows is ever called or a game ever has two shadow-casting
+		lights at once. Their contents are never actually read: shadow_factor
+		only samples a slot whose caster index push_lighting actually set,
+		which it never does unless shadow.enabled is true, and enable_shadows
+		is what replaces these placeholders the moment it runs.
 	*/
 	mbi.renderer.shadow.sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
 		min_filter     = .LINEAR,
@@ -742,20 +746,26 @@ init :: proc(title: string, width: i32, height: i32) {
 		compare_op     = .LESS_OR_EQUAL,
 		enable_compare = true,
 	})
-	mbi.renderer.shadow.texture = sdl.CreateGPUTexture(mbi.renderer.device, {
-		type                 = .D2,
-		format               = mbi.renderer.shadow.format,
-		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
-		width                = 1,
-		height               = 1,
-		layer_count_or_depth = 1,
-		num_levels           = 1,
-	})
-	mbi.renderer.shadow.resolution   = 1
-	mbi.renderer.shadow.caster_index = -1 // Odin's zero value is 0, a real slot -- -1 has to be said
+
+	shadow_placeholders_ok := true
+	for slot in 0 ..< MAX_SHADOW_CASTERS {
+		mbi.renderer.shadow.textures[slot] = sdl.CreateGPUTexture(mbi.renderer.device, {
+			type                 = .D2,
+			format               = mbi.renderer.shadow.format,
+			usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+			width                = 1,
+			height               = 1,
+			layer_count_or_depth = 1,
+			num_levels           = 1,
+		})
+		shadow_placeholders_ok &= mbi.renderer.shadow.textures[slot] != nil
+	}
+
+	mbi.renderer.shadow.resolution = 1
+	mbi.renderer.shadow.caster_indices = {-1, -1} // Odin's zero value is 0, a real slot -- -1 has to be said
 
 	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil &&
-		mbi.renderer.shadow.sampler != nil && mbi.renderer.shadow.texture != nil,
+		mbi.renderer.shadow.sampler != nil && shadow_placeholders_ok,
 		"could not create samplers")
 
 	// The one quad every draw uses.
@@ -832,7 +842,9 @@ cleanup :: proc() {
 	if mbi.renderer.sprite_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.sprite_sampler)
 	if mbi.renderer.font_sampler   != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.font_sampler)
 	if mbi.renderer.shadow.sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.shadow.sampler)
-	if mbi.renderer.shadow.texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.shadow.texture)
+	for texture in mbi.renderer.shadow.textures {
+		if texture != nil do sdl.ReleaseGPUTexture(device, texture)
+	}
 
 	if mbi.renderer.pipelines.sprite  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.sprite)
 	if mbi.renderer.pipelines.rect    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.rect)

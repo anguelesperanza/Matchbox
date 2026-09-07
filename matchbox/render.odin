@@ -105,33 +105,45 @@ Pipelines :: struct {
 	view-projection is enough state to earn its own struct rather than four
 	more loose fields.
 
-	`texture` is never nil: `init` creates a 1x1 placeholder immediately, so
-	`mesh_flat`/`mesh_textured` -- which declare this slot unconditionally,
-	for every game -- always have something valid bound, whether or not that
-	game ever calls `enable_shadows`. See shadow.odin.
+	`textures[n]` is never nil: `init` creates a 1x1 placeholder for each
+	slot immediately, so `mesh_flat`/`mesh_textured` -- which declare both
+	slots unconditionally, for every game -- always have something valid
+	bound, whether or not that game ever calls `enable_shadows` or ever has
+	more than one light marked `casts_shadow`. See shadow.odin.
+
+	Two of everything shadow-specific rather than one: `MAX_SHADOW_CASTERS`
+	lights can each cast a real shadow at once, each into its own map. One
+	`sampler`/`format`/`resolution` still serve both -- they are the shadow
+	system's own settings, not a per-light choice.
 */
 Shadow :: struct {
 	enabled:  bool,
 	settings: Shadow_Settings,
 
-	texture:    ^sdl.GPUTexture,
 	sampler:    ^sdl.GPUSampler,
 	format:     sdl.GPUTextureFormat,
 	resolution: i32,
 
-	view_projection: matrix[4, 4]f32,
-	caster_index:    int, // which of Lighting_Data.lights casts it, or -1
+	textures:         [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
+	view_projections: [MAX_SHADOW_CASTERS]matrix[4, 4]f32,
+	caster_indices:   [MAX_SHADOW_CASTERS]int, // which of Lighting_Data.lights each casts, or -1
+
+	// Which of the two the current shadow pass is filling -- read by
+	// draw_model_immediate to pick the matching view_projections entry.
+	active_slot: int,
 
 	// A game's `casts_shadow` on each `Light`, kept here rather than on
 	// `Light_Uniform` because the GPU has no use for it -- only
-	// `recompute_shadow_caster` (light.odin) ever reads this, to find the
-	// one light `caster_index` should point at.
+	// `recompute_shadow_casters` (light.odin) ever reads this, to find which
+	// lights `caster_indices` should point at.
 	light_casts_shadow: [MAX_LIGHTS]bool,
 
 	// Whether begin_shadow_pass has already logged its "nothing to render"
 	// warning for the current stretch of no-caster/disabled frames, so a
 	// game that leaves the call in its loop with shadows off gets one line
-	// instead of one every frame.
+	// instead of one every frame. Only slot 0 ever warns -- an empty slot 1
+	// is the ordinary shape of a game with one shadow-casting light, not a
+	// misconfiguration.
 	warned: bool,
 }
 

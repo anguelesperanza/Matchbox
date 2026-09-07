@@ -8,10 +8,12 @@
     Must match matchbox.Mesh_Frag_Data and matchbox.Lighting_Data.
 */
 
-// This shader's only sampled texture -- see lighting.hlsli's own comment on
-// why it is declared here, at t0, rather than inside that shared header.
-Texture2D<float>       shadow_map     : register(t0, space2);
-SamplerComparisonState shadow_sampler : register(s0, space2);
+// This shader's only sampled textures -- see lighting.hlsli's own comment on
+// why they are declared here, at t0/t1, rather than inside that shared header.
+Texture2D<float>       shadow_map0     : register(t0, space2);
+SamplerComparisonState shadow_sampler0 : register(s0, space2);
+Texture2D<float>       shadow_map1     : register(t1, space2);
+SamplerComparisonState shadow_sampler1 : register(s1, space2);
 
 #include "lighting.hlsli"
 

@@ -22,15 +22,13 @@
     makes the layout the same on both sides by construction, which is what the
     size assert in init.odin then confirms.
 
-    Must match matchbox.Lighting_Data exactly. 416 bytes.
-
-    **`_pad0` is not spare room, it is copying a fact rather than a choice.**
-    Odin's own `matrix[4,4]f32` aligns to 32 bytes, not 16, so
-    `Lighting_Data.light_view_projection` sits 16 bytes further along than a
-    naive count of the fields before it suggests -- the Odin side gets that
-    gap from its compiler whether asked for or not, and the one thing to get
-    right here is reproducing it, since HLSL's own packing would otherwise
-    place a float4x4 immediately after `flags` with no gap at all.
+    Must match matchbox.Lighting_Data exactly. 480 bytes, and -- for now --
+    no explicit padding field: Odin's own `matrix[4,4]f32` aligns to 32
+    bytes, not 16, and has needed a manual pad here before to reproduce a
+    gap the Odin side got from its compiler whether asked for or not. It
+    happens not to need one at this particular size (see Lighting_Data's own
+    comment for why), which is exactly why that struct's comment says to
+    measure again rather than assume, the next time a field is added here.
 */
 
 #define MAX_LIGHTS 4
@@ -51,46 +49,53 @@ cbuffer Lighting : register(b1, space3)
     float4    fog_color; // rgb
     float4    fog_range; // x near, y far
 
-    // x how many lights are set, y 1 when fog is on, z the shadow-casting
-    // light's index or -1 for none, w the shadow depth-compare bias.
+    // x how many lights are set, y 1 when fog is on, z the first shadow
+    // caster's light index or -1 for none, w the shadow depth-compare bias.
     float4    flags;
 
-    float4    _pad0; // see this file's own top comment on Odin's matrix alignment
+    // x the second shadow caster's light index or -1 for none -- two lights
+    // may each cast a real shadow at once, see shadow.odin's
+    // MAX_SHADOW_CASTERS. y-w unused.
+    float4    shadow_caster1;
 
-    // World space to the shadow caster's clip space. Unread whenever
-    // flags.z is -1 -- see shadow_factor.
+    // Each caster's own view-projection, world space to its own clip space.
+    // light_view_projection is unread whenever flags.z is -1;
+    // light_view_projection2 whenever shadow_caster1.x is -1.
     float4x4  light_view_projection;
+    float4x4  light_view_projection2;
 };
 
 /*
-    `shadow_map`/`shadow_sampler` are declared by whichever file includes
-    this header, not here -- SDL_GPU requires a shader's sampled textures to
-    be numbered contiguously from t0 (see its own CreateGPUShader doc
-    comment), and mesh_flat and mesh_textured cannot agree on one fixed slot
-    for it: mesh_flat has nothing else, so its shadow map is t0/s0, while
-    mesh_textured's own albedo already sits at t0/s0 and the shadow map
-    follows at t1/s1. Declaring them ahead of this #include, at whichever
-    slot is free, is what makes the same shadow_factor below compile
-    correctly against either.
+    `shadow_map0`/`shadow_sampler0`/`shadow_map1`/`shadow_sampler1` are
+    declared by whichever file includes this header, not here -- SDL_GPU
+    requires a shader's sampled textures to be numbered contiguously from t0
+    (see its own CreateGPUShader doc comment), and mesh_flat and
+    mesh_textured cannot agree on one fixed pair of slots for them:
+    mesh_flat has nothing else, so its two shadow maps are t0/s0 and t1/s1,
+    while mesh_textured's own albedo already sits at t0/s0 and its two
+    shadow maps follow at t1/s1 and t2/s2. Declaring them ahead of this
+    #include, at whichever slots are free, is what makes the same
+    shadow_factor below compile correctly against either.
 */
 
 /*
-    How much of a light's contribution actually reaches `world`, 0 (fully
+    How much of one caster's light actually reaches `world`, 0 (fully
     shadowed) to 1 (fully lit, or filtered in between across the map's own
-    texels courtesy of SampleCmpLevelZero's hardware PCF).
+    texels courtesy of SampleCmpLevelZero's hardware PCF). Takes the map,
+    its comparison sampler and its own view-projection as arguments rather
+    than reading a single fixed set of globals, so the same function serves
+    whichever of the two shadow-casting slots `lit_shade` is asking about.
 
-    Returns 1 -- lit, no correction -- whenever there is no shadow caster at
-    all (`flags.z < 0`, `enable_shadows` never called) or `world` falls
-    outside the light's own frustum. The far edge of a shadow map fading to
-    "lit" rather than clipping to "shadowed" is the right degrade: a
-    frustum drawn too small should look like no shadow past its edge, not a
-    false wall of darkness there.
+    Returns 1 -- lit, no correction -- whenever `world` falls outside that
+    caster's own frustum. The far edge of a shadow map fading to "lit"
+    rather than clipping to "shadowed" is the right degrade: a frustum drawn
+    too small should look like no shadow past its edge, not a false wall of
+    darkness there. Callers already check the caster index is not -1 before
+    reaching here -- see lit_shade -- so that case is not handled twice.
 */
-float shadow_factor(float3 world)
+float shadow_factor(Texture2D<float> map, SamplerComparisonState samp, float4x4 view_projection, float3 world)
 {
-    if (flags.z < 0.0) return 1.0;
-
-    float4 light_clip = mul(light_view_projection, float4(world, 1.0));
+    float4 light_clip = mul(view_projection, float4(world, 1.0));
     float3 light_ndc   = light_clip.xyz / light_clip.w;
 
     float2 uv = light_ndc.xy * 0.5 + 0.5;
@@ -100,8 +105,8 @@ float shadow_factor(float3 world)
         light_ndc.z < 0.0 || light_ndc.z > 1.0)
         return 1.0;
 
-    float current = light_ndc.z - flags.w; // flags.w: the bias
-    return shadow_map.SampleCmpLevelZero(shadow_sampler, uv, current);
+    float current = light_ndc.z - flags.w; // flags.w: the bias, shared by both maps
+    return map.SampleCmpLevelZero(samp, uv, current);
 }
 
 /*
@@ -170,11 +175,15 @@ float3 lit_shade(float3 normal, float3 world, float3 albedo)
             }
         }
 
-        // Only the one light named by flags.z casts a shadow -- see
-        // shadow_factor's own doc comment for why there is only one. Every
-        // other light still reaches a surface behind an occluder, the same
-        // as before this feature existed.
-        float shadow = (i == int(flags.z)) ? shadow_factor(world) : 1.0;
+        // Only the (up to two) lights named by flags.z/shadow_caster1.x cast
+        // a shadow -- see shadow.odin's MAX_SHADOW_CASTERS. Every other
+        // light still reaches a surface behind an occluder, the same as
+        // before this feature existed.
+        float shadow = 1.0;
+        if (i == int(flags.z))
+            shadow = shadow_factor(shadow_map0, shadow_sampler0, light_view_projection, world);
+        else if (i == int(shadow_caster1.x))
+            shadow = shadow_factor(shadow_map1, shadow_sampler1, light_view_projection2, world);
 
         float ndl = max(dot(n, to_light), 0.0);
         light_dot += lights[i].color.rgb * ndl * attenuation * shadow;

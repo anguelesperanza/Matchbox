@@ -242,19 +242,20 @@ Light_Uniform :: struct #align(16) {
 }
 
 /*
-	416 bytes: four lights, five more registers, a gap the compiler puts
-	there uninvited, and one whole matrix. Pushed to fragment slot 1 once per
-	3D pass, where the per-draw tint is slot 0.
+	480 bytes. Size measured with a scratch offset_of program, not assumed --
+	see init.odin's own size assert and this struct's history:
+	`matrix[4,4]f32` aligns to 32 bytes in Odin, not 16, whatever a struct's
+	own `#align` says, which once forced a compiler-inserted gap here that
+	`lighting.hlsli`'s cbuffer had to spend an explicit `_pad0` to reproduce.
 
-	**The gap is real and has to be matched, not designed around.**
-	`matrix[4,4]f32` aligns to 32 bytes in Odin -- not 16, whatever the
-	struct's own `#align` says -- so `light_view_projection` lands at offset
-	288 rather than 272, with 16 bytes of compiler-inserted padding at 272
-	that no field here names. `lighting.hlsli`'s cbuffer has to spend an
-	explicit `float4 _pad0` to reach the same offset, since HLSL would
-	otherwise pack a float4x4 straight after `flags` with no gap at all.
-	Measured with `offset_of`, not assumed: the size assert in init.odin is
-	what would have caught the two sides disagreeing.
+	That gap is gone now, not because the 32-byte rule stopped applying, but
+	because adding `shadow_caster1` happened to land light_view_projection's
+	own offset (352) on a 32-byte boundary already -- 352 / 32 = 11 exactly --
+	so Odin has nothing to pad before it this time, and neither cbuffer needs
+	a `_pad0`. This is exactly why the number is measured freshly here rather
+	than adjusted by hand from the old one: the same change that added a
+	field could just as easily have landed on an offset that still needed
+	padding, or a different amount of it.
 */
 Lighting_Data :: struct #align(16) {
 	lights:               [MAX_LIGHTS]Light_Uniform,
@@ -263,14 +264,19 @@ Lighting_Data :: struct #align(16) {
 	fog_color:            [4]f32, // rgb
 	fog_range:            [4]f32, // x near, y far
 
-	// x how many lights are set, y 1 when fog is on, z the shadow-casting
-	// light's index or -1 for none, w the shadow depth-compare bias.
+	// x how many lights are set, y 1 when fog is on, z the first shadow
+	// caster's light index or -1 for none, w the shadow depth-compare bias.
 	flags:                [4]f32,
 
-	// The shadow caster's view-projection, world space to its own clip space.
-	// Unused (and unread by the shader) whenever flags.z is -1 -- see
-	// shadow.odin for why one caster is all this carries.
-	light_view_projection: matrix[4, 4]f32,
+	// x the second shadow caster's light index or -1 for none -- see
+	// shadow.odin's MAX_SHADOW_CASTERS. y-w unused.
+	shadow_caster1:       [4]f32,
+
+	// Each caster's own view-projection, world space to its own clip space.
+	// light_view_projection is unused (and unread by the shader) whenever
+	// flags.z is -1; light_view_projection2 whenever shadow_caster1.x is -1.
+	light_view_projection:  matrix[4, 4]f32,
+	light_view_projection2: matrix[4, 4]f32,
 }
 
 // GPU handle bundle — shared by Sprite, Animation_Clip, and Font.

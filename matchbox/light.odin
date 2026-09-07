@@ -24,7 +24,7 @@ package matchbox
 
 import sdl "vendor:sdl3"
 
-MAX_LIGHTS :: 4
+MAX_LIGHTS :: 16
 
 Light_Kind :: enum {
 	DIRECTIONAL, // a direction only; distance does not matter

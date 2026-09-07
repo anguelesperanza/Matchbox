@@ -109,12 +109,12 @@ destroy_shapes3d :: proc() {
 	or rebuilt. Under raylib the same thing needs `rlgl.PushMatrix`, a `Rotatef`
 	in degrees off `GetAxisAngle`, and a `PopMatrix`.
 */
-draw_cube :: proc(position: [3]f32, size: [3]f32, color: [4]f32 = WHITE, rotation: quaternion128 = 1) {
+draw_cube :: proc(position: [3]f32, size: [3]f32, color: [4]f32 = WHITE, rotation: quaternion128 = 1, casts_shadow: bool = false) {
 	draw_model(shapes3d_cube(), Transform{
 		position = position,
 		rotation = rotation,
 		scale    = size,
-	}, color)
+	}, color, casts_shadow = casts_shadow)
 }
 
 // A flat square on the ground plane at `position`, facing up.

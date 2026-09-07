@@ -117,6 +117,7 @@ disable_shadows :: proc() {
 	mbi.renderer.shadow.enabled = false
 }
 
+// Whether enable_shadows has been called and disable_shadows has not undone it.
 is_shadows_active :: proc() -> bool {
 	return mbi.renderer.shadow.enabled
 }

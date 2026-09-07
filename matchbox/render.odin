@@ -217,6 +217,11 @@ Renderer :: struct {
 	shadow:         Shadow,
 	in_shadow_pass: bool,
 
+	// draw_model calls made with casts_shadow = true before begin_drawing_3d
+	// has a pass of any kind open yet, held until it does. See draw_model's
+	// own doc comment.
+	pending_shadow_models: [dynamic]Pending_Shadow_Model,
+
 	// The shapes draw_cube and friends draw, built the first time one is asked
 	// for. Same reasoning as the depth texture: a game that draws no 3D should
 	// not be carrying a sphere it never uses. See shapes3d.odin.

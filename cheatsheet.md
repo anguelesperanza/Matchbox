@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 360 of them -- with its arguments
+Every public procedure in the package -- 364 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -1838,6 +1838,7 @@ draw_model :: proc(
 	transform: Transform,
 	tint: [4]f32 = WHITE,
 	animator: ^Animator = nil,
+	casts_shadow: bool = false,
 )
 ```
 Draws every part of a model, placed by `transform` and multiplied by `tint`.
@@ -1849,6 +1850,7 @@ draw_model_at :: proc(
 	scale: f32 = 1,
 	tint: [4]f32 = WHITE,
 	animator: ^Animator = nil,
+	casts_shadow: bool = false,
 )
 ```
 A model at a position, at one scale on every axis and unturned.
@@ -1872,6 +1874,7 @@ draw_cube :: proc(
 	size: [3]f32,
 	color: [4]f32 = WHITE,
 	rotation: quaternion128 = 1,
+	casts_shadow: bool = false,
 )
 ```
 A box at `position`, `size` units across each axis.
@@ -2504,7 +2507,7 @@ Back to no shadow at all -- the map itself is left alone rather than released, s
 ```odin
 is_shadows_active :: proc() -> bool
 ```
-_(no doc comment)_
+Whether enable_shadows has been called and disable_shadows has not undone it.
 
 ```odin
 begin_shadow_pass :: proc() -> bool

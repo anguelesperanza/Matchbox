@@ -106,6 +106,28 @@ pick_depth_format :: proc() -> sdl.GPUTextureFormat {
 	return .D16_UNORM
 }
 
+/*
+	The same question as `pick_depth_format`, for a format this codebase had
+	never needed until the shadow map: one written as a depth target in the
+	shadow pass and *also* sampled as an ordinary texture in the main one.
+	`D24_UNORM_S8_UINT`'s packed stencil byte is the more likely of the three
+	to refuse that combination on a given backend, which is why it is tried
+	last here rather than first as `pick_depth_format` tries it.
+*/
+@(private)
+pick_shadow_format :: proc() -> sdl.GPUTextureFormat {
+	candidates := [3]sdl.GPUTextureFormat{.D32_FLOAT, .D16_UNORM, .D24_UNORM_S8_UINT}
+
+	for format in candidates {
+		if sdl.GPUTextureSupportsFormat(mbi.renderer.device, format, .D2, {.DEPTH_STENCIL_TARGET, .SAMPLER}) {
+			return format
+		}
+	}
+
+	log.error("no format on this device supports a sampled depth texture; shadows will not work")
+	return .D32_FLOAT
+}
+
 // -----------------------------------------------------------------------
 // The 3D pass
 // -----------------------------------------------------------------------
@@ -216,12 +238,18 @@ draw_model :: proc(
 	r := &mbi.renderer
 	if !r.frame_active || r.pass == nil do return
 
-	ensure(r.mode_3d, "draw_model must be called between begin_drawing_3d and end_drawing_3d")
+	ensure(r.mode_3d || r.in_shadow_pass,
+		"draw_model must be called between begin_drawing_3d/begin_shadow_pass and their matching end")
 
 	model_matrix := transform_matrix(transform)
 
+	// The light's view-projection in the shadow pass, the camera's everywhere
+	// else -- the one thing that actually makes this the shadow pass rather
+	// than an ordinary draw of the same geometry.
+	view_projection := r.shadow.view_projection if r.in_shadow_pass else r.view_projection
+
 	vert_data := Mesh_Vert_Data{
-		mvp           = r.view_projection * model_matrix,
+		mvp           = view_projection * model_matrix,
 		model         = model_matrix,
 
 		// Inverse transpose, so that a model scaled unevenly keeps its normals
@@ -239,26 +267,62 @@ draw_model :: proc(
 	for part, part_index in model.parts {
 		if part.vertices == nil || part.indices == nil do continue
 
-		skinned := part.skin >= 0
+		// A grid or a wireframe has no faces for a shadow to fall across --
+		// skipped here rather than given a line-topology shadow pipeline
+		// nothing else needs.
+		if r.in_shadow_pass && part.topology == .LINES do continue
+
+		skinned  := part.skin >= 0
+		textured := part.texture != nil
 
 		// Per part rather than per model: a part says whether it is lines or
 		// triangles, whether it has a texture, and whether a skeleton deforms
 		// it, and between them those decide the pipeline. One loaded file
-		// routinely holds parts that differ.
+		// routinely holds parts that differ. The shadow pass only ever cares
+		// about the skinned/unskinned half of that -- its fragment shader
+		// writes nothing, so a textured part and an untextured one cast the
+		// same shadow.
 		pipeline := r.pipelines.mesh
 		switch {
-		case part.topology == .LINES:      pipeline = r.pipelines.line
-		case skinned && part.texture != nil: pipeline = r.pipelines.mesh_skinned_textured
-		case skinned:                      pipeline = r.pipelines.mesh_skinned
-		case part.texture != nil:          pipeline = r.pipelines.mesh_textured
+		case r.in_shadow_pass && skinned:     pipeline = r.pipelines.shadow_skinned
+		case r.in_shadow_pass:                pipeline = r.pipelines.shadow
+		case part.topology == .LINES:         pipeline = r.pipelines.line
+		case skinned && textured:             pipeline = r.pipelines.mesh_skinned_textured
+		case skinned:                         pipeline = r.pipelines.mesh_skinned
+		case textured:                        pipeline = r.pipelines.mesh_textured
 		}
 
 		if r.bound_pipeline != pipeline {
 			sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
 			r.bound_pipeline = pipeline
+
+			/*
+				The shadow map, at whichever slot this pipeline's own
+				fragment shader declares it -- 0 for the untextured
+				pipelines, 1 for the textured ones, since SDL_GPU numbers a
+				shader's sampled textures contiguously from t0 and
+				mesh_textured's own albedo already occupies t0. See
+				lighting.hlsli's comment on why the two shaders cannot agree
+				on one fixed slot for it.
+
+				Not bound at all in the shadow pass itself: that fragment
+				shader samples nothing, so there is nothing here to give it.
+			*/
+			if !r.in_shadow_pass {
+				shadow_binding := sdl.GPUTextureSamplerBinding{texture = r.shadow.texture, sampler = r.shadow.sampler}
+				shadow_slot: u32 = 1 if textured else 0
+				sdl.BindGPUFragmentSamplers(r.pass, shadow_slot, &shadow_binding, 1)
+
+				// The pipeline switch just changed what slot 0 even means --
+				// the shadow map a moment ago, on an untextured part, an
+				// albedo texture now. Either way the cache below no longer
+				// describes what is actually bound there.
+				r.bound_texture = nil
+				r.bound_sampler = nil
+			}
 		}
 
-		if part.texture != nil {
+		if !r.in_shadow_pass && textured {
 			sampler := part.sampler if part.sampler != nil else r.sprite_sampler
 
 			if r.bound_texture != part.texture || r.bound_sampler != sampler {
@@ -279,7 +343,12 @@ draw_model :: proc(
 		r.bound_quad = false
 
 		sdl.PushGPUVertexUniformData(r.cmd, 0, &vert_data, size_of(vert_data))
-		sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
+
+		// The shadow pass's fragment shader declares no uniform buffer at
+		// all -- see shadow.frag.hlsl -- so there is nothing to push here.
+		if !r.in_shadow_pass {
+			sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
+		}
 
 		if skinned {
 			joint_buffer: ^sdl.GPUBuffer

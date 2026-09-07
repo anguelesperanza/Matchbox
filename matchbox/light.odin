@@ -39,13 +39,21 @@ Light_Kind :: enum {
 
 	The zero value is a disabled light, which is what makes `set_lights` with a
 	short slice do the obvious thing.
+
+	`casts_shadow` only ever does anything for a directional light -- see
+	shadow.odin for why point-light shadows are not built -- and only once
+	`enable_shadows` has also been called. Marking a light this way with
+	shadows never enabled is inert rather than an error, the same "opt-in,
+	nothing happens until both switches are on" shape `enable_shadows` itself
+	has.
 */
 Light :: struct {
-	kind:     Light_Kind,
-	position: [3]f32,
-	target:   [3]f32,
-	color:    [4]f32,
-	enabled:  bool,
+	kind:         Light_Kind,
+	position:     [3]f32,
+	target:       [3]f32,
+	color:        [4]f32,
+	enabled:      bool,
+	casts_shadow: bool,
 }
 
 // A point light at `position`. The common case, and the one the campfire is.
@@ -54,8 +62,11 @@ create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light {
 }
 
 // A light shining along `direction`, from nowhere in particular. A sun.
-create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Light {
-	return Light{kind = .DIRECTIONAL, position = {0, 0, 0}, target = direction, color = color, enabled = true}
+create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE, casts_shadow := false) -> Light {
+	return Light{
+		kind = .DIRECTIONAL, position = {0, 0, 0}, target = direction, color = color,
+		enabled = true, casts_shadow = casts_shadow,
+	}
 }
 
 /*
@@ -70,16 +81,25 @@ create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE) -> Li
 */
 set_lights :: proc(lights: []Light) {
 	l := &mbi.renderer.lighting
+	s := &mbi.renderer.shadow
 
 	count := min(len(lights), MAX_LIGHTS)
 
 	for i in 0 ..< MAX_LIGHTS {
-		l.lights[i] = light_uniform(lights[i]) if i < count else {}
+		if i < count {
+			l.lights[i]             = light_uniform(lights[i])
+			s.light_casts_shadow[i] = lights[i].casts_shadow
+		} else {
+			l.lights[i]             = {}
+			s.light_casts_shadow[i] = false
+		}
 	}
 
 	// How many were handed over, not how many are switched on: a game that sets
 	// one light and disables it wants a dark scene, not the fallback shading.
 	l.flags.x = f32(count)
+
+	recompute_shadow_caster()
 }
 
 // One light, by slot, leaving the others alone. For a scene that turns a single
@@ -88,8 +108,13 @@ set_light :: proc(index: int, light: Light) {
 	if index < 0 || index >= MAX_LIGHTS do return
 
 	l := &mbi.renderer.lighting
-	l.lights[index] = light_uniform(light)
+	s := &mbi.renderer.shadow
+
+	l.lights[index]             = light_uniform(light)
+	s.light_casts_shadow[index] = light.casts_shadow
 	l.flags.x = max(l.flags.x, f32(index + 1))
+
+	recompute_shadow_caster()
 }
 
 /*
@@ -100,9 +125,39 @@ set_light :: proc(index: int, light: Light) {
 */
 clear_lights :: proc() {
 	l := &mbi.renderer.lighting
+	s := &mbi.renderer.shadow
 
 	l.lights  = {}
 	l.flags.x = 0
+
+	s.light_casts_shadow = {}
+	s.caster_index       = -1
+}
+
+/*
+	Which of `Lighting_Data.lights`, if any, casts the shadow -- the first
+	enabled light marked `casts_shadow`, by slot order. Recomputed after every
+	change to the light list rather than incrementally, since four lights is
+	cheap enough to scan outright and "the first match" is otherwise a subtle
+	thing to keep correct through `set_light` touching one slot at a time.
+
+	`-1` (no caster) is what makes marking a light `casts_shadow` harmless
+	before `enable_shadows` is ever called: `push_lighting` only trusts this
+	value when `mbi.renderer.shadow.enabled` is also true, so this alone never
+	points the shader at a shadow map that was never actually rendered into.
+*/
+@(private)
+recompute_shadow_caster :: proc() {
+	l := &mbi.renderer.lighting
+	s := &mbi.renderer.shadow
+
+	s.caster_index = -1
+	for i in 0 ..< MAX_LIGHTS {
+		if l.lights[i].position.w >= 0.5 && s.light_casts_shadow[i] {
+			s.caster_index = i
+			break
+		}
+	}
 }
 
 /*
@@ -170,6 +225,16 @@ push_lighting :: proc(camera: Camera3D) {
 	r := &mbi.renderer
 
 	r.lighting.view_pos = {camera.position.x, camera.position.y, camera.position.z, 0}
+
+	/*
+		-1 whenever shadows are not enabled, even if a light is marked
+		`casts_shadow` and `caster_index` names it -- the shadow map is a 1x1
+		placeholder, never rendered into, until `enable_shadows` builds a real
+		one, and the shader must never be told to trust it.
+	*/
+	r.lighting.flags.z = f32(r.shadow.caster_index) if r.shadow.enabled else -1
+	r.lighting.flags.w = r.shadow.settings.bias
+	r.lighting.light_view_projection = r.shadow.view_projection
 
 	sdl.PushGPUFragmentUniformData(r.cmd, 1, &r.lighting, size_of(Lighting_Data))
 }

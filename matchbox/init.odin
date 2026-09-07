@@ -211,6 +211,28 @@ create_pipeline :: proc(
 		even though it ignores every value in it.
 	*/
 	depth_ignore: bool = false,
+
+	// False for the shadow pass alone, which writes nothing but depth -- SDL3
+	// permits zero colour targets on a pipeline, and the pass it runs in
+	// opens with none bound to match. Every other caller keeps the one
+	// colour target every pipeline before this had.
+	color_target: bool = true,
+
+	// .INVALID means "whatever the main 3D pass's own depth buffer is",
+	// which is every caller before the shadow pass. The shadow pipelines are
+	// the one exception: their pass writes into `mbi.renderer.shadow.texture`,
+	// a separate, differently-sized, possibly differently-formatted texture,
+	// and a pipeline's depth format has to agree with the pass it runs in or
+	// SDL3 rejects it outright.
+	depth_format: sdl.GPUTextureFormat = .INVALID,
+
+	// Zero for every pipeline except the shadow pair, which need a push away
+	// from the surface they are rasterizing before comparing it against
+	// itself from the light's own point of view -- see shadow.odin for why a
+	// constant-plus-slope bias is what fixes that rather than a shader-side
+	// epsilon alone.
+	depth_bias:       f32 = 0,
+	depth_bias_slope: f32 = 0,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -289,6 +311,11 @@ create_pipeline :: proc(
 		},
 	}
 
+	num_color_targets:         u32 = 1 if color_target else 0
+	color_target_descriptions: [^]sdl.GPUColorTargetDescription = raw_data(color_targets[:]) if color_target else nil
+
+	resolved_depth_format := depth_format if depth_format != .INVALID else mbi.renderer.depth_format
+
 	pipeline := sdl.CreateGPUGraphicsPipeline(mbi.renderer.device, {
 		vertex_shader   = vertex_shader,
 		fragment_shader = fragment,
@@ -315,11 +342,15 @@ create_pipeline :: proc(
 			// behind a picture that looks almost right.
 			enable_depth_clip = true,
 
-			// No depth bias, though a wireframe drawn over the surface it
-			// outlines badly needs one. This state is specified for polygons and
-			// a line list is not one, so setting it here is accepted and then
-			// ignored -- which was tried, and cost an afternoon. The offset that
-			// does work is in mesh_line.frag, which writes SV_Depth.
+			// Zero for every polygon pipeline except the shadow pair. A
+			// wireframe drawn over the surface it outlines badly needs a bias
+			// too, but this state is specified for polygons and a line list
+			// is not one -- setting it here for mesh_line was tried, silently
+			// ignored, and cost an afternoon. The offset that works there is
+			// in mesh_line.frag, which writes SV_Depth directly instead.
+			enable_depth_bias          = depth_bias != 0 || depth_bias_slope != 0,
+			depth_bias_constant_factor = depth_bias,
+			depth_bias_slope_factor    = depth_bias_slope,
 		},
 		depth_stencil_state = {
 			// Nearer wins, and nearer is the smaller number: the projections in
@@ -329,9 +360,9 @@ create_pipeline :: proc(
 			enable_depth_write = depth,
 		},
 		target_info = {
-			color_target_descriptions = raw_data(color_targets[:]),
-			num_color_targets         = 1,
-			depth_stencil_format      = mbi.renderer.depth_format,
+			color_target_descriptions = color_target_descriptions,
+			num_color_targets         = num_color_targets,
+			depth_stencil_format      = resolved_depth_format,
 			has_depth_stencil_target  = depth || depth_ignore,
 		},
 	})
@@ -401,7 +432,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Mesh_Vert_Data)  == 192)
 	#assert(size_of(Mesh_Frag_Data)  == 16)
 	#assert(size_of(Light_Uniform)   == 48)
-	#assert(size_of(Lighting_Data)   == 272)
+	#assert(size_of(Lighting_Data)   == 352)
 	#assert(size_of(Post_Frag_Data)  == 32)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
@@ -499,9 +530,11 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.mesh = create_builtin_shader(
 		#load("shaders/mesh.vert.spv"), #load("shaders/mesh.vert.dxil"), .VERTEX, 0)
 	// Two uniform buffers, not one: slot 0 is the per-draw tint and slot 1 is
-	// the lighting, which is pushed once for a whole pass.
+	// the lighting, which is pushed once for a whole pass. One sampler even
+	// with no texture of its own: the shadow map lighting.hlsli declares at
+	// slot 1, shared with mesh_textured -- see shadow.odin.
 	mbi.renderer.shaders.mesh_flat = create_builtin_shader(
-		#load("shaders/mesh_flat.frag.spv"), #load("shaders/mesh_flat.frag.dxil"), .FRAGMENT, 0, 2)
+		#load("shaders/mesh_flat.frag.spv"), #load("shaders/mesh_flat.frag.dxil"), .FRAGMENT, 1, 2)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -513,9 +546,10 @@ init :: proc(title: string, width: i32, height: i32) {
 		#load("shaders/psx.frag.spv"), #load("shaders/psx.frag.dxil"), .FRAGMENT, 1)
 	mbi.renderer.shaders.vhs = create_builtin_shader(
 		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
-	// One sampler: the model's base colour. Two uniform buffers, as above.
+	// Two samplers: the model's base colour at slot 0, the shadow map
+	// lighting.hlsli declares at slot 1. Two uniform buffers, as above.
 	mbi.renderer.shaders.mesh_textured = create_builtin_shader(
-		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 1, 2)
+		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 2, 2)
 
 	// Two uniform buffers -- the three matrices every mesh vertex shader
 	// takes, and the joint offset behind them -- plus one storage buffer: the
@@ -523,6 +557,13 @@ init :: proc(title: string, width: i32, height: i32) {
 	// on Vulkan. See Skin_Vert_Data in types.odin.
 	mbi.renderer.shaders.mesh_skinned = create_builtin_shader(
 		#load("shaders/mesh_skinned.vert.spv"), #load("shaders/mesh_skinned.vert.dxil"), .VERTEX, 0, 2, 1)
+
+	// No samplers and no uniform buffers of its own -- it writes nothing, see
+	// shadow.frag.hlsl. Paired with mesh.vert/mesh_skinned.vert below rather
+	// than a vertex shader of its own, since those already declare exactly
+	// the layout and uniforms a shadow caster needs.
+	mbi.renderer.shaders.shadow = create_builtin_shader(
+		#load("shaders/shadow.frag.spv"), #load("shaders/shadow.frag.dxil"), .FRAGMENT, 0, 0)
 
 	mbi.renderer.shaders.skybox = create_builtin_shader(
 		#load("shaders/skybox.vert.spv"), #load("shaders/skybox.vert.dxil"), .VERTEX, 0)
@@ -577,6 +618,43 @@ init :: proc(title: string, width: i32, height: i32) {
 		layout = .SKINNED,
 		depth  = true,
 		cull   = .BACK,
+	)
+
+	/*
+		The shadow pass's own pair, depth-only and biased away from the
+		surface they rasterize -- see create_pipeline's own comment on
+		depth_bias for why a wireframe's line pipeline cannot use this same
+		mechanism and these two, being ordinary triangle lists, can.
+
+		mbi.renderer.shadow.format is asked for here rather than reused from
+		mbi.renderer.depth_format: the shadow map is sampled as well as
+		written, a combination the main depth buffer never needs, and the two
+		can legitimately land on different formats.
+	*/
+	mbi.renderer.shadow.format = pick_shadow_format()
+
+	mbi.renderer.pipelines.shadow = create_pipeline(
+		mbi.renderer.shaders.shadow,
+		vertex           = mbi.renderer.shaders.mesh,
+		layout           = .MESH,
+		depth            = true,
+		cull             = .BACK,
+		color_target     = false,
+		depth_format     = mbi.renderer.shadow.format,
+		depth_bias       = 2.0,
+		depth_bias_slope = 2.0,
+	)
+
+	mbi.renderer.pipelines.shadow_skinned = create_pipeline(
+		mbi.renderer.shaders.shadow,
+		vertex           = mbi.renderer.shaders.mesh_skinned,
+		layout           = .SKINNED,
+		depth            = true,
+		cull             = .BACK,
+		color_target     = false,
+		depth_format     = mbi.renderer.shadow.format,
+		depth_bias       = 2.0,
+		depth_bias_slope = 2.0,
 	)
 
 	// No geometry, no culling and no depth. Drawn first, so everything after it
@@ -639,7 +717,45 @@ init :: proc(title: string, width: i32, height: i32) {
 		address_mode_v = .CLAMP_TO_EDGE,
 		address_mode_w = .CLAMP_TO_EDGE,
 	})
-	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil,
+	/*
+		The shadow sampler compares rather than just filters -- SampleCmpLevelZero
+		in lighting.hlsli reads compare_op/enable_compare, not the filter mode
+		alone, to turn "how far is this texel" into "is this texel lit",
+		filtered across neighbours for free rather than a hand-rolled PCF loop.
+		Clamped on both axes: nothing outside the light's own frustum should
+		wrap around and sample the opposite edge.
+
+		The 1x1 placeholder exists so mesh_flat/mesh_textured -- which declare
+		this slot unconditionally, for every game -- always have something
+		valid bound, whether or not enable_shadows is ever called. Its
+		contents are never actually read: shadow_factor only samples when
+		flags.z names a real caster, which push_lighting never sets unless
+		shadow.enabled is true, and this placeholder is what enable_shadows
+		replaces the moment it is.
+	*/
+	mbi.renderer.shadow.sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter     = .LINEAR,
+		mag_filter     = .LINEAR,
+		address_mode_u = .CLAMP_TO_EDGE,
+		address_mode_v = .CLAMP_TO_EDGE,
+		address_mode_w = .CLAMP_TO_EDGE,
+		compare_op     = .LESS_OR_EQUAL,
+		enable_compare = true,
+	})
+	mbi.renderer.shadow.texture = sdl.CreateGPUTexture(mbi.renderer.device, {
+		type                 = .D2,
+		format               = mbi.renderer.shadow.format,
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+		width                = 1,
+		height               = 1,
+		layer_count_or_depth = 1,
+		num_levels           = 1,
+	})
+	mbi.renderer.shadow.resolution   = 1
+	mbi.renderer.shadow.caster_index = -1 // Odin's zero value is 0, a real slot -- -1 has to be said
+
+	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil &&
+		mbi.renderer.shadow.sampler != nil && mbi.renderer.shadow.texture != nil,
 		"could not create samplers")
 
 	// The one quad every draw uses.
@@ -715,6 +831,8 @@ cleanup :: proc() {
 
 	if mbi.renderer.sprite_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.sprite_sampler)
 	if mbi.renderer.font_sampler   != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.font_sampler)
+	if mbi.renderer.shadow.sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.shadow.sampler)
+	if mbi.renderer.shadow.texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.shadow.texture)
 
 	if mbi.renderer.pipelines.sprite  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.sprite)
 	if mbi.renderer.pipelines.rect    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.rect)
@@ -726,6 +844,8 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.mesh_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_textured)
 	if mbi.renderer.pipelines.mesh_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned)
 	if mbi.renderer.pipelines.mesh_skinned_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned_textured)
+	if mbi.renderer.pipelines.shadow != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shadow)
+	if mbi.renderer.pipelines.shadow_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shadow_skinned)
 	if mbi.renderer.pipelines.skybox_panorama != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.skybox_panorama)
 	if mbi.renderer.pipelines.skybox_cubemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.skybox_cubemap)
 	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
@@ -743,6 +863,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.mesh_line != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_line)
 	if mbi.renderer.shaders.mesh_textured != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_textured)
 	if mbi.renderer.shaders.mesh_skinned != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_skinned)
+	if mbi.renderer.shaders.shadow != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.shadow)
 	if mbi.renderer.shaders.skybox != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox)
 	if mbi.renderer.shaders.skybox_panorama != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox_panorama)
 	if mbi.renderer.shaders.skybox_cubemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox_cubemap)

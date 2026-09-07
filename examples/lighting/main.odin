@@ -39,6 +39,11 @@ package lighting_example
 	    is the cone, not range. Watch the edge of the beam sweep across the
 	    ground as you turn: soft, not a hard line, which is `inner_angle`
 	    fading out to `outer_angle` rather than a single cutoff angle
+	  - **T and H together, K off** -- the torch casts its own shadow now,
+	    from its own position rather than the camera-centred trick the moon's
+	    shadow needs for having none. Turn the moon back on and the moon
+	    wins: only the first light marked `casts_shadow`, by slot order, is
+	    ever the caster
 
 	Models are PsxGame's own, loaded by stage 4.
 */
@@ -173,7 +178,7 @@ main :: proc() {
 				count += 1
 			}
 			if torch_on {
-				slots[count] = mb.create_spot_light(rig.camera.position, mb.camera3d_forward(rig.camera), mb.WHITE, 15, 25)
+				slots[count] = mb.create_spot_light(rig.camera.position, mb.camera3d_forward(rig.camera), mb.WHITE, 15, 25, casts_shadow = true)
 				count += 1
 			}
 

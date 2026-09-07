@@ -6,12 +6,12 @@ package matchbox
 	Whether an occluder actually blocks a light, for the one light a game
 	names as the caster.
 
-	**Directional only.** A point light's shadow needs a cubemap -- six depth
-	renders instead of one, since the light radiates every direction rather
-	than down one axis -- and nothing here builds that. Marking a point light
-	`casts_shadow` is silently ignored by `recompute_shadow_caster`
-	(light.odin), the same degrade an unsupported combination gets elsewhere
-	in this package rather than an error.
+	**Directional and spot, not point.** A point light's shadow needs a
+	cubemap -- six depth renders instead of one, since the light radiates
+	every direction rather than down one axis or into one cone -- and nothing
+	here builds that. `create_point_light` has no `casts_shadow` parameter at
+	all, the same degrade an unsupported combination gets elsewhere in this
+	package rather than an error.
 
 	**One shadow map, one caster, opt-in twice over.** A light needs
 	`casts_shadow = true` *and* a game needs to call `enable_shadows` -- see
@@ -144,14 +144,17 @@ is_shadows_active :: proc() -> bool {
 	Logged once per change of state rather than every frame a game leaves
 	shadows off -- see `r.shadow.warned` below.
 
-	**Centred on the camera, not the scene.** A directional light has no
-	position of its own to build a frustum around, and this renderer has no
-	scene bounds to ask for one either. The last camera position
-	`begin_drawing_3d` was given is one frame behind whatever
-	`begin_shadow_pass` is called with this frame (it runs first, by
-	convention) -- imperceptible at any real frame rate, and simpler than
+	**Centred on the camera for a directional light, on the light itself for a
+	spot.** A directional light has no position of its own to build a frustum
+	around, and this renderer has no scene bounds to ask for one either -- so
+	its frustum is faked, centred on the last camera position
+	`begin_drawing_3d` was given (one frame behind whatever
+	`begin_shadow_pass` runs with this frame, since it runs first by
+	convention -- imperceptible at any real frame rate, and simpler than
 	threading a position through an API the plan deliberately kept
-	parameterless.
+	parameterless). A spotlight needs none of that: it already has a real
+	position and direction, so its frustum is built from those directly, at a
+	field of view matching its own cone.
 */
 begin_shadow_pass :: proc() -> bool {
 	r := &mbi.renderer
@@ -166,8 +169,24 @@ begin_shadow_pass :: proc() -> bool {
 	}
 	r.shadow.warned = false
 
-	caster    := r.lighting.lights[r.shadow.caster_index]
-	direction := linalg.normalize(caster.target.xyz - caster.position.xyz)
+	caster  := r.lighting.lights[r.shadow.caster_index]
+	is_spot := caster.target.w > 1.5
+
+	direction: [3]f32
+	eye:       [3]f32
+
+	if is_spot {
+		// target IS the raw direction for a spot, the same convention a
+		// directional light's own target is -- and unlike a directional
+		// light, a spotlight has a real position to shine the shadow from
+		// rather than one faked from the camera.
+		direction = linalg.normalize(caster.target.xyz)
+		eye       = caster.position.xyz
+	} else {
+		direction = linalg.normalize(caster.target.xyz - caster.position.xyz)
+		center    := r.camera3d.position
+		eye        = center - direction * r.shadow.settings.far * 0.5
+	}
 
 	// look_at_matrix degenerates when `up` is parallel to the direction it is
 	// squared against -- a light pointing straight up or down. {0,0,1} is
@@ -179,11 +198,20 @@ begin_shadow_pass :: proc() -> bool {
 	}
 
 	settings := r.shadow.settings
-	center   := r.camera3d.position
-	eye      := center - direction * settings.far * 0.5
+	view     := look_at_matrix(eye, eye + direction, up)
 
-	view := look_at_matrix(eye, eye + direction, up)
-	proj := ortho(-settings.extent, settings.extent, -settings.extent, settings.extent, settings.near, settings.far)
+	proj: matrix[4, 4]f32
+	if is_spot {
+		// The outer half-angle doubled to a full field of view, clamped away
+		// from perspective()'s degenerate ends -- a cone this package would
+		// call a floodlight rather than a spotlight long before either bound
+		// is reached. Aspect 1: the shadow map is square.
+		fov := clamp(caster.cone.x * 2, 1, 170)
+		proj = perspective(fov, 1, settings.near, settings.far)
+	} else {
+		proj = ortho(-settings.extent, settings.extent, -settings.extent, settings.extent, settings.near, settings.far)
+	}
+
 	r.shadow.view_projection = proj * view
 
 	if r.pass != nil {

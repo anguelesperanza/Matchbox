@@ -44,12 +44,12 @@ Light_Kind :: enum {
 	The zero value is a disabled light, which is what makes `set_lights` with a
 	short slice do the obvious thing.
 
-	`casts_shadow` only ever does anything for a directional light -- see
-	shadow.odin for why point-light shadows are not built, the same degrade a
-	spotlight gets for now -- and only once `enable_shadows` has also been
-	called. Marking a light this way with shadows never enabled is inert
-	rather than an error, the same "opt-in, nothing happens until both
-	switches are on" shape `enable_shadows` itself has.
+	`casts_shadow` only ever does anything for a directional or spot light --
+	see shadow.odin for why a point light's shadow is not built -- and only
+	once `enable_shadows` has also been called. Marking a light this way with
+	shadows never enabled is inert rather than an error, the same "opt-in,
+	nothing happens until both switches are on" shape `enable_shadows` itself
+	has.
 
 	`inner_angle`/`outer_angle` only ever mean anything for a spotlight -- see
 	`create_spot_light`.
@@ -89,22 +89,24 @@ create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE, casts
 	own axis to its edge, not corner to corner. A flashlight wants these
 	fairly narrow -- the 20/30 default is a tight beam, not a floodlight.
 
-	Cannot cast a shadow: a spotlight's `casts_shadow` would need a
-	perspective shadow projection sized to the cone, which nothing here
-	builds yet, so unlike `create_directional_light` this takes no
-	`casts_shadow` parameter at all -- the same reason `create_point_light`
-	does not have one either.
+	`casts_shadow` builds a perspective shadow frustum sized to the cone --
+	`fov = outer_angle * 2` -- from the spotlight's own real position, rather
+	than the camera-centred trick a directional light's shadow needs for
+	having none. See `Light`'s own doc comment for the same "opt-in twice"
+	contract every shadow-casting light has.
 */
 create_spot_light :: proc(
-	position:    [3]f32,
-	direction:   [3]f32,
-	color:       [4]f32 = WHITE,
-	inner_angle: f32 = 20,
-	outer_angle: f32 = 30,
+	position:     [3]f32,
+	direction:    [3]f32,
+	color:        [4]f32 = WHITE,
+	inner_angle:  f32 = 20,
+	outer_angle:  f32 = 30,
+	casts_shadow: bool = false,
 ) -> Light {
 	return Light{
 		kind = .SPOT, position = position, target = direction, color = color,
-		enabled = true, inner_angle = inner_angle, outer_angle = outer_angle,
+		enabled = true, casts_shadow = casts_shadow,
+		inner_angle = inner_angle, outer_angle = outer_angle,
 	}
 }
 

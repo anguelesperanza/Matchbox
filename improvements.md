@@ -521,6 +521,52 @@ While I wrote a chunk of this, so did Claude. I'd like to
 reduce the AI code as I make breaking api changes,
 optimazations, etc
 
+## What URP-PSX Gets That Our PSX Shaders Do Not
+
+Backburner, not a task -- a comparison against a Unity URP project
+(`URP-PSX`, MIT-licensed) I was asked to look at for its PSX shaders,
+written down so the answer does not have to be re-derived if the itch
+comes back. Three of its four techniques are already beaten by what is
+here, ported from an actual PSX game rather than a generic asset:
+
+	Dithering.shader    1-bit threshold dither (full colour or black
+	                    against a pattern matrix). psx.frag.hlsl already
+	                    does real ordered dithering *before* 5-bit-per-
+	                    channel quantization, which is the PS1's own
+	                    order of operations and a strictly finer effect.
+	Pixelation.shader   grid-snap plus colour-precision floor, nothing
+	                    else. psx.frag.hlsl already does both of those
+	                    and adds cell-centred sampling and scanlines.
+	DitheringPatterns
+	  .cginc            the same threshold matrices as the shader above,
+	                    factored out. Artistic patterns, not the
+	                    hardware-accurate Bayer matrix already in use.
+
+**Fog.shader is the one real gap.** It is a depth-buffer post-process
+(exponential falloff) with Perlin/Voronoi noise perturbing the fog's
+edge, so the transition breaks into noise instead of a clean gradient.
+`lighting.hlsli`'s fog (`apply_lighting`, the `flags.y` branch) is a
+plain linear lerp by distance, computed inline during shading rather
+than as a separate pass -- no noise, no breakup.
+
+Adopting *their* approach is not the move: it needs a depth texture
+bound to a post-process pass, which is new plumbing Matchbox does not
+have (`post.frag.hlsl` samples colour only). The cheaper route is to
+perturb the existing fog factor in place -- world position is already
+in hand in `apply_lighting`, so a small noise term added to `factor`
+before the `lerp` would get the same visual break-up with no new
+resource bindings, no depth texture, and no second fog system living
+alongside the first.
+
+Not started because nothing has asked for it yet. If a game's fog reads
+as too clean, this is where to start, and the noise function does not
+need porting from `voronoi.cginc` either -- it is a generic Perlin/
+Voronoi implementation with no PSX-specific content, the same category
+`CustomLighting.hlsl` turned out to be (a thin wrapper over Unity URP's
+own `GetMainLight`/`LightingLambert`/`LightingSpecular`, nothing
+PS1-specific in it at all, and already matched, constant for constant,
+by `lighting.hlsli`'s own lighting model).
+
 ## Reduce System Usage
 
 Basic Init Window example uses about 53mb of ram.

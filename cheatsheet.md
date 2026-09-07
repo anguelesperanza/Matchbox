@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 355 of them -- with its arguments
+Every public procedure in the package -- 359 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -14,7 +14,7 @@ any.
 
 ## Contents
 
-- [Getting started](#getting-started) -- 17
+- [Getting started](#getting-started) -- 21
 - [Input](#input) -- 42
 - [2D drawing](#2d-drawing) -- 60
 - [Text and fonts](#text-and-fonts) -- 21
@@ -93,6 +93,29 @@ set_target_fps :: proc(fps: i32)
 Limits the frame rate to `fps` frames per second by sleeping in poll_events.
 
 ### `display.odin`
+
+```odin
+set_window_fullscreen_mode :: proc(
+	window: ^sdl.Window,
+	mode: ^sdl.DisplayMode,
+) -> bool
+```
+vendor:sdl3's own SetWindowFullscreenMode takes its mode `#by_ptr`, which Odin can only fill from an addressable DisplayMode value -- there is no way to pass it nil through that binding.
+
+```odin
+set_screen_type :: proc(type: Screen_Type)
+```
+Changes how the window occupies the screen -- see Screen_Type for what each value means.
+
+```odin
+get_screen_type :: proc() -> Screen_Type
+```
+What set_screen_type last actually managed to put the window into -- WINDOWED until a game calls it.
+
+```odin
+toggle_screen_type :: proc()
+```
+Steps to the next Screen_Type in the order the type declares them -- WINDOWED -> FULLSCREEN -> WINDOWED_FULLSCREEN -> WINDOWED -- the shape a single key (F11, say) wants without a game tracking the state itself.
 
 ```odin
 set_logical_size :: proc(width: i32, height: i32)

@@ -150,15 +150,19 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	if !r.frame_active do return
 
 	// Whatever draw_model was asked to cast a shadow before either pass
-	// existed, put into the shadow map now -- a no-op if shadows are not
-	// enabled or nothing here is marked casts_shadow, same as a game calling
-	// begin_shadow_pass by hand gets.
+	// existed, put into each active shadow map now -- a no-op per slot if
+	// shadows are not enabled or nothing here is marked casts_shadow for
+	// that slot, same as a game calling begin_shadow_pass by hand gets. The
+	// same pending list goes into both maps: an occluder blocks whichever
+	// light hits it, regardless of which slot that light landed in.
 	if len(r.pending_shadow_models) > 0 {
-		if begin_shadow_pass() {
-			for pending in r.pending_shadow_models {
-				draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+		for slot in 0 ..< MAX_SHADOW_CASTERS {
+			if begin_shadow_pass(slot) {
+				for pending in r.pending_shadow_models {
+					draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+				}
+				end_shadow_pass()
 			}
-			end_shadow_pass()
 		}
 	}
 
@@ -306,10 +310,10 @@ draw_model_immediate :: proc(
 
 	model_matrix := transform_matrix(transform)
 
-	// The light's view-projection in the shadow pass, the camera's everywhere
-	// else -- the one thing that actually makes this the shadow pass rather
-	// than an ordinary draw of the same geometry.
-	view_projection := r.shadow.view_projection if r.in_shadow_pass else r.view_projection
+	// Whichever slot's light is being drawn into its shadow map, the
+	// camera's everywhere else -- the one thing that actually makes this the
+	// shadow pass rather than an ordinary draw of the same geometry.
+	view_projection := r.shadow.view_projections[r.shadow.active_slot] if r.in_shadow_pass else r.view_projection
 
 	vert_data := Mesh_Vert_Data{
 		mvp           = view_projection * model_matrix,
@@ -360,21 +364,25 @@ draw_model_immediate :: proc(
 			r.bound_pipeline = pipeline
 
 			/*
-				The shadow map, at whichever slot this pipeline's own
-				fragment shader declares it -- 0 for the untextured
-				pipelines, 1 for the textured ones, since SDL_GPU numbers a
+				Both shadow maps, at whichever slots this pipeline's own
+				fragment shader declares them -- 0/1 for the untextured
+				pipelines, 1/2 for the textured ones, since SDL_GPU numbers a
 				shader's sampled textures contiguously from t0 and
 				mesh_textured's own albedo already occupies t0. See
 				lighting.hlsli's comment on why the two shaders cannot agree
-				on one fixed slot for it.
+				on one fixed pair of slots for them. One comparison sampler
+				serves both maps.
 
 				Not bound at all in the shadow pass itself: that fragment
 				shader samples nothing, so there is nothing here to give it.
 			*/
 			if !r.in_shadow_pass {
-				shadow_binding := sdl.GPUTextureSamplerBinding{texture = r.shadow.texture, sampler = r.shadow.sampler}
+				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
+					{texture = r.shadow.textures[0], sampler = r.shadow.sampler},
+					{texture = r.shadow.textures[1], sampler = r.shadow.sampler},
+				}
 				shadow_slot: u32 = 1 if textured else 0
-				sdl.BindGPUFragmentSamplers(r.pass, shadow_slot, &shadow_binding, 1)
+				sdl.BindGPUFragmentSamplers(r.pass, shadow_slot, &shadow_bindings[0], MAX_SHADOW_CASTERS)
 
 				// The pipeline switch just changed what slot 0 even means --
 				// the shadow map a moment ago, on an untextured part, an

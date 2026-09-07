@@ -39,11 +39,15 @@ package lighting_example
 	    is the cone, not range. Watch the edge of the beam sweep across the
 	    ground as you turn: soft, not a hard line, which is `inner_angle`
 	    fading out to `outer_angle` rather than a single cutoff angle
-	  - **T and H together, K off** -- the torch casts its own shadow now,
-	    from its own position rather than the camera-centred trick the moon's
-	    shadow needs for having none. Turn the moon back on and the moon
-	    wins: only the first light marked `casts_shadow`, by slot order, is
-	    ever the caster
+	  - **T and H together, K off** -- the torch casts its own shadow, from
+	    its own position rather than the camera-centred trick the moon's
+	    shadow needs for having none
+	  - **T, H and K all together** -- the moon and the torch each cast a
+	    real shadow at once now, in two separate maps (`MAX_SHADOW_CASTERS`).
+	    Turning the flashlight on used to mean the moon's own shadow vanished
+	    everywhere, not just outside the beam, since only one light could
+	    ever be the caster; watch the moon's own shadows on the ground stay
+	    put while the torch's beam adds its own
 
 	Models are PsxGame's own, loaded by stage 4.
 */
@@ -193,30 +197,34 @@ main :: proc() {
 		mb.clear_background(FOG_COLOR if fog_on else {0.02, 0.02, 0.05, 1})
 
 		/*
-			Whatever should cast a shadow, drawn once from the moon's own
-			point of view before the scene is drawn from the camera's. Same
-			models, same positions, as the main pass just below -- a shadow
-			pass ordinarily draws whatever occludes the light, which here is
-			everything the main pass also draws except the ground itself
-			(nothing for the plane's own shadow to fall on). Guarded on the
-			return value rather than called unconditionally: with shadows off
-			or no light marked casts_shadow, begin_shadow_pass opens no pass
-			at all, and draw_model asserts loudly rather than silently doing
+			Whatever should cast a shadow, drawn once per active caster
+			(moon and/or torch, each its own slot -- see MAX_SHADOW_CASTERS)
+			from that light's own point of view before the scene is drawn
+			from the camera's. Same models, same positions, as the main pass
+			just below -- a shadow pass ordinarily draws whatever occludes
+			the light, which here is everything the main pass also draws
+			except the ground itself (nothing for the plane's own shadow to
+			fall on). Guarded on the return value rather than called
+			unconditionally: with shadows off or no light marked
+			casts_shadow for that slot, begin_shadow_pass opens no pass at
+			all, and draw_model asserts loudly rather than silently doing
 			nothing if asked to draw with none of the right kind open.
 		*/
-		if mb.begin_shadow_pass() {
-			for prop in props {
-				if prop.loaded do mb.draw_model_at(prop.model, prop.position, prop.scale)
+		for slot in 0 ..< mb.MAX_SHADOW_CASTERS {
+			if mb.begin_shadow_pass(slot) {
+				for prop in props {
+					if prop.loaded do mb.draw_model_at(prop.model, prop.position, prop.scale)
+				}
+				for i in 0 ..< 9 {
+					angle := f32(i) * math.TAU / 9
+					radius := 7 + f32(i % 3) * 2.5
+					mb.draw_cube(
+						{math.cos(angle) * radius, 0.6, math.sin(angle) * radius},
+						{1.2, 1.2, 1.2},
+						{0.55, 0.5, 0.45, 1})
+				}
+				mb.end_shadow_pass()
 			}
-			for i in 0 ..< 9 {
-				angle := f32(i) * math.TAU / 9
-				radius := 7 + f32(i % 3) * 2.5
-				mb.draw_cube(
-					{math.cos(angle) * radius, 0.6, math.sin(angle) * radius},
-					{1.2, 1.2, 1.2},
-					{0.55, 0.5, 0.45, 1})
-			}
-			mb.end_shadow_pass()
 		}
 
 		mb.begin_drawing_3d(rig.camera)

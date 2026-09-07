@@ -140,7 +140,7 @@ set_lights :: proc(lights: []Light) {
 	// one light and disables it wants a dark scene, not the fallback shading.
 	l.flags.x = f32(count)
 
-	recompute_shadow_caster()
+	recompute_shadow_casters()
 }
 
 // One light, by slot, leaving the others alone. For a scene that turns a single
@@ -155,7 +155,7 @@ set_light :: proc(index: int, light: Light) {
 	s.light_casts_shadow[index] = light.casts_shadow
 	l.flags.x = max(l.flags.x, f32(index + 1))
 
-	recompute_shadow_caster()
+	recompute_shadow_casters()
 }
 
 /*
@@ -172,31 +172,37 @@ clear_lights :: proc() {
 	l.flags.x = 0
 
 	s.light_casts_shadow = {}
-	s.caster_index       = -1
+	s.caster_indices     = {-1, -1}
 }
 
 /*
-	Which of `Lighting_Data.lights`, if any, casts the shadow -- the first
-	enabled light marked `casts_shadow`, by slot order. Recomputed after every
-	change to the light list rather than incrementally, since four lights is
-	cheap enough to scan outright and "the first match" is otherwise a subtle
-	thing to keep correct through `set_light` touching one slot at a time.
+	Which of `Lighting_Data.lights`, if any, cast a shadow -- up to
+	`MAX_SHADOW_CASTERS` enabled lights marked `casts_shadow`, by slot order.
+	Recomputed after every change to the light list rather than
+	incrementally, since four lights is cheap enough to scan outright and
+	"the first two matches" is otherwise a subtle thing to keep correct
+	through `set_light` touching one slot at a time.
 
-	`-1` (no caster) is what makes marking a light `casts_shadow` harmless
-	before `enable_shadows` is ever called: `push_lighting` only trusts this
-	value when `mbi.renderer.shadow.enabled` is also true, so this alone never
-	points the shader at a shadow map that was never actually rendered into.
+	`-1` (no caster) in either slot is what makes marking a light
+	`casts_shadow` harmless before `enable_shadows` is ever called:
+	`push_lighting` only trusts these values when `mbi.renderer.shadow.enabled`
+	is also true, so this alone never points the shader at a shadow map that
+	was never actually rendered into. A third `casts_shadow` light beyond the
+	first two found is not an error, the same silent degrade a point light's
+	own `casts_shadow` would be if one were hand-built with it set.
 */
 @(private)
-recompute_shadow_caster :: proc() {
+recompute_shadow_casters :: proc() {
 	l := &mbi.renderer.lighting
 	s := &mbi.renderer.shadow
 
-	s.caster_index = -1
+	s.caster_indices = {-1, -1}
+	found := 0
 	for i in 0 ..< MAX_LIGHTS {
+		if found >= MAX_SHADOW_CASTERS do break
 		if l.lights[i].position.w >= 0.5 && s.light_casts_shadow[i] {
-			s.caster_index = i
-			break
+			s.caster_indices[found] = i
+			found += 1
 		}
 	}
 }
@@ -276,14 +282,16 @@ push_lighting :: proc(camera: Camera3D) {
 	r.lighting.view_pos = {camera.position.x, camera.position.y, camera.position.z, 0}
 
 	/*
-		-1 whenever shadows are not enabled, even if a light is marked
-		`casts_shadow` and `caster_index` names it -- the shadow map is a 1x1
-		placeholder, never rendered into, until `enable_shadows` builds a real
-		one, and the shader must never be told to trust it.
+		-1 in both slots whenever shadows are not enabled, even if lights are
+		marked `casts_shadow` and `caster_indices` names them -- the shadow
+		maps are 1x1 placeholders, never rendered into, until `enable_shadows`
+		builds real ones, and the shader must never be told to trust them.
 	*/
-	r.lighting.flags.z = f32(r.shadow.caster_index) if r.shadow.enabled else -1
-	r.lighting.flags.w = r.shadow.settings.bias
-	r.lighting.light_view_projection = r.shadow.view_projection
+	r.lighting.flags.z          = f32(r.shadow.caster_indices[0]) if r.shadow.enabled else -1
+	r.lighting.flags.w          = r.shadow.settings.bias
+	r.lighting.shadow_caster1.x = f32(r.shadow.caster_indices[1]) if r.shadow.enabled else -1
+	r.lighting.light_view_projection  = r.shadow.view_projections[0]
+	r.lighting.light_view_projection2 = r.shadow.view_projections[1]
 
 	sdl.PushGPUFragmentUniformData(r.cmd, 1, &r.lighting, size_of(Lighting_Data))
 }

@@ -35,7 +35,7 @@ test_directional_and_point_still_pack_as_before :: proc(t: ^testing.T) {
 
 // The actual path begin_shadow_pass reads from, not just light_uniform in
 // isolation -- a spotlight marked casts_shadow has to make it all the way
-// through set_lights to mbi.renderer.shadow.caster_index the same way a
+// through set_lights to mbi.renderer.shadow.caster_indices the same way a
 // directional light's own already does.
 @(test)
 test_spot_light_can_become_shadow_caster :: proc(t: ^testing.T) {
@@ -44,6 +44,37 @@ test_spot_light_can_become_shadow_caster :: proc(t: ^testing.T) {
 	spot := create_spot_light({0, 5, 0}, {0, -1, 0}, casts_shadow = true)
 	set_lights({spot})
 
-	testing.expect(t, mbi.renderer.shadow.caster_index == 0,
-		"a spotlight marked casts_shadow should become the shadow caster")
+	testing.expect(t, mbi.renderer.shadow.caster_indices[0] == 0,
+		"a spotlight marked casts_shadow should become a shadow caster")
+}
+
+// Two lights marked casts_shadow both become casters, one per slot, in the
+// order set_lights was given them -- not just the first, which the single-
+// caster system this replaced would have stopped at.
+@(test)
+test_two_lights_can_both_become_casters :: proc(t: ^testing.T) {
+	defer clear_lights()
+
+	a := create_directional_light({0, -1, 0}, casts_shadow = true)
+	b := create_spot_light({0, 5, 0}, {0, -1, 0}, casts_shadow = true)
+	set_lights({a, b})
+
+	testing.expect(t, mbi.renderer.shadow.caster_indices[0] == 0, "the first casts_shadow light should be slot 0's caster")
+	testing.expect(t, mbi.renderer.shadow.caster_indices[1] == 1, "the second casts_shadow light should be slot 1's caster")
+}
+
+// A third casts_shadow light beyond MAX_SHADOW_CASTERS degrades silently,
+// the same way an unsupported point-light shadow already does, rather than
+// bumping one of the first two out.
+@(test)
+test_third_shadow_casting_light_is_not_selected :: proc(t: ^testing.T) {
+	defer clear_lights()
+
+	a := create_directional_light({0, -1, 0}, casts_shadow = true)
+	b := create_spot_light({0, 5, 0}, {0, -1, 0}, casts_shadow = true)
+	c := create_directional_light({1, -1, 0}, casts_shadow = true)
+	set_lights({a, b, c})
+
+	testing.expect(t, mbi.renderer.shadow.caster_indices[0] == 0, "the first casts_shadow light should still be slot 0's caster")
+	testing.expect(t, mbi.renderer.shadow.caster_indices[1] == 1, "the second casts_shadow light should still be slot 1's caster")
 }

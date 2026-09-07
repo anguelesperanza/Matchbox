@@ -239,15 +239,36 @@ Light_Uniform :: struct #align(16) {
 	color:    [4]f32,
 }
 
-// 272 bytes: four lights and five more registers. Pushed to fragment slot 1
-// once per 3D pass, where the per-draw tint is slot 0.
+/*
+	352 bytes: four lights, five more registers, a gap the compiler puts
+	there uninvited, and one whole matrix. Pushed to fragment slot 1 once per
+	3D pass, where the per-draw tint is slot 0.
+
+	**The gap is real and has to be matched, not designed around.**
+	`matrix[4,4]f32` aligns to 32 bytes in Odin -- not 16, whatever the
+	struct's own `#align` says -- so `light_view_projection` lands at offset
+	288 rather than 272, with 16 bytes of compiler-inserted padding at 272
+	that no field here names. `lighting.hlsli`'s cbuffer has to spend an
+	explicit `float4 _pad0` to reach the same offset, since HLSL would
+	otherwise pack a float4x4 straight after `flags` with no gap at all.
+	Measured with `offset_of`, not assumed: the size assert in init.odin is
+	what would have caught the two sides disagreeing.
+*/
 Lighting_Data :: struct #align(16) {
-	lights:    [MAX_LIGHTS]Light_Uniform,
-	ambient:   [4]f32, // rgb
-	view_pos:  [4]f32, // xyz, filled in from the active camera
-	fog_color: [4]f32, // rgb
-	fog_range: [4]f32, // x near, y far
-	flags:     [4]f32, // x how many lights are set, y 1 when fog is on
+	lights:               [MAX_LIGHTS]Light_Uniform,
+	ambient:              [4]f32, // rgb
+	view_pos:             [4]f32, // xyz, filled in from the active camera
+	fog_color:            [4]f32, // rgb
+	fog_range:            [4]f32, // x near, y far
+
+	// x how many lights are set, y 1 when fog is on, z the shadow-casting
+	// light's index or -1 for none, w the shadow depth-compare bias.
+	flags:                [4]f32,
+
+	// The shadow caster's view-projection, world space to its own clip space.
+	// Unused (and unread by the shader) whenever flags.z is -1 -- see
+	// shadow.odin for why one caster is all this carries.
+	light_view_projection: matrix[4, 4]f32,
 }
 
 // GPU handle bundle — shared by Sprite, Animation_Clip, and Font.

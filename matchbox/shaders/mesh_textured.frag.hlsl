@@ -7,15 +7,22 @@
 
     Must match matchbox.Mesh_Frag_Data and matchbox.Lighting_Data.
 */
+
+// Sampled textures in order: this one first (the model's own base colour),
+// then the shadow map -- see lighting.hlsli's own comment on why the second
+// is declared here rather than inside that shared header.
+Texture2D<float4> tex : register(t0, space2);
+SamplerState      smp : register(s0, space2);
+
+Texture2D<float>       shadow_map     : register(t1, space2);
+SamplerComparisonState shadow_sampler : register(s1, space2);
+
 #include "lighting.hlsli"
 
 cbuffer FragData : register(b0, space3)
 {
     float4 tint;
 };
-
-Texture2D<float4> tex : register(t0, space2);
-SamplerState      smp : register(s0, space2);
 
 struct PSInput
 {

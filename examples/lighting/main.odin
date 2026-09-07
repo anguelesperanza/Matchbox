@@ -20,11 +20,18 @@ package lighting_example
 	    fixed shading every 3D draw used before stage 5, so the scene goes
 	    flat-lit rather than black. Every example written before this one is
 	    still running down that path
-	  - **watch the shadows on the stove.** They move, because the light does.
-	    The flicker offsets the position by a few centimetres on two different
-	    sine waves and the specular highlight follows it
+	  - **watch the specular highlight on the stove.** It moves, because the
+	    light does. The flicker offsets the position by a few centimetres on
+	    two different sine waves and the highlight follows it
 	  - **press K** for a second, cold, directional light -- a moon. Four are
 	    allowed; both games use one
+	  - **press H** for an actual cast shadow -- the moon's, since only a
+	    directional light can have one here (see `shadow.odin`). The stove,
+	    pot, cube and the ring of cubes further out all block it, each with a
+	    dark patch on the ground stretching away from the moon's own
+	    direction. Needs K on as well: marking the moon `casts_shadow` and
+	    turning shadows on are two separate switches, and neither alone does
+	    anything
 
 	Models are PsxGame's own, loaded by stage 4.
 */
@@ -89,9 +96,10 @@ main :: proc() {
 		eye_offset = {0, 1.8, 0},
 	)
 
-	lights_on := true
-	fog_on    := true
-	moon_on   := false
+	lights_on   := true
+	fog_on      := true
+	moon_on     := false
+	shadows_on  := false
 
 	mb.set_ambient({0.35, 0.35, 0.55, 1})
 	mb.set_fog(FOG_COLOR, FOG_START, FOG_END)
@@ -117,6 +125,16 @@ main :: proc() {
 			else      do mb.disable_fog()
 		}
 
+		// Only the moon casts one -- see create_directional_light's
+		// casts_shadow below -- so this does nothing visible until K is also
+		// on. Left as two independent switches rather than one, the same
+		// "opt in twice" shape shadow.odin's own doc comment explains.
+		if mb.is_key_pressed(.H) {
+			shadows_on = !shadows_on
+			if shadows_on do mb.enable_shadows()
+			else          do mb.disable_shadows()
+		}
+
 		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
 		}
@@ -136,7 +154,7 @@ main :: proc() {
 				})
 
 			if moon_on {
-				moon := mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1})
+				moon := mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1}, casts_shadow = true)
 				mb.set_lights({fire, moon})
 			} else {
 				mb.set_lights({fire})
@@ -149,6 +167,33 @@ main :: proc() {
 
 		mb.begin_drawing()
 		mb.clear_background(FOG_COLOR if fog_on else {0.02, 0.02, 0.05, 1})
+
+		/*
+			Whatever should cast a shadow, drawn once from the moon's own
+			point of view before the scene is drawn from the camera's. Same
+			models, same positions, as the main pass just below -- a shadow
+			pass ordinarily draws whatever occludes the light, which here is
+			everything the main pass also draws except the ground itself
+			(nothing for the plane's own shadow to fall on). Guarded on the
+			return value rather than called unconditionally: with shadows off
+			or no light marked casts_shadow, begin_shadow_pass opens no pass
+			at all, and draw_model asserts loudly rather than silently doing
+			nothing if asked to draw with none of the right kind open.
+		*/
+		if mb.begin_shadow_pass() {
+			for prop in props {
+				if prop.loaded do mb.draw_model_at(prop.model, prop.position, prop.scale)
+			}
+			for i in 0 ..< 9 {
+				angle := f32(i) * math.TAU / 9
+				radius := 7 + f32(i % 3) * 2.5
+				mb.draw_cube(
+					{math.cos(angle) * radius, 0.6, math.sin(angle) * radius},
+					{1.2, 1.2, 1.2},
+					{0.55, 0.5, 0.45, 1})
+			}
+			mb.end_shadow_pass()
+		}
 
 		mb.begin_drawing_3d(rig.camera)
 
@@ -172,11 +217,12 @@ main :: proc() {
 		mb.end_drawing_3d()
 
 		font := &mb.mbi.font
-		mb.draw_text(font, "L lights, K moon, F fog, WASD walk, ESC pointer", 20, 40, mb.WHITE)
-		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v",
+		mb.draw_text(font, "L lights, K moon, F fog, H shadows, WASD walk, ESC pointer", 20, 40, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v",
 			"on" if lights_on else "off (fallback shading)",
 			"on" if moon_on else "off",
-			"on" if fog_on else "off"), 20, 70, mb.WHITE)
+			"on" if fog_on else "off",
+			"on" if shadows_on else "off"), 20, 70, mb.WHITE)
 
 		cx := f32(mb.mbi.width) * 0.5
 		cy := f32(mb.mbi.height) * 0.5

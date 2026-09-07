@@ -221,7 +221,7 @@ Post_Frag_Data :: struct #align(16) {
 }
 
 /*
-	One light, as the shader reads it. 48 bytes.
+	One light, as the shader reads it. 64 bytes.
 
 	Everything is a [4]f32 and nothing is a [3]f32, which is the whole trick.
 	HLSL refuses to let a vector straddle a 16-byte boundary and silently pads
@@ -231,16 +231,18 @@ Post_Frag_Data :: struct #align(16) {
 	agree by construction.
 
 	The spare components are not spare: `position.w` is whether the light is on,
-	and `target.w` is which kind it is.
+	and `target.w` is which kind it is. `cone` only ever means anything for a
+	spotlight -- see `create_spot_light` -- and rides along unread otherwise.
 */
 Light_Uniform :: struct #align(16) {
-	position: [4]f32, // xyz where it is,       w 1 when enabled
-	target:   [4]f32, // xyz what it points at, w 0 directional / 1 point
+	position: [4]f32, // xyz where it is,                     w 1 when enabled
+	target:   [4]f32, // xyz direction (directional/spot), unused (point), w kind: 0/1/2
 	color:    [4]f32,
+	cone:     [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
 }
 
 /*
-	352 bytes: four lights, five more registers, a gap the compiler puts
+	416 bytes: four lights, five more registers, a gap the compiler puts
 	there uninvited, and one whole matrix. Pushed to fragment slot 1 once per
 	3D pass, where the per-draw tint is slot 0.
 

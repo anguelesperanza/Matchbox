@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 364 of them -- with its arguments
+Every public procedure in the package -- 365 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -21,7 +21,7 @@ any.
 - [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 42
-- [3D drawing](#3d-drawing) -- 26
+- [3D drawing](#3d-drawing) -- 27
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
@@ -1928,6 +1928,17 @@ create_directional_light :: proc(
 ) -> Light
 ```
 A light shining along `direction`, from nowhere in particular.
+
+```odin
+create_spot_light :: proc(
+	position: [3]f32,
+	direction: [3]f32,
+	color: [4]f32 = WHITE,
+	inner_angle: f32 = 20,
+	outer_angle: f32 = 30,
+) -> Light
+```
+A cone of light at `position`, pointing along `direction`.
 
 ```odin
 set_lights :: proc(lights: []Light)

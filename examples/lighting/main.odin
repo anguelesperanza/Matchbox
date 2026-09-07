@@ -32,6 +32,13 @@ package lighting_example
 	    direction. Needs K on as well: marking the moon `casts_shadow` and
 	    turning shadows on are two separate switches, and neither alone does
 	    anything
+	  - **press T** for a flashlight -- a spotlight glued to the camera, aimed
+	    wherever it looks. Point straight at the stove or pot and it lights
+	    up; turn away and it goes back to whatever the fire and ambient alone
+	    give it, even though nothing about its distance changed -- the cutoff
+	    is the cone, not range. Watch the edge of the beam sweep across the
+	    ground as you turn: soft, not a hard line, which is `inner_angle`
+	    fading out to `outer_angle` rather than a single cutoff angle
 
 	Models are PsxGame's own, loaded by stage 4.
 */
@@ -100,6 +107,7 @@ main :: proc() {
 	fog_on      := true
 	moon_on     := false
 	shadows_on  := false
+	torch_on    := false
 
 	mb.set_ambient({0.35, 0.35, 0.55, 1})
 	mb.set_fog(FOG_COLOR, FOG_START, FOG_END)
@@ -118,6 +126,7 @@ main :: proc() {
 
 		if mb.is_key_pressed(.L) do lights_on = !lights_on
 		if mb.is_key_pressed(.K) do moon_on   = !moon_on
+		if mb.is_key_pressed(.T) do torch_on  = !torch_on
 
 		if mb.is_key_pressed(.F) {
 			fog_on = !fog_on
@@ -153,12 +162,22 @@ main :: proc() {
 					1,
 				})
 
+			// Fire is always on here; the moon and torch are each an extra
+			// slot, filled in only when their own key has turned them on.
+			slots: [4]mb.Light
+			count := 0
+			slots[count] = fire; count += 1
+
 			if moon_on {
-				moon := mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1}, casts_shadow = true)
-				mb.set_lights({fire, moon})
-			} else {
-				mb.set_lights({fire})
+				slots[count] = mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1}, casts_shadow = true)
+				count += 1
 			}
+			if torch_on {
+				slots[count] = mb.create_spot_light(rig.camera.position, mb.camera3d_forward(rig.camera), mb.WHITE, 15, 25)
+				count += 1
+			}
+
+			mb.set_lights(slots[:count])
 		} else {
 			// Not four disabled lights -- none at all, which is what puts the
 			// fallback shading back.
@@ -217,12 +236,13 @@ main :: proc() {
 		mb.end_drawing_3d()
 
 		font := &mb.mbi.font
-		mb.draw_text(font, "L lights, K moon, F fog, H shadows, WASD walk, ESC pointer", 20, 40, mb.WHITE)
-		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v",
+		mb.draw_text(font, "L lights, K moon, F fog, H shadows, T torch, WASD walk, ESC pointer", 20, 40, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v   torch %v",
 			"on" if lights_on else "off (fallback shading)",
 			"on" if moon_on else "off",
 			"on" if fog_on else "off",
-			"on" if shadows_on else "off"), 20, 70, mb.WHITE)
+			"on" if shadows_on else "off",
+			"on" if torch_on else "off"), 20, 70, mb.WHITE)
 
 		cx := f32(mb.mbi.width) * 0.5
 		cy := f32(mb.mbi.height) * 0.5

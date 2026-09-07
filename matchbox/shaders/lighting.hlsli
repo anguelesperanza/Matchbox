@@ -22,7 +22,7 @@
     makes the layout the same on both sides by construction, which is what the
     size assert in init.odin then confirms.
 
-    Must match matchbox.Lighting_Data exactly. 352 bytes.
+    Must match matchbox.Lighting_Data exactly. 416 bytes.
 
     **`_pad0` is not spare room, it is copying a fact rather than a choice.**
     Odin's own `matrix[4,4]f32` aligns to 32 bytes, not 16, so
@@ -37,9 +37,10 @@
 
 struct Light
 {
-    float4 position; // xyz where it is,       w 1 when enabled
-    float4 target;   // xyz what it points at, w 0 directional / 1 point
+    float4 position; // xyz where it is,                          w 1 when enabled
+    float4 target;   // xyz direction (directional/spot), unused (point), w kind: 0/1/2
     float4 color;
+    float4 cone;     // x outer half-angle degrees, y inner half-angle degrees -- spot only
 };
 
 cbuffer Lighting : register(b1, space3)
@@ -146,12 +147,27 @@ float3 lit_shade(float3 normal, float3 world, float3 albedo)
         }
         else
         {
+            // Point and spot are both a place, and fade the same way with
+            // distance -- the curve PsxGame uses, which decides how far a
+            // campfire reaches, so it is copied rather than reinvented.
             to_light = normalize(lights[i].position.xyz - world);
 
-            // The curve PsxGame uses. It is what decides how far a campfire
-            // reaches, so it is copied rather than reinvented.
             float d = length(lights[i].position.xyz - world);
             attenuation = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
+
+            if (lights[i].target.w > 1.5)
+            {
+                // Spot: an extra cone factor on top of the same distance
+                // falloff. cos falls as the angle from the cone's own axis
+                // grows, so the outer edge is the smaller of the two --
+                // smoothstep(outer, inner, x) is 0 past the outer cone, 1
+                // inside the inner one, and a soft ramp in between.
+                float3 spot_dir  = normalize(lights[i].target.xyz);
+                float  cos_angle = dot(-to_light, spot_dir);
+                float  outer_cos = cos(radians(lights[i].cone.x));
+                float  inner_cos = cos(radians(lights[i].cone.y));
+                attenuation *= smoothstep(outer_cos, inner_cos, cos_angle);
+            }
         }
 
         // Only the one light named by flags.z casts a shadow -- see

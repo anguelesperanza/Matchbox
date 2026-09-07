@@ -29,23 +29,30 @@ MAX_LIGHTS :: 4
 Light_Kind :: enum {
 	DIRECTIONAL, // a direction only; distance does not matter
 	POINT,       // a place, which things get dimmer further from
+	SPOT,        // a place that only shines within a cone around a direction
 }
 
 /*
 	One light.
 
 	`target` is what a directional light points at -- the direction is
-	`target - position`, so moving both moves nothing. A point light ignores it.
+	`target - position`, so moving both moves nothing. A spotlight reuses the
+	same field the same way: `target` is the direction its cone points, not a
+	place it aims at, so a spotlight's own `position` is not involved in
+	reading it back out. A point light ignores it.
 
 	The zero value is a disabled light, which is what makes `set_lights` with a
 	short slice do the obvious thing.
 
 	`casts_shadow` only ever does anything for a directional light -- see
-	shadow.odin for why point-light shadows are not built -- and only once
-	`enable_shadows` has also been called. Marking a light this way with
-	shadows never enabled is inert rather than an error, the same "opt-in,
-	nothing happens until both switches are on" shape `enable_shadows` itself
-	has.
+	shadow.odin for why point-light shadows are not built, the same degrade a
+	spotlight gets for now -- and only once `enable_shadows` has also been
+	called. Marking a light this way with shadows never enabled is inert
+	rather than an error, the same "opt-in, nothing happens until both
+	switches are on" shape `enable_shadows` itself has.
+
+	`inner_angle`/`outer_angle` only ever mean anything for a spotlight -- see
+	`create_spot_light`.
 */
 Light :: struct {
 	kind:         Light_Kind,
@@ -54,6 +61,8 @@ Light :: struct {
 	color:        [4]f32,
 	enabled:      bool,
 	casts_shadow: bool,
+	inner_angle:  f32, // spot only, degrees -- full brightness inside this
+	outer_angle:  f32, // spot only, degrees -- faded to nothing by this
 }
 
 // A point light at `position`. The common case, and the one the campfire is.
@@ -66,6 +75,36 @@ create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE, casts
 	return Light{
 		kind = .DIRECTIONAL, position = {0, 0, 0}, target = direction, color = color,
 		enabled = true, casts_shadow = casts_shadow,
+	}
+}
+
+/*
+	A cone of light at `position`, pointing along `direction`. Distance fades
+	the same curve a point light's own does -- see `lighting.hlsli`'s
+	attenuation -- the cone is an extra factor on top of that, not a
+	replacement for it.
+
+	`inner_angle` is where the cone is still at full brightness; it fades from
+	there out to `outer_angle`, both in degrees and measured from the cone's
+	own axis to its edge, not corner to corner. A flashlight wants these
+	fairly narrow -- the 20/30 default is a tight beam, not a floodlight.
+
+	Cannot cast a shadow: a spotlight's `casts_shadow` would need a
+	perspective shadow projection sized to the cone, which nothing here
+	builds yet, so unlike `create_directional_light` this takes no
+	`casts_shadow` parameter at all -- the same reason `create_point_light`
+	does not have one either.
+*/
+create_spot_light :: proc(
+	position:    [3]f32,
+	direction:   [3]f32,
+	color:       [4]f32 = WHITE,
+	inner_angle: f32 = 20,
+	outer_angle: f32 = 30,
+) -> Light {
+	return Light{
+		kind = .SPOT, position = position, target = direction, color = color,
+		enabled = true, inner_angle = inner_angle, outer_angle = outer_angle,
 	}
 }
 
@@ -203,10 +242,18 @@ is_lighting_active :: proc() -> bool {
 
 @(private)
 light_uniform :: proc(light: Light) -> Light_Uniform {
+	kind_flag: f32
+	switch light.kind {
+	case .DIRECTIONAL: kind_flag = 0
+	case .POINT:        kind_flag = 1
+	case .SPOT:         kind_flag = 2
+	}
+
 	return Light_Uniform{
 		position = {light.position.x, light.position.y, light.position.z, 1 if light.enabled else 0},
-		target   = {light.target.x, light.target.y, light.target.z, 0 if light.kind == .DIRECTIONAL else 1},
+		target   = {light.target.x, light.target.y, light.target.z, kind_flag},
 		color    = light.color,
+		cone     = {light.outer_angle, light.inner_angle, 0, 0},
 	}
 }
 

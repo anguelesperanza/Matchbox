@@ -886,6 +886,8 @@ cleanup :: proc() {
 		mbi.renderer.identity_joints = nil
 	}
 
+	delete(mbi.renderer.pending_shadow_models)
+
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
 	sdl.DestroyGPUDevice(device)
 	mbi.renderer.device = nil

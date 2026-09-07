@@ -149,6 +149,19 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	r := &mbi.renderer
 	if !r.frame_active do return
 
+	// Whatever draw_model was asked to cast a shadow before either pass
+	// existed, put into the shadow map now -- a no-op if shadows are not
+	// enabled or nothing here is marked casts_shadow, same as a game calling
+	// begin_shadow_pass by hand gets.
+	if len(r.pending_shadow_models) > 0 {
+		if begin_shadow_pass() {
+			for pending in r.pending_shadow_models {
+				draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+			}
+			end_shadow_pass()
+		}
+	}
+
 	if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)
 		r.pass = nil
@@ -193,6 +206,21 @@ end_drawing_3d :: proc() {
 	r := &mbi.renderer
 	if !r.mode_3d do return
 
+	/*
+		The other half of what the shadow pass drew, into the scene itself --
+		held until now rather than drawn the moment the pass opened, because
+		draw_skybox's own pipeline writes no depth at all and relies on being
+		first: see its "drawn first, so everything after it covers it" comment
+		in init.odin. Drawing these where begin_drawing_3d used to would put
+		them before a skybox the game draws afterward, and the skybox would
+		paint over them with nothing to stop it. Last is always safe, since
+		everything else here does write depth.
+	*/
+	for pending in r.pending_shadow_models {
+		draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+	}
+	clear(&r.pending_shadow_models)
+
 	if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)
 		r.pass = nil
@@ -216,6 +244,15 @@ current_camera3d :: proc() -> Camera3D {
 // Drawing
 // -----------------------------------------------------------------------
 
+// One draw_model call, held on to until begin_drawing_3d has a pass open to
+// put it in. See draw_model's own doc comment on casts_shadow.
+Pending_Shadow_Model :: struct {
+	model:     Model,
+	transform: Transform,
+	tint:      [4]f32,
+	animator:  ^Animator,
+}
+
 /*
 	Draws every part of a model, placed by `transform` and multiplied by `tint`.
 
@@ -228,8 +265,34 @@ current_camera3d :: proc() -> Camera3D {
 	bind pose -- arms out, which is a legible "you forgot the animator" rather
 	than a crash or an empty screen. A game with two characters sharing a model
 	passes a different animator for each; see `animation3d.odin`.
+
+	**`casts_shadow`** is the one case this is called *outside* begin_drawing_3d
+	or begin_shadow_pass rather than between one and its matching end. Marked
+	true, the call is held rather than drawn immediately; begin_drawing_3d puts
+	it in both passes for you -- once into the shadow map, once into the scene
+	-- so a caller no longer hand-draws the same model twice to get both. Left
+	false, this draws immediately exactly as it always has, and still needs to
+	run inside a pass of one kind or another.
 */
 draw_model :: proc(
+	model:        Model,
+	transform:    Transform,
+	tint:         [4]f32 = WHITE,
+	animator:     ^Animator = nil,
+	casts_shadow: bool = false,
+) {
+	r := &mbi.renderer
+
+	if casts_shadow && !r.mode_3d && !r.in_shadow_pass {
+		append(&r.pending_shadow_models, Pending_Shadow_Model{model, transform, tint, animator})
+		return
+	}
+
+	draw_model_immediate(model, transform, tint, animator)
+}
+
+@(private)
+draw_model_immediate :: proc(
 	model:     Model,
 	transform: Transform,
 	tint:      [4]f32 = WHITE,
@@ -423,13 +486,14 @@ ensure_identity_joint_buffer :: proc(count: int) -> ^sdl.GPUBuffer {
 // A model at a position, at one scale on every axis and unturned. What most
 // draws want, and the reason a game rarely has to build a Transform by hand.
 draw_model_at :: proc(
-	model:    Model,
-	position: [3]f32,
-	scale:    f32 = 1,
-	tint:     [4]f32 = WHITE,
-	animator: ^Animator = nil,
+	model:        Model,
+	position:     [3]f32,
+	scale:        f32 = 1,
+	tint:         [4]f32 = WHITE,
+	animator:     ^Animator = nil,
+	casts_shadow: bool = false,
 ) {
-	draw_model(model, create_transform(position, scale = scale), tint, animator)
+	draw_model(model, create_transform(position, scale = scale), tint, animator, casts_shadow)
 }
 
 /*

@@ -37,6 +37,26 @@ struct Surface
     float3 specular;   // specular-glossiness (brdf/pbr_specgloss.hlsli)
     float  glossiness; // specular-glossiness (brdf/pbr_specgloss.hlsli)
 
+    /*
+        Blinn-Phong's own exponent (brdf/blinn_phong.hlsli). **Added in P6,
+        and the one field this rework's own claim about this struct did not
+        survive contact with**: `brdf_light_blinn_phong` used to read this
+        straight off the bound `Material` cbuffer's `emissive.w`
+        (`mesh.frag.hlsl`) rather than from here, on the stated reasoning
+        that "a scalar this specific to one model is cheaper read straight
+        off the material that is already bound for this draw" -- true for a
+        forward fragment shader, where "this draw" names one part's one
+        material, and false for a deferred lighting pass, which is one
+        fullscreen draw covering every material in the scene at once with no
+        per-draw cbuffer to read at all. `deferred_lighting.frag.hlsl`
+        reconstructing a `Surface` from the G-buffer had nowhere to put this
+        value until it was a field here -- see `lighting_core.hlsli`'s own
+        `shade_lights` and P6's own report for the fuller account of why this
+        is the one place `Surface`'s own contract did not hold on the first
+        attempt.
+    */
+    float specular_power;
+
     float3 emissive;
     float  occlusion; // ambient occlusion -- 1.0 (no occlusion) wherever a part has no occlusion texture
 

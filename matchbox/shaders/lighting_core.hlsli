@@ -691,11 +691,39 @@ uint cluster_index_for_fragment(float4 screen_pos)
     lights it loops over"), and this function is where that promise is kept
     literally rather than approximately.
 */
+// Render_Pipeline_Kind's own ordinal (lighting.odin) that means CLUSTERED --
+// see this function's own doc comment below for why the check against
+// cluster_grid.w has to name this value exactly rather than merely testing
+// non-zero, since P6.
+#define RENDER_PIPELINE_CLUSTERED 1
+
 float3 shade_lights(Surface surface, float4 screen_pos)
 {
     Radiance total = (Radiance)0;
 
-    if (cluster_grid.w > 0.5) // CLUSTERED
+    /*
+        **Exact match, not `> 0.5`, since P6.** This branch was written when
+        `Render_Pipeline_Kind` had exactly two values -- FORWARD (0) and
+        CLUSTERED (1) -- so "not FORWARD" and "is CLUSTERED" were the same
+        question and a non-zero test answered both. P6 adds a third value,
+        DEFERRED (2, pushed into this same `cluster_grid.w` by `push_lighting`,
+        lighting.odin), and `2 > 0.5` is also true -- so the old test would
+        have sent every DEFERRED scene through this branch, reading
+        `cluster_ranges`/`cluster_light_indices` bound to FORWARD's own
+        1-element placeholder (`pipeline_deferred_cluster_buffers`,
+        pipeline_deferred.odin) and shading every opaque surface as if the
+        scene had zero lights in range -- silently, since a placeholder
+        `Cluster_Range{0, 0}` is a well-formed empty range rather than an
+        error. Found while wiring up DEFERRED's own dispatch, not by
+        rendering a frame (there is no GPU here to have shown it): a plain
+        re-read of what this comparison actually decides once a third value
+        existed. Matching `RENDER_PIPELINE_CLUSTERED` exactly is what a
+        FORWARD-vs-CLUSTERED-vs-DEFERRED three-way switch should have been
+        from the day this line was written; the two-value shape just let a
+        cheaper comparison stand in for it without anyone noticing the two
+        were not forever the same question.
+    */
+    if (int(cluster_grid.w) == RENDER_PIPELINE_CLUSTERED)
     {
         Cluster_Range range = cluster_ranges[cluster_index_for_fragment(screen_pos)];
 
@@ -709,7 +737,12 @@ float3 shade_lights(Surface surface, float4 screen_pos)
             total.specular += r.specular;
         }
     }
-    else // FORWARD
+    else // FORWARD or DEFERRED -- both loop every light; DEFERRED's own
+         // fullscreen lighting pass (deferred_lighting.frag.hlsl) is a plain
+         // per-pixel light loop over the whole list, the same as FORWARD's
+         // own mesh fragment shader, just fed a Surface reconstructed from
+         // the G-buffer instead of from interpolants -- see this file's own
+         // top comment and pipeline_deferred.odin.
     {
         uint count = uint(flags.x);
         for (uint i = 0; i < count; i++)

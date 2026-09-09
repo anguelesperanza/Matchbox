@@ -20,13 +20,21 @@
     that cross term exactly, with no special case and no light loop here at
     all.
 
-    The specular exponent is read from the bound `Material` cbuffer's own
-    `emissive.w` (`mesh.frag.hlsl`) rather than from `Surface` -- see
-    `material.odin`'s own `Material_Frag_Data` packing comment. `Surface`
-    only carries what a shading model needs that a future deferred G-buffer
-    could also supply (`surface.hlsli`'s own doc comment); a scalar this
-    specific to one model is cheaper read straight off the material that is
-    already bound for this draw.
+    The specular exponent is `Surface.specular_power`, filled from the bound
+    `Material` cbuffer's own `emissive.w` by whichever shader built the
+    `Surface` (`mesh.frag.hlsl` for forward, the G-buffer's own decode for
+    deferred) -- see `surface.hlsli`'s own doc comment on that field for why
+    it moved here in P6. It did not start there: P0/P2b read `emissive.w`
+    directly in this file, on the reasoning that a forward draw already has
+    the material bound and a scalar this specific to one model was cheaper
+    read from it than threaded through `Surface`. That reasoning covered
+    forward correctly and deferred not at all -- P6's own fullscreen lighting
+    pass has no per-draw `Material` cbuffer bound at all, so `emissive.w`
+    named nothing there, and this was the one place `Surface`'s own claim to
+    carry "everything a BRDF needs" did not hold on first contact with a
+    second pipeline. Fixed by widening `Surface` itself rather than
+    special-casing this file per pipeline, which is the only fix that keeps
+    this model's own two functions ignorant of which pipeline is running.
 */
 
 /*
@@ -69,8 +77,7 @@ Radiance brdf_light_blinn_phong(Surface surface, Light_Sample light)
 
     if (light.n_dot_l > 0.0)
     {
-        float specular_power = emissive.w; // Material's own, see this file's top comment
-        float spec = pow(max(0.0, dot(surface.view, reflect(-light.direction, surface.normal))), specular_power);
+        float spec = pow(max(0.0, dot(surface.view, reflect(-light.direction, surface.normal))), surface.specular_power);
 
         r.specular = light.radiance * spec; // coloured -- see this function's own doc comment
     }

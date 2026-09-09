@@ -139,6 +139,15 @@ float4 main(PSInput input) : SV_Target0
     surface.specular      = specular.rgb;
     surface.glossiness    = specular.a;
 
+    // Read from the bound Material cbuffer the same as every other field
+    // here -- filling it into Surface rather than leaving it for
+    // brdf_light_blinn_phong to read emissive.w directly is P6's fix, not a
+    // change to what value reaches the model: this shader still owns the
+    // one place a forward draw's own material is bound. See Surface's own
+    // doc comment (surface.hlsli) on specular_power for the deferred case
+    // this was actually for.
+    surface.specular_power = emissive.w;
+
     // Same factor * texture combine as metallic-roughness above, and the
     // same reason a missing texture must not read as black: a material with
     // an emissive factor and no emissive texture -- every emissive material

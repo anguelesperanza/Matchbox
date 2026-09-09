@@ -409,9 +409,33 @@ transfer function into the BRDF, which makes every BRDF module non-portable
 and makes tone mapping impossible to add later without changing all of them.
 
 So: the 3D pass renders into an `RGBA16_FLOAT` target, and a tonemap+encode
-pass resolves it to the swapchain. `render_target.odin` and `post.odin`
-already externalize a render-to-texture pass to the caller, so the machinery
-exists; this makes the 3D path use it by default rather than by hand.
+pass resolves it to the swapchain.
+
+**The machinery is less reusable than it first looks.** `render_target.odin`
+creates every target in the swapchain's own format, and its doc comment says
+why: SDL3 bakes target formats into a pipeline, so a target in another format
+needs its own copy of every pipeline that draws into it. A float scene target
+is exactly that other format. Three consequences, none optional:
+
+1. **The five pipelines that draw inside the 3D pass get rebuilt against the
+   HDR format** -- `mesh`, `mesh_skinned`, `line`, and both skyboxes. The
+   format is fixed rather than variable, so this is five more pipelines and
+   not a combinatorial explosion.
+2. **The HDR target is internal, and `Render_Target` is left alone.** The
+   scene target lives on `Renderer.lighting.targets` and is the destination of
+   the 3D pass always; the tonemap resolve then writes into
+   `current_color_texture()` -- swapchain or a game's own target, both still
+   in swapchain format. This matters because `examples/post` draws 3D *into* a
+   `Render_Target`, so both destinations are live paths today. Keeping
+   `Render_Target` in the swapchain format also keeps every 2D pipeline valid
+   inside one, which is the property its own comment exists to protect.
+3. **`begin_drawing_3d`'s "load, do not clear" contract changes.** It
+   currently loads whatever `clear_background` painted so the background shows
+   through. A separate HDR target has nothing to load. The replacement is to
+   clear the HDR target to the background colour converted to linear, and have
+   the resolve write opaque across the viewport. Anything a game drew in 2D
+   *before* its 3D pass would stop showing through -- check whether any example
+   relies on that before assuming none does, and document it either way.
 
 Consequence to state plainly: this changes what existing scenes look like.
 `set_fog`'s colour is currently mixed *after* gamma, so it means "the colour

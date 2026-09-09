@@ -1820,7 +1820,7 @@ Opens the 3D pass and fixes the camera for everything drawn until `end_drawing_3
 ```odin
 end_drawing_3d :: proc()
 ```
-Closes the 3D pass.
+Closes the 3D pass and resolves it.
 
 ```odin
 is_drawing_3d :: proc() -> bool

@@ -476,6 +476,18 @@ on plain `UNORM`, because those carry numbers rather than colours and decoding
 them would be actively wrong. That means `upload.odin` needs to be told which
 kind it is being handed rather than assuming one format for everything.
 
+**Correction, from building it: the axis is not "colour versus data".** That
+framing gets the data textures right and the interesting case wrong. A
+sprite's pixels are colour by any definition and must still upload `UNORM` --
+the 2D pass writes straight to an SDR swapchain with no resolve step, so a
+sprite decoded to linear on sample would stay linear all the way to the screen
+and every sprite in every 2D game would render dark. The rule that actually
+decides it is **"does something downstream re-encode this exactly once"**,
+which is true of the 3D pass (the tonemap resolve does it for the whole scene)
+and false of the 2D pass. `Texture_Encoding`'s doc comment in `upload.odin`
+carries this; P8 changes the answer for sprites when the 2D pass gains a
+resolve of its own.
+
 **`exposure` has no safe zero, and the same trap is waiting for every field
 added after it.** P1 added `exposure: f32` to `Lighting_Settings`, whose zero
 value multiplies the scene to black. Nine examples built the struct as a

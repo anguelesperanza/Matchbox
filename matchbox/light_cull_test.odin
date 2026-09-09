@@ -199,7 +199,7 @@ test_cluster_grid_sweep_every_cluster_contains_its_own_center :: proc(t: ^testin
 		d := (z_near + z_far) * 0.5 // mid-depth of the slice
 
 		for ty in 0 ..< f.ny {
-			y0, y1 := cluster_ndc_range_y_for_test(ty, f.ny)
+			y0, y1 := cluster_ndc_range_y(ty, f.ny)
 			ndc_y := (y0 + y1) * 0.5
 
 			for tx in 0 ..< f.nx {
@@ -229,17 +229,6 @@ test_cluster_grid_sweep_every_cluster_contains_its_own_center :: proc(t: ^testin
 	}
 
 	testing.expect_value(t, tested, f.nx * f.ny * f.nz)
-}
-
-// cluster_test's own Y convention is private to light_cull.odin's file scope
-// only insofar as it is inlined there -- this mirrors the same top-down
-// mapping (tile 0 is the top row) so the sweep above builds NDC ranges the
-// same way cluster_test itself interprets tx/ty/tz.
-@(private = "file")
-cluster_ndc_range_y_for_test :: proc(ty, ny: int) -> (lo, hi: f32) {
-	hi = 1 - 2 * f32(ty) / f32(ny)
-	lo = 1 - 2 * f32(ty + 1) / f32(ny)
-	return
 }
 
 // -----------------------------------------------------------------------

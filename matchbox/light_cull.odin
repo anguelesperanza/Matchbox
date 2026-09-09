@@ -255,12 +255,30 @@ cluster_frustum_from_camera :: proc(camera: Camera3D, grid: Cluster_Grid) -> Clu
 	return f
 }
 
-// The NDC range tile `t` (of `n`) covers along one axis, both axes read the
-// same way: tile 0 starts at NDC -1, tile n-1 ends at NDC 1.
+// The NDC range tile `t` (of `n`) covers along X: tile 0 starts at NDC -1,
+// tile n-1 ends at NDC 1, increasing left to right the same way NDC does.
 @(private)
 cluster_ndc_range :: proc(t, n: int) -> (lo, hi: f32) {
 	lo = -1 + 2 * f32(t) / f32(n)
 	hi = -1 + 2 * f32(t + 1) / f32(n)
+	return
+}
+
+/*
+	The NDC range tile `t` (of `n`) covers along Y -- top-down, so tile 0 is
+	the top row of the screen, matching `SV_Position.y`'s own orientation
+	(row 0 at the top, increasing downward). NDC +1 is top (math3d.odin's own
+	top comment on SDL3_GPU's convention), so tile 0's own NDC range is the
+	*high* end and tile n-1's is the low end -- the reverse of X, which is
+	why this is not just `cluster_ndc_range` called with the axes swapped.
+	`cluster_index_for_fragment` (lighting_core.hlsli) needs no flip to
+	match this, unlike `shadow_sample_pcf`'s own V-flip (shaders/shadow/pcf.hlsli)
+	for a different mapping.
+*/
+@(private)
+cluster_ndc_range_y :: proc(t, n: int) -> (lo, hi: f32) {
+	hi = 1 - 2 * f32(t) / f32(n)
+	lo = 1 - 2 * f32(t + 1) / f32(n)
 	return
 }
 
@@ -326,19 +344,7 @@ cluster_test :: proc(f: Cluster_Frustum, view_center: [3]f32, radius: f32, tx, t
 	if d - radius > z_far  do return false
 
 	x0, x1 := cluster_ndc_range(tx, f.nx)
-
-	/*
-		Y is top-down -- tile 0 is the top row of the screen, matching
-		SV_Position.y's own orientation (row 0 at the top, increasing
-		downward), so `cluster_index_for_fragment` needs no flip the way
-		`shadow_sample_pcf`'s own V-flip (shaders/shadow/pcf.hlsli) needs
-		one for a different mapping. NDC +1 is top (math3d.odin's own top
-		comment on SDL3_GPU's convention), so tile 0's NDC range is the
-		*high* end and tile n-1's is the low end -- the reverse of X, which
-		increases left to right the same way NDC does.
-	*/
-	y1 := 1 - 2 * f32(ty) / f32(f.ny)
-	y0 := 1 - 2 * f32(ty + 1) / f32(f.ny)
+	y0, y1 := cluster_ndc_range_y(ty, f.ny)
 
 	switch f.projection {
 	case .ORTHOGRAPHIC:

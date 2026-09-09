@@ -876,8 +876,16 @@ Answered once, and not re-litigated per phase.
    nothing applies one, and when something does, no BRDF file changes.
 
 6. **A loaded glTF gets the shading model its own file declares, with a
-   loader-level override.** *Not yet implemented -- P2d shipped the other way
-   and this reverses it. Apply after P3 lands; see below for why not sooner.*
+   loader-level override.** *Implemented after P3b, commit `8f988fe`. One
+   refinement made while building it: `KHR_materials_pbrSpecularGlossiness` is
+   deliberately **not** detected -- it is archived, its factors live in an
+   untyped `json.Value` this package has no typed parse for, and glTF requires
+   a file using it to also carry a `pbrMetallicRoughness` block precisely so a
+   client without the extension has a correct fallback. Taking that fallback is
+   the spec's own designed path rather than a gap. A primitive with no material
+   at all also keeps `MATERIAL_DEFAULTS` rather than becoming PBR: that is the
+   generated-shape case, and glTF's default material is metallic 1 roughness 1,
+   a rough metal nobody wants an untextured primitive to turn into.*
 
    P2d left `read_material` assigning `MATERIAL_DEFAULTS`' Blinn-Phong to every
    loaded material, reasoning that `lighting_plan.md` says the game picks the

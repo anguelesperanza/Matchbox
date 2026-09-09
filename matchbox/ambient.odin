@@ -128,9 +128,9 @@ Environment_Probe :: struct {
 }
 
 /*
-	Bakes `source`'s own cube map into a new `Environment_Probe` -- does
-	**not** install it as the scene's own ambient; call `set_environment_probe`
-	with the result to do that. Split the way `load_skybox_cubemap` (a pure
+	Bakes `source`'s own cube map into a new `Environment_Probe` -- does **not**
+	install it as the scene's own ambient; call `set_environment_probe` with
+	the result to do that. Split the way `load_skybox_cubemap` (a pure
 	loader) and drawing it (a separate call) already are: baking a probe is
 	comparatively expensive and a game may want to hold on to more than one
 	(day and night, say) and switch between them without re-baking.

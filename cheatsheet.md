@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 370 of them -- with its arguments
+Every public procedure in the package -- 375 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -21,14 +21,14 @@ any.
 - [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 42
-- [3D drawing](#3d-drawing) -- 21
+- [3D drawing](#3d-drawing) -- 23
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 26
+- [Other](#other) -- 29
 
 ## Getting started
 
@@ -1946,6 +1946,28 @@ create_spot_light :: proc(
 A cone of light at `position`, pointing along `direction`.
 
 ```odin
+create_area_rect_light :: proc(
+	position: [3]f32,
+	normal: [3]f32,
+	right: [3]f32,
+	width: f32,
+	height: f32,
+	color: [4]f32 = WHITE,
+) -> Light
+```
+A flat rectangle of light at `position`, facing `normal`, `width` wide along `right` and `height` wide along the axis square to both.
+
+```odin
+create_area_disk_light :: proc(
+	position: [3]f32,
+	normal: [3]f32,
+	radius: f32,
+	color: [4]f32 = WHITE,
+) -> Light
+```
+A flat disk of light at `position`, facing `normal`, `radius` wide.
+
+```odin
 set_lights :: proc(lights: []Light)
 ```
 Sets every light in the scene at once, replacing whatever was there.
@@ -2481,6 +2503,27 @@ is_mouse_over_sprite :: proc(sprite:Sprite) -> bool
 Whether the pointer is over a sprite.
 
 ## Other
+
+### `ambient.odin`
+
+```odin
+create_environment_probe :: proc(
+	source: Skybox,
+	settings: Environment_Probe_Settings = ENVIRONMENT_PROBE_DEFAULTS) -> (probe: Environment_Probe,
+	err: Error,
+)
+```
+Bakes `source`'s own cube map into a new `Environment_Probe` -- does **not** install it as the scene's own ambient; call `set_environment_probe` with the result to do that.
+
+```odin
+set_environment_probe :: proc(probe: Environment_Probe)
+```
+Installs `probe` as the scene's own environment probe, releasing whatever was bound before -- `set_lighting`'s own "replace the whole struct" shape, applied to the one piece of ambient/environment state that is a GPU resource rather than a plain value and therefore cannot live on `Lighting_Settings` itself (see that struct's own doc comment).
+
+```odin
+destroy_environment_probe :: proc(probe: ^Environment_Probe)
+```
+Releases a probe's own two textures.
 
 ### `lighting.odin`
 

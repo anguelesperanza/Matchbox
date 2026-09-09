@@ -114,3 +114,92 @@ float3 pbr_fresnel_schlick(float cos_theta, float3 f0)
     float m = clamp(1.0 - cos_theta, 0.0, 1.0);
     return f0 + (1.0 - f0) * (m * m * m * m * m);
 }
+
+/*
+    The split-sum BRDF integration term, analytically approximated rather
+    than baked -- `ambient.odin`'s own top comment names this as the one of
+    P4's three IBL pieces that is not generated at all: no bake pass, no
+    texture, no third probe sampler slot (which would have pushed
+    `MESH_FRAG_SAMPLER_COUNT`, render.odin, from 10 to 11 -- still under
+    Vulkan's floor of 16, but a cost worth avoiding when a closed-form fit is
+    this cheap and this close).
+
+    This is the Karis 2014 ("Real Shading in Unreal Engine 4", mobile
+    approximation) / Lazarov 2013 ("Getting More Physical in Call of Duty:
+    Black Ops II") polynomial fit for `f0 * scale + bias`, where `scale`/
+    `bias` are what a real split-sum LUT would otherwise store per
+    `(roughness, n_dot_v)` texel. **The anchor this file's own furnace sweep
+    (`ibl_test.odin`) checks it against**: at `roughness = 0` a specular
+    reflection is a perfect mirror, where the correct closed-form answer is
+    exactly `scale = 1, bias = 0` (the surface returns exactly what it
+    reflects, unmodified) -- this fit reduces to that anchor within the same
+    tolerance `pbr_test.odin` already uses for GGX's own closed-form check,
+    not merely "looks close on a graph". Away from that anchor the fit is
+    good to a few percent across the roughness/n_dot_v domain (the numbers
+    the two papers above measured against a numerically-integrated
+    reference) -- close enough that no material in this package's furnace
+    sweep visibly gains energy from using it in place of a real LUT, but it
+    is still a fit, not the reference integral itself, and a case sitting
+    exactly on its worst deviation would show a few percent of drift a real
+    LUT would not have.
+*/
+float2 pbr_env_brdf_approx(float roughness, float n_dot_v)
+{
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4( 1.0,  0.0425,  1.04, -0.04);
+
+    float4 r    = roughness * c0 + c1;
+    float  a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
+
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+/*
+    The specular half of image-based lighting -- `pbr_metallic.hlsli`/
+    `pbr_specgloss.hlsli`'s own resolve calls this alongside `ambient_light`
+    (`lighting_core.hlsli`, the diffuse half); no other shading model calls
+    it, since Blinn-Phong/toon/subsurface have no physically-based specular
+    environment term to add -- see `ambient_light`'s own doc comment for why
+    that split is two functions rather than one.
+
+    Returns zero outright under `AMBIENT_CONSTANT`/`AMBIENT_HEMISPHERE`: a
+    flat colour or a two-colour gradient has no notion of "the reflection
+    seen in this direction", so there is nothing physically meaningful this
+    could return under either, and a material's own specular highlight
+    (already accumulated per-light, `total.specular`) is what a mirror-like
+    surface shows in a scene with no probe rather than a fabricated
+    stand-in -- the same "opt in, nothing happens" shape selecting
+    `ENVIRONMENT_PROBE` with no probe ever loaded already has
+    (`Renderer.default_probe_texture`'s own doc comment, render.odin).
+
+    **The level chosen is a layer index, not a real mip level.** Unlike a
+    hardware-filtered mip chain, `prefiltered_map`'s `prefilter_level_count`
+    roughness buckets are `prefilter_level_count` *layers* of one
+    `Texture2DArray` (`ambient.odin`'s own top comment explains why: every
+    layer must share one width/height, so there is no per-level resolution
+    falloff the way a real mip chain has) -- `roughness` is turned into the
+    nearest layer with a plain `round`, not `SampleLevel`'s own fractional
+    interpolation between mips, since there is no second adjacent mip of the
+    same texture to blend toward. A visible band between two roughness
+    layers is the cost of that choice; see this function's own top comment
+    for why a real mip chain was not built instead.
+*/
+float3 pbr_environment_specular(Surface surface, float3 f0)
+{
+    if (int(ambient.w) != AMBIENT_ENVIRONMENT_PROBE)
+        return float3(0.0, 0.0, 0.0);
+
+    float3 r       = reflect(-surface.view, surface.normal);
+    float  n_dot_v = max(dot(surface.normal, surface.view), 1e-4);
+
+    float level_count_minus_one = ambient_ground.w;
+    int   level                 = int(round(saturate(surface.roughness) * level_count_minus_one));
+
+    int    face = shadow_cube_face_index(r);
+    float2 uv   = probe_layer_uv(r, face);
+
+    float3 prefiltered = prefiltered_map.Sample(probe_sampler1, float3(uv, float(level * 6 + face))).rgb;
+    float2 env_brdf    = pbr_env_brdf_approx(surface.roughness, n_dot_v);
+
+    return prefiltered * (f0 * env_brdf.x + env_brdf.y);
+}

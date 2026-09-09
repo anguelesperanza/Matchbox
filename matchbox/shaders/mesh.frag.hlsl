@@ -68,6 +68,29 @@ SamplerComparisonState cascade_sampler : register(s6, space2);
 Texture2DArray<float>  cube_maps       : register(t7, space2);
 SamplerComparisonState cube_sampler    : register(s7, space2);
 
+/*
+    The environment probe's own two maps (P4, ambient.odin) -- diffuse
+    irradiance and prefiltered specular, one `Texture2DArray` apiece (six
+    layers, or `6 * prefilter_level_count` for the prefiltered one), always
+    declared and always bound to something valid (a real probe's own maps,
+    or `Renderer.default_probe_texture`'s six-layer black placeholder,
+    render.odin) the same way `cascade_maps`/`cube_maps` above always are
+    whether or not this scene's shadow settings ever use them. One shared
+    `probe_sampler` (init.odin) rather than one per map: both are read with
+    the identical addressing (`probe_layer_uv`, `lighting_core.hlsli`) and
+    the identical filtering -- `probe_sampler0`/`probe_sampler1` are the same
+    `Renderer.probe_sampler` object (init.odin, render3d.odin) bound twice,
+    not two different samplers, but SDL_GPU's binding model still wants one
+    `SamplerState` declared per texture-sampler pair the way `metal_rough_smp`/
+    `occlusion_smp`/`emissive_smp` above already do even though
+    `resolve_texture`'s own doc comment notes those are, in practice, one
+    underlying sampler too.
+*/
+Texture2DArray<float4> irradiance_map   : register(t8, space2);
+SamplerState            probe_sampler0  : register(s8, space2);
+Texture2DArray<float4> prefiltered_map  : register(t9, space2);
+SamplerState            probe_sampler1  : register(s9, space2);
+
 cbuffer Material : register(b0, space3)
 {
     float4 tint;       // draw_model's own multiplier, not a material property

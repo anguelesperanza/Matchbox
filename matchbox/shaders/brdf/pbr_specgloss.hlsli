@@ -72,9 +72,15 @@ Radiance brdf_light_pbr_specgloss(Surface surface, Light_Sample light)
 }
 
 // Identical combine to `brdf_resolve_pbr_metallic` -- see that function's own
-// doc comment. Both PBR models resolve their sums the same, boring way; the
-// two files differ only in how each arrives at the per-light `Radiance`.
+// doc comment, P4's own `pbr_environment_specular` addition included. Both
+// PBR models resolve their sums the same, boring way; the two files differ
+// only in how each arrives at the per-light `Radiance` and in what `f0` is
+// (`surface.specular`, painted directly -- see this file's own top comment
+// -- rather than metallic-roughness's own lerp).
 float3 brdf_resolve_pbr_specgloss(Surface surface, Radiance total)
 {
-    return total.diffuse + total.specular + surface.emissive + ambient.rgb * surface.occlusion;
+    float3 ambient_specular = pbr_environment_specular(surface, surface.specular);
+
+    return total.diffuse + total.specular + surface.emissive +
+        (ambient_light(surface) + ambient_specular) * surface.occlusion;
 }

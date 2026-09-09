@@ -87,11 +87,26 @@ Radiance brdf_light_blinn_phong(Surface surface, Light_Sample light)
     `lighting_core.hlsli`), so multiplying the two sums here reproduces the
     same cross terms P0's single accumulating loop produced, without either
     sum needing to know about any other light while it was being built.
+
+    **`ambient.rgb` became `ambient_light(surface)` in P4**, the one edit
+    this file needed for `Ambient_Kind.HEMISPHERE`/`.ENVIRONMENT_PROBE`
+    (lighting.odin) to reach this model at all -- see that function's own
+    doc comment (lighting_core.hlsli). The `/ 10.0` stays local to this
+    model regardless of which `Ambient_Kind` supplied the colour: it is
+    PsxGame's own tuning of what *Blinn-Phong* does with ambient, not a
+    property of a flat colour specifically, so the two new modules must not
+    (and do not) bypass it -- `ambient_light`'s own return value means the
+    same thing to this resolve whichever module produced it. No specular
+    environment term is added here even under `ENVIRONMENT_PROBE`: this
+    model has no physically-based notion of a prefiltered reflection, the
+    same reason `pbr_environment_specular` (brdf/pbr_common.hlsli) is a
+    second, separate call the two PBR models opt into rather than something
+    every resolve function receives automatically.
 */
 float3 brdf_resolve_blinn_phong(Surface surface, Radiance total)
 {
     float3 color = surface.base_color * (1.0 + total.specular) * total.diffuse;
-    color += surface.base_color * (ambient.rgb / 10.0);
+    color += surface.base_color * (ambient_light(surface) / 10.0);
 
     return color;
 }

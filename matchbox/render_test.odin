@@ -9,15 +9,19 @@ package matchbox
 	`maxPerStageDescriptorSamplers` -- invisible to `odin check`, invisible to
 	`dxc`, and untestable by rendering a frame in this environment (no GPU).
 	P3b collapsed CASCADED's and CUBE's own resource arrays into one
-	Texture2DArray apiece, bringing the count to 8 -- see mesh.frag.hlsl's own
-	top comment and `MESH_FRAG_SAMPLER_COUNT`'s (render.odin).
+	Texture2DArray apiece, bringing the count to 8; P4's environment probe
+	added its own two maps (`irradiance_map`/`prefiltered_map`,
+	mesh.frag.hlsl) on top of that, bringing it to 10 -- see mesh.frag.hlsl's
+	own top comment and `MESH_FRAG_SAMPLER_COUNT`'s (render.odin).
 
 	This is the one number that can be pinned without a device: it is a plain
 	Odin constant, passed to `CreateGPUShader` by `init` rather than a bare
 	literal at that call site, specifically so a test can read the actual
 	value the code sends rather than asserting on source text. A future phase
-	(P4's environment probes, most likely) that pushes this back toward or
-	past 16 will fail here before it ever reaches a device that enforces the
+	that pushes this back toward or past 16 -- a real BRDF integration LUT
+	texture would have been the next candidate, had P4 not approximated that
+	term analytically instead (`pbr_env_brdf_approx`, brdf/pbr_common.hlsli)
+	-- will fail here before it ever reaches a device that enforces the
 	limit -- which, per `lighting_rework.md`'s own account, is exactly the
 	class of failure nothing else in this package's toolchain catches.
 */
@@ -30,8 +34,12 @@ test_mesh_frag_sampler_count_is_pinned_under_vulkan_floor :: proc(t: ^testing.T)
 	// change (not just a regression past the floor) shows up as a failing
 	// test a developer has to look at and consciously update, the same
 	// "changing the expected value is itself the finding" shape
-	// shadow_test.odin's own numeric expectations already have.
-	testing.expect_value(t, MESH_FRAG_SAMPLER_COUNT, 8)
+	// shadow_test.odin's own numeric expectations already have. P4 is
+	// exactly that: this failed with "expected 8, got 10" the moment the
+	// environment probe's two maps were declared, and updating it here is
+	// that conscious look, not a rubber stamp -- 10 is still five under the
+	// floor the second assertion below checks.
+	testing.expect_value(t, MESH_FRAG_SAMPLER_COUNT, 10)
 
 	// The actual invariant: Vulkan's spec-guaranteed minimum for both
 	// maxPerStageDescriptorSampledImages and maxPerStageDescriptorSamplers is

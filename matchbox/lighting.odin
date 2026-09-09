@@ -42,13 +42,62 @@ Render_Pipeline_Kind :: enum {
 	FORWARD,
 }
 
-// The light that reaches every surface regardless of where it faces or what
-// casts a shadow toward it. Divided by ten inside brdf/blinn_phong.hlsli,
-// which is PsxGame's own scaling and is kept so that a value carried over
-// from there means the same thing. `Shading_Model.UNLIT` never reads this --
-// an unlit material ignores every piece of scene lighting, ambient included.
+/*
+	Which module supplies the light that reaches every surface regardless of
+	where it faces or what casts a shadow toward it -- `lighting_plan.md`
+	section 4's own "ambient/environment" line, which named three shapes
+	(constant, hemisphere, a probe) without picking one; P4 is what actually
+	builds the other two.
+
+	`CONSTANT` is what existed before this phase: one flat colour, everywhere,
+	regardless of a surface's own normal.
+
+	`HEMISPHERE` blends `Ambient.color` (read as the sky, above) and
+	`Ambient.ground_color` (below) by the surface's own normal against world
+	`+Y` -- see `ambient_light`'s own doc comment (lighting_core.hlsli) for
+	why `+Y` rather than a configurable axis. Cheap, and a real improvement
+	over `CONSTANT` for an outdoor scene: a ceiling-facing surface picks up
+	sky colour and a floor-facing one picks up ground colour without needing
+	a single real light to do it.
+
+	`ENVIRONMENT_PROBE` reads a baked `Environment_Probe` instead of either
+	colour -- see that struct's own doc comment (ambient.odin) for what gets
+	generated at load and what is approximated, and `set_environment_probe`
+	for how one gets bound to the scene. Selecting this with no probe ever
+	loaded degrades to no ambient light at all, the same "opt in, nothing
+	happens" shape the rest of this system already has -- see
+	`Renderer.default_probe_texture`'s own doc comment (render.odin).
+*/
+Ambient_Kind :: enum {
+	CONSTANT,
+	HEMISPHERE,
+	ENVIRONMENT_PROBE,
+}
+
+/*
+	The light that reaches every surface regardless of where it faces or what
+	casts a shadow toward it -- see `Ambient_Kind`'s own doc comment for the
+	three modules this selects between.
+
+	`color` is `CONSTANT`'s whole answer and `HEMISPHERE`'s own sky half;
+	`ground_color` is `HEMISPHERE`'s other half and is not read by either of
+	the other two kinds. Divided by ten inside brdf/blinn_phong.hlsli's own
+	resolve, which is PsxGame's own scaling and is kept so that a value
+	carried over from there means the same thing -- see `ambient_light`'s own
+	doc comment for why that scaling stays local to one model's resolve
+	rather than living in the shared dispatcher this struct feeds.
+	`Shading_Model.UNLIT` never reads any of this -- an unlit material
+	ignores every piece of scene lighting, ambient included.
+
+	The zero value is `kind = .CONSTANT, color = {0,0,0,0}`, which is exactly
+	what `Ambient{}` already meant before `kind` existed -- no ambient light
+	at all -- so an existing `Lighting_Settings{ambient = {color = ...}}`
+	literal keeps meaning what it always did.
+*/
 Ambient :: struct {
-	color: [4]f32,
+	kind:         Ambient_Kind,
+	color:        [4]f32,
+	ground_color: [4]f32,
 }
 
 /*
@@ -266,12 +315,14 @@ is_lighting_active :: proc() -> bool {
 }
 
 /*
-	224 bytes -- everything `shade_surface` (lighting_core.hlsli) needs about
-	the scene besides the lights themselves, which are their own
-	`StructuredBuffer` now and no longer part of this block at all. That is
-	the whole reason this is smaller than the `Lighting_Data` it replaces:
-	that struct carried `[MAX_LIGHTS]Light_Uniform` inline and was 1248 bytes
-	at MAX_LIGHTS = 16; this is the same handful of scalars alone.
+	240 bytes since P4 added `ambient_ground` (16 more, for HEMISPHERE's
+	ground colour and the prefiltered probe's own level count) -- everything
+	`shade_surface` (lighting_core.hlsli) needs about the scene besides the
+	lights themselves, which are their own `StructuredBuffer` now and no
+	longer part of this block at all. That is the whole reason this is
+	smaller than the `Lighting_Data` it replaces: that struct carried
+	`[MAX_LIGHTS]Light_Uniform` inline and was 1248 bytes at MAX_LIGHTS = 16;
+	this is the same handful of scalars alone.
 
 	Every member a float4 or a float4x4, for the packing reason this package
 	repeats at every uniform block: HLSL pads a vector that would straddle a
@@ -284,9 +335,24 @@ is_lighting_active :: proc() -> bool {
 	nobody re-measured.
 */
 Scene_Frag_Data :: struct #align(16) {
-	ambient:   [4]f32, // rgb
+	// rgb: the CONSTANT colour, or HEMISPHERE's own sky colour -- unread
+	// under ENVIRONMENT_PROBE, which reads the probe's own textures instead.
+	// w: Ambient_Kind's own ordinal -- see ambient_light (lighting_core.hlsli).
+	ambient:   [4]f32,
 	view_pos:  [4]f32, // xyz, filled in from the active camera
 	fog_color: [4]f32, // rgb
+
+	/*
+		P4's own addition, alongside `ambient` rather than folded into it:
+		HEMISPHERE's ground colour has nowhere else to live, since `ambient`
+		above is already spoken for by its sky half. rgb is that ground
+		colour; w is `Environment_Probe.prefiltered_level_count - 1`, pushed
+		here rather than recomputed in the shader because
+		`pbr_environment_specular` (brdf/pbr_common.hlsli) needs it as a
+		plain scale on `roughness` and has no other way to learn how many
+		levels the currently-bound `prefiltered_map` actually has.
+	*/
+	ambient_ground: [4]f32,
 
 	// x near, y far, z 1 when fog is enabled, w unused.
 	fog_range: [4]f32,
@@ -377,8 +443,16 @@ push_lighting :: proc(camera: Camera3D) {
 	l  := &r.lighting
 	sh := &l.shadow
 
+	// prefiltered_level_count - 1: the scale pbr_environment_specular
+	// (brdf/pbr_common.hlsli) turns a [0,1] roughness into a level index
+	// with. 0 whenever no probe is bound, which keeps that multiply well
+	// defined (a level of 0 into a 1x1 placeholder) rather than a divide by
+	// a level count of zero.
+	prefiltered_levels_minus_one := f32(max(l.probe.prefiltered_level_count-1, 0))
+
 	data := Scene_Frag_Data{
-		ambient   = l.settings.ambient.color,
+		ambient        = {l.settings.ambient.color.x, l.settings.ambient.color.y, l.settings.ambient.color.z, f32(l.settings.ambient.kind)},
+		ambient_ground = {l.settings.ambient.ground_color.x, l.settings.ambient.ground_color.y, l.settings.ambient.ground_color.z, prefiltered_levels_minus_one},
 		view_pos  = {camera.position.x, camera.position.y, camera.position.z, 0},
 		fog_color = l.settings.fog.color,
 		fog_range = {l.settings.fog.start, max(l.settings.fog.end, l.settings.fog.start + 0.001), 1 if l.settings.fog.enabled else 0, 0},

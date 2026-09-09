@@ -584,6 +584,30 @@ draw_model_immediate :: proc(
 				r.bound_cube_maps = shadow.cube_texture
 			}
 
+			/*
+				The environment probe's own two maps, slots 8 and 9 -- one
+				`default_probe_texture` placeholder standing in for whichever
+				half (or both) `Renderer.lighting.probe` does not currently
+				have, the same "always something valid bound" shape every
+				other always-declared slot in this shader already has. Bound
+				as a pair, unlike the shadow slots above, since a game
+				replacing its probe (`set_environment_probe`, ambient.odin)
+				always replaces both maps together -- there is no technique
+				switch here that leaves one stale while the other updates.
+			*/
+			probe_maps := [2]^sdl.GPUTexture{
+				r.lighting.probe.irradiance  if r.lighting.probe.irradiance  != nil else r.default_probe_texture,
+				r.lighting.probe.prefiltered if r.lighting.probe.prefiltered != nil else r.default_probe_texture,
+			}
+			if r.bound_probe_maps != probe_maps {
+				probe_bindings := [2]sdl.GPUTextureSamplerBinding{
+					{texture = probe_maps[0], sampler = r.probe_sampler},
+					{texture = probe_maps[1], sampler = r.probe_sampler},
+				}
+				sdl.BindGPUFragmentSamplers(r.pass, 8, &probe_bindings[0], 2)
+				r.bound_probe_maps = probe_maps
+			}
+
 			if r.bound_light_buffer != r.lighting.light_buffer {
 				light_buffer := r.lighting.light_buffer
 				sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)

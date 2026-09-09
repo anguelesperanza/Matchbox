@@ -5,13 +5,22 @@ import sdl "vendor:sdl3"
 /*
 	How many sampled textures/samplers mesh.frag.hlsl declares -- 1 base
 	colour, 3 material maps, 2 PCF/PCSS shadow maps, 1 CASCADED array, 1 CUBE
-	array, at t0-t7/s0-s7 (see that file's own top comment). Passed to
-	`create_builtin_shader` for `Shaders.mesh_frag` below rather than a bare
-	literal at the call site, so `render_test.odin` can pin
+	array, 1 environment probe irradiance map, 1 environment probe
+	prefiltered map, at t0-t9/s0-s9 (see that file's own top comment). Passed
+	to `create_builtin_shader` for `Shaders.mesh_frag` below rather than a
+	bare literal at the call site, so `render_test.odin` can pin
 	the actual value `init` hands `CreateGPUShader` under Vulkan's guaranteed
 	per-stage floor (16, for both `maxPerStageDescriptorSampledImages` and
 	`maxPerStageDescriptorSamplers`) rather than merely asserting on source
 	text.
+
+	**Grew from 8 to 10 in P4**, for the environment probe's own two maps
+	(`ambient.odin`) -- still five under the floor `render_test.odin` pins,
+	and comfortably clear of it: a real BRDF integration LUT would have been
+	a third texture and pushed this to 11, still fine, but P4 approximates
+	that term analytically instead (`pbr_env_brdf_approx`,
+	brdf/pbr_common.hlsli) rather than spending a slot and a bake pass on it
+	-- see that function's own doc comment for the trade.
 
 	Not a CLAUDE.md "configuration" constant -- nothing about this number is a
 	judgement call a game could reasonably want to override, since it has to
@@ -22,7 +31,7 @@ import sdl "vendor:sdl3"
 	`MAX_CASCADES`/`MAX_CASCADES_HLSL` (shadow.odin,
 	shaders/shadow/cascaded.hlsli) already has.
 */
-MESH_FRAG_SAMPLER_COUNT :: 8
+MESH_FRAG_SAMPLER_COUNT :: 10
 
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
@@ -72,6 +81,14 @@ Shaders :: struct {
 	post: ^sdl.GPUShader,
 	psx:  ^sdl.GPUShader,
 	vhs:  ^sdl.GPUShader,
+
+	// Environment probe baking -- both take the skybox's own vertex shader
+	// (Shaders.skybox), reused rather than duplicated: a per-face camera
+	// basis is a per-face camera basis whether the fragment shader that
+	// reads it draws a sky or convolves one. See ambient.odin's own top
+	// comment.
+	probe_irradiance: ^sdl.GPUShader,
+	probe_prefilter:  ^sdl.GPUShader,
 
 	/*
 		The tonemap resolve -- exposure, one of `Tonemap`'s curves, then the
@@ -141,6 +158,14 @@ Pipelines :: struct {
 	// the swapchain's own format like every other 2D pipeline here: it writes
 	// into current_color_texture(), never into the HDR target itself.
 	tonemap: ^sdl.GPUGraphicsPipeline,
+
+	// Environment probe baking -- see Shaders.probe_irradiance/probe_prefilter's
+	// own comment. Built against the HDR target's own float format
+	// (ambient.odin's own top comment), not the swapchain's: these write
+	// into a probe's own textures, never onto anything a game will see
+	// directly.
+	probe_irradiance: ^sdl.GPUGraphicsPipeline,
+	probe_prefilter:  ^sdl.GPUGraphicsPipeline,
 }
 
 /*
@@ -167,6 +192,12 @@ Lighting :: struct {
 	light_capacity: int,
 
 	shadow: Shadow_State, // shadow.odin / shadow_standard.odin
+
+	// The baked diffuse/specular environment maps `Ambient_Kind.ENVIRONMENT_PROBE`
+	// reads (lighting.odin, ambient.odin) -- zero value is "no probe loaded",
+	// which is what makes selecting that ambient kind before ever calling
+	// create_environment_probe degrade to no ambient light rather than a crash.
+	probe: Environment_Probe,
 
 	// The HDR scene target the 3D pass actually draws into, and the tonemap
 	// resolve that turns it back into whatever begin_drawing_3d was called
@@ -207,6 +238,26 @@ Renderer :: struct {
 		the same sampler slot.
 	*/
 	default_texture: ^sdl.GPUTexture,
+
+	/*
+		1x1 black, sampled at both of the environment probe's own slots
+		(`irradiance_map`/`prefiltered_map`, mesh.frag.hlsl) whenever
+		`Renderer.lighting.probe` is empty -- the same "always something valid
+		bound" trick `default_texture` already plays for the material maps,
+		applied to `Ambient_Kind.ENVIRONMENT_PROBE` so selecting it with no
+		probe ever loaded reads as zero ambient light rather than sampling a
+		nil texture. Black rather than white here: `default_texture` stands
+		in for a *factor* (1.0 is "no change"), this stands in for *emitted
+		light* (0.0 is "none"), and the two would be the wrong value swapped.
+	*/
+	default_probe_texture: ^sdl.GPUTexture,
+
+	// The environment probe's own sampler -- mipmap-linear (see
+	// ambient.odin's own doc comment on why the prefiltered map is read with
+	// an explicit level rather than automatic derivatives), shared by both
+	// probe slots and by the 1x1 placeholder above the same way
+	// `sprite_sampler` is shared by every untextured material slot.
+	probe_sampler: ^sdl.GPUSampler,
 
 	// Linear, and wrapping across the seam where a panorama's longitude comes
 	// back round to itself. Clamped in v, so the poles do not bleed into each
@@ -311,6 +362,13 @@ Renderer :: struct {
 	bound_shadow_maps:  [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
 	bound_cascade_maps: ^sdl.GPUTexture,
 	bound_cube_maps:    ^sdl.GPUTexture,
+
+	// The environment probe's own two maps -- {irradiance, prefiltered},
+	// whichever of a real probe or default_probe_texture's own placeholder is
+	// currently bound for each. See draw_model_immediate's own comment on
+	// why these two always bind together.
+	bound_probe_maps:   [2]^sdl.GPUTexture,
+
 	bound_light_buffer: ^sdl.GPUBuffer,
 
 	// draw_model calls made with casts_shadow = true before begin_drawing_3d
@@ -346,6 +404,7 @@ bind_cache_reset :: proc() {
 	r.bound_shadow_maps       = {}
 	r.bound_cascade_maps      = nil
 	r.bound_cube_maps         = nil
+	r.bound_probe_maps        = {}
 	r.bound_light_buffer      = nil
 }
 

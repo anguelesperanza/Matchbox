@@ -222,6 +222,14 @@ Post_Frag_Data :: struct #align(16) {
 	_pad:       [3]f32,
 }
 
+// 16 bytes. probe_prefilter.frag.hlsl's own fragment uniform -- which
+// roughness level of the prefiltered environment map this draw is baking.
+// See create_environment_probe (ambient.odin), the one caller.
+Probe_Prefilter_Frag_Data :: struct #align(16) {
+	roughness: f32,
+	_pad:      [3]f32,
+}
+
 // 16 bytes. The tonemap resolve's own fragment uniform -- exposure and which
 // curve to run, nothing else. Does not share Post_Frag_Data: this is not a
 // Post_Effect a game chooses, it is the always-on step that turns the HDR
@@ -233,7 +241,11 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 }
 
 /*
-	One light, as the shader reads it. 64 bytes. An element of the
+	One light, as the shader reads it. 112 bytes since P4 -- this comment
+	said 64 for a while after `shadow_bias` (P3) actually made it 80, and
+	`area_right`/`area_size` (P4) make it 112 now; the count is worth
+	re-checking against the field list below rather than trusted, which is
+	exactly the mistake that let it drift the first time. An element of the
 	`StructuredBuffer<Light>` `lighting_core.hlsli` declares (see
 	`light.odin`'s own `Lighting.light_buffer`) rather than a fixed-size
 	cbuffer array the way it was before this rework -- see `light.odin`'s top
@@ -263,13 +275,26 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 	`material_frag_data` already uses for `Material`, and for the same reason:
 	a `Light` belongs to whoever built it, so there is nowhere on this struct
 	to store a normalized copy the caller would ever read back.
+
+	**`area_right`/`area_size` joined the rest in P4**, for the two new area
+	kinds (`Light_Kind.AREA_RECT`/`.AREA_DISK`, light.odin). `target.w`
+	(`kind_flag`) grew from 0..2 to 0..4: 3 is `AREA_RECT`, 4 `AREA_DISK` --
+	see `sample_light` (lighting_core.hlsli) for how those two are reduced to
+	the same shape every punctual light already has before anything
+	downstream of it ever runs.
 */
 Light_Uniform :: struct #align(16) {
 	position:     [4]f32, // xyz where it is,                     w 1 when enabled
-	target:       [4]f32, // xyz direction (directional/spot), unused (point), w kind: 0/1/2
+	target:       [4]f32, // xyz direction (directional/spot/area facing), w kind: 0 directional, 1 point, 2 spot, 3 area rect, 4 area disk
 	color:        [4]f32,
 	cone:         [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
 	shadow_bias:  [4]f32, // x depth bias, y normal-offset bias -- see Shadow_Bias.  z-w unused
+
+	// Area rect/disk only -- see Light.area_right's own doc comment
+	// (light.odin) for what each component means and why a disk leaves most
+	// of them unread.
+	area_right: [4]f32, // xyz normalized tangent axis (rect only), w half-width (rect) / radius (disk)
+	area_size:  [4]f32, // x half-height (rect only).  y-w unused
 }
 
 // GPU handle bundle — shared by Sprite, Animation_Clip, and Font.

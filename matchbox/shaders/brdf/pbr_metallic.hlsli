@@ -100,13 +100,28 @@ Radiance brdf_light_pbr_metallic(Surface surface, Light_Sample light)
     The plain, physically-based combine `lighting_rework.md` section 2.1
     calls "the boring case this was designed for": the two accumulated
     channels, `emissive` (a surface's own light, independent of anything
-    arriving from outside it), and `ambient * occlusion` -- ambient reaches
-    every point equally except where `occlusion` says a point is tucked away
-    from it. No division, no cross term: unlike blinn_phong's resolve, GGX's
-    energy split already happened per-light, above, so there is nothing left
-    for this step to do but add.
+    arriving from outside it), and `ambient_light(surface) * occlusion` --
+    ambient reaches every point equally except where `occlusion` says a
+    point is tucked away from it. No division, no cross term: unlike
+    blinn_phong's resolve, GGX's energy split already happened per-light,
+    above, so there is nothing left for this step to do but add.
+
+    **`pbr_environment_specular` joined this in P4**, occlusion-weighted the
+    same way the diffuse ambient term already is -- see that function's own
+    doc comment (brdf/pbr_common.hlsli) for why it is a second call rather
+    than folded into `ambient_light`, and why it is a silent zero under
+    every `Ambient_Kind` but `ENVIRONMENT_PROBE`. `f0` is recomputed here
+    rather than threaded through from `brdf_light_pbr_metallic`: the two
+    functions are never guaranteed to run back-to-back for the same light
+    (`shade_lights` calls this once per surface, that once per light), and
+    recomputing four scalars is cheaper than a second field on `Radiance`
+    every other shading model would then carry unread.
 */
 float3 brdf_resolve_pbr_metallic(Surface surface, Radiance total)
 {
-    return total.diffuse + total.specular + surface.emissive + ambient.rgb * surface.occlusion;
+    float3 f0 = lerp(float3(0.04, 0.04, 0.04), surface.base_color, surface.metallic);
+    float3 ambient_specular = pbr_environment_specular(surface, f0);
+
+    return total.diffuse + total.specular + surface.emissive +
+        (ambient_light(surface) + ambient_specular) * surface.occlusion;
 }

@@ -69,14 +69,19 @@ Radiance brdf_light_subsurface(Surface surface, Light_Sample light)
     un-scaled, `base_color`-tinted and `occlusion`-attenuated, the same
     choice `brdf_resolve_toon` makes and for the same reason: nothing here is
     physically based enough to justify PsxGame's ambient-over-ten the way
-    blinn_phong's own resolve still does.
+    blinn_phong's own resolve still does. `ambient.rgb` became
+    `ambient_light(surface)` (`lighting_core.hlsli`) in P4 for the same
+    reason `toon`'s own resolve changed -- no specular environment term is
+    added here either, for the same reason: this model's `roughness` is not
+    a real microfacet parameter `pbr_environment_specular`
+    (brdf/pbr_common.hlsli) could key a reflection off of.
 */
 float3 brdf_resolve_subsurface(Surface surface, Radiance total)
 {
     float3 color = surface.base_color * total.diffuse;
     color += surface.subsurface * total.diffuse * saturate(1.0 - surface.thickness);
     color += surface.emissive;
-    color += surface.base_color * ambient.rgb * surface.occlusion;
+    color += surface.base_color * ambient_light(surface) * surface.occlusion;
 
     return color;
 }

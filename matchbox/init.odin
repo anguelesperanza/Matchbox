@@ -446,12 +446,13 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Mesh_Vert_Data)    == 192)
 	#assert(size_of(Tint_Frag_Data)    == 16)
 	#assert(size_of(Material_Frag_Data) == 112)
-	#assert(size_of(Light_Uniform)     == 80)
-	#assert(size_of(Scene_Frag_Data)   == 224)
+	#assert(size_of(Light_Uniform)     == 112)
+	#assert(size_of(Scene_Frag_Data)   == 240)
 	#assert(size_of(Cascade_Frag_Data) == 544)
 	#assert(size_of(Cube_Frag_Data)    == 400)
 	#assert(size_of(Post_Frag_Data)    == 32)
 	#assert(size_of(Tonemap_Resolve_Frag_Data) == 16)
+	#assert(size_of(Probe_Prefilter_Frag_Data) == 16)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
 	// database along -- which is what lets a game ask for `.NORTH` rather than
@@ -591,6 +592,21 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.tonemap = create_builtin_shader(
 		#load("shaders/tonemap.frag.spv"), #load("shaders/tonemap.frag.dxil"), .FRAGMENT, 1)
 
+	/*
+		Environment probe baking (ambient.odin). Both read one sampler -- the
+		source skybox's own cube map -- through the same `skybox.vert.hlsl`
+		vertex shader `Shaders.skybox` already loaded above, reused rather
+		than duplicated (see Shaders.probe_irradiance's own comment).
+		`probe_irradiance` needs no uniform buffer at all: which face it is
+		baking is entirely a function of the vertex data pushed for that
+		draw. `probe_prefilter` needs one -- the roughness level being baked
+		-- since one fragment shader bakes every level, not one per level.
+	*/
+	mbi.renderer.shaders.probe_irradiance = create_builtin_shader(
+		#load("shaders/probe_irradiance.frag.spv"), #load("shaders/probe_irradiance.frag.dxil"), .FRAGMENT, 1, 0)
+	mbi.renderer.shaders.probe_prefilter = create_builtin_shader(
+		#load("shaders/probe_prefilter.frag.spv"), #load("shaders/probe_prefilter.frag.dxil"), .FRAGMENT, 1, 1)
+
 	// Two uniform buffers -- the three matrices every mesh vertex shader
 	// takes, and the joint offset behind them -- plus one storage buffer: the
 	// joint palette itself, unbounded, where a uniform capped at 64 matrices
@@ -643,6 +659,31 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.pipelines.psx     = create_pipeline(mbi.renderer.shaders.psx)
 	mbi.renderer.pipelines.vhs     = create_pipeline(mbi.renderer.shaders.vhs)
 	mbi.renderer.pipelines.tonemap = create_pipeline(mbi.renderer.shaders.tonemap)
+
+	/*
+		Environment probe baking -- the skybox's own vertex shader (no
+		geometry, SV_VertexID triangle, see Vertex_Layout.NONE), no depth
+		(these write into a Texture2DArray of their own, never into any pass
+		a game's draw calls share), and the HDR target's own float format --
+		see ambient.odin's own top comment for why these write float-format
+		targets that are never the swapchain.
+	*/
+	mbi.renderer.pipelines.probe_irradiance = create_pipeline(
+		mbi.renderer.shaders.probe_irradiance,
+		vertex       = mbi.renderer.shaders.skybox,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+	mbi.renderer.pipelines.probe_prefilter = create_pipeline(
+		mbi.renderer.shaders.probe_prefilter,
+		vertex       = mbi.renderer.shaders.skybox,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
 
 	mbi.renderer.pipelines.mesh_skinned = create_pipeline(
 		mbi.renderer.shaders.mesh_frag,
@@ -753,6 +794,25 @@ init :: proc(title: string, width: i32, height: i32) {
 		address_mode_v = .CLAMP_TO_EDGE,
 		address_mode_w = .CLAMP_TO_EDGE,
 	})
+	/*
+		The environment probe's own sampler. Linear, clamped on both axes --
+		there is no wrap-around to be had inside one face's own image, the
+		same reasoning `skybox_clamp_sampler` already gives for a cube map's
+		own faces. Mip filtering is irrelevant: `probe_layer_uv`
+		(lighting_core.hlsli) always reads mip 0 of whichever layer it
+		picked, since roughness selects a *layer* here rather than a real mip
+		level (ambient.odin's own top comment explains why) -- `min_lod`/
+		`max_lod` are left at their zero-value default for exactly that
+		reason, not tuned for a mip chain neither probe texture actually has.
+	*/
+	mbi.renderer.probe_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter     = .LINEAR,
+		mag_filter     = .LINEAR,
+		address_mode_u = .CLAMP_TO_EDGE,
+		address_mode_v = .CLAMP_TO_EDGE,
+		address_mode_w = .CLAMP_TO_EDGE,
+	})
+
 	/*
 		The shadow sampler compares rather than just filters -- SampleCmpLevelZero
 		in lighting.hlsli reads compare_op/enable_compare, not the filter mode
@@ -874,8 +934,54 @@ init :: proc(title: string, width: i32, height: i32) {
 		default_texture_ok = true
 	}
 
+	/*
+		1x1 black, six layers -- bound at both of the environment probe's own
+		slots (`irradiance_map`/`prefiltered_map`, mesh.frag.hlsl) whenever
+		`Renderer.lighting.probe` is empty. Six rather than one: `probe_layer_uv`
+		picks a face (0..5) regardless of whether a real probe is bound, and a
+		`Texture2DArray` sampled at a layer past its own count is exactly the
+		undefined-read hazard `Vertex3D_Skinned`'s own doc comment already
+		warns this package away from -- six matching layers of the same black
+		pixel costs nothing and removes the question entirely. One texture
+		serves both probe slots (see this proc's own doc comment on
+		`Renderer.default_probe_texture`): with no real probe bound,
+		`ambient_ground.w` is 0 (`push_lighting`, lighting.odin), so
+		`pbr_environment_specular`'s own level math always lands on layer
+		`0 * 6 + face`, inside this texture's six layers regardless.
+	*/
+	default_probe_texture_ok := false
+	{
+		black_pixel := [4]u8{0, 0, 0, 0}
+		texture := sdl.CreateGPUTexture(mbi.renderer.device, {
+			type                 = .D2_ARRAY,
+			format               = .R8G8B8A8_UNORM,
+			usage                = {.SAMPLER},
+			width                = 1,
+			height               = 1,
+			layer_count_or_depth = 6,
+			num_levels           = 1,
+		})
+
+		if texture != nil {
+			ok := true
+			for layer in 0 ..< 6 {
+				if upload_texture_region(texture, &black_pixel, 1, 1, u32(layer)) != nil {
+					ok = false
+				}
+			}
+
+			if ok {
+				mbi.renderer.default_probe_texture = texture
+				default_probe_texture_ok = true
+			} else {
+				sdl.ReleaseGPUTexture(mbi.renderer.device, texture)
+			}
+		}
+	}
+
 	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil &&
-		mbi.renderer.lighting.shadow.sampler != nil && shadow_placeholders_ok && default_texture_ok,
+		mbi.renderer.lighting.shadow.sampler != nil && shadow_placeholders_ok && default_texture_ok &&
+		mbi.renderer.probe_sampler != nil && default_probe_texture_ok,
 		"could not create samplers")
 
 	// The one quad every draw uses.
@@ -958,6 +1064,12 @@ cleanup :: proc() {
 	if mbi.renderer.lighting.shadow.cascade_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.shadow.cascade_texture)
 	if mbi.renderer.lighting.shadow.cube_texture    != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.shadow.cube_texture)
 	if mbi.renderer.default_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_texture)
+	if mbi.renderer.default_probe_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_probe_texture)
+	if mbi.renderer.probe_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.probe_sampler)
+
+	// A game's own probe, if one was ever loaded and set -- see
+	// set_environment_probe (ambient.odin).
+	destroy_environment_probe(&mbi.renderer.lighting.probe)
 
 	if mbi.renderer.pipelines.sprite  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.sprite)
 	if mbi.renderer.pipelines.rect    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.rect)
@@ -975,6 +1087,8 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
 	if mbi.renderer.pipelines.tonemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.tonemap)
+	if mbi.renderer.pipelines.probe_irradiance != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_irradiance)
+	if mbi.renderer.pipelines.probe_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_prefilter)
 
 	if mbi.renderer.shaders.quad    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.quad)
 	if mbi.renderer.shaders.sprite  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.sprite)
@@ -994,6 +1108,8 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
 	if mbi.renderer.shaders.tonemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.tonemap)
+	if mbi.renderer.shaders.probe_irradiance != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_irradiance)
+	if mbi.renderer.shaders.probe_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_prefilter)
 
 	// The generated shapes, if anything ever asked for one.
 	destroy_shapes3d()

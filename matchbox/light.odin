@@ -33,13 +33,32 @@ package matchbox
 */
 
 import "core:log"
+import "core:math/linalg"
 
 import sdl "vendor:sdl3"
 
+/*
+	`AREA_RECT`/`AREA_DISK` are P4's own addition -- `lighting_plan.md` has
+	named them since P0 and nothing implemented them until now. Both are
+	shaded through the *same* per-light contract every punctual kind already
+	uses (`sample_light`, `lighting_core.hlsli`): a finite-area light has no
+	single direction to hand a BRDF, so `sample_light` reduces it to one
+	representative point on its own shape -- the closest point, along the
+	shading point's own reflection ray, to the light's rectangle or disk --
+	and treats that point exactly the way it already treats a point light.
+	See `sample_light`'s own doc comment for the method, the citation, and
+	why this is the approximation this phase ships rather than LTC.
+
+	Neither area kind casts a shadow this phase -- see `Light`'s own doc
+	comment on `area_right`/`area_size` for why `set_lights` never routes one
+	into a caster slot.
+*/
 Light_Kind :: enum {
 	DIRECTIONAL, // a direction only; distance does not matter
 	POINT,       // a place, which things get dimmer further from
 	SPOT,        // a place that only shines within a cone around a direction
+	AREA_RECT,   // a flat rectangle, facing `target`
+	AREA_DISK,   // a flat circle, facing `target`
 }
 
 /*
@@ -92,6 +111,34 @@ Light :: struct {
 	casts_shadow: bool,
 	inner_angle:  f32, // spot only, degrees -- full brightness inside this
 	outer_angle:  f32, // spot only, degrees -- faded to nothing by this
+
+	/*
+		Area rect/disk only. `target` (above) doubles as the shape's own
+		facing normal for these two kinds -- consistent with how it already
+		means "direction" for directional/spot rather than a third field.
+
+		`area_right` is the rectangle's own tangent axis (its "width"
+		direction); the other tangent is never stored, since it is always
+		`cross(target, area_right)` and storing it too would just be a second
+		value that has to stay square to the first. A disk has no preferred
+		tangent -- it is rotationally symmetric about `target` -- so
+		`area_right` rides along unread for one, the same way `inner_angle`/
+		`outer_angle` ride along unread for a light that is not a spot.
+
+		`area_size` is `{half_width, half_height}` for a rect; a disk reads
+		only `area_size.x`, as its radius.
+
+		Neither kind is routed into a shadow caster slot by `set_lights` --
+		shadow techniques are untouched this phase (see the phase's own scope
+		boundary), and a finite-area caster needs a shadow approach none of
+		PCF/PCSS/CASCADED/CUBE already provide. Setting `casts_shadow` on one
+		by hand is therefore inert rather than an error, the same "opt in,
+		nothing happens" shape an unsupported combination already gets
+		elsewhere in this package.
+	*/
+	area_right: [3]f32,
+	area_size:  [2]f32,
+
 	shadow_bias:  Shadow_Bias, // zero means "use Shadow_Settings.bias" -- see this struct's own doc comment
 }
 
@@ -153,6 +200,61 @@ create_spot_light :: proc(
 }
 
 /*
+	A flat rectangle of light at `position`, facing `normal`, `width` wide
+	along `right` and `height` wide along the axis square to both. A window,
+	a light panel, a strip of neon.
+
+	`right` need not be exactly perpendicular to `normal` -- it is
+	normalized and re-squared against it the same way `look_at_matrix`
+	already re-squares an `up` hint against a forward direction, so a
+	slightly-off value still gives a sensible rectangle rather than a
+	skewed one.
+
+	See `Light_Kind`'s own doc comment for how this is shaded: there is no
+	true area-light integral here, only a representative-point approximation
+	that reduces to a point light of the same colour as the rectangle
+	shrinks to nothing. `casts_shadow` is not a parameter -- see `Light`'s
+	own doc comment on `area_right` for why an area light never casts one
+	this phase.
+*/
+create_area_rect_light :: proc(
+	position: [3]f32,
+	normal:   [3]f32,
+	right:    [3]f32,
+	width:    f32,
+	height:   f32,
+	color:    [4]f32 = WHITE,
+) -> Light {
+	return Light{
+		kind = .AREA_RECT, position = position, target = linalg.normalize(normal),
+		area_right = linalg.normalize(right),
+		area_size  = {width * 0.5, height * 0.5},
+		color = color, enabled = true,
+	}
+}
+
+/*
+	A flat disk of light at `position`, facing `normal`, `radius` wide. A
+	round light fixture or a porthole, where `create_area_rect_light`'s
+	own corners would be visibly wrong.
+
+	See `create_area_rect_light`'s own doc comment for the shading method
+	and why `casts_shadow` is not a parameter here either.
+*/
+create_area_disk_light :: proc(
+	position: [3]f32,
+	normal:   [3]f32,
+	radius:   f32,
+	color:    [4]f32 = WHITE,
+) -> Light {
+	return Light{
+		kind = .AREA_DISK, position = position, target = linalg.normalize(normal),
+		area_size = {radius, 0},
+		color = color, enabled = true,
+	}
+}
+
+/*
 	Sets every light in the scene at once, replacing whatever was there.
 
 	Unbounded -- see this file's own top comment -- and disabled lights are
@@ -209,6 +311,11 @@ set_lights :: proc(lights: []Light) {
 				s.caster_indices[found] = index
 				found += 1
 			}
+		case .AREA_RECT, .AREA_DISK:
+			// Never routed anywhere -- see Light's own doc comment on
+			// area_right for why an area light does not cast a shadow this
+			// phase. A caller that set casts_shadow anyway is not wrong, it
+			// is just asking for something this phase does not build.
 		}
 	}
 
@@ -234,6 +341,8 @@ light_uniform :: proc(light: Light, default_bias: Shadow_Bias) -> Light_Uniform 
 	case .DIRECTIONAL: kind_flag = 0
 	case .POINT:        kind_flag = 1
 	case .SPOT:         kind_flag = 2
+	case .AREA_RECT:    kind_flag = 3
+	case .AREA_DISK:    kind_flag = 4
 	}
 
 	// Per field, not "both zero or neither" -- a light might want a wider
@@ -254,6 +363,13 @@ light_uniform :: proc(light: Light, default_bias: Shadow_Bias) -> Light_Uniform 
 		color       = light.color,
 		cone        = {light.outer_angle, light.inner_angle, 0, 0},
 		shadow_bias = {bias.depth, bias.normal_offset, 0, 0},
+
+		// area_right.w carries the rect's own half-width *or* the disk's
+		// radius -- one shared slot rather than a second field, since no
+		// light is ever both kinds at once. area_size.x is the rect's own
+		// half-height; unread for a disk, which has none.
+		area_right = {light.area_right.x, light.area_right.y, light.area_right.z, light.area_size.x},
+		area_size  = {light.area_size.y, 0, 0, 0},
 	}
 }
 

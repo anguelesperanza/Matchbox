@@ -49,7 +49,12 @@ Radiance brdf_light_toon(Surface surface, Light_Sample light)
     based reason to divide it, the way blinn_phong's own ambient-over-ten is
     PsxGame's tuning rather than anything this model inherits (see
     `lighting_rework.md` section 7.4). Each model decides this for itself;
-    this is toon's answer.
+    this is toon's answer. `ambient.rgb` became `ambient_light(surface)`
+    (`lighting_core.hlsli`) in P4, the one edit this file needed for
+    `Ambient_Kind.HEMISPHERE`/`.ENVIRONMENT_PROBE` to reach a toon material
+    at all -- no specular environment term is added, since a banded model
+    has no continuous roughness for `pbr_environment_specular`
+    (brdf/pbr_common.hlsli) to key a reflection sharpness off of.
 */
 float3 brdf_resolve_toon(Surface surface, Radiance total)
 {
@@ -58,7 +63,7 @@ float3 brdf_resolve_toon(Surface surface, Radiance total)
 
     float3 color = surface.base_color * (total.diffuse + rim);
     color += surface.emissive;
-    color += surface.base_color * ambient.rgb * surface.occlusion;
+    color += surface.base_color * ambient_light(surface) * surface.occlusion;
 
     return color;
 }

@@ -2048,7 +2048,11 @@ A grid of lines on the ground plane, centred on the origin.
 ### `model_load.odin`
 
 ```odin
-load_model :: proc(path: string) -> (model: Model, err: Error)
+load_model :: proc(
+	path: string,
+	shading: Maybe(Shading_Model) = nil) -> (model: Model,
+	err: Error,
+)
 ```
 Loads a model from a `.gltf` or `.glb` file.
 

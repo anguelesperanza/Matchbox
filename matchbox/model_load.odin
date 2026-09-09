@@ -31,6 +31,7 @@ package matchbox
 	skipped rather than failed on.
 */
 
+import "core:encoding/json"
 import "core:log"
 import "core:math/linalg"
 import "core:path/filepath"
@@ -64,8 +65,23 @@ import gltf "./gltf2"
 	missing model is a shipping mistake rather than a crash, and telling the two
 	apart is the difference between "you forgot to copy the file" and "the
 	export is wrong".
+
+	**`shading` forces one shading model onto every part of the file.** Left
+	nil -- the default -- each part gets whatever its own glTF material
+	declares, which is `PBR_METALLIC` for essentially every real file and
+	`UNLIT` for one carrying `KHR_materials_unlit`; see `read_material` for
+	why honouring the file is the right default rather than an imposition.
+	Passing a value is the one-line escape hatch for a game that wants
+	something else across the board:
+
+		model := mb.load_model("prop.glb", shading = .TOON)
+
+	Per-part control needs no parameter at all -- a `Model`'s parts are
+	writable, so `model.parts[i].material.shading = .TOON` already worked and
+	still does. This exists because "shade this whole file the old way" is a
+	common enough wish to deserve better than a loop at every call site.
 */
-load_model :: proc(path: string) -> (model: Model, err: Error) {
+load_model :: proc(path: string, shading: Maybe(Shading_Model) = nil) -> (model: Model, err: Error) {
 	bytes := read_entire_file(path, context.allocator) or_return
 	defer delete(bytes)
 
@@ -98,7 +114,24 @@ load_model :: proc(path: string) -> (model: Model, err: Error) {
 	}
 	defer gltf.unload(data)
 
-	return model_from_gltf(data), nil
+	model = model_from_gltf(data)
+
+	/*
+		Applied to the finished model rather than threaded down through
+		`model_from_gltf` and every part builder to `read_material`. The
+		parameter would have to travel four procedures deep to reach the one
+		place that sets `shading`, and every one of them would carry an
+		argument it does not itself use -- where overwriting one field on each
+		finished part says the same thing in three lines, at the one level
+		that actually knows the caller asked.
+	*/
+	if forced, ok := shading.?; ok {
+		for &part in model.parts {
+			part.material.shading = forced
+		}
+	}
+
+	return model, nil
 }
 
 // Everything after the parse: walk the scene, build the parts, measure the
@@ -519,6 +552,44 @@ read_material :: proc(
 	gltf_material := data.materials[material_index]
 
 	result := MATERIAL_DEFAULTS
+
+	/*
+		**The file's own declaration of what it is, not Matchbox's guess.**
+		A glTF material carrying a `pbrMetallicRoughness` block -- which is
+		every material that does not say otherwise, since the spec makes that
+		the default parameterization -- is stating that it is a
+		metallic-roughness surface. Loading it as Blinn-Phong would not be
+		declining to choose on the game's behalf, which is what
+		`lighting_plan.md`'s "the consumer selects" principle asks for; it
+		would be choosing Blinn-Phong *for* the game while discarding what the
+		file said, and leaving `metallic`, `roughness`, `occlusion` and
+		`emissive` populated below for a model that reads none of them. A game
+		that wants something else still overrides, per part or per file -- see
+		`load_model`'s own `shading` parameter.
+
+		`KHR_materials_unlit` is the one extension read here, and only for its
+		presence: it is a rendering hint with no parameters of its own, so a
+		key lookup is the whole of it.
+
+		**`KHR_materials_pbrSpecularGlossiness` is deliberately not detected**,
+		even though `Shading_Model.PBR_SPECGLOSS` exists and reads exactly the
+		parameters it carries. The extension is archived, its factors live in
+		an untyped `json.Value` this package has no typed parse for, and glTF
+		requires a file using it to *also* supply a `pbrMetallicRoughness`
+		block precisely so a client without the extension has something
+		correct to fall back to. Matchbox is that client, and taking the
+		documented fallback is the spec's own designed path rather than a gap
+		-- reading the extension badly would be worse than reading the
+		fallback well. A game with a spec-gloss asset it wants shaded that way
+		sets `PBR_SPECGLOSS` itself and fills the factors it knows.
+	*/
+	result.shading = .PBR_METALLIC
+	if extensions, ok := gltf_material.extensions.(json.Object); ok {
+		if _, unlit := extensions["KHR_materials_unlit"]; unlit {
+			result.shading = .UNLIT
+		}
+	}
+
 	result.emissive = {
 		f32(gltf_material.emissive_factor.x),
 		f32(gltf_material.emissive_factor.y),

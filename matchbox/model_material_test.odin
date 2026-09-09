@@ -17,6 +17,7 @@ package matchbox
 	real load exercises end to end; it is not measured by anything below.
 */
 
+import "core:encoding/json"
 import "core:testing"
 
 import sdl "vendor:sdl3"
@@ -128,14 +129,18 @@ test_factors_with_no_textures_carry_through_with_no_shading_change :: proc(t: ^t
 		"no texture reference in the file must mean no texture on the Material")
 
 	/*
-		The decision this file's own doc comment on read_material states and
-		explains: the loader reads the data, it does not also flip the
-		shading model to PBR_METALLIC on the strength of a file carrying
-		metallic-roughness values. lighting_plan.md's own opening principle
-		is that the game chooses a shading model, not Matchbox.
+		This assertion used to run the other way, and the reversal is
+		deliberate -- see `lighting_rework.md` section 7.6 and
+		`read_material`'s own doc comment. The reasoning it was written under
+		was that `lighting_plan.md`'s "the consumer selects" principle meant
+		the loader must not pick a shading model. But a `pbrMetallicRoughness`
+		block is the *file* stating what the surface is; assigning Blinn-Phong
+		to it is not declining to choose, it is choosing on the game's behalf
+		while discarding what the file said -- and it left every factor
+		asserted above populated for a model that reads none of them.
 	*/
-	testing.expect(t, m.shading == MATERIAL_DEFAULTS.shading,
-		"read_material must not choose a shading model on the game's behalf")
+	testing.expect(t, m.shading == .PBR_METALLIC,
+		"a material declaring metallic-roughness must load as PBR_METALLIC, not as the generated-shape default")
 }
 
 // -----------------------------------------------------------------------
@@ -281,4 +286,94 @@ test_resolve_texture_with_no_source_image_returns_nil :: proc(t: ^testing.T) {
 	texture := resolve_texture(&data, 0, &uploaded, .UNORM)
 
 	testing.expect(t, texture == nil, "a texture with no source image must come back nil")
+}
+
+// -----------------------------------------------------------------------
+// Which shading model a loaded material declares itself to be
+// -----------------------------------------------------------------------
+
+/*
+	The half of `read_material` that decides `shading` rather than the
+	numbers -- see that proc's own doc comment for why honouring the file is
+	the default and `load_model`'s `shading` parameter is the override.
+
+	`MATERIAL_DEFAULTS` is still Blinn-Phong, and these tests are careful not
+	to conflate the two cases: a primitive with *no* material is a generated
+	shape by another name and keeps that default, while a primitive with a
+	real glTF material gets what that material declares.
+*/
+
+@(test)
+test_a_glTF_material_declares_itself_metallic_roughness :: proc(t: ^testing.T) {
+	materials := [1]gltf.Material{{
+		metallic_roughness = gltf.Material_Metallic_Roughness{
+			base_color_factor = {1, 1, 1, 1},
+			metallic_factor   = 1,
+			roughness_factor  = 1,
+		},
+	}}
+	data := gltf.Data{materials = materials[:]}
+	uploaded := make(map[gltf.Integer]^sdl.GPUTexture)
+	defer delete(uploaded)
+
+	m := read_material(&data, gltf.Integer(0), &uploaded)
+
+	testing.expect(t, m.shading == .PBR_METALLIC,
+		"a pbrMetallicRoughness block is the file saying what it is; loading it as Blinn-Phong would discard that")
+}
+
+@(test)
+test_a_material_without_a_pbr_block_is_still_metallic_roughness :: proc(t: ^testing.T) {
+	// Legal glTF, and it means every pbrMetallicRoughness default spelled
+	// out -- not "this material has no parameterization". See read_material's
+	// own comment on the absent block.
+	materials := [1]gltf.Material{{}}
+	data := gltf.Data{materials = materials[:]}
+	uploaded := make(map[gltf.Integer]^sdl.GPUTexture)
+	defer delete(uploaded)
+
+	m := read_material(&data, gltf.Integer(0), &uploaded)
+
+	testing.expect(t, m.shading == .PBR_METALLIC,
+		"an absent pbrMetallicRoughness block is the spec's defaults, not the absence of a parameterization")
+}
+
+@(test)
+test_khr_materials_unlit_loads_as_unlit :: proc(t: ^testing.T) {
+	extensions := make(json.Object)
+	defer delete(extensions)
+	extensions["KHR_materials_unlit"] = json.Object{}
+
+	materials := [1]gltf.Material{{extensions = extensions}}
+	data := gltf.Data{materials = materials[:]}
+	uploaded := make(map[gltf.Integer]^sdl.GPUTexture)
+	defer delete(uploaded)
+
+	m := read_material(&data, gltf.Integer(0), &uploaded)
+
+	testing.expect(t, m.shading == .UNLIT,
+		"KHR_materials_unlit is a rendering hint with no parameters -- its presence is the whole of it")
+}
+
+@(test)
+test_an_unrelated_extension_does_not_change_the_shading_model :: proc(t: ^testing.T) {
+	/*
+		The check is a lookup of one key, not "does this material carry any
+		extension at all" -- a file with KHR_texture_transform or a VRM block
+		on its materials is ordinary and must not be read as unlit.
+	*/
+	extensions := make(json.Object)
+	defer delete(extensions)
+	extensions["KHR_texture_transform"] = json.Object{}
+
+	materials := [1]gltf.Material{{}}
+	materials[0].extensions = extensions
+	data := gltf.Data{materials = materials[:]}
+	uploaded := make(map[gltf.Integer]^sdl.GPUTexture)
+	defer delete(uploaded)
+
+	m := read_material(&data, gltf.Integer(0), &uploaded)
+
+	testing.expect(t, m.shading == .PBR_METALLIC,
+		"only KHR_materials_unlit means unlit; any other extension leaves the parameterization alone")
 }

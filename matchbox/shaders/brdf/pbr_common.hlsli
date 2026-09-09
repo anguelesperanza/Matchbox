@@ -128,20 +128,26 @@ float3 pbr_fresnel_schlick(float cos_theta, float3 f0)
     approximation) / Lazarov 2013 ("Getting More Physical in Call of Duty:
     Black Ops II") polynomial fit for `f0 * scale + bias`, where `scale`/
     `bias` are what a real split-sum LUT would otherwise store per
-    `(roughness, n_dot_v)` texel. **The anchor this file's own furnace sweep
-    (`ibl_test.odin`) checks it against**: at `roughness = 0` a specular
-    reflection is a perfect mirror, where the correct closed-form answer is
-    exactly `scale = 1, bias = 0` (the surface returns exactly what it
-    reflects, unmodified) -- this fit reduces to that anchor within the same
-    tolerance `pbr_test.odin` already uses for GGX's own closed-form check,
-    not merely "looks close on a graph". Away from that anchor the fit is
-    good to a few percent across the roughness/n_dot_v domain (the numbers
-    the two papers above measured against a numerically-integrated
-    reference) -- close enough that no material in this package's furnace
-    sweep visibly gains energy from using it in place of a real LUT, but it
-    is still a fit, not the reference integral itself, and a case sitting
-    exactly on its worst deviation would show a few percent of drift a real
-    LUT would not have.
+    `(roughness, n_dot_v)` texel.
+
+    **The exact closed-form anchor `ibl_test.odin` checks this against is
+    not "scale=1, bias=0 at roughness 0"** -- that would be true of the real
+    split-sum integral at normal incidence, but this fit does not reach it
+    exactly (`scale` comes out to ~0.994 at `roughness=0, n_dot_v=1`, not
+    1.0 -- checked once, independently, in `ibl_test.odin`'s own comment, so
+    this file does not overclaim a precision the fit does not have). The
+    anchor this polynomial *does* hit exactly, derivable from its own
+    algebra rather than measured: `scale + bias` depends on `roughness`
+    alone, not on `n_dot_v` or on `a004` at all -- `scale + bias = (-1.04 +
+    1.04) * a004 + (r.z + r.w) = r.z + r.w`, and `r.z + r.w = roughness *
+    (c0.z + c0.w) + (c1.z + c1.w) = roughness * (-0.55) + 1.0`. So
+    `scale + bias == 1 - 0.55 * roughness` identically, for any `n_dot_v` --
+    a genuine algebraic fact about this specific fit rather than a physical
+    property of a real BRDF LUT, but a useful regression check precisely
+    because it is exact: `ibl_test.odin` asserts it to float precision
+    rather than to the "a few percent" tolerance the fit's own accuracy
+    against a real split-sum integral (the two papers above's own measured
+    numbers) would otherwise require.
 */
 float2 pbr_env_brdf_approx(float roughness, float n_dot_v)
 {

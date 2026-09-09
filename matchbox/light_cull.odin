@@ -409,6 +409,19 @@ light_cull_radius :: proc(cutoff: f32) -> f32 {
 	`Ambient` (lighting.odin) already has for a different reason -- `center`/
 	`radius` are meaningless for it and left zero.
 
+	**A spot light's own cone is not shaped for.** It gets exactly a point
+	light's radius -- the same full sphere of influence its own distance
+	attenuation alone would give it, `cone`/`shadow_bias` unread. A cone is
+	strictly narrower than the sphere bounding its own range, so this can
+	only ever assign a spot light to clusters its beam does not actually
+	reach, never drop one it does -- safe by the same "no fewer, extra
+	wasted work is the acceptable failure" standard `lighting_rework.md`'s
+	own P5 gate states. Shaping the cone exactly would mean a per-cluster
+	cone-vs-frustum test rather than a sphere-vs-frustum one; not built this
+	phase because the sphere already satisfies the gate's critical half and
+	a real cost to point at the tighter version does not exist without a GPU
+	to measure the difference on.
+
 	**Area lights are padded, not measured exactly.** `sample_light` shades
 	an area light from a representative point that can land anywhere on its
 	own rectangle or disk (`area_light_representative_point`'s own doc

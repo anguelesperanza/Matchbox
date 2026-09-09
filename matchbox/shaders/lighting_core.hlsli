@@ -29,10 +29,20 @@
 
     `Light` must match `matchbox.Light_Uniform` exactly (112 bytes since P4's
     own `area_right`/`area_size`); `Scene` must match `matchbox.Scene_Frag_Data`
-    exactly (240 bytes since P4's own `ambient_ground`) -- see that struct's
-    own comment in lighting.odin for why both stayed safe from the 32-byte
-    `matrix[4,4]f32` alignment gap `Lighting_Data` (now deleted) used to have
-    to reason about.
+    exactly (272 bytes since P5's own `cluster_grid`/`cluster_camera`) -- see
+    that struct's own comment in lighting.odin for why both stayed safe from
+    the 32-byte `matrix[4,4]f32` alignment gap `Lighting_Data` (now deleted)
+    used to have to reason about.
+
+    `cluster_ranges`/`cluster_light_indices` below are `CLUSTERED`'s own two
+    storage buffers -- see `light_cull.odin`'s own top comment for what
+    builds them (on the CPU, once a frame) and why, and
+    `cluster_index_for_fragment`'s own doc comment for the one place they are
+    read. Declared and bound unconditionally, the identical "always
+    something valid, whether or not this scene uses it" shape `lights` below
+    already has: a `FORWARD` scene has these bound to a 1-element placeholder
+    (`pipeline_forward_cluster_buffers`, pipeline_forward.odin) it never
+    reads, because `shade_lights` only branches into them under `CLUSTERED`.
 */
 
 #include "surface.hlsli"
@@ -86,6 +96,27 @@ struct Light
 */
 StructuredBuffer<Light> lights : register(t10, space2);
 
+/*
+    One cluster's own slice of `cluster_light_indices` below -- `count`
+    lights starting at `offset`. Must match `matchbox.Cluster_Range`
+    (light_cull.odin) exactly: two plain `uint`s, 8 bytes, no padding either
+    side needs -- a `StructuredBuffer` element is not a cbuffer, so none of
+    this file's own "everything is a float4" packing rule applies to it.
+*/
+struct Cluster_Range
+{
+    uint offset;
+    uint count;
+};
+
+// t11/t12, space2 -- continuing the sequence `lights` (t10) started, per
+// this file's own top comment. Indexed by `cluster_index_for_fragment`
+// below, which `tx + ty*nx + tz*nx*ny` (light_cull.odin's own
+// `cluster_build`) has to agree with byte for byte or a fragment reads a
+// neighbouring cluster's own light list.
+StructuredBuffer<Cluster_Range> cluster_ranges        : register(t11, space2);
+StructuredBuffer<uint>          cluster_light_indices  : register(t12, space2);
+
 cbuffer Scene : register(b1, space3)
 {
     // rgb: the CONSTANT colour, or HEMISPHERE's own sky colour -- unread
@@ -117,6 +148,16 @@ cbuffer Scene : register(b1, space3)
     // MAX_SHADOW_CASTERS. y which shadow technique is running -- see
     // shadow_visibility below and Shadow_Technique (shadow.odin). z-w unused.
     float4 shadow_caster1;
+
+    /*
+        P5's own addition -- see matchbox.Scene_Frag_Data's own doc comment
+        (lighting.odin) for what each component means. Read only by
+        cluster_index_for_fragment below, and only once shade_lights has
+        already branched on cluster_grid.w == 1 (CLUSTERED) -- FORWARD never
+        touches either field.
+    */
+    float4 cluster_grid;
+    float4 cluster_camera;
 
     // Each caster's own view-projection, world space to its own clip space.
     // light_view_projection is unread whenever flags.z is -1;
@@ -538,26 +579,105 @@ float3 brdf_resolve(Surface surface, Radiance total)
 }
 
 /*
+    Which cluster (light_cull.odin's own `tx + ty*nx + tz*nx*ny` indexing)
+    fragment `screen_pos` falls into -- the shader's own half of an agreement
+    `cluster_build` (light_cull.odin) already kept when it built
+    `cluster_ranges`/`cluster_light_indices` around this exact grid, once per
+    frame, on the CPU (see that file's own top comment for why there and not
+    in a compute shader). Read only by `shade_lights` below, and only under
+    `CLUSTERED` (`cluster_grid.w`) -- computing it under `FORWARD` too would
+    be wasted ALU, not a wrong answer, since nothing reads the result there;
+    kept unconditional anyway because `shade_surface` calling this once,
+    always, is simpler than threading a second branch through its own
+    caller.
+
+    Tile x/y come straight from the fragment's own pixel position divided
+    into `cluster_grid.x`/`.y` columns/rows -- the same tiling
+    `cluster_ndc_range` (light_cull.odin) built cluster boundaries from,
+    since a screen pixel and its own NDC coordinate move together regardless
+    of projection.
+
+    **The Z slice assumes a perspective camera.** `screen_pos.w` is
+    `SV_Position`'s own reciprocal of clip-space w, and clip-space w is
+    exactly `-view_z` for the perspective matrix `math3d.odin` writes (that
+    file's own top comment: row 3 is `(0, 0, -1, 0)`), so `1 / screen_pos.w`
+    recovers the same positive view-space depth `cluster_build` sliced with
+    no further work. An orthographic camera's own row 3 is `(0, 0, 0, 1)`,
+    so `screen_pos.w` is always 1 there and this always resolves to slice 0
+    -- known, not fixed this phase, see `light_cull.odin`'s own top comment
+    for why. `cluster_build`'s own CPU-side assignment is correct for both
+    projections regardless; only this reconstruction is perspective-only.
+*/
+uint cluster_index_for_fragment(float4 screen_pos)
+{
+    uint nx = uint(cluster_grid.x);
+    uint ny = uint(cluster_grid.y);
+    uint nz = uint(cluster_grid.z);
+
+    uint tile_x = min(uint(screen_pos.x / cluster_camera.x * float(nx)), nx - 1);
+    uint tile_y = min(uint(screen_pos.y / cluster_camera.y * float(ny)), ny - 1);
+
+    float near = cluster_camera.z;
+    float far  = cluster_camera.w;
+    float view_depth = 1.0 / max(screen_pos.w, 1e-8);
+
+    // The inverse of cluster_z_bounds's own exponential curve
+    // (light_cull.odin): solving `near * (far/near)^(slice/count) <= depth`
+    // for `slice` gives this log ratio directly.
+    float t = log(max(view_depth, near) / near) / log(far / near);
+    uint slice = uint(clamp(floor(t * float(nz)), 0.0, float(nz - 1)));
+
+    return tile_x + tile_y * nx + slice * nx * ny;
+}
+
+/*
     The light loop itself -- shared, written once, the replacement for every
     model owning its own copy of this. `lighting_rework.md` section 2.1's own
-    sketch, unchanged: sample each light, dispatch its contribution into the
-    running `Radiance`, then dispatch once more to resolve the sums into a
-    colour. No shading model ever appears here by name -- this loop only
-    knows the contract (`brdf/contract.hlsli`), not which models implement
-    it, which is what keeps a new model from having to touch this function.
+    sketch, unchanged under FORWARD: sample each light, dispatch its
+    contribution into the running `Radiance`, then dispatch once more to
+    resolve the sums into a colour. No shading model ever appears here by
+    name -- this loop only knows the contract (`brdf/contract.hlsli`), not
+    which models implement it, which is what keeps a new model from having
+    to touch this function.
+
+    **CLUSTERED loops a cluster's own light list instead of every light** --
+    P5's one addition, and the only difference between the two pipelines
+    anywhere in this file: same `sample_light`, same `brdf_light`, same
+    `brdf_resolve`, same `Radiance` accumulation, just a different set of
+    indices to iterate. `lighting_rework.md` section 3.6 asks for exactly
+    this ("shares the forward fragment path; the only difference is which
+    lights it loops over"), and this function is where that promise is kept
+    literally rather than approximately.
 */
-float3 shade_lights(Surface surface)
+float3 shade_lights(Surface surface, float4 screen_pos)
 {
     Radiance total = (Radiance)0;
 
-    uint count = uint(flags.x);
-    for (uint i = 0; i < count; i++)
+    if (cluster_grid.w > 0.5) // CLUSTERED
     {
-        Light_Sample light = sample_light(i, surface);
-        Radiance     r     = brdf_light(surface, light);
+        Cluster_Range range = cluster_ranges[cluster_index_for_fragment(screen_pos)];
 
-        total.diffuse  += r.diffuse;
-        total.specular += r.specular;
+        for (uint j = 0; j < range.count; j++)
+        {
+            uint         i     = cluster_light_indices[range.offset + j];
+            Light_Sample light = sample_light(i, surface);
+            Radiance     r     = brdf_light(surface, light);
+
+            total.diffuse  += r.diffuse;
+            total.specular += r.specular;
+        }
+    }
+    else // FORWARD
+    {
+        uint count = uint(flags.x);
+        for (uint i = 0; i < count; i++)
+        {
+            Light_Sample light = sample_light(i, surface);
+            Radiance     r     = brdf_light(surface, light);
+
+            total.diffuse  += r.diffuse;
+            total.specular += r.specular;
+        }
     }
 
     return brdf_resolve(surface, total);
@@ -611,11 +731,11 @@ float3 shade_lights(Surface surface)
     before this phase needs a different `base_color`, not a different code
     path.
 */
-float4 shade_surface(Surface surface)
+float4 shade_surface(Surface surface, float4 screen_pos)
 {
     surface.shading_model = flags.y > 0.5 ? surface.shading_model : SHADING_UNLIT;
 
-    float3 color = shade_lights(surface);
+    float3 color = shade_lights(surface, screen_pos);
 
     /*
         Fog moves into linear space here purely by virtue of where the

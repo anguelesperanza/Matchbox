@@ -193,6 +193,13 @@ Lighting :: struct {
 
 	shadow: Shadow_State, // shadow.odin / shadow_standard.odin
 
+	// CLUSTERED's own per-frame assignment -- see light_cull.odin's own top
+	// comment. Rebuilt every frame that pipeline is selected, unlike
+	// light_data/light_buffer above which only rebuild when a game calls
+	// set_lights, since a cluster's own shape depends on the camera and the
+	// camera may move every frame even when the lights do not.
+	cluster: Cluster_State,
+
 	// The baked diffuse/specular environment maps `Ambient_Kind.ENVIRONMENT_PROBE`
 	// reads (lighting.odin, ambient.odin) -- zero value is "no probe loaded",
 	// which is what makes selecting that ambient kind before ever calling
@@ -251,6 +258,22 @@ Renderer :: struct {
 		light* (0.0 is "none"), and the two would be the wrong value swapped.
 	*/
 	default_probe_texture: ^sdl.GPUTexture,
+
+	/*
+		A 1-element `Cluster_Range{0, 0}` and a 1-element `uint(0)` -- bound
+		whenever `Lighting_Settings.pipeline` is not `CLUSTERED`, or is
+		`CLUSTERED` but `Lighting.cluster`'s own buffers have not been built
+		yet (the first frame the pipeline is selected, before
+		`pipeline_clustered_begin` runs). The same "always something valid
+		bound" trick `default_texture`/`default_probe_texture` already play,
+		applied to the two storage buffers `lighting_core.hlsli` declares
+		unconditionally (`cluster_ranges`/`cluster_light_indices`) so
+		`FORWARD` never has to leave either slot empty. See
+		`pipeline_forward_cluster_buffers` (pipeline_forward.odin), the one
+		reader.
+	*/
+	default_cluster_ranges_buffer:        ^sdl.GPUBuffer,
+	default_cluster_light_indices_buffer: ^sdl.GPUBuffer,
 
 	// The environment probe's own sampler -- mipmap-linear (see
 	// ambient.odin's own doc comment on why the prefiltered map is read with
@@ -371,6 +394,12 @@ Renderer :: struct {
 
 	bound_light_buffer: ^sdl.GPUBuffer,
 
+	// CLUSTERED's own two storage buffers, or FORWARD's placeholders for the
+	// same slots -- see pipeline_cluster_buffers (render3d.odin), the one
+	// dispatcher that decides which.
+	bound_cluster_ranges:        ^sdl.GPUBuffer,
+	bound_cluster_light_indices: ^sdl.GPUBuffer,
+
 	// draw_model calls made with casts_shadow = true before begin_drawing_3d
 	// has a pass of any kind open yet, held until it does. See draw_model's
 	// own doc comment.
@@ -406,6 +435,8 @@ bind_cache_reset :: proc() {
 	r.bound_cube_maps         = nil
 	r.bound_probe_maps        = {}
 	r.bound_light_buffer      = nil
+	r.bound_cluster_ranges        = nil
+	r.bound_cluster_light_indices = nil
 }
 
 // -----------------------------------------------------------------------

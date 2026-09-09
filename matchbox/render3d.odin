@@ -139,6 +139,57 @@ pick_shadow_format :: proc() -> sdl.GPUTextureFormat {
 }
 
 // -----------------------------------------------------------------------
+// Render pipeline dispatch
+// -----------------------------------------------------------------------
+
+/*
+	`Render_Pipeline_Kind`'s own dispatcher, and the only place this file
+	switches on it -- `lighting_rework.md` section 3.6 asks for
+	`begin_drawing_3d`/`draw_model_immediate`/`end_drawing_3d` to "stop
+	containing pipeline-specific code entirely" and dispatch instead; this
+	pair, plus `pipeline_forward.odin`/`pipeline_clustered.odin`'s own tiny
+	modules, is what that means in practice. Adding a third pipeline (P6's
+	`DEFERRED`) touches one case in each of these two functions and its own
+	new `pipeline_deferred.odin` -- nowhere else in this file.
+
+	Called once, from `begin_drawing_3d`, after `push_lighting` has already
+	pushed the camera-derived half of `Scene_Frag_Data` -- `CLUSTERED`'s own
+	`pipeline_clustered_begin` needs the camera, not anything push_lighting
+	computed from it, so the ordering is not load-bearing today, but it
+	keeps "the scene's own state is current" true for whichever pipeline
+	runs next regardless.
+*/
+@(private)
+pipeline_begin_frame :: proc(camera: Camera3D) {
+	switch mbi.renderer.lighting.settings.pipeline {
+	case .CLUSTERED:
+		pipeline_clustered_begin(camera)
+	case .FORWARD:
+		fallthrough
+	case:
+		pipeline_forward_begin(camera)
+	}
+}
+
+/*
+	The two cluster-only storage buffers `draw_model_immediate` binds every
+	draw, whichever pipeline is actually running -- see this file's own doc
+	comment on `pipeline_begin_frame` for why this is the dispatcher rather
+	than an inline switch at the call site.
+*/
+@(private)
+pipeline_cluster_buffers :: proc() -> (ranges, indices: ^sdl.GPUBuffer) {
+	switch mbi.renderer.lighting.settings.pipeline {
+	case .CLUSTERED:
+		return pipeline_clustered_cluster_buffers()
+	case .FORWARD:
+		fallthrough
+	case:
+		return pipeline_forward_cluster_buffers()
+	}
+}
+
+// -----------------------------------------------------------------------
 // The 3D pass
 // -----------------------------------------------------------------------
 
@@ -276,6 +327,12 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	// the shader needs for specular and fog is the one this pass was opened
 	// with -- which the game should not have to hand over separately.
 	push_lighting(camera)
+
+	// Whichever Render_Pipeline_Kind is running gets to do its own per-frame
+	// work here -- CLUSTERED rebuilds and reuploads its light lists for this
+	// same camera; FORWARD has none. See pipeline_begin_frame's own doc
+	// comment just above this file's "Render pipeline dispatch" section.
+	pipeline_begin_frame(camera)
 }
 
 /*
@@ -612,6 +669,29 @@ draw_model_immediate :: proc(
 				light_buffer := r.lighting.light_buffer
 				sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)
 				r.bound_light_buffer = light_buffer
+			}
+
+			/*
+				CLUSTERED's own two storage buffers (slots 1/2, HLSL t11/t12
+				-- lighting_core.hlsli's own comment), or FORWARD's
+				placeholders for the same slots -- pipeline_cluster_buffers
+				(this file's own "Render pipeline dispatch" section) is the
+				one place that decides which, so this stays a plain bind-if-
+				changed the same shape every other resource in this function
+				already has, rather than a pipeline switch of its own.
+			*/
+			cluster_ranges, cluster_light_indices := pipeline_cluster_buffers()
+
+			if r.bound_cluster_ranges != cluster_ranges {
+				buffer := cluster_ranges
+				sdl.BindGPUFragmentStorageBuffers(r.pass, 1, &buffer, 1)
+				r.bound_cluster_ranges = cluster_ranges
+			}
+
+			if r.bound_cluster_light_indices != cluster_light_indices {
+				buffer := cluster_light_indices
+				sdl.BindGPUFragmentStorageBuffers(r.pass, 2, &buffer, 1)
+				r.bound_cluster_light_indices = cluster_light_indices
 			}
 		}
 

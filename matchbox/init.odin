@@ -447,7 +447,8 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Tint_Frag_Data)    == 16)
 	#assert(size_of(Material_Frag_Data) == 112)
 	#assert(size_of(Light_Uniform)     == 112)
-	#assert(size_of(Scene_Frag_Data)   == 240)
+	#assert(size_of(Scene_Frag_Data)   == 272)
+	#assert(size_of(Cluster_Range)     == 8)
 	#assert(size_of(Cascade_Frag_Data) == 544)
 	#assert(size_of(Cube_Frag_Data)    == 400)
 	#assert(size_of(Post_Frag_Data)    == 32)
@@ -556,14 +557,17 @@ init :: proc(title: string, width: i32, height: i32) {
 		CUBE's own Cube_Data -- the last two pushed every pass regardless of
 		which technique is running, see Cascade_Frag_Data/Cube_Frag_Data's
 		own doc comments (lighting.odin) for why they are split out of Scene
-		rather than folded into it. Eight samplers -- base colour,
-		metallic-roughness, occlusion and emissive, PCF/PCSS's two maps, one
-		Texture2DArray for CASCADED and one for CUBE, which is what
-		mesh.frag.hlsl declares at t0-t7 -- and one storage buffer, the light
-		list (light.odin) at t8, which is what replaced the fixed MAX_LIGHTS
-		cbuffer array this rework retired. See lighting_core.hlsli's own
-		comment on `lights` for why the storage buffer's register number has
-		to track the sampler count like this.
+		rather than folded into it. MESH_FRAG_SAMPLER_COUNT (render.odin)
+		sampled textures -- base colour, three material maps, PCF/PCSS's two
+		shadow maps, one Texture2DArray each for CASCADED and CUBE, and the
+		environment probe's own two maps, t0-t9 -- and three storage buffers:
+		the light list (light.odin) at t10, and CLUSTERED's own
+		cluster_ranges/cluster_light_indices (light_cull.odin) at t11/t12,
+		bound to a 1-element placeholder under FORWARD rather than left
+		unbound (pipeline_forward.odin) since mesh.frag.hlsl declares all
+		three unconditionally. See lighting_core.hlsli's own comment on
+		`lights` for why a storage buffer's register number has to track the
+		sampler count like this.
 
 		This was twenty samplers through P3 -- one flat Texture2D per
 		CASCADED/CUBE layer rather than one Texture2DArray per group -- which
@@ -574,7 +578,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		against.
 	*/
 	mbi.renderer.shaders.mesh_frag = create_builtin_shader(
-		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 4, 1)
+		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 4, 3)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -979,9 +983,34 @@ init :: proc(title: string, width: i32, height: i32) {
 		}
 	}
 
+	/*
+		A 1-element Cluster_Range{0, 0} and a 1-element uint(0) -- bound
+		whenever CLUSTERED is not the active pipeline, so mesh.frag.hlsl's own
+		unconditional cluster_ranges/cluster_light_indices declarations
+		(lighting_core.hlsli) always have something valid regardless. See
+		Renderer.default_cluster_ranges_buffer's own doc comment (render.odin).
+	*/
+	cluster_placeholders_ok := false
+	{
+		zero_range: Cluster_Range
+		zero_index: u32
+
+		ranges_buffer,  ranges_err  := upload_buffer(&zero_range, size_of(Cluster_Range), {.GRAPHICS_STORAGE_READ})
+		indices_buffer, indices_err := upload_buffer(&zero_index, size_of(u32), {.GRAPHICS_STORAGE_READ})
+
+		if ranges_err == nil && indices_err == nil {
+			mbi.renderer.default_cluster_ranges_buffer        = ranges_buffer
+			mbi.renderer.default_cluster_light_indices_buffer = indices_buffer
+			cluster_placeholders_ok = true
+		} else {
+			if ranges_err  == nil do sdl.ReleaseGPUBuffer(mbi.renderer.device, ranges_buffer)
+			if indices_err == nil do sdl.ReleaseGPUBuffer(mbi.renderer.device, indices_buffer)
+		}
+	}
+
 	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil &&
 		mbi.renderer.lighting.shadow.sampler != nil && shadow_placeholders_ok && default_texture_ok &&
-		mbi.renderer.probe_sampler != nil && default_probe_texture_ok,
+		mbi.renderer.probe_sampler != nil && default_probe_texture_ok && cluster_placeholders_ok,
 		"could not create samplers")
 
 	// The one quad every draw uses.
@@ -1065,6 +1094,8 @@ cleanup :: proc() {
 	if mbi.renderer.lighting.shadow.cube_texture    != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.shadow.cube_texture)
 	if mbi.renderer.default_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_texture)
 	if mbi.renderer.default_probe_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_probe_texture)
+	if mbi.renderer.default_cluster_ranges_buffer        != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.default_cluster_ranges_buffer)
+	if mbi.renderer.default_cluster_light_indices_buffer != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.default_cluster_light_indices_buffer)
 	if mbi.renderer.probe_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.probe_sampler)
 
 	// A game's own probe, if one was ever loaded and set -- see
@@ -1138,6 +1169,16 @@ cleanup :: proc() {
 	if mbi.renderer.lighting.light_buffer   != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.lighting.light_buffer)
 	if mbi.renderer.lighting.light_transfer != nil do sdl.ReleaseGPUTransferBuffer(device, mbi.renderer.lighting.light_transfer)
 	delete(mbi.renderer.lighting.light_data)
+
+	// CLUSTERED's own buffers, if this game ever selected that pipeline --
+	// see light_cull.odin's own Cluster_State.
+	c := &mbi.renderer.lighting.cluster
+	if c.ranges_buffer          != nil do sdl.ReleaseGPUBuffer(device, c.ranges_buffer)
+	if c.ranges_transfer        != nil do sdl.ReleaseGPUTransferBuffer(device, c.ranges_transfer)
+	if c.light_indices_buffer   != nil do sdl.ReleaseGPUBuffer(device, c.light_indices_buffer)
+	if c.light_indices_transfer != nil do sdl.ReleaseGPUTransferBuffer(device, c.light_indices_transfer)
+	delete(c.ranges)
+	delete(c.light_indices)
 
 	delete(mbi.renderer.pending_shadow_models)
 

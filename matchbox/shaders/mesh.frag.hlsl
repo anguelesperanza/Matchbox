@@ -160,5 +160,5 @@ float4 main(PSInput input) : SV_Target0
     surface.bands         = params.z;
     surface.rim           = params.w;
 
-    return shade_surface(surface);
+    return shade_surface(surface, input.pos);
 }

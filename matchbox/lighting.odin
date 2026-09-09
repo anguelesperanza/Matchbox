@@ -26,20 +26,34 @@ package matchbox
 import sdl "vendor:sdl3"
 
 /*
-	Which render pipeline is driving the 3D pass. One value in P0 -- `FORWARD`,
-	which is what this package has always done and the only one built or
-	tested. `lighting_plan.md` section 3 asks for deferred and clustered
-	forward+ on top of this; `lighting_rework.md` section 3.6's own build
-	order is explicit that forward is finished and validated alone before
-	either of those begins, which is a later phase's work, not this one's.
+	Which render pipeline is driving the 3D pass. P0 shipped this with one
+	value (`FORWARD`) and nothing to dispatch to; P5 is what earns the enum --
+	`begin_drawing_3d`/`draw_model_immediate`/`end_drawing_3d` (render3d.odin)
+	now call `pipeline_begin_frame`/`pipeline_cluster_buffers`, the one
+	switch each of those questions is answered in, rather than containing
+	pipeline-specific code themselves. `lighting_plan.md` section 3 also asks
+	for a deferred pipeline; `lighting_rework.md` section 3.6's own build
+	order keeps that for P6, once forward and clustered are both proven, so
+	it is not a value here yet.
 
-	Declared now, with the one value P0 actually runs, because `Lighting_Settings`
-	names its field either way -- see that struct's own doc comment. Nothing
-	in `render3d.odin` branches on this yet; there is exactly one pipeline to
-	branch to.
+	`FORWARD` -- every mesh draw, unchanged since before this enum existed:
+	`shade_lights` (lighting_core.hlsli) loops every light in the scene for
+	every fragment. See `pipeline_forward.odin`.
+
+	`CLUSTERED` -- forward's own fragment path, shading the same `Surface`
+	through the same BRDF, but `shade_lights` loops only the lights
+	`light_cull.odin`'s own per-frame assignment says reach that fragment's
+	cluster. No new render pass, no new vertex layout, no new pipeline
+	object -- `lighting_rework.md` section 3.6 says clustered "shares the
+	forward fragment path; the only difference is which lights it loops
+	over", and that is the whole difference: the mesh pipelines
+	`draw_model_immediate` binds are the identical objects either way. See
+	`pipeline_clustered.odin` and `light_cull.odin`'s own top comment for why
+	the assignment itself runs on the CPU rather than in a compute shader.
 */
 Render_Pipeline_Kind :: enum {
 	FORWARD,
+	CLUSTERED,
 }
 
 /*
@@ -187,6 +201,14 @@ Lighting_Settings :: struct {
 	ambient:  Ambient,
 	fog:      Fog,
 
+	// Only read when `pipeline` above is `CLUSTERED` -- see `Cluster_Settings`'s
+	// own doc comment (light_cull.odin) for the grid it sizes and the cutoff
+	// that turns a light's own attenuation curve into a culling radius.
+	// `FORWARD` never reads a light's own reach at all, so this field is
+	// inert under it, the same "opt in, nothing happens" shape a shadow
+	// technique's own parameters already have when shadows are off.
+	cluster: Cluster_Settings,
+
 	/*
 		Multiplies every linear colour the 3D pass produces before the
 		tonemap curve (`tonemap` below) runs -- see `resolve_tonemap`
@@ -225,7 +247,7 @@ Lighting_Settings :: struct {
 	struct exactly so a game (or a later phase) can choose one without this
 	default having to be relitigated.
 */
-LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD, exposure = 1, tonemap = .NONE}
+LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD, exposure = 1, tonemap = .NONE, cluster = CLUSTER_DEFAULTS}
 
 /*
 	Applies `settings` to the scene: whether lighting runs, whether shadows do
@@ -291,7 +313,11 @@ set_lighting :: proc(settings: Lighting_Settings = LIGHTING_DEFAULTS) {
 	Covered here: `exposure` alone. Every other field of `Lighting_Settings`
 	has a legitimate zero -- `enabled = false` is a scene that is not lit,
 	`Ambient{}` is no ambient light, `Fog{}` is no fog, and `pipeline` and
-	`tonemap` both have a real first enum value (`FORWARD`, `NONE`).
+	`tonemap` both have a real first enum value (`FORWARD`, `NONE`). `cluster`
+	delegates to `cluster_settings_normalized` (light_cull.odin) the same way
+	`shadows` delegates to `shadow_settings_normalized`, since a grid of zero
+	clusters along any axis is exactly this same "not a value anybody could
+	mean" case, one struct over.
 */
 @(private)
 lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Settings {
@@ -303,6 +329,7 @@ lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Se
 	if s.exposure == 0 do s.exposure = LIGHTING_DEFAULTS.exposure
 
 	s.shadows = shadow_settings_normalized(s.shadows)
+	s.cluster = cluster_settings_normalized(s.cluster)
 
 	return s
 }
@@ -315,8 +342,11 @@ is_lighting_active :: proc() -> bool {
 }
 
 /*
-	240 bytes since P4 added `ambient_ground` (16 more, for HEMISPHERE's
-	ground colour and the prefiltered probe's own level count) -- everything
+	272 bytes since P5 added `cluster_grid`/`cluster_camera` (32 more, for
+	`CLUSTERED`'s own grid dimensions and the camera numbers
+	`cluster_index_for_fragment` needs to reconstruct a fragment's own
+	cluster) on top of P4's `ambient_ground` (16, for HEMISPHERE's ground
+	colour and the prefiltered probe's own level count) -- everything
 	`shade_surface` (lighting_core.hlsli) needs about the scene besides the
 	lights themselves, which are their own `StructuredBuffer` now and no
 	longer part of this block at all. That is the whole reason this is
@@ -368,6 +398,34 @@ Scene_Frag_Data :: struct #align(16) {
 	// shadow_visibility (lighting_core.hlsli) and Shadow_Technique
 	// (shadow.odin). z-w unused.
 	shadow_caster1: [4]f32,
+
+	/*
+		P5's own addition, read only by `cluster_index_for_fragment`
+		(lighting_core.hlsli) and only under `CLUSTERED` (`cluster_grid.w`
+		below) -- `shade_lights` still ignores both fields entirely under
+		`FORWARD`, the same "ride along unread" shape `cone` already has for
+		a light that is not a spot.
+
+		x/y/z: `Cluster_Settings.grid`'s own `x`/`y`/`z` (light_cull.odin),
+		however many tiles/slices `Lighting.cluster` was last built for. w:
+		`Render_Pipeline_Kind`'s own ordinal -- 0 for `FORWARD`, 1 for
+		`CLUSTERED` -- which is the one bit `shade_lights` actually branches
+		on; the grid dimensions only matter once that branch is taken.
+	*/
+	cluster_grid: [4]f32,
+
+	/*
+		x/y: the window's own width/height in pixels, matching `SV_Position`'s
+		own units -- `cluster_index_for_fragment` divides a fragment's screen
+		position by these to find which tile column/row it falls in, the same
+		"pixels, not points" `mbi.window_width`/`window_height` (display.odin)
+		already mean. z/w: the active camera's own `near`/`far`
+		(`camera3d_defaults`, camera3d.odin) -- the same numbers
+		`cluster_build` (light_cull.odin) sliced the Z axis with, so a
+		fragment's own slice reconstruction agrees with which slice its own
+		light actually landed in.
+	*/
+	cluster_camera: [4]f32,
 
 	// Each caster's own view-projection, world space to its own clip space.
 	// light_view_projection is unread whenever flags.z is -1;
@@ -485,6 +543,14 @@ push_lighting :: proc(camera: Camera3D) {
 			shadow_technique_index(sh.settings.technique),
 			0, 0,
 		},
+
+		// See Scene_Frag_Data's own doc comment on cluster_grid/cluster_camera.
+		// Pushed every frame regardless of which pipeline is running, the same
+		// "always something valid, whether or not this scene uses it" shape
+		// the shadow/probe slots already have -- FORWARD simply never reads
+		// either field.
+		cluster_grid   = {f32(l.settings.cluster.grid.x), f32(l.settings.cluster.grid.y), f32(l.settings.cluster.grid.z), f32(l.settings.pipeline)},
+		cluster_camera = {f32(mbi.window_width), f32(mbi.window_height), camera3d_defaults(camera).near, camera3d_defaults(camera).far},
 
 		light_view_projection  = sh.view_projections[0],
 		light_view_projection2 = sh.view_projections[1],

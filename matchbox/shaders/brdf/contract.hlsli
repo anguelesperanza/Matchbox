@@ -92,6 +92,7 @@
         SHADING_PBR_METALLIC  2
         SHADING_PBR_SPECGLOSS 3
         SHADING_TOON          4
+        SHADING_SUBSURFACE    5
 */
 
 #define SHADING_BLINN_PHONG   0
@@ -99,6 +100,7 @@
 #define SHADING_PBR_METALLIC  2
 #define SHADING_PBR_SPECGLOSS 3
 #define SHADING_TOON          4
+#define SHADING_SUBSURFACE    5
 
 /*
     What one light contributes at a surface, before any model-specific

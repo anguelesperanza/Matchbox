@@ -38,7 +38,10 @@ package matchbox
 	include, per this rework's own modularity test: two divergent copies of
 	GGX would not be one seam. `TOON` is cel shading: `Surface.bands`
 	quantizes the diffuse response into discrete steps and `Surface.rim` is a
-	silhouette rim-light term.
+	silhouette rim-light term. `SUBSURFACE` is a wrapped-diffuse translucency
+	approximation over `Surface.subsurface` (the wrapped-around light's tint)
+	and `Surface.thickness` -- see `brdf/subsurface.hlsli`'s own doc comment
+	for exactly which approximation this is and, as plainly, what it is not.
 */
 Shading_Model :: enum {
 	BLINN_PHONG,
@@ -46,6 +49,7 @@ Shading_Model :: enum {
 	PBR_METALLIC,
 	PBR_SPECGLOSS,
 	TOON,
+	SUBSURFACE,
 }
 
 /*

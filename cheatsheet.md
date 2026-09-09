@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 364 of them -- with its arguments
+Every public procedure in the package -- 365 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 20
+- [Other](#other) -- 21
 
 ## Getting started
 
@@ -2537,6 +2537,17 @@ create_material_toon :: proc(
 ) -> Material
 ```
 Cel shading -- `brdf/toon.hlsli` reads `bands` as how many discrete steps the diffuse response quantizes into (4, this proc's own default, is a common cel-shading choice: a dark band, two mid bands and a lit one) and `rim` as the strength of a silhouette-edge highlight, 0 by default because not every toon-shaded material wants one.
+
+```odin
+create_material_subsurface :: proc(
+	base_color: [4]f32 = WHITE,
+	subsurface: [3]f32 = {1, 1, 1},
+	thickness: f32 = 0.5,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+A wrapped-diffuse translucency approximation -- see `brdf/subsurface.hlsli`'s own doc comment for exactly what this does and does not model (it is not a real BSSRDF).
 
 ### `shadow_standard.odin`
 

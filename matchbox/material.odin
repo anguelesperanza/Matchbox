@@ -18,13 +18,13 @@ package matchbox
 	**Every field for every model that will eventually exist was here from
 	P0**, even though P0 itself implemented only two of the six
 	`lighting_plan.md` asks for (see `shading.odin`). That was deliberate, not
-	scope creep: it is what lets P2c add the other four shading models one at
+	scope creep: it is what let P2c add the other four shading models one at
 	a time by touching the four places `shading.odin`'s own doc comment
 	describes, without a fifth place to also widen `Material_Frag_Data`'s
-	packed layout -- `metallic`, `roughness`, `specular`, `glossiness`,
-	`bands` and `rim`, three models' own fields between them, were already
-	present and already reaching the shader, unread, before P2c touched a
-	single `.hlsli`.
+	packed layout -- every field P2c's four models read (`metallic`,
+	`roughness`, `specular`, `glossiness`, `bands`, `rim`, `subsurface`,
+	`thickness`) was already present and already reaching the shader, unread,
+	before P2c touched a single `.hlsli`.
 */
 
 import sdl "vendor:sdl3"
@@ -62,8 +62,8 @@ Material :: struct {
 	// top comment for why. Metallic-roughness and specular-glossiness are
 	// PBR's two parameterizations (brdf/pbr_metallic.hlsli,
 	// brdf/pbr_specgloss.hlsli); bands/rim are toon's (brdf/toon.hlsli);
-	// subsurface/thickness are the SSS model's (P2); specular_power is
-	// Blinn-Phong's (brdf/blinn_phong.hlsli).
+	// subsurface/thickness are the SSS model's (brdf/subsurface.hlsli);
+	// specular_power is Blinn-Phong's (brdf/blinn_phong.hlsli).
 	metallic:       f32,
 	roughness:      f32,
 	specular:       [3]f32,
@@ -194,6 +194,31 @@ create_material_toon :: proc(
 }
 
 /*
+	A wrapped-diffuse translucency approximation -- see `brdf/subsurface.hlsli`'s
+	own doc comment for exactly what this does and does not model (it is not a
+	real BSSRDF). `subsurface` is the tint the wrapped-around light picks up;
+	`thickness` is normalized (0 as thin as this material gets, 1 thick enough
+	that no light gets through) rather than a physical unit, since nothing in
+	this package's material pipeline measures one.
+*/
+create_material_subsurface :: proc(
+	base_color: [4]f32 = WHITE,
+	subsurface: [3]f32 = {1, 1, 1},
+	thickness:  f32    = 0.5,
+	emissive:   [3]f32 = {0, 0, 0},
+	textures:   Material_Textures = {},
+) -> Material {
+	return Material{
+		shading    = .SUBSURFACE,
+		base_color = base_color,
+		subsurface = subsurface,
+		thickness  = thickness,
+		emissive   = emissive,
+		textures   = textures,
+	}
+}
+
+/*
 	112 bytes: the wire form of a `Material` plus the one thing that is not a
 	material property at all -- `tint`, `draw_model`'s own per-call multiplier,
 	carried here because both are pushed together, once per part, in the same
@@ -207,10 +232,10 @@ create_material_toon :: proc(
 Material_Frag_Data :: struct #align(16) {
 	tint:       [4]f32, // draw_model's own multiplier, not a material property
 	base_color: [4]f32,
-	specular:   [4]f32, // xyz specular colour (spec-gloss, P2), w glossiness (spec-gloss, P2)
-	emissive:   [4]f32, // xyz emissive colour,                  w specular_power (Blinn-Phong)
-	params:     [4]f32, // x metallic, y roughness, z bands (toon, P2), w rim (toon, P2)
-	subsurface: [4]f32, // xyz subsurface tint (P2),             w thickness (P2)
+	specular:   [4]f32, // xyz specular colour (spec-gloss), w glossiness (spec-gloss)
+	emissive:   [4]f32, // xyz emissive colour,              w specular_power (Blinn-Phong)
+	params:     [4]f32, // x metallic, y roughness, z bands (toon), w rim (toon)
+	subsurface: [4]f32, // xyz subsurface tint,              w thickness
 	shading:    [4]f32, // x shading_model_index -- see shading.odin.  y-w unused
 }
 
@@ -232,22 +257,19 @@ Material_Frag_Data :: struct #align(16) {
 	normalized copy that the caller would ever see. Packing is the last point
 	the value passes through before the GPU, so it is where the fixup goes.
 
-	**`metallic`, `roughness` and `glossiness` are deliberately not in here**,
-	and they are why this rule is a per-field judgement rather than a sweep
-	over every number. Zero metallic is a dielectric, which is most surfaces;
-	zero roughness is a perfect mirror (clamped away from the literal 0
-	inside `brdf/pbr_metallic.hlsli` for a numerical reason, not a semantic
-	one -- see that file's own comment); zero glossiness is "as rough as
-	specular-glossiness can express", the same real answer from the other
-	parameterization's own side, which `brdf/pbr_specgloss.hlsli` reads
-	directly. `specular` (spec-gloss's own `f0`) is judged the same way in
-	`create_material_pbr_specgloss`'s own doc comment rather than swept here:
-	a caller who wants a material with genuinely zero specular reflectance
-	means exactly that. `rim` (toon's silhouette highlight) is the same story
-	-- zero rim is no rim light, a real and common choice. The remaining P2c
-	fields -- `subsurface`, `thickness` -- are unread by any model this far
-	into P2c; whichever of them turn out to have no sensible zero get added
-	here by the model that starts reading them, the same way these were.
+	**`metallic`, `roughness`, `glossiness`, `specular`, `subsurface`,
+	`thickness` and `rim` are deliberately not in here**, and they are why
+	this rule is a per-field judgement rather than a sweep over every number.
+	Zero metallic is a dielectric, which is most surfaces; zero roughness is
+	a perfect mirror (clamped away from the literal 0 inside
+	`brdf/pbr_metallic.hlsli` for a numerical reason, not a semantic one --
+	see that file's own comment); zero glossiness is "as rough as specular-
+	glossiness can express", the same real answer from the other
+	parameterization's own side; zero specular (spec-gloss's own `f0`) is a
+	real, if unusual, "no specular reflectance at all"; zero subsurface is no
+	translucent tint and zero thickness is "as thin as the SSS model can
+	express" -- both real answers `brdf/subsurface.hlsli` reads directly; and
+	zero rim is no rim light, a real and common choice.
 
 	**`bands` is in here, and it is the one field P2c decided the other way.**
 	Zero bands is not a real cel-shading choice -- `brdf/toon.hlsli` guards

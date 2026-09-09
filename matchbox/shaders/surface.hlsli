@@ -40,8 +40,8 @@ struct Surface
     float3 emissive;
     float  occlusion; // hardcoded to 1.0 until the occlusion texture lands (the loader job after this one)
 
-    float3 subsurface; // tint for the SSS model (P2)
-    float  thickness;  // P2
+    float3 subsurface; // tint for the SSS model (brdf/subsurface.hlsli)
+    float  thickness;  // brdf/subsurface.hlsli
 
     uint  shading_model; // which brdf_light/brdf_resolve this point runs -- see shading.odin
     float bands;         // toon (brdf/toon.hlsli)

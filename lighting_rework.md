@@ -714,22 +714,12 @@ which is what keeps it to one worker and one seam.
 and textures, normal, occlusion, emissive -- and the renderer binds them.
 Disjoint from the models above in everything but timing.
 
-**It carries a problem worth naming before it starts: there are no tangents.**
-`Vertex3D` is position, normal, uv and nothing else, and nothing in
-`model_load.odin` reads glTF's `TANGENT` attribute. A tangent-space normal map
-cannot be applied without a basis to apply it in. Three ways out, and the
-choice is a real one rather than an obvious one:
-
-- read `TANGENT` when a file has it and generate it when it does not, which
-  means a fourth vertex attribute, a wider `Vertex3D`, and a change to every
-  pipeline's vertex layout;
-- derive the basis in the fragment shader from screen-space derivatives of
-  position and uv, which costs no vertex memory and is standard practice, but
-  is lower quality on low-poly geometry -- which is what this renderer mostly
-  draws;
-- read the other maps now and leave normal mapping to its own phase.
-
-Decide it when that job is briefed, not inside it.
+**It carried a problem, and it is settled -- see §7.5.** There are no
+tangents: `Vertex3D` is position, normal, uv and nothing else, and nothing in
+`model_load.odin` reads glTF's `TANGENT`, so a tangent-space normal map has no
+basis to be applied in. The decision is to read metallic-roughness, occlusion
+and emissive now -- none of which need a tangent -- and leave normal mapping
+to a phase of its own.
 
 **Gate:** white-furnace test for both PBR models (uniform environment in,
 energy-conserving out, no energy gain at any roughness), asserted against an
@@ -853,6 +843,22 @@ Answered once, and not re-litigated per phase.
    choose sensible defaults rather than round-tripping existing scenes, and
    existing scenes get retuned by hand. `brdf/blinn_phong.hlsli` is still a
    real, supported module; it is just no longer a compatibility contract.
+
+5. **Normal mapping is its own phase, not part of the material loader.**
+   Applying a tangent-space normal map needs a tangent basis, and this package
+   has none -- no `TANGENT` read at load, no fourth vertex attribute. The two
+   ways to get one are both real changes with real costs: widening `Vertex3D`
+   touches every pipeline's vertex layout, and deriving the basis from
+   screen-space derivatives is cheap but visibly worse on the low-poly
+   geometry this renderer mostly draws. Neither is a decision worth making as
+   a side effect of a loader task. So P2's loader job reads
+   metallic-roughness, occlusion and emissive -- every map that needs no
+   tangent -- and normal mapping gets briefed on its own merits later, with
+   the vertex-format question asked out loud.
+
+   `Surface.normal`'s doc comment already says "normal map already applied",
+   which is the contract the BRDFs are written against and stays true: today
+   nothing applies one, and when something does, no BRDF file changes.
 
 ---
 

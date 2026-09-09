@@ -93,10 +93,10 @@ cbuffer Scene : register(b1, space3)
     to the one it does, the same silent-degrade shape an unsupported
     combination gets elsewhere in this package.
 
-    Declared before the brdf includes below: a BRDF is free to call this from
-    inside its own light loop (see `brdf/contract.hlsli`'s own doc comment on
-    why the loop lives there rather than in shared code), which means the
-    dispatcher has to exist before anything that might call it.
+    Declared before `sample_light` below: that is the only caller left, since
+    P2b moved the shadow lookup out of every BRDF's own light loop and into
+    shared code -- see `brdf/contract.hlsli`'s own doc comment for why no
+    `brdf_light_*`/`brdf_resolve_*` may call this directly any more.
 */
 float shadow_visibility(int light_index, float3 world)
 {
@@ -108,13 +108,146 @@ float shadow_visibility(int light_index, float3 world)
     }
 }
 
+/*
+    What light `i` contributes at `surface`, resolved once regardless of
+    which shading model is running -- see `brdf/contract.hlsli`'s own doc
+    comment for the three-piece contract this is step one of, and
+    `lighting_rework.md` section 2.1 for why this used to be duplicated
+    inside every model's own light loop instead. Lifted verbatim from what
+    was P0's `brdf_eval_blinn_phong` (now `brdf_light_blinn_phong`,
+    `brdf/blinn_phong.hlsli`): the directional/point/spot resolution, the
+    distance attenuation curve, the spot cone smoothstep, and the shadow
+    lookup are unchanged arithmetic, just no longer copied into a second
+    model the day one arrives.
+
+    **`radiance` already has attenuation and shadow multiplied in.** That is
+    the whole point of pulling this out: a BRDF never learns whether a
+    shadow map, a spot cone or distance dimmed a light, the same way
+    `Surface` never tells one which render pipeline filled it in
+    (`surface.hlsli`'s own doc comment).
+
+    Declared after `shadow_visibility` above, and after `Light`/`lights`/
+    `Scene`, because it reads all three -- `sample_light` is scene-shaped
+    code, not a model, so it lives here rather than in `brdf/contract.hlsli`
+    alongside the plain data shapes (`Light_Sample`, `Radiance`) that do not
+    depend on any of them.
+*/
+Light_Sample sample_light(uint i, Surface surface)
+{
+    Light_Sample result;
+    float        attenuation = 1.0;
+
+    if (lights[i].target.w < 0.5)
+    {
+        // Directional: a direction, not a place. Everything is lit from
+        // the same angle however far away it is.
+        result.direction = -normalize(lights[i].target.xyz - lights[i].position.xyz);
+    }
+    else
+    {
+        // Point and spot are both a place, and fade the same way with
+        // distance -- the curve PsxGame uses, which decides how far a
+        // campfire reaches, so it is copied rather than reinvented.
+        result.direction = normalize(lights[i].position.xyz - surface.position);
+
+        float d = length(lights[i].position.xyz - surface.position);
+        attenuation = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
+
+        if (lights[i].target.w > 1.5)
+        {
+            // Spot: an extra cone factor on top of the same distance
+            // falloff. cos falls as the angle from the cone's own axis
+            // grows, so the outer edge is the smaller of the two --
+            // smoothstep(outer, inner, x) is 0 past the outer cone, 1
+            // inside the inner one, and a soft ramp in between.
+            float3 spot_dir  = normalize(lights[i].target.xyz);
+            float  cos_angle = dot(-result.direction, spot_dir);
+            float  outer_cos = cos(radians(lights[i].cone.x));
+            float  inner_cos = cos(radians(lights[i].cone.y));
+            attenuation *= smoothstep(outer_cos, inner_cos, cos_angle);
+        }
+    }
+
+    // Every light asks the same dispatcher, regardless of whether it is
+    // actually one of the (up to MAX_SHADOW_CASTERS) casters -- see
+    // shadow_visibility_pcf's own doc comment for why a light that is
+    // neither still comes back 1 (unshadowed) rather than needing a special
+    // case here.
+    float shadow = shadow_visibility(int(i), surface.position);
+
+    result.n_dot_l  = max(dot(surface.normal, result.direction), 0.0);
+    result.radiance = lights[i].color.rgb * attenuation * shadow;
+
+    return result;
+}
+
 #include "brdf/blinn_phong.hlsli"
 #include "brdf/unlit.hlsli"
 
 /*
+    Step two of the per-light contract: which model's `brdf_light_<name>`
+    runs for this light. The only things in this whole file that switch on
+    `Surface.shading_model` are this function and `brdf_resolve` below --
+    see `brdf/contract.hlsli`'s own doc comment for why adding a sixth
+    shading model touches one line in each of these two rather than
+    anything else here.
+*/
+Radiance brdf_light(Surface surface, Light_Sample light)
+{
+    switch (surface.shading_model)
+    {
+    case SHADING_BLINN_PHONG:
+        return brdf_light_blinn_phong(surface, light);
+    case SHADING_UNLIT:
+    default:
+        return brdf_light_unlit(surface, light);
+    }
+}
+
+// Step three: which model's `brdf_resolve_<name>` turns the accumulated
+// sums into a colour. See `brdf_light`'s own doc comment just above.
+float3 brdf_resolve(Surface surface, Radiance total)
+{
+    switch (surface.shading_model)
+    {
+    case SHADING_BLINN_PHONG:
+        return brdf_resolve_blinn_phong(surface, total);
+    case SHADING_UNLIT:
+    default:
+        return brdf_resolve_unlit(surface, total);
+    }
+}
+
+/*
+    The light loop itself -- shared, written once, the replacement for every
+    model owning its own copy of this. `lighting_rework.md` section 2.1's own
+    sketch, unchanged: sample each light, dispatch its contribution into the
+    running `Radiance`, then dispatch once more to resolve the sums into a
+    colour. No shading model ever appears here by name -- this loop only
+    knows the contract (`brdf/contract.hlsli`), not which models implement
+    it, which is what keeps a new model from having to touch this function.
+*/
+float3 shade_lights(Surface surface)
+{
+    Radiance total = (Radiance)0;
+
+    uint count = uint(flags.x);
+    for (uint i = 0; i < count; i++)
+    {
+        Light_Sample light = sample_light(i, surface);
+        Radiance     r     = brdf_light(surface, light);
+
+        total.diffuse  += r.diffuse;
+        total.specular += r.specular;
+    }
+
+    return brdf_resolve(surface, total);
+}
+
+/*
     The one dispatcher a mesh fragment shader calls: which BRDF `surface`
-    runs, then the fog mix every material gets regardless of which one that
-    was.
+    runs (by way of `shade_lights` above), then the fog mix every material
+    gets regardless of which one that was.
 
     `flags.y < 0.5` (`Lighting_Settings.enabled == false`, lighting.odin)
     forces `SHADING_UNLIT` on every material regardless of its own choice --
@@ -124,7 +257,14 @@ float shadow_visibility(int light_index, float3 world)
     says "I am never lit"; a scene says "nothing is lit right now" without
     every material needing to agree on why.
 
-    **No gamma and no tone mapping here, since P1.** Before this phase,
+    The override is applied to this function's own local copy of `surface`
+    before `shade_lights` ever sees it -- HLSL passes structs by value, so
+    mutating the parameter here changes nothing the caller holds, and lets
+    `brdf_light`/`brdf_resolve` read `surface.shading_model` directly rather
+    than needing the scene-level override threaded through as a second
+    argument.
+
+    **No gamma and no tone mapping here, since P1.** Before that phase,
     `BLINN_PHONG`'s branch applied `pow(color, 1.0 / 2.2)` in place, inline,
     before fog -- a transfer function baked into one shading model's own
     case of this switch, which is exactly what `brdf/contract.hlsli`'s doc
@@ -154,19 +294,9 @@ float shadow_visibility(int light_index, float3 world)
 */
 float4 shade_surface(Surface surface)
 {
-    uint model = flags.y > 0.5 ? surface.shading_model : SHADING_UNLIT;
+    surface.shading_model = flags.y > 0.5 ? surface.shading_model : SHADING_UNLIT;
 
-    float3 color;
-    switch (model)
-    {
-    case SHADING_BLINN_PHONG:
-        color = brdf_eval_blinn_phong(surface);
-        break;
-    case SHADING_UNLIT:
-    default:
-        color = brdf_eval_unlit(surface);
-        break;
-    }
+    float3 color = shade_lights(surface);
 
     /*
         Fog moves into linear space here purely by virtue of where the

@@ -2,93 +2,95 @@
     Blinn-Phong
     -----------
     Ported from this package's own `lighting.hlsli` -- itself ported from
-    PsxGame's lighting.fs -- constant for constant: the same attenuation
-    curve, the same specular exponent of 16, the same ambient divided by ten.
-    Keeping those exactly is the whole point of doing this one first (P0):
-    not because this look is being preserved past this phase (it is not, see
-    `lighting_rework.md` section 7.4), but because a refactor that also
-    changes the maths cannot be checked against a reference picture. Every
-    later shading model is free to look however it likes; this one may not,
-    yet.
+    PsxGame's lighting.fs. P0 kept the arithmetic constant for constant so
+    that phase had a reference picture to check its own refactor against;
+    P2b's job is a second refactor, splitting the one function P0 shipped
+    into the three pieces `brdf/contract.hlsli` now describes, and the
+    arithmetic is *still* the same re-associated expression -- with one
+    stated exception, `brdf_light_blinn_phong`'s own specular term, which is
+    this rework's first deliberate change to how this model looks. See that
+    function's doc comment for what changed and why.
 
-    See `brdf/contract.hlsli`'s own doc comment for why this owns its whole
-    light loop rather than being called once per light: the final
-    `base_color * (1 + specular) * diffuse` combination has a cross term
-    between every pair of lights that a strict per-light contract cannot
-    express.
+    See `brdf/contract.hlsli` for why this no longer owns its whole light
+    loop the way P0's `brdf_eval_blinn_phong` did: the `base_color *
+    (1 + specular) * diffuse` combination has a cross term between every
+    pair of lights, but both `specular` and `diffuse` are themselves plain
+    sums -- only the final combine is nonlinear, so splitting accumulation
+    (this file) from resolution (`brdf_resolve_blinn_phong`, below) expresses
+    that cross term exactly, with no special case and no light loop here at
+    all.
 
     The specular exponent is read from the bound `Material` cbuffer's own
     `emissive.w` (`mesh.frag.hlsl`) rather than from `Surface` -- see
-    `material.odin`'s own `Material_Frag_Data` packing comment. `Surface` only
-    carries what a shading model needs that a future deferred G-buffer could
-    also supply (`surface.hlsli`'s own doc comment); a scalar this specific to
-    one model is cheaper read straight off the material that is already bound
-    for this draw.
+    `material.odin`'s own `Material_Frag_Data` packing comment. `Surface`
+    only carries what a shading model needs that a future deferred G-buffer
+    could also supply (`surface.hlsli`'s own doc comment); a scalar this
+    specific to one model is cheaper read straight off the material that is
+    already bound for this draw.
 */
-float3 brdf_eval_blinn_phong(Surface surface)
+
+/*
+    One light's diffuse and specular contribution -- P0's own per-iteration
+    body (`lighting.hlsli`'s predecessor), re-expressed against
+    `Light_Sample` instead of reading `lights[i]`/`shadow_visibility`
+    directly. `light.radiance` already carries that light's colour,
+    attenuation and shadow together (`sample_light`'s own doc comment,
+    `lighting_core.hlsli`), and `light.n_dot_l` is the same clamped dot P0
+    computed inline as `ndl`.
+
+    diffuse:  P0 had `lights[i].color.rgb * ndl * attenuation * shadow`,
+              which is exactly `light.radiance * light.n_dot_l` once colour,
+              attenuation and shadow are already folded into `radiance`.
+
+    specular: **Coloured, where P0's own port was not.** P0 accumulated
+              `spec * attenuation * shadow` alone, with no colour term, while
+              the diffuse sum above carried the light's colour. Folding
+              colour into `light.radiance` -- the whole point of this file's
+              split, see `sample_light`'s doc comment -- means specular would
+              have had to divide that colour back out again just to stay
+              bit-for-bit identical to the old, uncoloured result, which is
+              precisely the "awkward line" `lighting_rework.md` section 2.1
+              already flags rather than asks anyone to write. Section 7.4 has
+              already released the old look as a constraint, so the honest
+              move is to let specular be coloured instead: `light.radiance *
+              spec` rather than `spec * attenuation * shadow`. A white light's
+              highlight looks identical either way; a coloured light now
+              tints its own highlight the way a real one would. **This is
+              this rework's first deliberate change to `blinn_phong`'s
+              arithmetic** -- every other line in this file and in
+              `brdf_resolve_blinn_phong` is P0's own expression, re-associated
+              rather than rewritten.
+*/
+Radiance brdf_light_blinn_phong(Surface surface, Light_Sample light)
 {
-    float3 n     = surface.normal;
-    float3 viewd = surface.view;
+    Radiance r = (Radiance)0;
 
-    float3 diffuse_sum  = float3(0, 0, 0);
-    float3 specular_sum = float3(0, 0, 0);
+    r.diffuse = light.radiance * light.n_dot_l;
 
-    uint count = uint(flags.x);
-    for (uint i = 0; i < count; i++)
+    if (light.n_dot_l > 0.0)
     {
-        float3 to_light;
-        float  attenuation = 1.0;
+        float specular_power = emissive.w; // Material's own, see this file's top comment
+        float spec = pow(max(0.0, dot(surface.view, reflect(-light.direction, surface.normal))), specular_power);
 
-        if (lights[i].target.w < 0.5)
-        {
-            // Directional: a direction, not a place. Everything is lit from
-            // the same angle however far away it is.
-            to_light = -normalize(lights[i].target.xyz - lights[i].position.xyz);
-        }
-        else
-        {
-            // Point and spot are both a place, and fade the same way with
-            // distance -- the curve PsxGame uses, which decides how far a
-            // campfire reaches, so it is copied rather than reinvented.
-            to_light = normalize(lights[i].position.xyz - surface.position);
-
-            float d = length(lights[i].position.xyz - surface.position);
-            attenuation = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
-
-            if (lights[i].target.w > 1.5)
-            {
-                // Spot: an extra cone factor on top of the same distance
-                // falloff. cos falls as the angle from the cone's own axis
-                // grows, so the outer edge is the smaller of the two --
-                // smoothstep(outer, inner, x) is 0 past the outer cone, 1
-                // inside the inner one, and a soft ramp in between.
-                float3 spot_dir  = normalize(lights[i].target.xyz);
-                float  cos_angle = dot(-to_light, spot_dir);
-                float  outer_cos = cos(radians(lights[i].cone.x));
-                float  inner_cos = cos(radians(lights[i].cone.y));
-                attenuation *= smoothstep(outer_cos, inner_cos, cos_angle);
-            }
-        }
-
-        // Every light asks the same dispatcher, regardless of whether it is
-        // actually one of the (up to MAX_SHADOW_CASTERS) casters -- see
-        // shadow_visibility_pcf's own doc comment for why a light that is
-        // neither still comes back 1 (unshadowed) rather than needing a
-        // special case here.
-        float shadow = shadow_visibility(int(i), surface.position);
-
-        float ndl = max(dot(n, to_light), 0.0);
-        diffuse_sum += lights[i].color.rgb * ndl * attenuation * shadow;
-
-        if (ndl > 0.0)
-        {
-            float specular_power = emissive.w; // Material's own, see this file's top comment
-            float spec = pow(max(0.0, dot(viewd, reflect(-to_light, n))), specular_power);
-            specular_sum += spec * attenuation * shadow;
-        }
+        r.specular = light.radiance * spec; // coloured -- see this function's own doc comment
     }
 
-    float3 color = surface.base_color * (1.0 + specular_sum) * diffuse_sum;
+    return r;
+}
+
+/*
+    P0's own final combine, unchanged: `base_color * (1 + specular) *
+    diffuse` plus `base_color * (ambient / 10)`. This is where PsxGame's
+    cross term between every pair of lights' specular and diffuse
+    contributions actually happens -- `total.specular` and `total.diffuse`
+    are each a sum across every light already (`shade_lights`,
+    `lighting_core.hlsli`), so multiplying the two sums here reproduces the
+    same cross terms P0's single accumulating loop produced, without either
+    sum needing to know about any other light while it was being built.
+*/
+float3 brdf_resolve_blinn_phong(Surface surface, Radiance total)
+{
+    float3 color = surface.base_color * (1.0 + total.specular) * total.diffuse;
     color += surface.base_color * (ambient.rgb / 10.0);
 
     return color;

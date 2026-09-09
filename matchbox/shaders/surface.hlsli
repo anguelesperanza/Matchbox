@@ -5,10 +5,11 @@
     how that point was reached. A forward fragment shader (today, the only
     kind this package has) fills one from interpolants and texture samples; a
     future deferred lighting pass would fill the identical struct from
-    G-buffer reads instead. No `brdf_eval` in any shading model's own .hlsli
-    ever learns which of the two happened -- that is the property that lets a shading model be
-    written once and used from any render pipeline, see
-    `lighting_rework.md` section 3.2.
+    G-buffer reads instead. No `brdf_light_*`/`brdf_resolve_*` in any shading
+    model's own .hlsli (`brdf/contract.hlsli`) ever learns which of the two
+    happened -- that is the property that lets a shading model be written
+    once and used from any render pipeline, see `lighting_rework.md`
+    section 3.2.
 
     **Must also be fillable from a 2D sprite fragment**, even though that is
     P8's work and not this phase's. That is a decision made now rather than

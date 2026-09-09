@@ -126,10 +126,11 @@ main :: proc() {
 		and an extent on the spot.
 	*/
 	settings := mb.Lighting_Settings{
-		enabled = true,
-		ambient = {color = {0.35, 0.35, 0.55, 1}},
-		fog     = {enabled = true, color = FOG_COLOR, start = FOG_START, end = FOG_END},
-		shadows = mb.SHADOW_DEFAULTS,
+		enabled  = true,
+		ambient  = {color = {0.35, 0.35, 0.55, 1}},
+		fog      = {enabled = true, color = FOG_COLOR, start = FOG_START, end = FOG_END},
+		shadows  = mb.SHADOW_DEFAULTS,
+		exposure = 1,
 	}
 	settings.shadows.enabled = false
 	mb.set_lighting(settings)

@@ -60,7 +60,7 @@ main :: proc() {
 		here is 0.35 reaching the surface -- which is what keeps the faces
 		turned away from the sun off pure black.
 	*/
-	mb.set_lighting({enabled = true, ambient = {color = {3.5, 3.5, 3.5, 1}}})
+	mb.set_lighting({enabled = true, ambient = {color = {3.5, 3.5, 3.5, 1}}, exposure = 1})
 	mb.set_lights({mb.create_directional_light({0.4, -1, -0.7}, {0.65, 0.65, 0.65, 1})})
 
 	mb.set_escape_key(.UNKNOWN)

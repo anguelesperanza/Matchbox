@@ -273,6 +273,41 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 	_pad:             [2]f32,
 }
 
+/*
+	704 bytes. ssao.frag.hlsl's own fragment uniform -- the two matrices it
+	reconstructs and reprojects world positions with, the camera those
+	matrices came from, the tuning `Ssao` carries, and the sample kernel
+	itself.
+
+	The two matrices are declared first, at offset 0, for the same reason
+	`Cascade_Frag_Data` declares its own array of them first: Odin aligns
+	`matrix[4,4]f32` to 32 bytes, and anything ahead of them that is not a
+	multiple of 32 opens a gap `init`'s size assert would then have to account
+	for. The kernel goes last because it is the only variable-length thing
+	here in spirit -- `Ssao.samples` decides how much of it is read -- and
+	putting it between the scalars would make every field after it move when
+	MAX_SSAO_SAMPLES changed.
+*/
+Ssao_Frag_Data :: struct #align(16) {
+	inverse_view_projection: matrix[4, 4]f32,
+	view_projection:         matrix[4, 4]f32,
+
+	camera:  [4]f32, // xyz eye position,    w sample count
+	forward: [4]f32, // xyz camera forward,  w radius in world units
+	params:  [4]f32, // x bias, y intensity, zw one texel of the AO target in uv
+	screen:  [4]f32, // xy AO target size in pixels, z 1 when orthographic, w unused
+
+	kernel: [MAX_SSAO_SAMPLES][4]f32,
+}
+
+// 16 bytes. ssao_blur.frag.hlsl's own -- one texel of the AO texture and how
+// many of them the box reaches. See ssao.odin.
+Ssao_Blur_Frag_Data :: struct #align(16) {
+	texel:  [2]f32,
+	radius: f32,
+	_pad:   f32,
+}
+
 // 16 bytes. bloom_downsample.frag.hlsl and bloom_upsample.frag.hlsl share
 // this one. Both need the size of a texel of whatever they are *reading* --
 // see bloom.odin's own bloom_run for why the source's and not the

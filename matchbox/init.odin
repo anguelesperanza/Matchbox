@@ -517,7 +517,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Tint_Frag_Data)    == 16)
 	#assert(size_of(Material_Frag_Data) == 112)
 	#assert(size_of(Light_Uniform)     == 112)
-	#assert(size_of(Scene_Frag_Data)   == 272)
+	#assert(size_of(Scene_Frag_Data)   == 288)
 	#assert(size_of(Cluster_Range)     == 8)
 	#assert(size_of(Cascade_Frag_Data) == 544)
 	#assert(size_of(Cube_Frag_Data)    == 400)
@@ -526,6 +526,8 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Probe_Prefilter_Frag_Data) == 16)
 	#assert(size_of(Bloom_Filter_Frag_Data)    == 16)
 	#assert(size_of(Bloom_Prefilter_Frag_Data) == 32)
+	#assert(size_of(Ssao_Frag_Data)            == 704)
+	#assert(size_of(Ssao_Blur_Frag_Data)       == 16)
 	#assert(size_of(Deferred_Lighting_Frag_Data) == 64)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
@@ -706,6 +708,13 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.bloom_upsample = create_builtin_shader(
 		#load("shaders/bloom_upsample.frag.spv"), #load("shaders/bloom_upsample.frag.dxil"), .FRAGMENT, 1)
 
+	// SSAO (ssao.odin). One sampler each -- the depth buffer, then the AO
+	// texture the first pass wrote -- and one uniform block each.
+	mbi.renderer.shaders.ssao = create_builtin_shader(
+		#load("shaders/ssao.frag.spv"), #load("shaders/ssao.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.ssao_blur = create_builtin_shader(
+		#load("shaders/ssao_blur.frag.spv"), #load("shaders/ssao_blur.frag.dxil"), .FRAGMENT, 1)
+
 	/*
 		Environment probe baking (ambient.odin). Both read one sampler -- the
 		source skybox's own cube map -- through the same `skybox.vert.hlsl`
@@ -798,6 +807,25 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.pipelines.bloom_upsample = create_pipeline(
 		mbi.renderer.shaders.bloom_upsample,
 		color_format = mbi.renderer.lighting.targets.format,
+	)
+
+	/*
+		SSAO's own two. The device's answer for the AO format is settled here
+		rather than at first use, for the same reason the G-buffer's is
+		(`ensure_gbuffer_targets`): SDL3 bakes a colour format into a pipeline
+		at creation and the answer cannot change afterward, so asking now
+		means `ensure_ssao_targets` later finds it already resolved rather
+		than picking one a pipeline was not built against.
+	*/
+	mbi.renderer.lighting.ssao.format = pick_ssao_format()
+
+	mbi.renderer.pipelines.ssao = create_pipeline(
+		mbi.renderer.shaders.ssao,
+		color_format = mbi.renderer.lighting.ssao.format,
+	)
+	mbi.renderer.pipelines.ssao_blur = create_pipeline(
+		mbi.renderer.shaders.ssao_blur,
+		color_format = mbi.renderer.lighting.ssao.format,
 	)
 
 	/*
@@ -930,6 +958,31 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	// No geometry, no culling and no depth. Drawn first, so everything after it
 	// covers it; see draw_skybox.
+	/*
+		The depth prepass (pipeline_forward.odin) -- the shadow pipelines'
+		own shape, with the two differences that matter: the *main* depth
+		format, since this writes into the pass's own depth buffer rather
+		than a shadow map, and no bias at all, since its depth has to match
+		bit for bit what the scene pass will write over it.
+	*/
+	mbi.renderer.pipelines.depth_prepass = create_pipeline(
+		mbi.renderer.shaders.shadow,
+		vertex       = mbi.renderer.shaders.mesh,
+		layout       = .MESH,
+		depth        = true,
+		cull         = .BACK,
+		color_target = false,
+	)
+
+	mbi.renderer.pipelines.depth_prepass_skinned = create_pipeline(
+		mbi.renderer.shaders.shadow,
+		vertex       = mbi.renderer.shaders.mesh_skinned,
+		layout       = .SKINNED,
+		depth        = true,
+		cull         = .BACK,
+		color_target = false,
+	)
+
 	mbi.renderer.pipelines.skybox_panorama = create_pipeline(
 		mbi.renderer.shaders.skybox_panorama,
 		vertex       = mbi.renderer.shaders.skybox,
@@ -1320,6 +1373,10 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.bloom_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_prefilter)
 	if mbi.renderer.pipelines.bloom_downsample != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_downsample)
 	if mbi.renderer.pipelines.bloom_upsample   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_upsample)
+	if mbi.renderer.pipelines.ssao      != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.ssao)
+	if mbi.renderer.pipelines.ssao_blur != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.ssao_blur)
+	if mbi.renderer.pipelines.depth_prepass         != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.depth_prepass)
+	if mbi.renderer.pipelines.depth_prepass_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.depth_prepass_skinned)
 	if mbi.renderer.pipelines.probe_irradiance != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_irradiance)
 	if mbi.renderer.pipelines.probe_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_prefilter)
 
@@ -1347,6 +1404,8 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.bloom_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_prefilter)
 	if mbi.renderer.shaders.bloom_downsample != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_downsample)
 	if mbi.renderer.shaders.bloom_upsample   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_upsample)
+	if mbi.renderer.shaders.ssao      != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.ssao)
+	if mbi.renderer.shaders.ssao_blur != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.ssao_blur)
 	if mbi.renderer.shaders.probe_irradiance != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_irradiance)
 	if mbi.renderer.shaders.probe_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_prefilter)
 
@@ -1369,6 +1428,9 @@ cleanup :: proc() {
 	// The bloom chain's own levels -- only ever made once a game turns bloom
 	// on. See bloom.odin.
 	release_bloom_targets()
+
+	// SSAO's own two, the same "only once a game turned it on". See ssao.odin.
+	release_ssao_targets()
 
 	// DEFERRED's own targets -- only ever made once a game selects that
 	// pipeline. See Gbuffer_Targets' own doc comment (gbuffer.odin).
@@ -1406,6 +1468,7 @@ cleanup :: proc() {
 
 	delete(mbi.renderer.pending_shadow_models)
 	delete(mbi.renderer.pending_deferred_forward_models)
+	delete(mbi.renderer.pending_scene_models)
 
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
 	sdl.DestroyGPUDevice(device)

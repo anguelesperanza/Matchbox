@@ -261,6 +261,18 @@ Lighting_Settings :: struct {
 		new field on this struct has to be checked for, rather than assumed.
 	*/
 	post: Post_Settings,
+
+	/*
+		P7b's own addition: screen-space ambient occlusion. See `Ssao`
+		(ssao.odin), and that file's own top comment for why it is here rather
+		than on `post` above -- it produces a value for `Surface.occlusion`,
+		which has to be known before shading, where everything in `post`
+		consumes the finished HDR buffer afterward.
+
+		The zero value is off, which is the picture every scene got before
+		this phase.
+	*/
+	ssao: Ssao,
 }
 
 /*
@@ -364,6 +376,7 @@ lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Se
 	s.shadows = shadow_settings_normalized(s.shadows)
 	s.cluster = cluster_settings_normalized(s.cluster)
 	s.post    = post_settings_normalized(s.post)
+	s.ssao    = ssao_settings_normalized(s.ssao)
 
 	return s
 }
@@ -376,7 +389,10 @@ is_lighting_active :: proc() -> bool {
 }
 
 /*
-	272 bytes since P5 added `cluster_grid`/`cluster_camera` (32 more, for
+	288 bytes since P7b added `screen_size` (16 more, for the one thing that
+	needs the size of the pass rather than the size of the window -- see that
+	field's own comment), and 272 before that, since P5 added
+	`cluster_grid`/`cluster_camera` (32 more, for
 	`CLUSTERED`'s own grid dimensions and the camera numbers
 	`cluster_index_for_fragment` needs to reconstruct a fragment's own
 	cluster) on top of P4's `ambient_ground` (16, for HEMISPHERE's ground
@@ -461,6 +477,24 @@ Scene_Frag_Data :: struct #align(16) {
 	*/
 	cluster_camera: [4]f32,
 
+	/*
+		P7b's own addition: the width and height in pixels of whatever
+		`begin_drawing_3d` was actually called for -- the window, or a game's
+		own `Render_Target` -- and its reciprocal. `ssao_occlusion`
+		(lighting_core.hlsli) divides `SV_Position` by it to find this
+		fragment's place in the AO texture.
+
+		Deliberately not the same value as `cluster_camera.xy`, which carries
+		`mbi.window_width`/`window_height`. The two agree for every scene that
+		draws 3D straight to the window and disagree for one drawing into a
+		differently-sized render target -- which makes `cluster_camera.xy`
+		wrong in that case, and has since P5. Not fixed here: it is a real
+		bug, it is not this phase's, and repointing it means also checking
+		`cluster_build`'s own CPU-side use of the same two numbers
+		(light_cull.odin) rather than editing one line.
+	*/
+	screen_size: [4]f32,
+
 	// Each caster's own view-projection, world space to its own clip space.
 	// light_view_projection is unread whenever flags.z is -1;
 	// light_view_projection2 whenever shadow_caster1.x is -1.
@@ -535,6 +569,8 @@ push_lighting :: proc(camera: Camera3D) {
 	l  := &r.lighting
 	sh := &l.shadow
 
+	pass_size := get_current_target_size()
+
 	// prefiltered_level_count - 1: the scale pbr_environment_specular
 	// (brdf/pbr_common.hlsli) turns a [0,1] roughness into a level index
 	// with. 0 whenever no probe is bound, which keeps that multiply well
@@ -594,6 +630,11 @@ push_lighting :: proc(camera: Camera3D) {
 		// either field.
 		cluster_grid   = {f32(l.settings.cluster.grid.x), f32(l.settings.cluster.grid.y), f32(l.settings.cluster.grid.z), f32(l.settings.pipeline)},
 		cluster_camera = {f32(mbi.window_width), f32(mbi.window_height), camera3d_defaults(camera).near, camera3d_defaults(camera).far},
+
+		// The pass's own size, which is not the window's whenever a game is
+		// drawing 3D into a Render_Target -- see this field's own comment on
+		// Scene_Frag_Data.
+		screen_size = {pass_size.x, pass_size.y, 1 / max(pass_size.x, 1), 1 / max(pass_size.y, 1)},
 
 		light_view_projection  = sh.view_projections[0],
 		light_view_projection2 = sh.view_projections[1],

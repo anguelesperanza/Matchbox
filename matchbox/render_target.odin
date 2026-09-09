@@ -90,10 +90,14 @@ create_render_target :: proc(width: i32 = 0, height: i32 = 0) -> (Render_Target,
 
 	if r.depth_format == .INVALID do r.depth_format = pick_depth_format()
 
+	// SAMPLER as well, for the same reason the window's own depth texture
+	// carries it since P7b -- 3D drawn into a target still runs SSAO and
+	// volumetrics, and both read this frame's depth back. See
+	// ensure_depth_texture (render3d.odin).
 	target.depth = sdl.CreateGPUTexture(r.device, {
 		type                 = .D2,
 		format               = r.depth_format,
-		usage                = {.DEPTH_STENCIL_TARGET},
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
 		width                = u32(w),
 		height               = u32(h),
 		layer_count_or_depth = 1,

@@ -670,13 +670,16 @@ fmt_shading_model :: proc(m: Shading_Model) -> string {
 	`deferred_lighting.frag.hlsl` is the shader the P6 brief itself named as
 	at risk: it needs everything mesh.frag.hlsl needs for shading (shadow
 	maps, the environment probe) *plus* the four G-buffer targets and its own
-	sampled depth target. See `DEFERRED_LIGHTING_SAMPLER_COUNT`'s own doc
-	comment (render.odin) for the count (11) and `test_mesh_frag_sampler_count_is_pinned_under_vulkan_floor`
-	(render_test.odin) for the identical shape this test copies.
+	sampled depth target -- and since P7b the AO texture too. See
+	`DEFERRED_LIGHTING_SAMPLER_COUNT`'s own doc comment (render.odin) for the
+	count (12) and `test_mesh_frag_sampler_count_is_pinned_under_vulkan_floor`
+	(render_test.odin) for the identical shape this test copies, including the
+	part where updating the number is meant to be a conscious look rather than
+	a rubber stamp.
 */
 @(test)
 test_deferred_lighting_sampler_count_is_pinned_under_vulkan_floor :: proc(t: ^testing.T) {
-	testing.expect_value(t, DEFERRED_LIGHTING_SAMPLER_COUNT, 11)
+	testing.expect_value(t, DEFERRED_LIGHTING_SAMPLER_COUNT, 12)
 
 	testing.expect(
 		t, DEFERRED_LIGHTING_SAMPLER_COUNT < 16,

@@ -68,18 +68,41 @@
     produce the token `tLIGHTS_T`, not `t11`; routing through one more macro
     layer forces `LIGHTS_T` to expand to `11` before the paste happens.
 */
+#ifndef SSAO_T
+#define SSAO_T 10
+#endif
 #ifndef LIGHTS_T
-#define LIGHTS_T 10
+#define LIGHTS_T 11
 #endif
 #ifndef CLUSTER_RANGES_T
-#define CLUSTER_RANGES_T 11
+#define CLUSTER_RANGES_T 12
 #endif
 #ifndef CLUSTER_LIGHT_INDICES_T
-#define CLUSTER_LIGHT_INDICES_T 12
+#define CLUSTER_LIGHT_INDICES_T 13
 #endif
 
 #define CONCAT_(a, b) a##b
 #define CONCAT(a, b) CONCAT_(a, b)
+
+/*
+    P7b's ambient occlusion (`ssao.odin`), declared here rather than in either
+    shader that includes this file -- which is the whole point of it. The AO
+    texture is read in exactly one place, `shade_surface` below, and that one
+    place serves the forward mesh shader and the deferred lighting pass alike;
+    declaring the sampler beside its only reader keeps it that way. It is
+    parametrized for the same reason the three storage buffers below are: the
+    two including shaders have different numbers of sampled textures ahead of
+    this point, so the register cannot be a literal here.
+
+    Bound to `Renderer.default_texture` -- 1x1 **white** -- whenever SSAO is
+    off or its pass did not run this frame. White is 1.0 and this is a
+    *factor*, so an unbound frame reads as "nothing is occluded" rather than
+    as "everything is". Getting that backwards would black out every scene
+    that never turned SSAO on, which is most of them.
+*/
+Texture2D<float> ssao_map : register(CONCAT(t, SSAO_T), space2);
+SamplerState     ssao_smp : register(CONCAT(s, SSAO_T), space2);
+
 
 /*
     One light, as the shader reads it -- the same shape as before this
@@ -190,6 +213,25 @@ cbuffer Scene : register(b1, space3)
     */
     float4 cluster_grid;
     float4 cluster_camera;
+
+    /*
+        P7b's own addition: the width and height in pixels of whatever
+        `begin_drawing_3d` was actually called for -- the window, or a game's
+        own `Render_Target`. `ssao_occlusion` -- further down this file, where
+        the Scene block it reads is finally in scope -- divides `SV_Position`
+        by it.
+
+        Not the same as `cluster_camera.xy`, which carries the *window's* size
+        and is what `cluster_index_for_fragment` divides by. Those two agree
+        for every scene that draws 3D straight to the window, which is every
+        example here, and disagree for one drawing into a differently-sized
+        render target -- so `cluster_camera.xy` is wrong in that case and has
+        been since P5. Left alone rather than quietly repointed at this field:
+        it is a real bug, it is not this phase's, and fixing it means checking
+        `cluster_build`'s own CPU-side use of the same numbers
+        (light_cull.odin) rather than changing one line here.
+    */
+    float4 screen_size;
 
     // Each caster's own view-projection, world space to its own clip space.
     // light_view_projection is unread whenever flags.z is -1;
@@ -838,9 +880,41 @@ float3 shade_lights(Surface surface, float4 screen_pos)
     before this phase needs a different `base_color`, not a different code
     path.
 */
+/*
+    This pixel's ambient occlusion. `screen_pos` is `SV_Position`, so it is in
+    pixels and has to be divided by the pass's own size rather than by the
+    window's -- `screen_size` (Scene_Frag_Data) carries the size of whatever
+    `begin_drawing_3d` was actually called for, which is not the window when a
+    game is drawing 3D into a `Render_Target`.
+*/
+float ssao_occlusion(float4 screen_pos)
+{
+    if (screen_size.x <= 0.0 || screen_size.y <= 0.0) return 1.0;
+
+    float2 uv = screen_pos.xy / screen_size.xy;
+    return ssao_map.Sample(ssao_smp, uv).r;
+}
+
 float4 shade_surface(Surface surface, float4 screen_pos)
 {
     surface.shading_model = flags.y > 0.5 ? surface.shading_model : SHADING_UNLIT;
+
+    /*
+        **The one place screen-space ambient occlusion is applied**, for every
+        shading model and from every render pipeline -- `ssao.odin`'s own top
+        comment makes that claim and this line is it. `surface.occlusion` is
+        already whatever the material's own occlusion texture said, and the two
+        multiply: a baked occlusion map and a screen-space one describe
+        different scales of the same quantity (one the model's own creases, one
+        the scene's), so neither replaces the other.
+
+        Above the model dispatch rather than inside it, because occlusion is a
+        property of the point and not of how that point is being shaded --
+        exactly what `Surface` is for. A model that ignores occlusion entirely
+        (`SHADING_UNLIT`) ignores this too, for free, because it never reads
+        the field.
+    */
+    surface.occlusion *= ssao_occlusion(screen_pos);
 
     float3 color = shade_lights(surface, screen_pos);
 

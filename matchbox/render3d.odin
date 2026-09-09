@@ -54,6 +54,33 @@ import sdl "vendor:sdl3"
 	desktop drivers all have, `D32_FLOAT` is the usual fallback, and
 	`D16_UNORM` is the one guaranteed everywhere -- which is the one an Android
 	device may leave you with.
+
+	**Sampled as well as written since P7b**, which is a change to a resource
+	every 3D game already has and so is worth saying out loud. SSAO and
+	volumetric light both need to read this frame's depth back
+	(`ssao.odin`), and under `FORWARD`/`CLUSTERED` there is nowhere else for
+	it to come from -- `DEFERRED` has its own sampled depth target
+	(`Gbuffer_Targets.depth`) and P6 deliberately built that as a second
+	texture rather than widening this one, on the grounds that no
+	forward/clustered game should pay for a feature only deferred used. That
+	reasoning does not survive a feature every pipeline is meant to offer:
+	the alternative would be a second full-size depth texture for
+	forward/clustered as well, and the mesh pipelines cannot be bound in a
+	pass whose depth format differs from the one they were built against
+	(SDL3 bakes it in at creation), so that second texture would have to
+	*replace* this one anyway.
+
+	What it costs, stated rather than discovered: `pick_depth_format` now
+	requires `{.DEPTH_STENCIL_TARGET, .SAMPLER}` of a candidate rather than
+	`{.DEPTH_STENCIL_TARGET}` alone, so a device that offers
+	`D24_UNORM_S8_UINT` only as a plain depth target now falls to
+	`D32_FLOAT` -- `pick_shadow_format`'s own doc comment already flags that
+	format as "the more likely of the three to refuse" a sampled
+	combination. And on a tiled mobile GPU, a depth buffer that may be
+	sampled generally cannot stay in tile memory. Neither is measurable
+	here. The `store_op` is still `DONT_CARE` for a frame nothing reads the
+	depth of, which is what keeps the second cost off a game that uses
+	neither effect -- see `begin_drawing_3d`.
 */
 @(private)
 ensure_depth_texture :: proc() -> bool {
@@ -80,7 +107,7 @@ ensure_depth_texture :: proc() -> bool {
 	r.depth_texture = sdl.CreateGPUTexture(r.device, {
 		type                 = .D2,
 		format               = r.depth_format,
-		usage                = {.DEPTH_STENCIL_TARGET},
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
 		width                = u32(width),
 		height               = u32(height),
 		layer_count_or_depth = 1,
@@ -105,7 +132,7 @@ pick_depth_format :: proc() -> sdl.GPUTextureFormat {
 	candidates := [3]sdl.GPUTextureFormat{.D24_UNORM_S8_UINT, .D32_FLOAT, .D16_UNORM}
 
 	for format in candidates {
-		if sdl.GPUTextureSupportsFormat(mbi.renderer.device, format, .D2, {.DEPTH_STENCIL_TARGET}) {
+		if sdl.GPUTextureSupportsFormat(mbi.renderer.device, format, .D2, {.DEPTH_STENCIL_TARGET, .SAMPLER}) {
 			return format
 		}
 	}
@@ -233,6 +260,12 @@ pipeline_cluster_buffers :: proc() -> (ranges, indices: ^sdl.GPUBuffer) {
 */
 begin_drawing_3d :: proc(camera: Camera3D) {
 	r := &mbi.renderer
+
+	// Cleared first thing, not only where it is set below: every early return
+	// between here and there would otherwise leave last frame's answer in
+	// place, and a stale `true` makes draw_model and draw_skybox queue into a
+	// frame that has no replay coming.
+	r.scene_deferred = false
 	if !r.frame_active do return
 
 	// Whatever draw_model was asked to cast a shadow before either pass
@@ -309,32 +342,28 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 		needs it to already exist, the same way FORWARD/CLUSTERED already
 		needed it here.
 	*/
-	if r.lighting.settings.pipeline == .DEFERRED {
+	/*
+		P7b: a forward-family pipeline with SSAO on opens no pass at all here.
+		Its scene has to go through a depth prepass and the AO pass before it
+		can be shaded, and neither can start until the frame has said what its
+		models are -- see `pipeline_forward_defers_scene`
+		(pipeline_forward.odin). Everything below this point still runs:
+		`mode_3d`, the camera, `push_lighting` and the per-pipeline begin all
+		belong to the frame rather than to the pass, and holding them back
+		would leave the queued draws with no camera to be replayed against.
+	*/
+	r.scene_deferred = pipeline_forward_defers_scene()
+	clear(&r.pending_scene_models)
+
+	switch {
+	case r.scene_deferred:
+		// Nothing to open yet. end_drawing_3d opens both passes, in order.
+
+	case r.lighting.settings.pipeline == .DEFERRED:
 		if !pipeline_deferred_open_gbuffer_pass() do return
-	} else {
-		linear_background := linearize_background_color(r.background_color)
 
-		color := sdl.GPUColorTargetInfo{
-			texture     = r.lighting.targets.color,
-			clear_color = {linear_background.x, linear_background.y, linear_background.z, linear_background.w},
-			load_op     = .CLEAR,
-			store_op    = .STORE,
-		}
-
-		depth := sdl.GPUDepthStencilTargetInfo{
-			texture     = depth_texture,
-			clear_depth = 1,
-			load_op     = .CLEAR,
-			store_op    = .DONT_CARE, // nothing reads it after the pass ends
-			stencil_load_op  = .DONT_CARE,
-			stencil_store_op = .DONT_CARE,
-		}
-
-		r.pass = sdl.BeginGPURenderPass(r.cmd, &color, 1, &depth)
-		if r.pass == nil do return
-
-		bind_cache_reset()
-		apply_clip()
+	case:
+		if !open_forward_scene_pass(load_depth = false) do return
 	}
 
 	r.mode_3d        = true
@@ -351,6 +380,61 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	// same camera; FORWARD has none. See pipeline_begin_frame's own doc
 	// comment just above this file's "Render pipeline dispatch" section.
 	pipeline_begin_frame(camera)
+}
+
+/*
+	Opens the pass a forward-family pipeline shades into: the HDR scene target
+	(`tonemap.odin`) and the frame's own depth buffer.
+
+	Its own procedure since P7b, because there are now two moments it can
+	happen at. Ordinarily it is `begin_drawing_3d`, exactly as it always was.
+	With SSAO on it is `end_drawing_3d` instead, after the depth prepass and
+	the AO pass have both run -- and then `load_depth` is true, so the pass
+	keeps the depth the prepass already worked out rather than clearing it and
+	making every fragment prove itself again. That is the early-Z half of what
+	a prepass buys, and it is free once the prepass exists.
+
+	`store_op` on the depth is the one thing here that is not fixed: nothing
+	read this frame's depth after the pass ended until P7b, and nothing reads
+	it now either unless something asked (`scene_depth_is_read`, ssao.odin).
+	Kept as `DONT_CARE` in the common case rather than made unconditional,
+	because a stored depth buffer is a real write on a tiled GPU where a
+	discarded one never leaves tile memory -- see `ensure_depth_texture`'s own
+	doc comment on what the `.SAMPLER` usage flag already costs there.
+*/
+@(private)
+open_forward_scene_pass :: proc(load_depth: bool) -> bool {
+	r := &mbi.renderer
+
+	depth_texture := current_depth_texture()
+	if depth_texture == nil do return false
+	if r.lighting.targets.color == nil do return false
+
+	linear_background := linearize_background_color(r.background_color)
+
+	color := sdl.GPUColorTargetInfo{
+		texture     = r.lighting.targets.color,
+		clear_color = {linear_background.x, linear_background.y, linear_background.z, linear_background.w},
+		load_op     = .CLEAR,
+		store_op    = .STORE,
+	}
+
+	depth := sdl.GPUDepthStencilTargetInfo{
+		texture     = depth_texture,
+		clear_depth = 1,
+		load_op     = .LOAD if load_depth else .CLEAR,
+		store_op    = .STORE if scene_depth_is_read() else .DONT_CARE,
+		stencil_load_op  = .DONT_CARE,
+		stencil_store_op = .DONT_CARE,
+	}
+
+	r.pass = sdl.BeginGPURenderPass(r.cmd, &color, 1, &depth)
+	if r.pass == nil do return false
+
+	bind_cache_reset()
+	apply_clip()
+
+	return true
 }
 
 /*
@@ -378,6 +462,41 @@ end_drawing_3d :: proc() {
 		paint over them with nothing to stop it. Last is always safe, since
 		everything else here does write depth.
 	*/
+	/*
+		P7b's deferred-scene path, for a forward-family pipeline with SSAO on
+		-- see `pipeline_forward_defers_scene` (pipeline_forward.odin) for why
+		the whole frame was held back rather than drawn as it arrived.
+
+		Three steps, and the order is the entire point: depth first, then the
+		AO pass that reads it, then the scene pass that reads the AO. The sky
+		goes in first once that pass is open, for the reason the pending
+		shadow models are drawn last -- `draw_skybox`'s own pipeline writes no
+		depth and relies on being first (see init.odin).
+	*/
+	if r.scene_deferred {
+		r.scene_deferred = false
+
+		if pipeline_forward_depth_prepass() {
+			ssao_run(r.camera3d)
+		}
+
+		if !open_forward_scene_pass(load_depth = true) do return
+
+		if r.has_pending_skybox {
+			draw_skybox_immediate(r.pending_skybox)
+			r.has_pending_skybox = false
+			r.pending_skybox     = {}
+		}
+	}
+
+	// The queue, replayed into whichever pass is now open -- ordinary draws
+	// first, in submission order, exactly as they would have run had they not
+	// been held. A frame that was never deferred has an empty list here.
+	for pending in r.pending_scene_models {
+		draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+	}
+	clear(&r.pending_scene_models)
+
 	for pending in r.pending_shadow_models {
 		draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
 	}
@@ -491,10 +610,36 @@ draw_model_immediate :: proc(
 	animator:  ^Animator = nil,
 ) {
 	r := &mbi.renderer
-	if !r.frame_active || r.pass == nil do return
+	if !r.frame_active do return
 
 	ensure(r.mode_3d || r.in_shadow_pass,
 		"draw_model must be called between begin_drawing_3d/begin_shadow_pass and their matching end")
+
+	/*
+		`FORWARD`/`CLUSTERED` with SSAO on have no pass open yet -- see
+		`pipeline_forward_defers_scene` (pipeline_forward.odin) for why the
+		scene cannot be drawn until its own depth has been through the AO
+		pass first. The call is held here, in submission order, and
+		`end_drawing_3d` replays it twice: once into the depth prepass, once
+		into the real one.
+
+		Before the `r.pass == nil` return below rather than after it, which is
+		the whole subtlety: there genuinely is no pass at this moment, and the
+		guard that exists to stop a stray draw from recording into nothing
+		would otherwise silently swallow every model in the frame.
+	*/
+	if r.scene_deferred && !r.in_shadow_pass {
+		append(&r.pending_scene_models, Pending_Shadow_Model{model, transform, tint, animator})
+		return
+	}
+
+	if r.pass == nil do return
+
+	// A shadow pass and a depth prepass want the identical thing from this
+	// procedure: geometry into a depth buffer, with no material, no textures
+	// and no fragment uniforms. They differ only in which matrix transforms
+	// it, which is why the two flags stay separate and this local exists.
+	depth_only := r.in_shadow_pass || r.in_depth_prepass
 
 	/*
 		DEFERRED's own routing -- see pipeline_deferred.odin's own top
@@ -515,7 +660,7 @@ draw_model_immediate :: proc(
 		call and lets the per-part switch below sort out which of its parts
 		actually need drawing that second time.
 	*/
-	deferred_active := !r.in_shadow_pass && r.lighting.settings.pipeline == .DEFERRED
+	deferred_active := !depth_only && r.lighting.settings.pipeline == .DEFERRED
 
 	if deferred_active && !r.in_deferred_forward_pass {
 		needs_forward_fallback := false
@@ -576,7 +721,7 @@ draw_model_immediate :: proc(
 		// A grid or a wireframe has no faces for a shadow to fall across --
 		// skipped here rather than given a line-topology shadow pipeline
 		// nothing else needs.
-		if r.in_shadow_pass && part.topology == .LINES do continue
+		if depth_only && part.topology == .LINES do continue
 
 		skinned := part.skin >= 0
 
@@ -615,8 +760,10 @@ draw_model_immediate :: proc(
 		*/
 		pipeline := r.pipelines.mesh
 		switch {
-		case r.in_shadow_pass && skinned: pipeline = r.pipelines.shadow_skinned
-		case r.in_shadow_pass:            pipeline = r.pipelines.shadow
+		case r.in_shadow_pass && skinned:   pipeline = r.pipelines.shadow_skinned
+		case r.in_shadow_pass:              pipeline = r.pipelines.shadow
+		case r.in_depth_prepass && skinned: pipeline = r.pipelines.depth_prepass_skinned
+		case r.in_depth_prepass:            pipeline = r.pipelines.depth_prepass
 		case part.topology == .LINES:     pipeline = r.pipelines.line
 		case is_deferred_fill && skinned: pipeline = r.pipelines.gbuffer_skinned
 		case is_deferred_fill:            pipeline = r.pipelines.gbuffer
@@ -628,7 +775,7 @@ draw_model_immediate :: proc(
 			r.bound_pipeline = pipeline
 		}
 
-		if !r.in_shadow_pass {
+		if !depth_only {
 			/*
 				Base colour at t0, always -- the 1x1 white default whenever
 				the part has none of its own, per `mesh.frag.hlsl`'s own
@@ -776,6 +923,24 @@ draw_model_immediate :: proc(
 					r.bound_probe_maps = probe_maps
 				}
 
+				/*
+					P7b's ambient occlusion, slot 10 -- `Renderer.default_texture`
+					(1x1 **white**) whenever SSAO is off or its pass did not run,
+					since this is a factor and the identity of a factor is one.
+					The same always-something-valid-bound shape every slot above
+					it has; see `ssao_output`'s own doc comment (ssao.odin) for
+					why white rather than the black placeholder the probe slots
+					use.
+				*/
+				ssao_texture := ssao_output()
+				if ssao_texture == nil do ssao_texture = r.default_texture
+
+				if r.bound_ssao_map != ssao_texture {
+					ssao_binding := sdl.GPUTextureSamplerBinding{texture = ssao_texture, sampler = r.linear_clamp_sampler}
+					sdl.BindGPUFragmentSamplers(r.pass, 10, &ssao_binding, 1)
+					r.bound_ssao_map = ssao_texture
+				}
+
 				if r.bound_light_buffer != r.lighting.light_buffer {
 					light_buffer := r.lighting.light_buffer
 					sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)
@@ -823,7 +988,7 @@ draw_model_immediate :: proc(
 		// Built per part rather than once for the whole model: the material
 		// (shading model, base colour, specular power, ...) is a part's own,
 		// only `tint` is the same for every part of this draw_model call.
-		if !r.in_shadow_pass {
+		if !depth_only {
 			frag_data := material_frag_data(part.material, tint)
 			sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
 		}

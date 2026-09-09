@@ -194,10 +194,27 @@ destroy_skybox :: proc(skybox: ^Skybox) {
 */
 draw_skybox :: proc(skybox: Skybox) {
 	r := &mbi.renderer
-	if !r.frame_active || r.pass == nil do return
+	if !r.frame_active do return
 	if skybox.texture == nil do return
 
 	ensure(r.mode_3d, "draw_skybox must be called between begin_drawing_3d and end_drawing_3d")
+
+	/*
+		`FORWARD`/`CLUSTERED` with SSAO on have no pass open at this point --
+		see `pipeline_forward_defers_scene` (pipeline_forward.odin) -- so this
+		queues into exactly the same slot DEFERRED's own branch below uses,
+		and `end_drawing_3d` draws it first once the real pass opens. Held
+		before the `r.pass == nil` guard for the reason
+		`draw_model_immediate`'s own deferral is: there is genuinely no pass,
+		and a guard meant to catch a stray draw would otherwise eat the sky.
+	*/
+	if r.scene_deferred {
+		r.pending_skybox     = skybox
+		r.has_pending_skybox = true
+		return
+	}
+
+	if r.pass == nil do return
 
 	/*
 		DEFERRED queues this rather than drawing it now -- see

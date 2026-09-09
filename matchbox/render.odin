@@ -14,6 +14,14 @@ import sdl "vendor:sdl3"
 	`maxPerStageDescriptorSamplers`) rather than merely asserting on source
 	text.
 
+	**Grew to 11 in P7b**, for the ambient-occlusion texture `shade_surface`
+	multiplies into `Surface.occlusion` -- declared in `lighting_core.hlsli`
+	rather than in `mesh.frag.hlsl` itself, since the deferred lighting pass
+	reads the identical texture in the identical place. Adding it pushed the
+	three storage buffers behind it up a register in **both** shaders, which
+	is the trap to remember: a sampler added anywhere ahead of them renumbers
+	every one of them.
+
 	**Grew from 8 to 10 in P4**, for the environment probe's own two maps
 	(`ambient.odin`) -- still five under the floor `render_test.odin` pins,
 	and comfortably clear of it: a real BRDF integration LUT would have been
@@ -31,7 +39,7 @@ import sdl "vendor:sdl3"
 	`MAX_CASCADES`/`MAX_CASCADES_HLSL` (shadow.odin,
 	shaders/shadow/cascaded.hlsli) already has.
 */
-MESH_FRAG_SAMPLER_COUNT :: 10
+MESH_FRAG_SAMPLER_COUNT :: 11
 
 /*
 	How many sampled textures/samplers `deferred_lighting.frag.hlsl`
@@ -42,7 +50,8 @@ MESH_FRAG_SAMPLER_COUNT :: 10
 	textures `mesh.frag.hlsl` reads (base colour, metallic-roughness,
 	occlusion, emissive arrive through the G-buffer instead): four G-buffer
 	targets, one depth target, two PCF/PCSS shadow maps, one CASCADED array,
-	one CUBE array, two environment-probe maps -- t0-t10.
+	one CUBE array, two environment-probe maps, and since P7b the AO texture
+	`lighting_core.hlsli` declares for both shaders alike -- t0-t11.
 
 	Five under Vulkan's guaranteed per-stage floor of 16
 	(`gbuffer_test.odin` pins the actual value the same way
@@ -50,7 +59,7 @@ MESH_FRAG_SAMPLER_COUNT :: 10
 	the "stop and report" the phase brief asked for if it had come out
 	otherwise.
 */
-DEFERRED_LIGHTING_SAMPLER_COUNT :: 11
+DEFERRED_LIGHTING_SAMPLER_COUNT :: 12
 
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
@@ -128,6 +137,18 @@ Shaders :: struct {
 	bloom_prefilter:  ^sdl.GPUShader,
 	bloom_downsample: ^sdl.GPUShader,
 	bloom_upsample:   ^sdl.GPUShader,
+
+	// SSAO's own two (ssao.odin) -- also on the shared quad vertex shader,
+	// since both are a full-screen rectangle over a texture. `ssao` reads the
+	// depth buffer and writes occlusion; `ssao_blur` takes the sampling noise
+	// off what it wrote.
+	ssao:      ^sdl.GPUShader,
+	ssao_blur: ^sdl.GPUShader,
+
+	// The depth prepass's own fragment shader is `shadow` above -- it writes
+	// nothing, which is the whole requirement -- paired with mesh.vert /
+	// mesh_skinned.vert rather than a vertex shader of its own. See
+	// pipeline_forward.odin.
 
 	// Environment probe baking -- both take the skybox's own vertex shader
 	// (Shaders.skybox), reused rather than duplicated: a per-face camera
@@ -237,6 +258,30 @@ Pipelines :: struct {
 	bloom_downsample: ^sdl.GPUGraphicsPipeline,
 	bloom_upsample:   ^sdl.GPUGraphicsPipeline,
 
+	// SSAO's own two -- built against the AO texture's own single-channel
+	// format (`Ssao_Targets.format`, ssao.odin) rather than the swapchain's
+	// or the HDR target's, since that is what they write into. Depthless,
+	// like every other fullscreen pipeline here.
+	ssao:      ^sdl.GPUGraphicsPipeline,
+	ssao_blur: ^sdl.GPUGraphicsPipeline,
+
+	/*
+		The depth prepass `FORWARD`/`CLUSTERED` need before SSAO can run --
+		`mesh`/`mesh_skinned`'s own siblings with no colour target at all and
+		the null fragment shader the shadow pass already uses. Two, for the
+		same reason `shadow`/`shadow_skinned` are two: a skinned occluder
+		needs the skeleton's own vertex shader.
+
+		Not the shadow pipelines themselves, which differ in the two ways
+		that matter: they are built against `Shadow_State.format` (a
+		different depth format, so SDL3 would reject them in this pass) and
+		they carry the constant-plus-slope depth bias that keeps a shadow map
+		from self-shadowing. A prepass wants no bias at all -- its depth has
+		to match, to the bit, what the scene pass will then write.
+	*/
+	depth_prepass:         ^sdl.GPUGraphicsPipeline,
+	depth_prepass_skinned: ^sdl.GPUGraphicsPipeline,
+
 	// Environment probe baking -- see Shaders.probe_irradiance/probe_prefilter's
 	// own comment. Built against the HDR target's own float format
 	// (ambient.odin's own top comment), not the swapchain's: these write
@@ -305,6 +350,11 @@ Lighting :: struct {
 	// bloom is an ordinary thing to do, where a game toggling DEFERRED is
 	// not.
 	bloom: Bloom_Targets,
+
+	// SSAO's own two single-channel targets -- see Ssao_Targets (ssao.odin).
+	// Zero value until a game turns SSAO on, released again when it turns it
+	// off, the same shape Bloom_Targets has.
+	ssao: Ssao_Targets,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -497,6 +547,7 @@ Renderer :: struct {
 	// whichever of a real probe or default_probe_texture's own placeholder is
 	// currently bound for each. See draw_model_immediate's own comment on
 	// why these two always bind together.
+	bound_ssao_map:   ^sdl.GPUTexture,
 	bound_probe_maps:   [2]^sdl.GPUTexture,
 
 	bound_light_buffer: ^sdl.GPUBuffer,
@@ -550,6 +601,25 @@ Renderer :: struct {
 	unit_plane:      Model,
 	unit_sphere:     Model,
 
+	/*
+		P7b's depth prepass (pipeline_forward.odin). `scene_deferred` is true
+		between begin_drawing_3d and end_drawing_3d whenever a forward-family
+		pipeline is running with SSAO on, and it is what turns draw_model and
+		draw_skybox from "draw it" into "hold it" -- see
+		`pipeline_forward_defers_scene`. `in_depth_prepass` is set only during
+		the replay into the depth-only pass, and is to that pass what
+		`in_shadow_pass` is to a shadow one: it says this draw wants geometry
+		and nothing else.
+
+		`pending_scene_models` is that queue. A separate list from
+		`pending_shadow_models`, which holds a different set for a different
+		reason -- models the game marked `casts_shadow` and never drew itself
+		-- and both are replayed into both passes, since both are in the frame.
+	*/
+	scene_deferred:       bool,
+	in_depth_prepass:     bool,
+	pending_scene_models: [dynamic]Pending_Shadow_Model,
+
 	// draw_grid's one grid, rebuilt when the numbers it was asked for change.
 	grid:         Model,
 	grid_slices:  int,
@@ -571,6 +641,7 @@ bind_cache_reset :: proc() {
 	r.bound_cascade_maps      = nil
 	r.bound_cube_maps         = nil
 	r.bound_probe_maps        = {}
+	r.bound_ssao_map          = nil
 	r.bound_light_buffer      = nil
 	r.bound_cluster_ranges        = nil
 	r.bound_cluster_light_indices = nil

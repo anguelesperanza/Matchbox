@@ -168,6 +168,21 @@ pipeline_deferred_end :: proc() {
 		r.pass = nil
 	}
 
+	/*
+		P7b's ambient occlusion, and this is the pipeline it costs almost
+		nothing to add to: the G-buffer pass just closed has already written
+		depth to `Gbuffer_Targets.depth`, and nothing has been shaded yet, so
+		the AO pass slots straight in here. `FORWARD`/`CLUSTERED` have to draw
+		the whole scene an extra time to reach this same point -- see
+		`pipeline_forward_depth_prepass` (pipeline_forward.odin) for the
+		asymmetry `lighting_rework.md` section 5 flagged in advance.
+
+		Before the final pass opens rather than inside it: `ssao_run` opens
+		render passes of its own, and a render pass cannot be opened inside
+		another.
+	*/
+	ssao_run(r.camera3d)
+
 	depth_texture := current_depth_texture()
 	if depth_texture == nil do return
 
@@ -278,6 +293,20 @@ draw_deferred_lighting_quad :: proc() {
 		{texture = probe_maps[1], sampler = r.linear_clamp_sampler},
 	}
 	sdl.BindGPUFragmentSamplers(r.pass, 9, &probe_bindings[0], 2)
+
+	/*
+		P7b's AO texture, slot 11 -- `Renderer.default_texture` (1x1 white)
+		whenever SSAO is off or its pass did not run this frame, since this is
+		a factor and the identity of a factor is one. Read by `shade_surface`
+		(lighting_core.hlsli), which is the same one place the forward mesh
+		shader reads it from -- see ssao.odin's own top comment for why one
+		place rather than two.
+	*/
+	ssao_texture := ssao_output()
+	if ssao_texture == nil do ssao_texture = r.default_texture
+
+	ssao_binding := sdl.GPUTextureSamplerBinding{texture = ssao_texture, sampler = r.linear_clamp_sampler}
+	sdl.BindGPUFragmentSamplers(r.pass, 11, &ssao_binding, 1)
 
 	light_buffer := r.lighting.light_buffer
 	sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)

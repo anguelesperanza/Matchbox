@@ -19,14 +19,23 @@
     `CLUSTER_LIGHT_INDICES_T`, `#define`d below before that file is included).
 
     Registers t0-t3 are the G-buffer, t4 this pass's own depth, t5-t10 mirror
-    mesh.frag.hlsl's own t4-t9 exactly (same types, same samplers) --
-    t11-t13 are `lighting_core.hlsli`'s three storage buffers, renumbered up
-    by one to make room.
+    mesh.frag.hlsl's own t4-t9 exactly (same types, same samplers), t11 is
+    P7b's AO texture (declared in lighting_core.hlsli, not here) -- and
+    t12-t14 are that file's three storage buffers, renumbered up by one to
+    make room for the G-buffer's extra texture and up by one again for the AO
+    one.
+
+    **Every one of these numbers moves when a texture is added anywhere ahead
+    of it**, which is the trap `lighting_rework.md`'s own repo notes call out:
+    storage buffers continue the fragment stage's t-register sequence after
+    all sampled textures, so a new sampler renumbers every buffer behind it in
+    both shaders at once. P2d, P3b, P5 and now P7b are the precedents.
 */
 
-#define LIGHTS_T 11
-#define CLUSTER_RANGES_T 12
-#define CLUSTER_LIGHT_INDICES_T 13
+#define SSAO_T 11
+#define LIGHTS_T 12
+#define CLUSTER_RANGES_T 13
+#define CLUSTER_LIGHT_INDICES_T 14
 
 // See mesh.vert.hlsl's own doc comment on this pragma: this is the one
 // fragment shader in the package carrying a matrix of its own

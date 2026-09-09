@@ -37,9 +37,15 @@ test_mesh_frag_sampler_count_is_pinned_under_vulkan_floor :: proc(t: ^testing.T)
 	// shadow_test.odin's own numeric expectations already have. P4 is
 	// exactly that: this failed with "expected 8, got 10" the moment the
 	// environment probe's two maps were declared, and updating it here is
-	// that conscious look, not a rubber stamp -- 10 is still five under the
-	// floor the second assertion below checks.
-	testing.expect_value(t, MESH_FRAG_SAMPLER_COUNT, 10)
+	// that conscious look, not a rubber stamp.
+	//
+	// P7b did it again -- "expected 10, got 11", for the ambient-occlusion
+	// texture lighting_core.hlsli declares for this shader and the deferred
+	// lighting pass alike (ssao.odin). Looked at and accepted: 11 is four
+	// under the floor the second assertion below checks, and the sampler
+	// carries with it the renumbering of every storage buffer behind it,
+	// which is the part worth having a test insist somebody notices.
+	testing.expect_value(t, MESH_FRAG_SAMPLER_COUNT, 11)
 
 	// The actual invariant: Vulkan's spec-guaranteed minimum for both
 	// maxPerStageDescriptorSampledImages and maxPerStageDescriptorSamplers is

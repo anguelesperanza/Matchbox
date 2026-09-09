@@ -29,8 +29,8 @@
     as the same constant.
 
     It is also why this pass's own render pass loads rather than discarding --
-    the destination's existing value is half the answer. See `bloom_pass`
-    (bloom.odin).
+    the destination's existing value is half the answer. See `fullscreen_pass`
+    (post.odin).
 
     Must match matchbox.Bloom_Filter_Frag_Data.
 */

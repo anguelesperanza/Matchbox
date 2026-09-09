@@ -411,80 +411,6 @@ bloom_output :: proc() -> ^sdl.GPUTexture {
 }
 
 /*
-	One stage of the chain: a full-screen quad reading `source` and writing
-	`dest`, in a render pass of its own.
-
-	Its own pass rather than the frame's, and its own binds rather than
-	`bind_quad_state`'s, for one reason: every other quad in this package
-	draws into `current_color_texture()`, and each of these draws into a
-	different bloom level. `r.pass` is nil throughout -- `end_drawing_3d`
-	closed the 3D pass before the chain runs -- so nothing here disturbs the
-	bind cache that the tonemap resolve's own pass will reset anyway.
-
-	`load` is false for the two shrinking passes, which write every texel of
-	their destination, and true for the upsample, which blends into what is
-	already there (see `bloom_upsample.frag.hlsl`). Discarding rather than
-	loading where it is safe to is not a micro-optimization on a tiler -- it
-	is the difference between a pass that reads the whole destination back
-	from memory and one that does not.
-*/
-@(private)
-bloom_pass :: proc(
-	pipeline:  ^sdl.GPUGraphicsPipeline,
-	source:    ^sdl.GPUTexture,
-	dest:      ^sdl.GPUTexture,
-	dest_size: [2]i32,
-	frag_data: rawptr,
-	frag_size: u32,
-	load:      bool,
-) -> bool {
-	r := &mbi.renderer
-
-	target := sdl.GPUColorTargetInfo{
-		texture  = dest,
-		load_op  = .LOAD if load else .DONT_CARE,
-		store_op = .STORE,
-	}
-
-	pass := sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
-	if pass == nil {
-		log.errorf("could not open a bloom pass: %s", sdl.GetError())
-		return false
-	}
-
-	size := [2]f32{f32(dest_size.x), f32(dest_size.y)}
-
-	// The same full-screen rectangle every resolve draws: quad.vert turns
-	// position/size/screen into clip space, so "the whole destination" is the
-	// destination's own size centred on its own middle.
-	vert_data := Vert_Data{
-		position = size * 0.5,
-		size     = size,
-		screen   = size,
-		uv_min   = {0, 0},
-		uv_max   = {1, 1},
-	}
-
-	binding := sdl.GPUTextureSamplerBinding{texture = source, sampler = r.linear_clamp_sampler}
-
-	sdl.BindGPUGraphicsPipeline(pass, pipeline)
-
-	vertex_binding := sdl.GPUBufferBinding{buffer = r.quad_verts, offset = 0}
-	sdl.BindGPUVertexBuffers(pass, 0, &vertex_binding, 1)
-	sdl.BindGPUIndexBuffer(pass, {buffer = r.quad_indices, offset = 0}, ._32BIT)
-
-	sdl.BindGPUFragmentSamplers(pass, 0, &binding, 1)
-
-	sdl.PushGPUVertexUniformData(r.cmd, 0, &vert_data, size_of(vert_data))
-	sdl.PushGPUFragmentUniformData(r.cmd, 0, frag_data, frag_size)
-
-	sdl.DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0)
-	sdl.EndGPURenderPass(pass)
-
-	return true
-}
-
-/*
 	Builds the whole chain for this frame: prefilter, down, then back up.
 	Called by `post_chain_run` (post.odin) from `end_drawing_3d`, after the 3D
 	pass has closed and before the tonemap resolve reads the result.
@@ -543,7 +469,7 @@ bloom_run :: proc() {
 		head, and BeginGPURenderPass failing at all is not a situation worth
 		two.
 	*/
-	if !bloom_pass(r.pipelines.bloom_prefilter, t.color, b.levels[0], b.sizes[0], &prefilter, size_of(prefilter), false) {
+	if !fullscreen_pass(r.pipelines.bloom_prefilter, t.color, b.levels[0], b.sizes[0], &prefilter, size_of(prefilter), false) {
 		release_bloom_targets()
 		return
 	}
@@ -551,7 +477,7 @@ bloom_run :: proc() {
 	for i in 0 ..< b.count - 1 {
 		down := Bloom_Filter_Frag_Data{texel = {1.0 / f32(b.sizes[i].x), 1.0 / f32(b.sizes[i].y)}}
 
-		if !bloom_pass(r.pipelines.bloom_downsample, b.levels[i], b.levels[i + 1], b.sizes[i + 1], &down, size_of(down), false) {
+		if !fullscreen_pass(r.pipelines.bloom_downsample, b.levels[i], b.levels[i + 1], b.sizes[i + 1], &down, size_of(down), false) {
 			release_bloom_targets()
 			return
 		}
@@ -567,7 +493,7 @@ bloom_run :: proc() {
 			scatter = settings.scatter,
 		}
 
-		if !bloom_pass(r.pipelines.bloom_upsample, b.levels[i + 1], b.levels[i], b.sizes[i], &up, size_of(up), true) {
+		if !fullscreen_pass(r.pipelines.bloom_upsample, b.levels[i + 1], b.levels[i], b.sizes[i], &up, size_of(up), true) {
 			release_bloom_targets()
 			return
 		}

@@ -1,6 +1,9 @@
 package matchbox
 
+import "core:log"
 import "core:math"
+
+import sdl "vendor:sdl3"
 
 /*
 	The post chain
@@ -179,6 +182,88 @@ post_settings_normalized :: proc(settings: Post_Settings) -> Post_Settings {
 @(private)
 post_chain_run :: proc() {
 	bloom_run()
+}
+
+/*
+	One full-screen quad, reading `source` and writing `dest`, in a render pass
+	of its own -- the shape every stage of the chain has, and the shape SSAO's
+	own two passes (`ssao.odin`) have as well, which is why this is named for
+	what it does rather than for the first thing that wanted it.
+
+	Its own pass rather than the frame's, and its own binds rather than
+	`bind_quad_state`'s, for one reason: every other quad in this package draws
+	into `current_color_texture()`, and each of these draws into a texture of
+	its own. `r.pass` is nil throughout wherever this is called from -- the
+	callers all run between two passes, never inside one -- so nothing here
+	disturbs the bind cache that the next pass to open will reset anyway.
+
+	`load` is false for a pass that writes every texel of its destination, and
+	true for one that blends into what is already there (the bloom chain's
+	upsample -- see bloom_upsample.frag.hlsl). Discarding rather than loading
+	where it is safe to is not a micro-optimization on a tiler: it is the
+	difference between a pass that reads the whole destination back from memory
+	and one that does not.
+
+	Everything reads through `linear_clamp_sampler`. Every caller so far wants
+	bilinear filtering of an internal texture whose edges are edges -- a bloom
+	level being magnified, a depth buffer being tapped between texels -- and a
+	wrapping sampler would fetch the far side of the screen at every border
+	pixel. A caller that ever wants nearest gets a parameter then, not now.
+*/
+@(private)
+fullscreen_pass :: proc(
+	pipeline:  ^sdl.GPUGraphicsPipeline,
+	source:    ^sdl.GPUTexture,
+	dest:      ^sdl.GPUTexture,
+	dest_size: [2]i32,
+	frag_data: rawptr,
+	frag_size: u32,
+	load:      bool,
+) -> bool {
+	r := &mbi.renderer
+
+	target := sdl.GPUColorTargetInfo{
+		texture  = dest,
+		load_op  = .LOAD if load else .DONT_CARE,
+		store_op = .STORE,
+	}
+
+	pass := sdl.BeginGPURenderPass(r.cmd, &target, 1, nil)
+	if pass == nil {
+		log.errorf("could not open a fullscreen pass: %s", sdl.GetError())
+		return false
+	}
+
+	size := [2]f32{f32(dest_size.x), f32(dest_size.y)}
+
+	// The same full-screen rectangle every resolve draws: quad.vert turns
+	// position/size/screen into clip space, so "the whole destination" is the
+	// destination's own size centred on its own middle.
+	vert_data := Vert_Data{
+		position = size * 0.5,
+		size     = size,
+		screen   = size,
+		uv_min   = {0, 0},
+		uv_max   = {1, 1},
+	}
+
+	binding := sdl.GPUTextureSamplerBinding{texture = source, sampler = r.linear_clamp_sampler}
+
+	sdl.BindGPUGraphicsPipeline(pass, pipeline)
+
+	vertex_binding := sdl.GPUBufferBinding{buffer = r.quad_verts, offset = 0}
+	sdl.BindGPUVertexBuffers(pass, 0, &vertex_binding, 1)
+	sdl.BindGPUIndexBuffer(pass, {buffer = r.quad_indices, offset = 0}, ._32BIT)
+
+	sdl.BindGPUFragmentSamplers(pass, 0, &binding, 1)
+
+	sdl.PushGPUVertexUniformData(r.cmd, 0, &vert_data, size_of(vert_data))
+	sdl.PushGPUFragmentUniformData(r.cmd, 0, frag_data, frag_size)
+
+	sdl.DrawGPUIndexedPrimitives(pass, 6, 1, 0, 0, 0)
+	sdl.EndGPURenderPass(pass)
+
+	return true
 }
 
 // -----------------------------------------------------------------------

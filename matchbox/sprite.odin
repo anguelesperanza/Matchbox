@@ -37,7 +37,13 @@ create_mesh :: proc(bytes: []byte) -> (Mesh, Error) {
 
 	// The quad every sprite draws with is shared and already on the GPU, so all
 	// that is uploaded here is the texture.
-	texture, err := upload_texture(pixels, width, height)
+	//
+	// UNORM, not SRGB: a sprite is 2D, and 2D writes straight to an SDR
+	// swapchain with no resolve step to re-encode afterward -- see
+	// Texture_Encoding. Decoding on sample here would leave the sprite
+	// linear all the way to the screen, and every sprite in every 2D game
+	// would render dark.
+	texture, err := upload_texture(pixels, width, height, .UNORM)
 	if err != nil do return {}, err
 
 	return Mesh{
@@ -67,7 +73,9 @@ create_mesh_from_pixels :: proc(pixels: []byte, width, height: i32) -> (Mesh, Er
 	if width <= 0 || height <= 0 do return {}, Argument_Error.Empty_Size
 	if len(pixels) < int(width) * int(height) * 4 do return {}, Argument_Error.Not_Enough_Pixels
 
-	texture, err := upload_texture(raw_data(pixels), width, height)
+	// UNORM -- see create_mesh's own comment; this is the same 2D texture by
+	// a different route in.
+	texture, err := upload_texture(raw_data(pixels), width, height, .UNORM)
 	if err != nil do return {}, err
 
 	return Mesh{

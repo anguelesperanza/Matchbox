@@ -84,7 +84,12 @@ load_font :: proc(bytes: []byte, font_size: f32) -> (Font, Error) {
 	// Linear filtering, unlike a sprite's nearest: glyph quads rarely land on
 	// whole pixels, and the atlas is a coverage mask that reads badly when it
 	// is point sampled.
-	texture, err := upload_texture(raw_data(rgba), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE)
+	//
+	// UNORM: this is 2D like a sprite, and additionally the RGB channels
+	// above are not colour at all -- every texel is {255, 255, 255, coverage}
+	// -- so there is no colour there for a decode to mean, on top of there
+	// being nothing downstream to re-encode it. See Texture_Encoding.
+	texture, err := upload_texture(raw_data(rgba), FONT_ATLAS_SIZE, FONT_ATLAS_SIZE, .UNORM)
 	if err != nil do return {}, err
 
 	font.texture = texture

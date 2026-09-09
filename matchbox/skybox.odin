@@ -71,7 +71,12 @@ load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, err: Error) {
 			path, image.width, image.height, ratio)
 	}
 
-	texture := upload_texture(raw_data(image.pixels), image.width, image.height) or_return
+	// SRGB: the sky is photometric colour sampled by the 3D pass -- see
+	// Texture_Encoding. Before P1 this texture's encoded bytes went straight
+	// to the swapchain and the round trip was correct by accident; now the
+	// 3D pass is linear and resolves through the tonemap, so the decode has
+	// to happen somewhere, and the hardware doing it on sample is that place.
+	texture := upload_texture(raw_data(image.pixels), image.width, image.height, .SRGB) or_return
 
 	skybox = Skybox{
 		kind    = .PANORAMA,
@@ -125,7 +130,8 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, err: Error) {
 		{3, 1}, // -Z
 	}
 
-	texture := create_gpu_texture(i32(face), i32(face), cube = true) or_return
+	// SRGB for the same reason load_skybox_panorama is -- see its comment.
+	texture := create_gpu_texture(i32(face), i32(face), .SRGB, cube = true) or_return
 
 	// One scratch face, refilled six times, rather than six allocations.
 	pixels := make([][4]u8, face * face, context.temp_allocator)

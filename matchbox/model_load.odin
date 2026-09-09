@@ -567,7 +567,11 @@ decode_and_upload :: proc(encoded: []byte) -> ^sdl.GPUTexture {
 	// A texture that will not upload leaves the part untextured rather than
 	// failing the load: the geometry is still worth having, and the caller
 	// already treats a nil texture as "draw this flat".
-	texture, err := upload_texture(pixels, width, height)
+	//
+	// SRGB: a glTF base-colour texture is photometric colour sampled by the
+	// 3D pass, which is linear end to end and resolves through the tonemap --
+	// see Texture_Encoding.
+	texture, err := upload_texture(pixels, width, height, .SRGB)
 	if err != nil {
 		log.errorf("could not upload a model texture: %v", err)
 		return nil

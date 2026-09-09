@@ -794,7 +794,14 @@ init :: proc(title: string, width: i32, height: i32) {
 	*/
 	white_pixel := [4]u8{255, 255, 255, 255}
 	default_texture_ok := false
-	if texture, err := upload_texture(&white_pixel, 1, 1); err == nil {
+
+	// SRGB, though it makes no numeric difference here -- white is 1.0 under
+	// either encoding, since sRGB's transfer function fixes both endpoints.
+	// The reason to say SRGB anyway is consistency: this stands in for a base
+	// colour texture in the same 3D pass and the same sampler slot a real one
+	// would occupy (mesh.frag.hlsl), so it should ask for the same format a
+	// textured part's own base colour does -- see Texture_Encoding.
+	if texture, err := upload_texture(&white_pixel, 1, 1, .SRGB); err == nil {
 		mbi.renderer.default_texture = texture
 		default_texture_ok = true
 	}

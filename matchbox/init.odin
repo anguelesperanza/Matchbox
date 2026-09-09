@@ -164,6 +164,25 @@ create_builtin_shader :: proc(
 	return shader
 }
 
+/*
+	How many colour targets `create_pipeline` will ever hand SDL3 at once.
+
+	4 rather than a bigger, safer-looking number: Vulkan's own spec only
+	guarantees `maxColorAttachments >= 4` (D3D12 and Metal both promise 8, but
+	this package targets Android, where Vulkan's own floor is the one that
+	matters -- the same reasoning `MESH_FRAG_SAMPLER_COUNT`'s own doc comment
+	gives for pinning against Vulkan's sampler floor rather than a desktop
+	driver's actual, higher number). P6's own G-buffer is exactly 4 targets
+	for that reason -- see `pipeline_deferred.odin`'s own top comment -- so
+	this is sized to what this package actually asks for, not rounded up.
+
+	An array size, so CLAUDE.md's "no loose constants" carves it out the same
+	way `MAX_LIGHTS`'s retired siblings (`MAX_CASCADES`, `MAX_SHADOW_CASTERS`)
+	already are.
+*/
+@(private)
+MAX_COLOR_TARGETS :: 4
+
 // Which geometry a pipeline reads: the shared quad, or a model's own vertices.
 @(private)
 Vertex_Layout :: enum {
@@ -247,6 +266,36 @@ create_pipeline :: proc(
 	// epsilon alone.
 	depth_bias:       f32 = 0,
 	depth_bias_slope: f32 = 0,
+
+	/*
+		P6's own addition, for the G-buffer fill pipelines
+		(`pipeline_deferred.odin`) -- a G-buffer pass writes several targets
+		at once, which `color_target`/`color_format` above have no room to
+		say (they are one bool and one format, the shape every pipeline
+		before this one needed). Non-nil overrides `color_target`/
+		`color_format` entirely: `len(color_formats)` targets are created,
+		each in its own listed format, and neither of the older two
+		parameters is read at all in that case.
+
+		Left nil, which is every caller before this phase, behaviour is
+		bit-for-bit what it always was -- this is purely additive, the same
+		"grew without disturbing an existing caller" shape `MESH_FRAG_SAMPLER_COUNT`
+		itself grew by across P3b and P4 without any caller of
+		`create_builtin_shader` needing to change.
+	*/
+	color_formats: []sdl.GPUTextureFormat = nil,
+
+	/*
+		Whether the colour target(s) built here blend -- true (the existing
+		behaviour, for every pipeline before this phase) or false, for the
+		G-buffer: a fill pass writes a `Surface` field's own raw value into
+		each target, and blending two unrelated materials' normals or
+		roughness together where two triangles' edges anti-alias against each
+		other is not a colour a lighting pass could ever make sense of, unlike
+		alpha-blending two colours which is exactly what every 2D/3D draw
+		before this pipeline wanted.
+	*/
+	color_blend: bool = true,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -308,25 +357,39 @@ create_pipeline :: proc(
 		// Already filled in above.
 	}
 
-	color_targets := [1]sdl.GPUColorTargetDescription{
-		{
-			format = color_format if color_format != .INVALID else sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
-			blend_state = {
-				enable_blend            = true,
-				color_blend_op          = .ADD,
-				src_color_blendfactor   = .SRC_ALPHA,
-				dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
-				alpha_blend_op          = .ADD,
-				src_alpha_blendfactor   = .ONE,
-				dst_alpha_blendfactor   = .ZERO,
-				enable_color_write_mask = true,
-				color_write_mask        = {.R, .G, .B, .A},
-			},
-		},
+	blend_state := sdl.GPUColorTargetBlendState{
+		enable_blend            = color_blend,
+		color_blend_op          = .ADD,
+		src_color_blendfactor   = .SRC_ALPHA,
+		dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
+		alpha_blend_op          = .ADD,
+		src_alpha_blendfactor   = .ONE,
+		dst_alpha_blendfactor   = .ZERO,
+		enable_color_write_mask = true,
+		color_write_mask        = {.R, .G, .B, .A},
 	}
 
-	num_color_targets:         u32 = 1 if color_target else 0
-	color_target_descriptions: [^]sdl.GPUColorTargetDescription = raw_data(color_targets[:]) if color_target else nil
+	color_targets:     [MAX_COLOR_TARGETS]sdl.GPUColorTargetDescription
+	num_color_targets: u32
+
+	switch {
+	case len(color_formats) > 0:
+		ensure(len(color_formats) <= MAX_COLOR_TARGETS, "create_pipeline: more color_formats than MAX_COLOR_TARGETS")
+		for format, i in color_formats {
+			color_targets[i] = sdl.GPUColorTargetDescription{format = format, blend_state = blend_state}
+		}
+		num_color_targets = u32(len(color_formats))
+	case color_target:
+		color_targets[0] = sdl.GPUColorTargetDescription{
+			format      = color_format if color_format != .INVALID else sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
+			blend_state = blend_state,
+		}
+		num_color_targets = 1
+	case:
+		num_color_targets = 0
+	}
+
+	color_target_descriptions: [^]sdl.GPUColorTargetDescription = raw_data(color_targets[:]) if num_color_targets > 0 else nil
 
 	resolved_depth_format := depth_format if depth_format != .INVALID else mbi.renderer.depth_format
 

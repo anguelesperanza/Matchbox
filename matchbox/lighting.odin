@@ -541,7 +541,16 @@ push_lighting :: proc(camera: Camera3D) {
 		shadow_caster1 = {
 			f32(sh.caster_indices[1]) if sh.settings.enabled else -1,
 			shadow_technique_index(sh.settings.technique),
-			0, 0,
+
+			// Which projection the pass was opened with, for
+			// `cluster_index_for_fragment` (lighting_core.hlsli) -- an
+			// orthographic camera's clip w carries no depth, so that
+			// function needs to know which of its two reconstructions to
+			// run. See its own doc comment for what went wrong without it.
+			// Riding in a component that was a spare zero rather than a new
+			// field, so `Scene_Frag_Data`'s measured size does not move.
+			f32(camera3d_defaults(camera).projection),
+			0,
 		},
 
 		// See Scene_Frag_Data's own doc comment on cluster_grid/cluster_camera.

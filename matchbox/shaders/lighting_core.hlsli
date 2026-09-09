@@ -619,7 +619,49 @@ uint cluster_index_for_fragment(float4 screen_pos)
 
     float near = cluster_camera.z;
     float far  = cluster_camera.w;
-    float view_depth = 1.0 / max(screen_pos.w, 1e-8);
+
+    /*
+        **Two reconstructions, because `SV_Position.w` carries a depth only
+        under a perspective projection.** In a pixel shader that component is
+        1/w_clip, so inverting it gives view depth directly -- but an
+        orthographic projection's clip w is 1 for every vertex, so the same
+        expression yields 1 for every fragment on screen and every one of them
+        lands in whichever slice `log(1/near)/log(far/near)` happens to name.
+        Not slice 0 necessarily, but one fixed slice, which means a fragment
+        reads a light list belonging to some other depth entirely and any
+        light outside that slice simply stops lighting it.
+
+        That was a live defect rather than a theoretical one:
+        `Camera3D_Projection.ORTHOGRAPHIC` is a supported mode
+        (camera3d.odin), and `cluster_test` (light_cull.odin) already builds
+        correct parallel-sided cluster boxes for it -- only this lookup was
+        perspective-only, so an orthographic scene opting into `CLUSTERED`
+        got silently wrong lighting with nothing to point at.
+
+        An orthographic projection's NDC z is linear in view depth, and
+        SDL_GPU's depth range is [0, 1], so undoing it is the plain lerp
+        below. The exponential slice curve is still what both sides use --
+        `cluster_z_bounds` (light_cull.odin) builds bounds with it and this
+        inverts the same one, so the two agree by construction. It is merely
+        a less useful *distribution* for an orthographic camera, which has no
+        perspective compression for it to compensate for; that costs cluster
+        resolution, not correctness, and is not worth a second curve until
+        something measures it.
+
+        `shadow_caster1.z` is `Camera3D_Projection`'s own ordinal, packed at
+        `push_lighting` (lighting.odin) into a component that was two spare
+        zeroes -- no `Scene_Frag_Data` size change, and so no packing to
+        re-measure.
+    */
+    float view_depth;
+    if (shadow_caster1.z > 0.5)
+    {
+        view_depth = near + saturate(screen_pos.z) * (far - near);
+    }
+    else
+    {
+        view_depth = 1.0 / max(screen_pos.w, 1e-8);
+    }
 
     // The inverse of cluster_z_bounds's own exponential curve
     // (light_cull.odin): solving `near * (far/near)^(slice/count) <= depth`

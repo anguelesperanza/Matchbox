@@ -444,3 +444,129 @@ test_cluster_settings_normalized_fills_in_zeroes_only :: proc(t: ^testing.T) {
 	normalized := cluster_settings_normalized(chosen)
 	testing.expect_value(t, normalized, chosen)
 }
+
+// -----------------------------------------------------------------------
+// Reconstructing a fragment's view depth, per projection
+// -----------------------------------------------------------------------
+
+/*
+	A CPU mirror of `cluster_index_for_fragment`'s own depth reconstruction
+	(lighting_core.hlsli) -- the half of the cluster lookup that has to know
+	which projection the pass was opened with, and the one piece of
+	`CLUSTERED` that was silently wrong for an orthographic camera until it
+	branched.
+
+	Mirrored rather than called: it lives in a fragment shader, and nothing
+	in this package can run one. So what is checked here is that the
+	arithmetic the shader was given is the right arithmetic, statement for
+	statement -- the same standing this rework's other shader mirrors have
+	(`brdf_test.odin`, `pbr_test.odin`, `shadow_test.odin`), and no more.
+
+	`clip_w` is what `SV_Position.w` carries: 1/w_clip in a pixel shader, so
+	a perspective pass hands view depth back when inverted. `ndc_z` is
+	`SV_Position.z`, already in [0, 1] under SDL_GPU's depth range.
+*/
+@(private = "file")
+reconstruct_view_depth :: proc(
+	projection: Camera3D_Projection,
+	ndc_z:      f32,
+	clip_w:     f32,
+	near, far:  f32,
+) -> f32 {
+	if projection == .ORTHOGRAPHIC {
+		return near + clamp(ndc_z, 0, 1) * (far - near)
+	}
+	return 1.0 / max(clip_w, 1e-8)
+}
+
+@(test)
+test_perspective_depth_reconstruction_round_trips :: proc(t: ^testing.T) {
+	near, far := f32(0.1), f32(100)
+
+	for depth in ([]f32{0.1, 0.5, 1, 7, 25, 99.5}) {
+		// A perspective pass's clip w is the view depth, so SV_Position.w is
+		// its reciprocal.
+		got := reconstruct_view_depth(.PERSPECTIVE, 0, 1.0 / depth, near, far)
+
+		testing.expectf(t, abs(got - depth) < depth * 1e-4,
+			"perspective view depth %v must come back from 1/w, got %v", depth, got)
+	}
+}
+
+@(test)
+test_orthographic_depth_reconstruction_round_trips :: proc(t: ^testing.T) {
+	near, far := f32(0.1), f32(100)
+
+	for depth in ([]f32{0.1, 0.5, 1, 7, 25, 99.5}) {
+		// An orthographic projection's NDC z is linear in view depth over
+		// [near, far], which is the whole reason a second branch exists.
+		ndc_z := (depth - near) / (far - near)
+		got   := reconstruct_view_depth(.ORTHOGRAPHIC, ndc_z, 1, near, far)
+
+		testing.expectf(t, abs(got - depth) < depth * 1e-4,
+			"orthographic view depth %v must come back from NDC z, got %v", depth, got)
+	}
+}
+
+@(test)
+test_the_perspective_formula_collapses_under_orthographic :: proc(t: ^testing.T) {
+	/*
+		The defect, pinned so it cannot come back quietly. An orthographic
+		projection's clip w is 1 for every vertex, so `SV_Position.w` is 1 for
+		every fragment and the perspective reconstruction hands back the same
+		depth no matter where the fragment actually is. Every fragment then
+		reads one fixed slice's light list, and any light outside that slice
+		stops lighting the scene -- wrong lighting, no error, nothing to point
+		at.
+
+		Asserted as "these two differ", not as "the old one equals 1": what
+		matters is that the branch is load-bearing, not what the broken value
+		happened to be.
+	*/
+	near, far := f32(0.1), f32(100)
+
+	near_frag := reconstruct_view_depth(.PERSPECTIVE, 0.01, 1, near, far)
+	far_frag  := reconstruct_view_depth(.PERSPECTIVE, 0.99, 1, near, far)
+
+	testing.expect(t, near_frag == far_frag,
+		"the perspective formula cannot tell two orthographic depths apart -- that is the bug")
+
+	ortho_near := reconstruct_view_depth(.ORTHOGRAPHIC, 0.01, 1, near, far)
+	ortho_far  := reconstruct_view_depth(.ORTHOGRAPHIC, 0.99, 1, near, far)
+
+	testing.expect(t, ortho_far > ortho_near + 1,
+		"the orthographic branch must separate them again")
+}
+
+@(test)
+test_reconstructed_depth_lands_in_its_own_cluster_slice :: proc(t: ^testing.T) {
+	/*
+		The two halves joined: a reconstructed view depth must fall inside the
+		slice `cluster_z_bounds` (light_cull.odin) built for it. Swept across
+		the depth range for both projections, since agreeing with the CPU's own
+		bounds is the whole point -- the shader inverts the same exponential
+		curve the assignment used, and if the two ever disagreed a fragment
+		would read a neighbouring slice's lights.
+	*/
+	near, far := f32(0.1), f32(100)
+	count     := 24
+
+	for projection in ([]Camera3D_Projection{.PERSPECTIVE, .ORTHOGRAPHIC}) {
+		for s in 0 ..< count {
+			z_near, z_far := cluster_z_bounds(s, count, near, far)
+
+			// The middle of this slice, in view depth, expressed the way a
+			// fragment of that projection would arrive carrying it.
+			depth := (z_near + z_far) * 0.5
+
+			ndc_z  := (depth - near) / (far - near)
+			clip_w := 1.0 / depth
+
+			got := reconstruct_view_depth(projection, ndc_z, clip_w, near, far)
+
+			testing.expectf(t, got >= z_near && got <= z_far,
+				"%v: depth %v must reconstruct inside slice %v's own bounds [%v, %v], got %v",
+				projection, depth, s, z_near, z_far, got)
+		}
+	}
+}

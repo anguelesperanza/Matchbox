@@ -273,6 +273,17 @@ Lighting_Settings :: struct {
 		this phase.
 	*/
 	ssao: Ssao,
+
+	/*
+		P7b's other half: light scattering off the air between the camera and
+		the scene. See `Volumetric` (volumetric.odin), and that file's own top
+		comment for why it is here beside `ssao` rather than on `post` --
+		it consumes the light list and the shadow maps and produces scene
+		light, where everything in `post` consumes the finished HDR buffer.
+
+		The zero value is off.
+	*/
+	volumetric: Volumetric,
 }
 
 /*
@@ -376,7 +387,8 @@ lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Se
 	s.shadows = shadow_settings_normalized(s.shadows)
 	s.cluster = cluster_settings_normalized(s.cluster)
 	s.post    = post_settings_normalized(s.post)
-	s.ssao    = ssao_settings_normalized(s.ssao)
+	s.ssao       = ssao_settings_normalized(s.ssao)
+	s.volumetric = volumetric_settings_normalized(s.volumetric)
 
 	return s
 }

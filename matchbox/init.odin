@@ -183,6 +183,39 @@ create_builtin_shader :: proc(
 @(private)
 MAX_COLOR_TARGETS :: 4
 
+/*
+	How a pipeline's colour target combines what a fragment produces with what
+	is already there.
+
+	`ALPHA` is the source-alpha blend every draw in this package used before
+	there was anything else, and is what all but three pipelines want.
+
+	`NONE` writes the fragment straight through. The G-buffer fill needs it:
+	blending two unrelated materials' normals or roughness together where
+	their triangles anti-alias against each other is not a value a lighting
+	pass could make sense of.
+
+	`ADDITIVE` sums colour and overwrites alpha. Volumetric light needs it
+	(volumetric.odin) -- light scattering off the air is scene light, and it
+	is added to the HDR target the 3D pass already wrote rather than
+	composited later.
+
+	**P7a considered this enum and rejected it**, and the record is worth
+	keeping: the bloom chain's upsample looked like it needed an additive
+	mode, and turned out to want the ordinary alpha blend with its own mix
+	weight written into alpha instead -- a better answer for reasons that had
+	nothing to do with blend state (see bloom_upsample.frag.hlsl). So the bool
+	stayed a bool. P7b is the caller that could not be talked out of it: there
+	is no alpha a fullscreen additive pass could write that would make
+	source-alpha blending sum two values.
+*/
+@(private)
+Color_Blend :: enum {
+	ALPHA,
+	NONE,
+	ADDITIVE,
+}
+
 // Which geometry a pipeline reads: the shared quad, or a model's own vertices.
 @(private)
 Vertex_Layout :: enum {
@@ -285,24 +318,9 @@ create_pipeline :: proc(
 	*/
 	color_formats: []sdl.GPUTextureFormat = nil,
 
-	/*
-		Whether the colour target(s) built here blend -- true (the existing
-		behaviour, for every pipeline but the G-buffer fill) or false: a fill
-		pass writes a `Surface` field's own raw value into each target, and
-		blending two unrelated materials' normals or roughness together where
-		two triangles' edges anti-alias against each other is not a colour a
-		lighting pass could ever make sense of, unlike alpha-blending two
-		colours which is exactly what every 2D/3D draw before that pipeline
-		wanted.
-
-		Still one source-alpha blend and not a mode enum, after P7a
-		considered making it one: the bloom chain's upsample looked like it
-		needed an additive mode, and it turned out to want this exact blend
-		with `scatter` written into its own alpha instead -- which is a
-		better answer for a reason that has nothing to do with blend state.
-		See bloom_upsample.frag.hlsl.
-	*/
-	color_blend: bool = true,
+	// How the colour target(s) built here combine with what is already in
+	// them -- see `Color_Blend`.
+	blend: Color_Blend = .ALPHA,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -365,10 +383,17 @@ create_pipeline :: proc(
 	}
 
 	blend_state := sdl.GPUColorTargetBlendState{
-		enable_blend            = color_blend,
+		enable_blend            = blend != .NONE,
 		color_blend_op          = .ADD,
-		src_color_blendfactor   = .SRC_ALPHA,
-		dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
+
+		// ONE rather than SRC_ALPHA is the whole difference between the two
+		// enabled modes: the source contributes in full instead of being
+		// weighted by an alpha the additive callers do not write. Alpha
+		// itself is ONE/ZERO either way, so the destination's alpha becomes
+		// the source's -- and nothing downstream of either mode reads it.
+		src_color_blendfactor   = .ONE if blend == .ADDITIVE else .SRC_ALPHA,
+		dst_color_blendfactor   = .ONE if blend == .ADDITIVE else .ONE_MINUS_SRC_ALPHA,
+
 		alpha_blend_op          = .ADD,
 		src_alpha_blendfactor   = .ONE,
 		dst_alpha_blendfactor   = .ZERO,
@@ -528,6 +553,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Bloom_Prefilter_Frag_Data) == 32)
 	#assert(size_of(Ssao_Frag_Data)            == 704)
 	#assert(size_of(Ssao_Blur_Frag_Data)       == 16)
+	#assert(size_of(Volumetric_Frag_Data)      == 96)
 	#assert(size_of(Deferred_Lighting_Frag_Data) == 64)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
@@ -715,6 +741,16 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.ssao_blur = create_builtin_shader(
 		#load("shaders/ssao_blur.frag.spv"), #load("shaders/ssao_blur.frag.dxil"), .FRAGMENT, 1)
 
+	// Volumetric light (volumetric.odin). Eight samplers -- the depth buffer,
+	// the four shadow textures, the two probe maps and the AO texture, the
+	// last three of which it never reads and must still declare, since
+	// lighting_core.hlsli declares them for every shader that includes it.
+	// Four uniform blocks (its own, plus Scene/Cascade/Cube) and the same
+	// three storage buffers every shader that includes that file gets.
+	mbi.renderer.shaders.volumetric = create_builtin_shader(
+		#load("shaders/volumetric.frag.spv"), #load("shaders/volumetric.frag.dxil"),
+		.FRAGMENT, VOLUMETRIC_SAMPLER_COUNT, 4, 3)
+
 	/*
 		Environment probe baking (ambient.odin). Both read one sampler -- the
 		source skybox's own cube map -- through the same `skybox.vert.hlsl`
@@ -828,6 +864,14 @@ init :: proc(title: string, width: i32, height: i32) {
 		color_format = mbi.renderer.lighting.ssao.format,
 	)
 
+	// Volumetric light: the HDR target's own format, since it adds into it,
+	// and the one additive pipeline here.
+	mbi.renderer.pipelines.volumetric = create_pipeline(
+		mbi.renderer.shaders.volumetric,
+		color_format = mbi.renderer.lighting.targets.format,
+		blend        = .ADDITIVE,
+	)
+
 	/*
 		Environment probe baking -- the skybox's own vertex shader (no
 		geometry, SV_VertexID triangle, see Vertex_Layout.NONE), no depth
@@ -890,7 +934,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull           = .BACK,
 		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
 		color_formats  = gbuffer_formats[:],
-		color_blend    = false, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
+		blend          = .NONE, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
 	)
 
 	mbi.renderer.pipelines.gbuffer_skinned = create_pipeline(
@@ -901,7 +945,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull           = .BACK,
 		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
 		color_formats  = gbuffer_formats[:],
-		color_blend    = false,
+		blend          = .NONE,
 	)
 
 	// Built the same shape skybox_panorama/skybox_cubemap already are (just
@@ -1375,6 +1419,7 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.bloom_upsample   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_upsample)
 	if mbi.renderer.pipelines.ssao      != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.ssao)
 	if mbi.renderer.pipelines.ssao_blur != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.ssao_blur)
+	if mbi.renderer.pipelines.volumetric != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.volumetric)
 	if mbi.renderer.pipelines.depth_prepass         != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.depth_prepass)
 	if mbi.renderer.pipelines.depth_prepass_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.depth_prepass_skinned)
 	if mbi.renderer.pipelines.probe_irradiance != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_irradiance)
@@ -1406,6 +1451,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.bloom_upsample   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_upsample)
 	if mbi.renderer.shaders.ssao      != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.ssao)
 	if mbi.renderer.shaders.ssao_blur != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.ssao_blur)
+	if mbi.renderer.shaders.volumetric != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.volumetric)
 	if mbi.renderer.shaders.probe_irradiance != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_irradiance)
 	if mbi.renderer.shaders.probe_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_prefilter)
 

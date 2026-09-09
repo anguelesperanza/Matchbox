@@ -61,6 +61,23 @@ MESH_FRAG_SAMPLER_COUNT :: 11
 */
 DEFERRED_LIGHTING_SAMPLER_COUNT :: 12
 
+/*
+	How many sampled textures/samplers `volumetric.frag.hlsl` declares: this
+	frame's depth, the two PCF/PCSS shadow maps, CASCADED's array, CUBE's
+	array, the two environment-probe maps and the AO texture -- t0-t7.
+
+	Only the first five are ever read. The other three come with including
+	`lighting_core.hlsli` at all, which declares them for every shader that
+	includes it, and a declared sampler has to have something bound in it --
+	see `volumetric_run` (volumetric.odin) for the placeholders that go there.
+
+	Eight under Vulkan's guaranteed per-stage floor of 16, and pinned by
+	`volumetric_test.odin` the same way the other two counts are pinned, for
+	the same reason: the number has to equal what the compiled binary actually
+	declares, and only a comment keeps it in step.
+*/
+VOLUMETRIC_SAMPLER_COUNT :: 8
+
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
 // One vertex shader serves every draw: the old test.vert and font.vert had
@@ -145,6 +162,12 @@ Shaders :: struct {
 	ssao:      ^sdl.GPUShader,
 	ssao_blur: ^sdl.GPUShader,
 
+	// Volumetric light (volumetric.odin) -- the shared quad vertex shader
+	// again, and the heaviest fragment shader in the package after the
+	// deferred lighting pass: it marches the depth buffer and asks every
+	// light, through the same `sample_light`, at every step.
+	volumetric: ^sdl.GPUShader,
+
 	// The depth prepass's own fragment shader is `shadow` above -- it writes
 	// nothing, which is the whole requirement -- paired with mesh.vert /
 	// mesh_skinned.vert rather than a vertex shader of its own. See
@@ -211,7 +234,7 @@ Pipelines :: struct {
 		built against the four G-buffer targets (`color_formats`,
 		`create_pipeline`) and the G-buffer's own depth texture rather than
 		the HDR target and the shared main depth texture, with blending off
-		(`color_blend = false`) -- see `Material.transparent`'s own doc
+		(`blend = .NONE`) -- see `Material.transparent`'s own doc
 		comment (material.odin) for why a G-buffer fill pass cannot blend at
 		all. `deferred_lighting` is the fullscreen resolve, built the same
 		shape `skybox_panorama`/`skybox_cubemap` already are
@@ -264,6 +287,11 @@ Pipelines :: struct {
 	// like every other fullscreen pipeline here.
 	ssao:      ^sdl.GPUGraphicsPipeline,
 	ssao_blur: ^sdl.GPUGraphicsPipeline,
+
+	// Volumetric light -- built against the HDR target's own format, because
+	// it writes straight into it, and the one `Color_Blend.ADDITIVE` pipeline
+	// in the package.
+	volumetric: ^sdl.GPUGraphicsPipeline,
 
 	/*
 		The depth prepass `FORWARD`/`CLUSTERED` need before SSAO can run --

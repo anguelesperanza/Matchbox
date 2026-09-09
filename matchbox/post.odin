@@ -37,6 +37,7 @@ import sdl "vendor:sdl3"
 
 	So the chain today is:
 
+		volumetric (volumetric.odin) -- one pass, additive into the HDR target
 		bloom (bloom.odin)      -- 1 + 2*(levels-1) passes, its own targets
 		  the tonemap resolve   -- one pass, and the end of the chain:
 		      bloom composite
@@ -181,6 +182,23 @@ post_settings_normalized :: proc(settings: Post_Settings) -> Post_Settings {
 */
 @(private)
 post_chain_run :: proc() {
+	/*
+		Volumetric light before bloom, and the order is a decision rather than
+		an accident: it adds scene light *into* the HDR target, so running it
+		first is what lets a shaft bright enough to blow out spill like
+		anything else bright. Reversed, bloom would read a buffer the shafts
+		were not in yet and they would sit on top of the picture looking
+		pasted on.
+
+		It is also the one stage here that is configured somewhere else --
+		`Lighting_Settings.volumetric` rather than `Post_Settings` -- because
+		it consumes the light list and the shadow maps rather than the
+		finished buffer. See volumetric.odin's own top comment. That is a
+		seam worth keeping straight: *where a stage runs* and *what a stage
+		is* are different questions, and this file answers only the first.
+	*/
+	volumetric_run()
+
 	bloom_run()
 }
 

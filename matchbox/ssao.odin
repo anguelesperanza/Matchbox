@@ -190,13 +190,14 @@ ssao_settings_normalized :: proc(settings: Ssao) -> Ssao {
 	its depth or discards it (`begin_drawing_3d`).
 
 	One procedure rather than the condition written out at each site, because
-	P7b's second half adds volumetric light to the same list and the two must
-	not be able to disagree: a pass that discarded its depth and an effect
-	that reads it is a frame of garbage, not a compile error.
+	both of P7b's effects read it and the two must not be able to disagree: a
+	pass that discarded its depth and an effect that reads it is a frame of
+	garbage, not a compile error.
 */
 @(private)
 scene_depth_is_read :: proc() -> bool {
-	return mbi.renderer.lighting.settings.ssao.enabled
+	settings := mbi.renderer.lighting.settings
+	return settings.ssao.enabled || settings.volumetric.enabled
 }
 
 /*

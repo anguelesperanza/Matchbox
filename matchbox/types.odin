@@ -274,6 +274,22 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 }
 
 /*
+	96 bytes. volumetric.frag.hlsl's own -- the matrix it reconstructs world
+	positions with, and the six numbers `Volumetric` (volumetric.odin) carries.
+
+	The matrix first, at offset 0, for the reason every struct here with one
+	in it puts it there: Odin aligns `matrix[4,4]f32` to 32 bytes and anything
+	ahead of it that is not a multiple of 32 opens a gap `init`'s own size
+	assert would then have to account for.
+*/
+Volumetric_Frag_Data :: struct #align(16) {
+	inverse_view_projection: matrix[4, 4]f32,
+
+	params:  [4]f32, // x density, y anisotropy, z step count, w max distance
+	params2: [4]f32, // x intensity, yzw unused
+}
+
+/*
 	704 bytes. ssao.frag.hlsl's own fragment uniform -- the two matrices it
 	reconstructs and reprojects world positions with, the camera those
 	matrices came from, the tuning `Ssao` carries, and the sample kernel

@@ -588,6 +588,35 @@ read_material :: proc(
 		if _, unlit := extensions["KHR_materials_unlit"]; unlit {
 			result.shading = .UNLIT
 		}
+
+		/*
+			Said out loud rather than absorbed silently. Falling back is the
+			right behaviour -- see this proc's own comment above -- but the
+			one case where it goes wrong is invisible without this line: a
+			file that lists the extension in `extensionsRequired` is under no
+			obligation to carry a `pbrMetallicRoughness` block at all, and
+			without one the code below reads glTF's own defaults instead,
+			which are metallic 1 and roughness 1. The asset then renders as
+			rough metal, correctly by the letter of the spec and wrongly by
+			any other measure, with nothing on screen or in a log to say why.
+
+			Named per material rather than once per file, and with the
+			material's own name where it has one, so the line says which
+			surface to go and look at instead of only that something
+			somewhere used the extension.
+
+			Reaches a game only if it has set `context.logger = mb.mbi.logger`
+			-- see CLAUDE.md. That is the same deal every other diagnostic in
+			this package offers, not a special weakness of this one.
+		*/
+		if _, spec_gloss := extensions["KHR_materials_pbrSpecularGlossiness"]; spec_gloss {
+			log.warnf(
+				"material %q uses KHR_materials_pbrSpecularGlossiness, which Matchbox does not read; " +
+				"loading its pbrMetallicRoughness fallback instead. Set Shading_Model.PBR_SPECGLOSS and " +
+				"the specular/glossiness factors yourself if the fallback looks wrong.",
+				gltf_material.name.? or_else "<unnamed>",
+			)
+		}
 	}
 
 	result.emissive = {

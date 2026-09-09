@@ -377,3 +377,37 @@ test_an_unrelated_extension_does_not_change_the_shading_model :: proc(t: ^testin
 	testing.expect(t, m.shading == .PBR_METALLIC,
 		"only KHR_materials_unlit means unlit; any other extension leaves the parameterization alone")
 }
+
+@(test)
+test_spec_gloss_falls_back_to_metallic_roughness :: proc(t: ^testing.T) {
+	/*
+		The behaviour behind the warning `read_material` logs for this
+		extension: Matchbox does not read spec-gloss, so the material takes
+		the `pbrMetallicRoughness` fallback the extension is designed around
+		rather than being skipped or zeroed. Asserted on the outcome, not on
+		the log line -- what matters to a game is that the factors it does
+		carry still arrive.
+	*/
+	extensions := make(json.Object)
+	defer delete(extensions)
+	extensions["KHR_materials_pbrSpecularGlossiness"] = json.Object{}
+
+	materials := [1]gltf.Material{{
+		metallic_roughness = gltf.Material_Metallic_Roughness{
+			base_color_factor = {0.5, 0.5, 0.5, 1},
+			metallic_factor   = 0,
+			roughness_factor  = 0.8,
+		},
+	}}
+	materials[0].extensions = extensions
+	data := gltf.Data{materials = materials[:]}
+	uploaded := make(map[gltf.Integer]^sdl.GPUTexture)
+	defer delete(uploaded)
+
+	m := read_material(&data, gltf.Integer(0), &uploaded)
+
+	testing.expect(t, m.shading == .PBR_METALLIC,
+		"an unread extension must leave the material on its own fallback parameterization")
+	testing.expect(t, m.roughness == 0.8,
+		"the fallback block's factors must still reach the Material -- the extension is ignored, not the material")
+}

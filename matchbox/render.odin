@@ -2,6 +2,28 @@ package matchbox
 
 import sdl "vendor:sdl3"
 
+/*
+	How many sampled textures/samplers mesh.frag.hlsl declares -- 1 base
+	colour, 3 material maps, 2 PCF/PCSS shadow maps, 1 CASCADED array, 1 CUBE
+	array, at t0-t7/s0-s7 (see that file's own top comment). Passed to
+	`create_builtin_shader` for `Shaders.mesh_frag` below rather than a bare
+	literal at the call site, so `render_test.odin` can pin
+	the actual value `init` hands `CreateGPUShader` under Vulkan's guaranteed
+	per-stage floor (16, for both `maxPerStageDescriptorSampledImages` and
+	`maxPerStageDescriptorSamplers`) rather than merely asserting on source
+	text.
+
+	Not a CLAUDE.md "configuration" constant -- nothing about this number is a
+	judgement call a game could reasonably want to override, since it has to
+	equal however many `Texture2D`/`Texture2DArray` slots the compiled shader
+	binary actually declares or `CreateGPUShader` and every bind call built
+	against it disagree with reality. The same "a fixed compile-time number
+	that only a comment keeps in step with the shader source" shape
+	`MAX_CASCADES`/`MAX_CASCADES_HLSL` (shadow.odin,
+	shaders/shadow/cascaded.hlsli) already has.
+*/
+MESH_FRAG_SAMPLER_COUNT :: 8
+
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
 // One vertex shader serves every draw: the old test.vert and font.vert had
@@ -274,16 +296,21 @@ Renderer :: struct {
 
 	// What draw_model_immediate has bound for the non-shadow-pass fragment
 	// shader beyond the per-part textures above: the shadow maps for every
-	// technique group (PCF/PCSS's two, CASCADED's up to eight, CUBE's six --
-	// all three always bound regardless of which technique is actually
-	// running, see Shadow_State's own doc comment) and the light storage
-	// buffer. None of these change per part or per pipeline switch the way
-	// the per-part textures do, but they can change mid-pass if a game calls
-	// set_lighting or set_lights (growing the light buffer) between
-	// draw_model calls.
+	// technique group (PCF/PCSS's two, CASCADED's one layered array, CUBE's
+	// one layered array -- all three always bound regardless of which
+	// technique is actually running, see Shadow_State's own doc comment) and
+	// the light storage buffer. None of these change per part or per
+	// pipeline switch the way the per-part textures do, but they can change
+	// mid-pass if a game calls set_lighting or set_lights (growing the light
+	// buffer) between draw_model calls.
+	//
+	// bound_cascade_maps/bound_cube_maps are single pointers, not arrays,
+	// since P3b: CASCADED's up-to-eight maps and CUBE's six are each one
+	// Texture2DArray now (one sampler apiece) rather than one GPUTexture per
+	// layer -- see shadow.odin's own doc comment on Shadow_State for why.
 	bound_shadow_maps:  [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
-	bound_cascade_maps: [MAX_SHADOW_CASTERS * MAX_CASCADES]^sdl.GPUTexture,
-	bound_cube_maps:    [6]^sdl.GPUTexture, // MAX_POINT_SHADOW_CASTERS is 1 -- see that constant's own doc comment
+	bound_cascade_maps: ^sdl.GPUTexture,
+	bound_cube_maps:    ^sdl.GPUTexture,
 	bound_light_buffer: ^sdl.GPUBuffer,
 
 	// draw_model calls made with casts_shadow = true before begin_drawing_3d
@@ -317,8 +344,8 @@ bind_cache_reset :: proc() {
 	r.bound_joint_buffer      = nil
 	r.bound_material_textures = {}
 	r.bound_shadow_maps       = {}
-	r.bound_cascade_maps      = {}
-	r.bound_cube_maps         = {}
+	r.bound_cascade_maps      = nil
+	r.bound_cube_maps         = nil
 	r.bound_light_buffer      = nil
 }
 

@@ -524,8 +524,8 @@ draw_model_immediate :: proc(
 
 			/*
 				Every shadow technique's own maps -- PCF/PCSS's two at t4/t5,
-				CASCADED's up to eight at t6-t13, CUBE's six at t14-t19 -- and
-				the light list at t20 as a storage buffer, all scene-wide
+				CASCADED's one Texture2DArray at t6, CUBE's one at t7 -- and
+				the light list at t8 as a storage buffer, all scene-wide
 				rather than per-part, so each of these four bind calls only
 				fires when its own resource actually changed: the shadow
 				textures when set_lighting rebuilds them, the light buffer
@@ -536,19 +536,20 @@ draw_model_immediate :: proc(
 				own comment on `Renderer`.
 
 				The slot numbers passed to BindGPUFragmentSamplers below (4,
-				6, 14) track the HLSL t-register each group starts at, kept
+				6, 7) track the HLSL t-register each group starts at, kept
 				equal on purpose for readability -- but they need not be:
 				BindGPUFragmentSamplers takes a slot within the *sampler*
 				category alone (0 = base, 1-3 = the three material textures
-				above, 4-19 = every shadow map), which SDL_GPU numbers
+				above, 4-7 = every shadow map), which SDL_GPU numbers
 				separately from the storage-buffer category the light list
 				binds into below. The two categories only share a numbering
 				*inside the HLSL register(tN) declarations* -- see
 				lighting_core.hlsli's own comment on `lights` for why -- so
 				the light buffer's own BindGPUFragmentStorageBuffers call
 				below still passes slot 0, unchanged, even though its own
-				HLSL register moved again, from t6 to t20, to make room for
-				CASCADED's and CUBE's fourteen new samplers.
+				HLSL register moved again, from t20 down to t8, once P3b
+				collapsed CASCADED's fourteen flat-map samplers (eight
+				cascade, six cube) down to two Texture2DArray ones.
 			*/
 			if r.bound_shadow_maps != shadow.textures {
 				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
@@ -560,40 +561,27 @@ draw_model_immediate :: proc(
 			}
 
 			/*
-				CASCADED's up-to-eight maps (slots 6-13) and CUBE's six
-				(slots 14-19) -- bound the same way the two PCF/PCSS maps
-				just above are, as one HLSL resource array each
-				(mesh.frag.hlsl's `cascade_maps`/`cube_maps`) rather than
-				individually-named textures, so this stays two bind calls
-				regardless of MAX_CASCADES. Always bound, whether or not
-				`settings.technique` is actually CASCADED or a point light is
-				actually casting a cube shadow this frame -- see
-				Shadow_State's own doc comment for why the shared fragment
-				shader cannot pick and choose which slots to declare.
+				CASCADED's array (slot 6) and CUBE's (slot 7) -- one
+				GPUTextureSamplerBinding each, since P3b: both groups are one
+				Texture2DArray apiece now (mesh.frag.hlsl's
+				`cascade_maps`/`cube_maps`), not an HLSL resource array of
+				flat `Texture2D`s needing one binding per layer. Always
+				bound, whether or not `settings.technique` is actually
+				CASCADED or a point light is actually casting a cube shadow
+				this frame -- see Shadow_State's own doc comment for why the
+				shared fragment shader cannot pick and choose which slots to
+				declare.
 			*/
-			cascade_flat: [MAX_SHADOW_CASTERS * MAX_CASCADES]^sdl.GPUTexture
-			for caster in 0 ..< MAX_SHADOW_CASTERS {
-				for cascade in 0 ..< MAX_CASCADES {
-					cascade_flat[caster * MAX_CASCADES + cascade] = shadow.cascade_textures[caster][cascade]
-				}
-			}
-			if r.bound_cascade_maps != cascade_flat {
-				cascade_bindings: [MAX_SHADOW_CASTERS * MAX_CASCADES]sdl.GPUTextureSamplerBinding
-				for i in 0 ..< len(cascade_flat) {
-					cascade_bindings[i] = {texture = cascade_flat[i], sampler = shadow.sampler}
-				}
-				sdl.BindGPUFragmentSamplers(r.pass, 6, &cascade_bindings[0], u32(len(cascade_bindings)))
-				r.bound_cascade_maps = cascade_flat
+			if r.bound_cascade_maps != shadow.cascade_texture {
+				cascade_binding := sdl.GPUTextureSamplerBinding{texture = shadow.cascade_texture, sampler = shadow.sampler}
+				sdl.BindGPUFragmentSamplers(r.pass, 6, &cascade_binding, 1)
+				r.bound_cascade_maps = shadow.cascade_texture
 			}
 
-			cube_flat := shadow.cube_textures[0]
-			if r.bound_cube_maps != cube_flat {
-				cube_bindings: [6]sdl.GPUTextureSamplerBinding
-				for i in 0 ..< 6 {
-					cube_bindings[i] = {texture = cube_flat[i], sampler = shadow.sampler}
-				}
-				sdl.BindGPUFragmentSamplers(r.pass, 14, &cube_bindings[0], 6)
-				r.bound_cube_maps = cube_flat
+			if r.bound_cube_maps != shadow.cube_texture {
+				cube_binding := sdl.GPUTextureSamplerBinding{texture = shadow.cube_texture, sampler = shadow.sampler}
+				sdl.BindGPUFragmentSamplers(r.pass, 7, &cube_binding, 1)
+				r.bound_cube_maps = shadow.cube_texture
 			}
 
 			if r.bound_light_buffer != r.lighting.light_buffer {

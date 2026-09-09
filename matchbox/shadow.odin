@@ -358,21 +358,43 @@ shadow_settings_normalized :: proc(settings: Shadow_Settings) -> Shadow_Settings
 	`set_lighting` -- grouped the way `Lighting` (render.odin) groups
 	everything lighting owns, rather than as loose fields on `Renderer`.
 
-	`textures[n]` is never nil once a device exists: `init` creates a 1x1
-	placeholder for each slot immediately, so the mesh fragment shader -- which
-	declares every slot below unconditionally, for every game, regardless of
-	which technique is actually running -- always has something valid bound.
-	See `shadow_standard.odin`, `shadow_cascaded.odin`, `shadow_cube.odin`.
+	`textures[n]`/`cascade_texture`/`cube_texture` are never nil once a device
+	exists: `init` creates a 1x1 placeholder for each immediately, so the mesh
+	fragment shader -- which declares every slot below unconditionally, for
+	every game, regardless of which technique is actually running -- always
+	has something valid bound. See `shadow_standard.odin`,
+	`shadow_cascaded.odin`, `shadow_cube.odin`.
 
 	Three independent groups of resources rather than one: `textures`/
 	`view_projections`/`caster_indices` are `PCF`/`PCSS`'s own two-slot shape,
-	unchanged from before this phase; `cascade_*` is `CASCADED`'s, sized for
-	up to `MAX_SHADOW_CASTERS` directional casters each split into up to
-	`MAX_CASCADES` maps; `cube_*` is `CUBE`'s, sized for
-	`MAX_POINT_SHADOW_CASTERS`. All three exist on every `Shadow_State`
+	unchanged from before this phase; `cascade_*` is `CASCADED`'s, one
+	`Texture2DArray` with a layer for every (caster, cascade) pair up to
+	`MAX_SHADOW_CASTERS * MAX_CASCADES`; `cube_*` is `CUBE`'s, one
+	`Texture2DArray` with a layer per face up to
+	`MAX_POINT_SHADOW_CASTERS * 6`. All three exist on every `Shadow_State`
 	regardless of `settings.technique` -- see `Shadow_Technique`'s own doc
 	comment on why the mesh fragment shader cannot pick and choose which
 	sampler slots to declare.
+
+	**Since P3b, `cascade_texture`/`cube_texture` are one texture apiece, not
+	one `^sdl.GPUTexture` per layer.** P3 built these as
+	`[MAX_SHADOW_CASTERS][MAX_CASCADES]^sdl.GPUTexture` and
+	`[MAX_POINT_SHADOW_CASTERS][6]^sdl.GPUTexture` -- a distinct `D2` texture
+	and a distinct sampler slot per layer -- on the belief that
+	`GPUDepthStencilTargetInfo` had no way to target one layer of a larger
+	texture at all. It does: `layer: Uint8`, the struct's own last field
+	(`vendor/sdl3/sdl3_gpu.odin`), confirmed by reading the struct directly
+	rather than trusting the comment this one replaces. Each layer is now
+	rendered into via that field instead of via its own texture, and the
+	fragment shader samples the whole group through one `Texture2DArray`
+	binding rather than eight or six flat ones -- see `lighting_rework.md`
+	section 7.7 for why the sampler count mattered (Vulkan's guaranteed
+	minimum for both sampled images and samplers per stage is 16, and this
+	shader sat at 20 before this) and `shadow_cube.odin`'s own top comment for
+	why an array was chosen there over a real depth `TextureCube`. The
+	per-layer view-projection matrices below (`cascade_view_projections`,
+	`cube_view_projections`) are unchanged -- every layer still needs its own,
+	whether it is a distinct texture or a distinct layer of one.
 */
 Shadow_State :: struct {
 	settings: Shadow_Settings,
@@ -395,13 +417,16 @@ Shadow_State :: struct {
 	view_projections: [MAX_SHADOW_CASTERS]matrix[4, 4]f32,
 	caster_indices:   [MAX_SHADOW_CASTERS]int, // which uploaded light each casts, or -1 -- see set_lights
 
-	// CASCADED -- see shadow_cascaded.odin.
-	cascade_textures:         [MAX_SHADOW_CASTERS][MAX_CASCADES]^sdl.GPUTexture,
+	// CASCADED -- see shadow_cascaded.odin. One Texture2DArray, layer
+	// `caster * MAX_CASCADES + cascade` -- see this struct's own doc comment
+	// on why one texture rather than one per layer.
+	cascade_texture:          ^sdl.GPUTexture,
 	cascade_view_projections: [MAX_SHADOW_CASTERS][MAX_CASCADES]matrix[4, 4]f32,
 	cascade_splits:           [MAX_CASCADES]f32, // view-space depth of each cascade's far edge, shared by both caster slots
 
-	// CUBE -- see shadow_cube.odin.
-	cube_textures:         [MAX_POINT_SHADOW_CASTERS][6]^sdl.GPUTexture,
+	// CUBE -- see shadow_cube.odin. One Texture2DArray, layer `face`
+	// (MAX_POINT_SHADOW_CASTERS is 1, so there is no caster term to add).
+	cube_texture:          ^sdl.GPUTexture,
 	cube_view_projections: [MAX_POINT_SHADOW_CASTERS][6]matrix[4, 4]f32,
 	cube_caster_index:     [MAX_POINT_SHADOW_CASTERS]int, // which uploaded point light casts, or -1
 

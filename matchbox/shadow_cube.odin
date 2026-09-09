@@ -10,43 +10,38 @@ package matchbox
 	`shadow.odin` documented from P0 onward, and this file is what removes it:
 	six views, one per cube face, each its own ordinary shadow map.
 
-	**Not a real GPU cube texture.** The obvious shape -- one `sdl.GPUTexture`
-	of `type = .CUBE`, rendered into face by face -- does not exist in
-	SDL_GPU's own API: `GPUDepthStencilTargetInfo` (the struct
-	`BeginGPURenderPass` takes for its depth attachment) has no `layer_or_
-	depth_plane` field at all, unlike `GPUColorTargetInfo`, which does. A
-	colour target can be told which layer or cube face to render into; a
-	depth-stencil target cannot be pointed at anything but layer/face 0 of
-	whatever texture it names. This is a real, checked limitation of the
-	vendor binding this package builds against (`vendor:sdl3`'s
-	`sdl3_gpu.odin`), not an assumption -- see this phase's own report for
-	where it was confirmed. So each face is its own full `D2` depth texture,
-	the exact same shape `shadow_standard.odin`'s two maps already are, and
-	`cube_textures[caster]` is `[6]^sdl.GPUTexture` rather than one texture of
-	six layers.
+	**One layered Texture2DArray, not six separate textures -- and not a real
+	depth TextureCube either, since P3b.** P3's own account of this said
+	`GPUDepthStencilTargetInfo` had no field for targeting one layer or face
+	of a larger texture at all, unlike `GPUColorTargetInfo`'s
+	`layer_or_depth_plane`. That premise was false: the struct has `layer:
+	Uint8` as its last field (`vendor/sdl3/sdl3_gpu.odin`), confirmed by
+	reading the struct directly rather than by trusting the comment this one
+	replaces -- see `lighting_rework.md` section 7.7. So a single texture with
+	six layers, one face per layer, is exactly as renderable-into as six
+	separate ones: `begin_point_shadow_pass` below now points each pass at
+	`cube_texture`'s own `face`-th layer via that field.
 
-	A consequence worth stating plainly: this makes a point-light shadow six
-	times the render cost of a directional or spot one (six passes over
-	whatever casts it, instead of one), and the six maps are sampled in the
-	fragment shader as six separate `Texture2D`s rather than one filtered
-	`TextureCube` -- there is no hardware seam-blending between them, so a
-	fragment near a cube face's edge samples only its own face's map with no
-	averaging against its neighbour. A real `TextureCube` could be built by
-	rendering each face into its own `D2` texture as here and then copying
-	each into a layer of a combined `CUBE`-type sampled texture with
-	`CopyGPUTextureToTexture` (which *does* support per-layer addressing, via
-	`GPUTextureRegion.layer`, unlike the render-target path) -- but there is
-	no GPU capture tooling in this environment to confirm SDL_GPU accepts a
-	depth-format texture-to-texture copy, and building a second, unverifiable
-	assumption on top of an already-unverified rendering path was judged the
-	worse trade. Six flat `Texture2D`s is the option built entirely out of
-	patterns this package has already proven work (`shadow_map0`/`shadow_map1`
-	are exactly this shape). Revisit if seam artifacts turn out to matter more
-	than this phase's own inability to see them render did.
+	What remains a real, load-bearing choice is `D2_ARRAY` over a genuine
+	`CUBE`-type depth texture. SDL_GPU's `GPUTextureType` does have `.CUBE`,
+	and `GPUTextureCreateInfo` would accept `usage = {.DEPTH_STENCIL_TARGET,
+	.SAMPLER}` on one syntactically -- but there is no GPU in this environment
+	to confirm every backend actually creates a depth-format cube texture
+	with both of those usage flags set, and the array shape sidesteps the
+	question entirely while still collapsing the sampler count exactly as
+	much: `shadow_cube_face_index` below already resolves a direction to a
+	face number, so indexing a `Texture2DArray` by that same number costs
+	nothing a real cube texture's hardware seam-blending would have bought
+	back. If a future phase confirms a depth `TextureCube` works everywhere
+	this package targets, revisiting this trades the array for one that
+	blends across face edges; nothing else about the pass or bias code
+	changes either way, since neither this file nor the shader currently
+	relies on hardware cube addressing.
 
 	**Face selection is this file's own convention, not a standard cubemap
-	layout.** Nothing here samples hardware cube-map addressing, so there is
-	no existing convention to match -- `shadow_cube_face_direction` and
+	layout.** Unchanged from P3: nothing here samples hardware cube-map
+	addressing, so there is no existing convention to match --
+	`shadow_cube_face_direction` and
 	`shadow_cube_face_index` only have to agree with *each other* (and with
 	`shaders/shadow/cube.hlsli`'s own mirror of the second one), not with
 	OpenGL's or Direct3D's own face order.
@@ -100,11 +95,16 @@ shadow_cube_face_index :: proc(direction: [3]f32) -> int {
 }
 
 /*
-	Builds `MAX_POINT_SHADOW_CASTERS * 6` real shadow maps at
+	Builds one `MAX_POINT_SHADOW_CASTERS * 6`-layer shadow map array at
 	`settings.resolution`, only when `settings.enabled` and only when turning
-	them on for the first time or the resolution changed -- see
+	it on for the first time or the resolution changed -- see
 	`apply_standard_shadow_textures`'s own doc comment (shadow_standard.odin)
-	for why an unrelated setting changing must not rebuild these every call.
+	for why an unrelated setting changing must not rebuild this every call.
+
+	One `CreateGPUTexture` call rather than `MAX_POINT_SHADOW_CASTERS * 6` of
+	them, since P3b -- see this file's own top comment and `shadow.odin`'s own
+	doc comment on `Shadow_State` for why a layered array replaced one
+	texture per face.
 
 	Unlike the other two groups, this one is **not** gated on
 	`settings.technique` -- see `Shadow_Technique`'s own doc comment for why
@@ -117,47 +117,30 @@ apply_cube_shadow_textures :: proc(settings: Shadow_Settings) {
 	s := &r.lighting.shadow
 
 	size := max(settings.resolution, 1)
-	if s.cube_resolution == i32(size) && s.cube_textures[0][0] != nil {
+	if s.cube_resolution == i32(size) && s.cube_texture != nil {
 		return // already built at this resolution -- nothing to do
 	}
 
-	new_textures: [MAX_POINT_SHADOW_CASTERS][6]^sdl.GPUTexture
-	for caster in 0 ..< MAX_POINT_SHADOW_CASTERS {
-		for face in 0 ..< 6 {
-			new_textures[caster][face] = sdl.CreateGPUTexture(r.device, {
-				type                 = .D2,
-				format               = s.format,
-				usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
-				width                = u32(size),
-				height               = u32(size),
-				layer_count_or_depth = 1,
-				num_levels           = 1,
-			})
+	new_texture := sdl.CreateGPUTexture(r.device, {
+		type                 = .D2_ARRAY,
+		format               = s.format,
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+		width                = u32(size),
+		height               = u32(size),
+		layer_count_or_depth = MAX_POINT_SHADOW_CASTERS * 6,
+		num_levels           = 1,
+	})
 
-			if new_textures[caster][face] == nil {
-				log.errorf("could not create a cube shadow map: %s", sdl.GetError())
-				s.settings.enabled = false
-
-				for c2 in 0 ..< MAX_POINT_SHADOW_CASTERS {
-					for f in 0 ..< 6 {
-						if new_textures[c2][f] != nil {
-							sdl.ReleaseGPUTexture(r.device, new_textures[c2][f])
-						}
-					}
-				}
-				return
-			}
-		}
+	if new_texture == nil {
+		log.errorf("could not create the cube shadow map array: %s", sdl.GetError())
+		s.settings.enabled = false
+		return
 	}
 
-	for caster in 0 ..< MAX_POINT_SHADOW_CASTERS {
-		for face in 0 ..< 6 {
-			if s.cube_textures[caster][face] != nil {
-				sdl.ReleaseGPUTexture(r.device, s.cube_textures[caster][face])
-			}
-			s.cube_textures[caster][face] = new_textures[caster][face]
-		}
+	if s.cube_texture != nil {
+		sdl.ReleaseGPUTexture(r.device, s.cube_texture)
 	}
+	s.cube_texture = new_texture
 
 	s.cube_resolution = i32(size)
 }
@@ -216,8 +199,13 @@ begin_point_shadow_pass :: proc(face: int) -> bool {
 		r.pass = nil
 	}
 
+	// `layer`, not a separate texture per face -- see this file's own top
+	// comment and shadow.odin's own doc comment on Shadow_State for why.
+	// MAX_POINT_SHADOW_CASTERS is 1, so `face` alone names the layer with no
+	// caster term to add.
 	depth := sdl.GPUDepthStencilTargetInfo{
-		texture          = s.cube_textures[0][face],
+		texture          = s.cube_texture,
+		layer            = u8(face),
 		clear_depth      = 1,
 		load_op          = .CLEAR,
 		store_op         = .STORE,

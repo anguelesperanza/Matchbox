@@ -28,15 +28,29 @@ package matchbox
 	section 2's modularity test is "a `.hlsli`, an enum value, one `#include`,
 	one dispatcher line, plus whatever CPU-side pass setup its own file
 	needs" -- and CSM is the first technique that needs a *second* uniform
-	block (`Cascade_Frag_Data`, lighting.odin) and more than two sampler
-	slots (`MAX_SHADOW_CASTERS * MAX_CASCADES`, mesh.frag.hlsl), neither of
-	which the P0/P2 contract anticipated. Both are additive: `mesh.frag.hlsl`
-	gains a declaration and a bind call, `push_lighting` gains a second push,
-	and `shadow_visibility_cascaded` (shaders/shadow/cascaded.hlsli) is the
-	only place any of it is read. Nothing in `sample_light`, `Light_Sample`,
+	block (`Cascade_Frag_Data`, lighting.odin) beyond the two sampler slots
+	`PCF`/`PCSS` already have, neither of which the P0/P2 contract
+	anticipated. Both are additive: `mesh.frag.hlsl` gains a declaration and a
+	bind call, `push_lighting` gains a second push, and
+	`shadow_visibility_cascaded` (shaders/shadow/cascaded.hlsli) is the only
+	place any of it is read. Nothing in `sample_light`, `Light_Sample`,
 	`Radiance`, `Surface` or any shading-model `.hlsli` file changed to make room for
 	it -- the strain landed exactly where the brief said to look for it
 	(register/uniform-block plumbing), not in the shared shading contract.
+
+	**One Texture2DArray, not `MAX_SHADOW_CASTERS * MAX_CASCADES` separate
+	textures, since P3b.** P3 built one `D2` texture per (caster, cascade)
+	pair on the mistaken belief that `GPUDepthStencilTargetInfo` could not
+	target a single layer of a larger texture -- see `shadow.odin`'s own doc
+	comment on `Shadow_State` for the correction and where the field actually
+	lives. `apply_cascade_shadow_textures` below now builds one
+	`D2_ARRAY` texture with `MAX_SHADOW_CASTERS * MAX_CASCADES` layers, and
+	`begin_cascade_shadow_pass` points each pass at its own layer via
+	`GPUDepthStencilTargetInfo.layer` rather than at its own texture. The
+	fragment shader samples the result through one `Texture2DArray` binding
+	(`cascade_maps`/`cascade_sampler`, mesh.frag.hlsl) instead of an
+	eight-element resource array -- see `shaders/shadow/cascaded.hlsli`'s own
+	top comment.
 */
 
 import "core:log"
@@ -176,11 +190,15 @@ far_enough_margin :: proc(camera: Camera3D) -> f32 {
 }
 
 /*
-	Builds `MAX_SHADOW_CASTERS * MAX_CASCADES` real shadow maps at
+	Builds one `MAX_SHADOW_CASTERS * MAX_CASCADES`-layer shadow map array at
 	`settings.resolution`, only when `settings.technique` is `CASCADED` and
 	only when turning it on for the first time or the resolution changed --
 	see `apply_standard_shadow_textures`'s own doc comment (shadow_standard.odin)
-	for why an unrelated setting changing must not rebuild these every call.
+	for why an unrelated setting changing must not rebuild this every call.
+
+	One `CreateGPUTexture` call rather than `MAX_SHADOW_CASTERS * MAX_CASCADES`
+	of them, since P3b -- see `shadow.odin`'s own doc comment on
+	`Shadow_State` for why a layered array replaced one texture per layer.
 */
 @(private)
 apply_cascade_shadow_textures :: proc(settings: Shadow_Settings) {
@@ -190,51 +208,30 @@ apply_cascade_shadow_textures :: proc(settings: Shadow_Settings) {
 	if settings.technique != .CASCADED do return
 
 	size := max(settings.resolution, 1)
-	if s.cascade_resolution == i32(size) && s.cascade_textures[0][0] != nil {
+	if s.cascade_resolution == i32(size) && s.cascade_texture != nil {
 		return // already built at this resolution -- nothing to do
 	}
 
-	new_textures: [MAX_SHADOW_CASTERS][MAX_CASCADES]^sdl.GPUTexture
-	for caster in 0 ..< MAX_SHADOW_CASTERS {
-		for cascade in 0 ..< MAX_CASCADES {
-			new_textures[caster][cascade] = sdl.CreateGPUTexture(r.device, {
-				type                 = .D2,
-				format               = s.format,
-				usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
-				width                = u32(size),
-				height               = u32(size),
-				layer_count_or_depth = 1,
-				num_levels           = 1,
-			})
+	new_texture := sdl.CreateGPUTexture(r.device, {
+		type                 = .D2_ARRAY,
+		format               = s.format,
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+		width                = u32(size),
+		height               = u32(size),
+		layer_count_or_depth = MAX_SHADOW_CASTERS * MAX_CASCADES,
+		num_levels           = 1,
+	})
 
-			if new_textures[caster][cascade] == nil {
-				log.errorf("could not create a cascade shadow map: %s", sdl.GetError())
-				s.settings.enabled = false
-
-				// Whatever this loop already made before failing is released
-				// rather than leaked -- unfilled entries are still nil
-				// (Odin zero-initializes the array), so this is safe to run
-				// over the whole thing regardless of where the failure hit.
-				for c2 in 0 ..< MAX_SHADOW_CASTERS {
-					for k in 0 ..< MAX_CASCADES {
-						if new_textures[c2][k] != nil {
-							sdl.ReleaseGPUTexture(r.device, new_textures[c2][k])
-						}
-					}
-				}
-				return
-			}
-		}
+	if new_texture == nil {
+		log.errorf("could not create the cascade shadow map array: %s", sdl.GetError())
+		s.settings.enabled = false
+		return
 	}
 
-	for caster in 0 ..< MAX_SHADOW_CASTERS {
-		for cascade in 0 ..< MAX_CASCADES {
-			if s.cascade_textures[caster][cascade] != nil {
-				sdl.ReleaseGPUTexture(r.device, s.cascade_textures[caster][cascade])
-			}
-			s.cascade_textures[caster][cascade] = new_textures[caster][cascade]
-		}
+	if s.cascade_texture != nil {
+		sdl.ReleaseGPUTexture(r.device, s.cascade_texture)
 	}
+	s.cascade_texture = new_texture
 
 	s.cascade_resolution = i32(size)
 }
@@ -305,8 +302,13 @@ begin_cascade_shadow_pass :: proc(slot: int, cascade: int) -> bool {
 		r.pass = nil
 	}
 
+	// `layer`, not a separate texture per (slot, cascade) pair -- see
+	// shadow.odin's own doc comment on Shadow_State for why. Caster-major,
+	// the same flattening cascade_view_projection reads on the shader side
+	// (shaders/shadow/cascaded.hlsli).
 	depth := sdl.GPUDepthStencilTargetInfo{
-		texture          = s.cascade_textures[slot][cascade],
+		texture          = s.cascade_texture,
+		layer            = u8(slot * MAX_CASCADES + cascade),
 		clear_depth      = 1,
 		load_op          = .CLEAR,
 		store_op         = .STORE,

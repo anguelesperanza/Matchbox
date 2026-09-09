@@ -72,6 +72,21 @@ main :: proc() {
 	mb.init("First Person", 1280, 720)
 	defer mb.cleanup()
 
+	/*
+		The sun this example is lit by. It used not to need saying: a scene that set
+		no lights got a hard-coded direction inside the shader, and that implicit
+		fallback is gone -- see `lighting_rework.md` section 1 for why an
+		emergent "lighting is on" was worth removing. Stating it is the
+		replacement, and it is two lines.
+
+		The direction is the way the light travels, so a sun overhead points
+		down. Ambient is divided by ten inside `brdf/blinn_phong.hlsli` -- 3.5
+		here is 0.35 reaching the surface -- which is what keeps the faces
+		turned away from the sun off pure black.
+	*/
+	mb.set_lighting({enabled = true, ambient = {color = {3.5, 3.5, 3.5, 1}}})
+	mb.set_lights({mb.create_directional_light({0.4, -1, -0.7}, {0.65, 0.65, 0.65, 1})})
+
 	// ESC is how you get the pointer back here, so it must not also close the
 	// window. .UNKNOWN is a scancode no key produces, which turns the built-in
 	// behaviour off without needing a flag for it.

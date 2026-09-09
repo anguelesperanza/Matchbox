@@ -37,10 +37,15 @@ package cube_example
 	of a scene means the frame closes one pass and opens another. If that were
 	wrong there would be a scene and no words, or words and no scene.
 
-	The lighting is a fixed direction hard-coded in mesh_flat.frag. It is not a
-	lighting system and stage 5 replaces it -- it is here so the faces of a cube
-	come out at different brightnesses, because a cube in one flat colour is a
-	hexagon and you cannot see it turn.
+	The lighting is one directional light and an ambient term, set below. It is
+	here so the faces of a cube come out at different brightnesses, because a
+	cube in one flat colour is a hexagon and you cannot see it turn -- not
+	because this example is about lighting. `examples/lighting` is.
+
+	It used to be a fixed direction hard-coded in mesh_flat.frag, applied to
+	any scene that had set no lights of its own. That fallback is gone, and
+	deliberately: `lighting_rework.md` section 1 has why an implicit "the
+	lighting is on" was worth removing.
 */
 
 import "core:fmt"
@@ -51,6 +56,21 @@ import mb "../../matchbox"
 main :: proc() {
 	mb.init("Cube", 1280, 720)
 	defer mb.cleanup()
+
+	/*
+		The sun this example is lit by. It used not to need saying: a scene that set
+		no lights got a hard-coded direction inside the shader, and that implicit
+		fallback is gone -- see `lighting_rework.md` section 1 for why an
+		emergent "lighting is on" was worth removing. Stating it is the
+		replacement, and it is two lines.
+
+		The direction is the way the light travels, so a sun overhead points
+		down. Ambient is divided by ten inside `brdf/blinn_phong.hlsli` -- 3.5
+		here is 0.35 reaching the surface -- which is what keeps the faces
+		turned away from the sun off pure black.
+	*/
+	mb.set_lighting({enabled = true, ambient = {color = {3.5, 3.5, 3.5, 1}}})
+	mb.set_lights({mb.create_directional_light({0.4, -1, -0.7}, {0.65, 0.65, 0.65, 1})})
 
 	// One cube on the GPU, drawn four times. A model is geometry, not a thing
 	// in the world -- where it goes is the Transform's business, which is what

@@ -503,6 +503,14 @@ bloom_pass :: proc(
 @(private)
 bloom_run :: proc() {
 	r := &mbi.renderer
+
+	// Every pass below records into r.cmd, which only exists inside a frame.
+	// end_drawing_3d cannot reach here without one -- mode_3d is set only
+	// after a pass has actually opened -- but this is the guard every other
+	// proc that touches r.cmd already carries, and the cost of it is one
+	// compare a frame.
+	if !r.frame_active || r.cmd == nil do return
+
 	settings := r.lighting.settings.post.bloom
 
 	if !settings.enabled {
@@ -521,7 +529,22 @@ bloom_run :: proc() {
 		curve = bloom_prefilter_curve(settings.threshold, settings.knee),
 	}
 
+	/*
+		A pass that could not open leaves the chain half-written, and the
+		prefilter is the one where that matters: level 0 opens `DONT_CARE`, so
+		failing there leaves the resolve sampling whatever was in that memory.
+		Releasing the whole chain on any failure makes `bloom_output` hand back
+		nil, which puts the 1x1 black placeholder in the sampler slot instead
+		-- a frame without bloom rather than a frame with garbage in it.
+
+		A failed later pass is only a chain that is narrower than asked for,
+		which would be harmless to keep. Treated the same way anyway: "the
+		chain did not finish, so there is no chain" is one rule to hold in your
+		head, and BeginGPURenderPass failing at all is not a situation worth
+		two.
+	*/
 	if !bloom_pass(r.pipelines.bloom_prefilter, t.color, b.levels[0], b.sizes[0], &prefilter, size_of(prefilter), false) {
+		release_bloom_targets()
 		return
 	}
 
@@ -529,6 +552,7 @@ bloom_run :: proc() {
 		down := Bloom_Filter_Frag_Data{texel = {1.0 / f32(b.sizes[i].x), 1.0 / f32(b.sizes[i].y)}}
 
 		if !bloom_pass(r.pipelines.bloom_downsample, b.levels[i], b.levels[i + 1], b.sizes[i + 1], &down, size_of(down), false) {
+			release_bloom_targets()
 			return
 		}
 	}
@@ -544,6 +568,7 @@ bloom_run :: proc() {
 		}
 
 		if !bloom_pass(r.pipelines.bloom_upsample, b.levels[i + 1], b.levels[i], b.sizes[i], &up, size_of(up), true) {
+			release_bloom_targets()
 			return
 		}
 	}

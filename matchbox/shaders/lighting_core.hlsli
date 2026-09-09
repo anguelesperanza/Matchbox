@@ -60,14 +60,15 @@ struct Light
     float4 shadow_bias; // x depth bias, y normal-offset bias -- see Shadow_Bias.  z-w unused
 };
 
-// Unbounded -- see light.odin's top comment on why MAX_LIGHTS retired. t20,
-// space2: sampled textures at t0-t19 (whichever the including shader
-// declares -- mesh.frag.hlsl's own twenty, as of P3's cascade and cube
-// sampler arrays) come first in SDL_GPU's fragment-stage numbering, storage
-// buffers continue the same t[n] sequence after them. Any shader that
-// changes its own sampler count has to renumber this to match --
-// mesh.frag.hlsl's own top comment is the place that number is decided.
-StructuredBuffer<Light> lights : register(t20, space2);
+// Unbounded -- see light.odin's top comment on why MAX_LIGHTS retired. t8,
+// space2: sampled textures at t0-t7 (whichever the including shader
+// declares -- mesh.frag.hlsl's own eight, since P3b collapsed CASCADED's and
+// CUBE's own resource arrays into one Texture2DArray apiece) come first in
+// SDL_GPU's fragment-stage numbering, storage buffers continue the same
+// t[n] sequence after them. Any shader that changes its own sampler count
+// has to renumber this to match -- mesh.frag.hlsl's own top comment is the
+// place that number is decided.
+StructuredBuffer<Light> lights : register(t8, space2);
 
 cbuffer Scene : register(b1, space3)
 {

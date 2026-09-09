@@ -1,11 +1,12 @@
 /*
     Cube shadow maps
     -----------------
-    A point light's own shadow -- six flat depth maps around it, one per cube
+    A point light's own shadow -- six depth maps around it, one per cube
     face, rather than the one map every directional/spot technique reads.
-    See `shadow_cube.odin`'s own top comment for why these are six ordinary
-    `Texture2D`s rather than one real `TextureCube`, and for the face
-    convention `shadow_cube_face_index` below mirrors exactly.
+    See `shadow_cube.odin`'s own top comment for why these are six layers of
+    one `Texture2DArray` rather than either six separate `Texture2D`s (P3's
+    own shape) or a real `TextureCube`, and for the face convention
+    `shadow_cube_face_index` below mirrors exactly.
 
     **Not one more case in `Shadow_Technique`'s switch.** `shadow_visibility`
     (`lighting_core.hlsli`) checks whether `light_index` is the cube caster
@@ -16,10 +17,13 @@
     point-light torch at the same time. See `Shadow_Technique`'s own doc
     comment (shadow.odin) for the fuller reasoning.
 
-    Reuses `shadow_sample_pcf` (`shadow/pcf.hlsli`) for the actual depth
+    Reuses `shadow_sample_pcf_array` (`shadow/pcf.hlsli`) for the actual depth
     compare, the same way `shadow/cascaded.hlsli` does -- picking the right
     face and matrix is this file's entire job, not a new comparison
-    algorithm.
+    algorithm. `cube_maps`/`cube_sampler` (one `Texture2DArray`, six layers)
+    are declared by whichever shader includes `lighting_core.hlsli` (today,
+    `mesh.frag.hlsl`), the same shape `cascade_maps`/`cascade_sampler`
+    already have.
 */
 
 #define CUBE_FACE_COUNT 6
@@ -67,5 +71,5 @@ float shadow_visibility_cube(int light_index, float3 world, float3 normal)
     float3 light_position = lights[light_index].position.xyz;
     int    face           = shadow_cube_face_index(world - light_position);
 
-    return shadow_sample_pcf(cube_maps[face], cube_samplers[face], cube_view_projection[face], world, normal, bias);
+    return shadow_sample_pcf_array(cube_maps, cube_sampler, face, cube_view_projection[face], world, normal, bias);
 }

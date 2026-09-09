@@ -37,21 +37,36 @@ SamplerComparisonState shadow_sampler1 : register(s5, space2);
 
 /*
     CASCADED's up to MAX_SHADOW_CASTERS(2) * MAX_CASCADES(4) maps, and CUBE's
-    six -- fixed-size HLSL resource arrays rather than one declaration per
-    map, which is what lets `render3d.odin`'s own binding code stay two
-    `BindGPUFragmentSamplers` calls (one contiguous range each) regardless of
-    `MAX_CASCADES`, the same shape the two PCF/PCSS slots just above already
-    use for `MAX_SHADOW_CASTERS`. Always declared and always bound to
-    *something* valid (real maps or `init`'s 1x1 placeholders) whether or not
+    six -- one `Texture2DArray` apiece, one layer per map, rather than either
+    one declaration per map or a fixed-size resource array of flat
+    `Texture2D`s. This is the collapse `lighting_rework.md` section 7.7 asks
+    for: P3 shipped `cascade_maps[8]`/`cube_maps[6]` as HLSL resource arrays
+    of eight and six separate sampler slots, twenty sampled textures and
+    twenty samplers in this shader in total -- above Vulkan's guaranteed
+    per-stage floor of 16 for both `maxPerStageDescriptorSampledImages` and
+    `maxPerStageDescriptorSamplers`, on a mistaken belief that SDL_GPU could
+    not render into one layer of a depth texture at all (see
+    `shadow.odin`'s own doc comment on `Shadow_State`, and `shadow_cube.odin`
+    for CUBE's own reasoning). It can -- `GPUDepthStencilTargetInfo.layer` --
+    so one `Texture2DArray` per group, sampled with a layer index computed on
+    the shader side (`shadow_cascade_index`/`shadow_cube_face_index`), gets
+    the same shadows through one sampler each instead of eight or six.
+
+    `render3d.odin`'s own binding code stays two `BindGPUFragmentSamplers`
+    calls regardless of `MAX_CASCADES` -- now one texture-sampler pair per
+    call rather than a contiguous range of them, the same simplification the
+    two PCF/PCSS slots just above never needed since they were never more
+    than two flat maps. Always declared and always bound to *something*
+    valid (a real array or `init`'s 1x1-per-layer placeholder) whether or not
     this game's scene ever selects `CASCADED` or ever has a point light
-    casting a cube shadow -- see `Shadow_State`'s own doc comment (shadow.odin)
-    for why the one shared fragment shader cannot pick and choose which
-    slots to declare per technique.
+    casting a cube shadow -- see `Shadow_State`'s own doc comment
+    (shadow.odin) for why the one shared fragment shader cannot pick and
+    choose which slots to declare per technique.
 */
-Texture2D<float>       cascade_maps[8]     : register(t6, space2);
-SamplerComparisonState cascade_samplers[8] : register(s6, space2);
-Texture2D<float>       cube_maps[6]        : register(t14, space2);
-SamplerComparisonState cube_samplers[6]    : register(s14, space2);
+Texture2DArray<float>  cascade_maps    : register(t6, space2);
+SamplerComparisonState cascade_sampler : register(s6, space2);
+Texture2DArray<float>  cube_maps       : register(t7, space2);
+SamplerComparisonState cube_sampler    : register(s7, space2);
 
 cbuffer Material : register(b0, space3)
 {

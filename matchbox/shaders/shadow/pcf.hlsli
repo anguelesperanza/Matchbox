@@ -57,6 +57,46 @@ float shadow_sample_pcf(
 }
 
 /*
+    Same comparison, same projection, same out-of-frustum degrade as
+    `shadow_sample_pcf` just above -- the only difference is the map itself:
+    one layer of a `Texture2DArray` rather than a whole `Texture2D`, which is
+    what `shadow_visibility_cascaded`/`shadow_visibility_cube`
+    (shaders/shadow/cascaded.hlsli, shaders/shadow/cube.hlsli) now read
+    instead of indexing into an HLSL resource array of flat maps -- see
+    `shadow.odin`'s own doc comment on `Shadow_State` for why. `layer` is an
+    `int` rather than the `float` `SampleCmpLevelZero` ultimately wants
+    because every caller already has one on hand as an array or loop index;
+    the conversion is exact for every value this file is ever called with
+    (at most `MAX_SHADOW_CASTERS * MAX_CASCADES` or `5`, both far inside
+    `float`'s exact integer range).
+
+    Kept as its own function rather than folding a `bool`/layer parameter
+    into `shadow_sample_pcf` above: `Texture2D` and `Texture2DArray` are
+    different HLSL types, so there is no single signature that accepts
+    either, and threading an unused layer through every `PCF`/`PCSS` call
+    site (which never has one) would be the worse asymmetry.
+*/
+float shadow_sample_pcf_array(
+    Texture2DArray<float> map, SamplerComparisonState samp, int layer, float4x4 view_projection,
+    float3 world, float3 normal, float2 bias)
+{
+    float3 offset_world = world + normal * bias.y;
+
+    float4 light_clip = mul(view_projection, float4(offset_world, 1.0));
+    float3 light_ndc   = light_clip.xyz / light_clip.w;
+
+    float2 uv = light_ndc.xy * 0.5 + 0.5;
+    uv.y = 1.0 - uv.y; // clip +Y is up, texture +V is down
+
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 ||
+        light_ndc.z < 0.0 || light_ndc.z > 1.0)
+        return 1.0;
+
+    float current = light_ndc.z - bias.x;
+    return map.SampleCmpLevelZero(samp, float3(uv, float(layer)), current);
+}
+
+/*
     Which of the (up to MAX_SHADOW_CASTERS) uploaded lights this index names,
     if either -- `flags.z`/`shadow_caster1.x` are `-1` whenever shadows are
     not enabled, even if a light was marked `casts_shadow`, so this never

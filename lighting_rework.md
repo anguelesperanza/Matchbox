@@ -76,38 +76,127 @@ dispatcher is greppable, debuggable, and cannot be left dangling. It also
 keeps the no-callbacks rule intact by construction rather than by discipline.
 
 **The test for "is this actually modular"** is stated once and applied at
-every review: *adding a sixth shading model must touch exactly three places*
--- a new `.hlsli`, a new enum value, and one line in each dispatcher. If it
-touches shared code anywhere else, the seam is in the wrong place.
+every review: *adding a sixth shading model must touch only its own file, one
+enum value, and one line in each dispatcher* -- three places under P0's single
+dispatcher, four once §2.1's split contract lands. If it touches shared code
+anywhere else, the seam is in the wrong place.
 
-### Correction, found while building P0
+### 2.1 The per-light contract -- what P0 shipped, and what P2 replaces it with
 
-The contract above was drafted as `brdf_eval(Surface, Light_Sample)` -- one
-call per light, summed by shared code. **It does not fit the model P0 had to
-port.** PsxGame's formula is
+P0 shipped a weaker seam than this section describes, for a reason that
+turned out not to hold. Recorded here in full because the fix is P2's first
+job and the wrong conclusion is easy to reach twice.
+
+**What P0 shipped.** Each model owns its whole light loop, reading `lights`,
+the light count and `shadow_visibility` as ordinary globals. The reasoning was
+that PsxGame's formula
 
 	base_color * (1 + sum(specular)) * sum(diffuse)
 
-which carries a genuine cross term between every pair of lights: one light's
-specular multiplies another light's diffuse. That is not decomposable into an
-order-independent sum of independent per-light contributions, so a strict
-per-light contract cannot express it.
+carries a cross term between every pair of lights -- one light's specular
+multiplies another light's diffuse -- and so cannot be expressed as a sum of
+independent per-light contributions.
 
-What P0 shipped instead: each model owns its whole light loop, reading
-`lights`, the light count and `shadow_visibility` as ordinary globals -- which
-any included file can see, so nothing needs threading through a parameter
-list. The three-places property still holds.
+**Why that is wrong.** It is true only if a light's contribution has to be a
+single `float3`. Both factors above are *plain sums*; only the final combine
+is nonlinear. Split accumulation from resolution and the cross term is
+expressed exactly, with no special case.
 
-**This is a weaker seam than intended and should not be permanent.** Light
-iteration, attenuation and the shadow lookup are now duplicated in every
-model rather than written once, which is exactly the "shared code should only
-assume the interface" property §1 of the spec asks for. The only thing forcing
-it is a formula §7.4 has already released from being a constraint. So: when
-P2 adds the physically-based models, restore `brdf_eval(Surface, Light_Sample)`
-as the contract for every model that is an order-independent sum -- which is
-all four of the remaining ones -- and let `blinn_phong` keep its own loop as
-the documented exception rather than letting the exception set the contract
-for everything.
+**The contract, in three pieces.** Today's `brdf_eval_blinn_phong` fuses three
+jobs, and two of them are not model-specific at all.
+
+*One -- sampling a light. Shared, written once.* What arrives at a surface
+from light `i`:
+
+```hlsl
+struct Light_Sample
+{
+    float3 direction; // normalized, surface toward the light
+    float3 radiance;  // color * attenuation * shadow -- what actually lands
+    float  n_dot_l;   // clamped; every model wants it
+};
+
+Light_Sample sample_light(uint i, Surface surface);
+```
+
+That is the directional/point/spot resolution, the attenuation curve, the cone
+smoothstep and the `shadow_visibility` call -- lines 39 to 79 of P0's
+`brdf/blinn_phong.hlsli`, lifted into shared code verbatim. **Shadow and
+attenuation are already multiplied into `radiance`**, which is the whole point:
+a BRDF never learns whether a shadow map, a cone or distance dimmed the light.
+
+*Two -- evaluating one light. The model's actual job.* Named channels rather
+than one colour, which is what makes Blinn-Phong expressible:
+
+```hlsl
+struct Radiance
+{
+    float3 diffuse;
+    float3 specular;
+};
+
+Radiance brdf_light_<name>(Surface s, Light_Sample l);
+```
+
+*Three -- resolving the sums.* Where a model's own weirdness lives:
+
+```hlsl
+float3 brdf_resolve_<name>(Surface s, Radiance total);
+```
+
+Blinn-Phong's is `s.base_color * (1 + total.specular) * total.diffuse +
+s.base_color * (ambient.rgb / 10.0)` -- arithmetic identical to P0's. PBR's is
+`total.diffuse + total.specular + s.emissive + ambient * s.occlusion`, which is
+the boring case this was designed for. Toon bands `n_dot_l` inside its own
+`brdf_light_toon` and resolves trivially.
+
+**The loop moves to shared code**, in `lighting_core.hlsli`:
+
+```hlsl
+float3 shade_lights(Surface surface)
+{
+    Radiance total = (Radiance)0;
+
+    uint count = uint(flags.x);
+    for (uint i = 0; i < count; i++)
+    {
+        Light_Sample l = sample_light(i, surface);
+        Radiance r = brdf_light(surface, l);   // dispatches on surface.shading_model
+        total.diffuse  += r.diffuse;
+        total.specular += r.specular;
+    }
+
+    return brdf_resolve(surface, total);       // dispatches too
+}
+```
+
+**What this buys, and it is the point of doing it:** P3 and P4 stop touching
+BRDF files. Cube shadow maps, PCSS and CSM all land inside `shadow_visibility`,
+which `sample_light` already calls -- so point-light shadows are one file
+changed rather than five. Anything that changes attenuation is the same.
+
+**What it costs, stated rather than discovered:**
+
+- **The modularity test loosens from three places to four.** A new model is a
+  new `.hlsli`, a new enum value, and one line in *each* of two dispatchers.
+  Still bounded and mechanical, but §2's headline property is now four, not
+  three.
+- **The dispatch runs inside the loop.** `surface.shading_model` is uniform
+  across a draw, so it predicts perfectly and is generally hoisted. If
+  measurement ever says otherwise, the fix is a macro generating the loop per
+  model -- not worth doing pre-emptively, and not worth assuming is needed.
+- **Area lights (P4) do not fit this shape.** An LTC area light integrates over
+  a polygon; there is no single `direction` and no single `radiance`. That
+  needs either a second entry point on the contract or a representative-point
+  approximation. Known now so P4 is not a surprise; it is not an argument
+  against doing this for the four punctual-light models.
+- **One wrinkle in the port.** P0 accumulates specular *uncoloured* (`spec *
+  attenuation * shadow`) while diffuse carries the light's colour. Folding
+  colour into `radiance` means specular would have to divide it back out to
+  stay constant-for-constant. Since §7.4 has already released the old look,
+  the right move is to let specular be coloured -- physically correct, and it
+  deletes the awkward line. **This is a deliberate look change to
+  `blinn_phong`, and the first one this rework makes.**
 
 ---
 
@@ -455,8 +544,16 @@ each tonemap curve, asserted numerically. Documented before/after for
 
 ### P2 -- Shading models (parallelizable)
 
-One worker per model, each writing one `.hlsli`, one enum value, one
-dispatcher line, one test. They do not share files beyond the two one-line
+**First, before any new model: land §2.1's split contract.** `sample_light`,
+`Light_Sample`, `Radiance`, the shared loop in `lighting_core.hlsli`, and
+`blinn_phong` rewritten into `brdf_light_blinn_phong` + `brdf_resolve_blinn_phong`
+-- with specular becoming coloured, this rework's first deliberate look
+change. This is one worker, and it blocks the rest of P2: every model below is
+written against the new contract, so writing them first would mean writing
+four light loops that then get deleted.
+
+Then one worker per model, each writing one `.hlsli`, two enum-adjacent
+one-line dispatcher edits, one test. They do not share files beyond those
 edits.
 
 - `pbr_metallic` (Cook-Torrance GGX + Smith + Schlick)

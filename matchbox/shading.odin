@@ -22,20 +22,25 @@ package matchbox
 	exists to buy, see `lighting_rework.md` section 2 and section 2.1 for why
 	the count moved from three to four.
 
-	Two values so far. `lighting_plan.md` asks for five (PBR metallic-
-	roughness, PBR specular-glossiness, toon, subsurface, on top of these
-	two), and `Material`'s fields already carry the numbers those will read --
-	see `material.odin`. They are not implemented yet because P0's job is the
-	seam, not the models: `BLINN_PHONG` is today's shading ported unchanged,
-	kept as the reference picture P0 is verified against, and `UNLIT` is what
+	`BLINN_PHONG` is today's shading ported unchanged from P0, kept as the
+	reference picture that phase was verified against, and `UNLIT` is what
 	replaces the old fallback that ran whenever a scene had no lights (see
 	`lighting_rework.md` section 1's first defect) -- lighting_rework.md
 	section 6 is explicit that unlit is now a material's own choice rather
 	than an accident of how many lights a scene happened to have.
+
+	P2c adds the rest `lighting_plan.md` section 1 asks for, one at a time
+	against the four-place contract above. First: `PBR_METALLIC`, Cook-Torrance
+	(GGX distribution, Smith visibility, Schlick Fresnel) under the industry-
+	standard metallic-roughness parameterization -- `brdf/pbr_common.hlsli` is
+	the shared microfacet helper this and the specular-glossiness model still
+	to come both include, per this rework's own modularity test: two divergent
+	copies of GGX would not be one seam.
 */
 Shading_Model :: enum {
 	BLINN_PHONG,
 	UNLIT,
+	PBR_METALLIC,
 }
 
 /*

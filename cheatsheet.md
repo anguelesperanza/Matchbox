@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 361 of them -- with its arguments
+Every public procedure in the package -- 362 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 17
+- [Other](#other) -- 18
 
 ## Getting started
 
@@ -2504,6 +2504,17 @@ create_material_unlit :: proc(
 ) -> Material
 ```
 A material no light reaches -- `shade_surface` (lighting_core.hlsli) returns `base_color` for one of these regardless of what the scene's lights or `Lighting_Settings.enabled` say, the same as it does for every surface when lighting is off scene-wide.
+
+```odin
+create_material_pbr_metallic :: proc(
+	base_color: [4]f32 = WHITE,
+	metallic: f32 = 0,
+	roughness: f32 = 0.5,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+Cook-Torrance GGX under the metallic-roughness parameterization -- `brdf/pbr_metallic.hlsli` is the shading model this reads into.
 
 ### `shadow_standard.odin`
 

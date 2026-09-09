@@ -15,13 +15,15 @@ package matchbox
 	model does not read rides along unread, the same way `Light.cone` already
 	does for a light that is not a spot.
 
-	**Every field for every model that will eventually exist is here now**,
-	even though P0 implements only two of the six `lighting_plan.md` asks for
-	(see `shading.odin`). That is deliberate, not scope creep: it is what lets
-	a later shading model be added by touching exactly three places (a
-	`.hlsli`, an enum value, one dispatcher line) rather than a fourth --
-	`Material_Frag_Data` below already has room for every model's numbers, so
-	P2's workers never touch the packed layout at all.
+	**Every field for every model that will eventually exist was here from
+	P0**, even though P0 itself implemented only two of the six
+	`lighting_plan.md` asks for (see `shading.odin`). That was deliberate, not
+	scope creep: it is what lets P2c add the other four shading models one at
+	a time by touching the four places `shading.odin`'s own doc comment
+	describes, without a fifth place to also widen `Material_Frag_Data`'s
+	packed layout -- `metallic` and `roughness`, the first of those four
+	models' own fields, were already present and already reaching the shader,
+	unread, before P2c touched a single `.hlsli`.
 */
 
 import sdl "vendor:sdl3"
@@ -56,10 +58,11 @@ Material :: struct {
 	base_color: [4]f32,
 
 	// Per-model parameters, flat rather than a union: see this file's own
-	// top comment for why. Metallic-roughness and specular-glossiness are
-	// PBR's two parameterizations (P2); bands/rim are toon's; subsurface/
-	// thickness are the SSS model's; specular_power is Blinn-Phong's, and is
-	// the one already read in P0 -- see brdf/blinn_phong.hlsli.
+	// top comment for why. Metallic-roughness is PBR's own parameterization
+	// (brdf/pbr_metallic.hlsli); specular/glossiness is its specular-
+	// glossiness alternate (P2); bands/rim are toon's (P2); subsurface/
+	// thickness are the SSS model's (P2); specular_power is Blinn-Phong's
+	// (brdf/blinn_phong.hlsli).
 	metallic:       f32,
 	roughness:      f32,
 	specular:       [3]f32,
@@ -112,6 +115,33 @@ create_material_unlit :: proc(base_color: [4]f32 = WHITE, textures: Material_Tex
 }
 
 /*
+	Cook-Torrance GGX under the metallic-roughness parameterization --
+	`brdf/pbr_metallic.hlsli` is the shading model this reads into.
+	`metallic` 0 is a dielectric (glass, plastic, wood -- most surfaces);
+	1 is a bare metal, whose visible colour comes entirely from `base_color`
+	tinting its specular reflection rather than from any diffuse term. Both
+	0 and the roughness default below are legitimate values, not "unset" --
+	see `material_normalized`'s own comment for why neither is defaulted at
+	pack time the way `base_color` and `specular_power` are.
+*/
+create_material_pbr_metallic :: proc(
+	base_color: [4]f32 = WHITE,
+	metallic:   f32    = 0,
+	roughness:  f32    = 0.5,
+	emissive:   [3]f32 = {0, 0, 0},
+	textures:   Material_Textures = {},
+) -> Material {
+	return Material{
+		shading    = .PBR_METALLIC,
+		base_color = base_color,
+		metallic   = metallic,
+		roughness  = roughness,
+		emissive   = emissive,
+		textures   = textures,
+	}
+}
+
+/*
 	112 bytes: the wire form of a `Material` plus the one thing that is not a
 	material property at all -- `tint`, `draw_model`'s own per-call multiplier,
 	carried here because both are pushed together, once per part, in the same
@@ -126,8 +156,8 @@ Material_Frag_Data :: struct #align(16) {
 	tint:       [4]f32, // draw_model's own multiplier, not a material property
 	base_color: [4]f32,
 	specular:   [4]f32, // xyz specular colour (spec-gloss, P2), w glossiness (spec-gloss, P2)
-	emissive:   [4]f32, // xyz emissive colour (P2),             w specular_power (Blinn-Phong)
-	params:     [4]f32, // x metallic (P2), y roughness (P2), z bands (toon, P2), w rim (toon, P2)
+	emissive:   [4]f32, // xyz emissive colour,                  w specular_power (Blinn-Phong)
+	params:     [4]f32, // x metallic, y roughness, z bands (toon, P2), w rim (toon, P2)
 	subsurface: [4]f32, // xyz subsurface tint (P2),             w thickness (P2)
 	shading:    [4]f32, // x shading_model_index -- see shading.odin.  y-w unused
 }
@@ -153,14 +183,14 @@ Material_Frag_Data :: struct #align(16) {
 	**`metallic` and `roughness` are deliberately not in here**, and they are
 	why this rule is a per-field judgement rather than a sweep over every
 	number. Both have legitimate zeroes under the metallic-roughness model
-	P2 adds: zero metallic is a dielectric, which is most surfaces, and zero
-	roughness is a perfect mirror. Defaulting either would make a value
-	somebody meant unreachable. The remaining P2 fields -- `specular`,
-	`glossiness`, `bands`, `rim`, `subsurface`, `thickness`, `emissive` --
-	are unread by any model P0 or P1 built; whichever of them turn out to
-	have no sensible zero get added here by the phase that starts reading
-	them, and the ones that do are named here as exceptions, the same way
-	these two are.
+	P2c adds: zero metallic is a dielectric, which is most surfaces, and zero
+	roughness is a perfect mirror (clamped away from the literal 0 inside
+	`brdf/pbr_metallic.hlsli` for a numerical reason, not a semantic one --
+	see that file's own comment). The remaining P2c fields -- `specular`,
+	`glossiness`, `bands`, `rim`, `subsurface`, `thickness` -- are unread by
+	any model this far into P2c; whichever of them turn out to have no
+	sensible zero get added here by the model that starts reading them, the
+	same way these two were.
 */
 @(private)
 material_normalized :: proc(material: Material) -> Material {

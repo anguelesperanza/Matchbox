@@ -149,7 +149,7 @@ test_a_black_material_stays_black :: proc(t: ^testing.T) {
 test_material_exceptions_keep_their_zeroes :: proc(t: ^testing.T) {
 	/*
 		The rule is a per-field judgement, not a sweep, and these two are why.
-		Under the metallic-roughness model P2 adds, zero metallic is a
+		Under the metallic-roughness model P2c adds, zero metallic is a
 		dielectric -- most surfaces in the world -- and zero roughness is a
 		perfect mirror. Both are values somebody means, so defaulting either
 		would put them out of reach.

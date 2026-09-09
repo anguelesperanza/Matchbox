@@ -32,18 +32,18 @@ struct Surface
     float3 base_color;
     float  alpha;
 
-    float  metallic;   // metallic-roughness (P2)
-    float  roughness;  // metallic-roughness (P2)
+    float  metallic;   // metallic-roughness (brdf/pbr_metallic.hlsli)
+    float  roughness;  // metallic-roughness (brdf/pbr_metallic.hlsli)
     float3 specular;   // specular-glossiness (P2)
     float  glossiness; // specular-glossiness (P2)
 
-    float3 emissive;  // P2
-    float  occlusion; // P2
+    float3 emissive;
+    float  occlusion; // hardcoded to 1.0 until the occlusion texture lands (the loader job after this one)
 
     float3 subsurface; // tint for the SSS model (P2)
     float  thickness;  // P2
 
-    uint  shading_model; // which brdf_eval this point runs -- see shading.odin
+    uint  shading_model; // which brdf_light/brdf_resolve this point runs -- see shading.odin
     float bands;         // toon (P2)
     float rim;           // toon (P2)
 };

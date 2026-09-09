@@ -875,6 +875,42 @@ Answered once, and not re-litigated per phase.
    which is the contract the BRDFs are written against and stays true: today
    nothing applies one, and when something does, no BRDF file changes.
 
+6. **A loaded glTF gets the shading model its own file declares, with a
+   loader-level override.** *Not yet implemented -- P2d shipped the other way
+   and this reverses it. Apply after P3 lands; see below for why not sooner.*
+
+   P2d left `read_material` assigning `MATERIAL_DEFAULTS`' Blinn-Phong to every
+   loaded material, reasoning that `lighting_plan.md` says the game picks the
+   shading model rather than Matchbox. The reasoning does not hold. A glTF
+   material carrying a `pbrMetallicRoughness` block is *declaring* that it is
+   metallic-roughness; assigning Blinn-Phong is not declining to choose, it is
+   choosing on the game's behalf while discarding what the file said. The
+   spec's principle is about not locking a game in, and honouring the file
+   locks nothing -- `part.material.shading = .TOON` still works.
+
+   The practical argument is stronger than the principled one: as P2d shipped
+   it, the loader reads metallic, roughness, occlusion and emissive into a
+   material where **nothing reads any of them**, because Blinn-Phong ignores
+   all four. P2d's own report concedes the default path has no visual change
+   at all, which is another way of saying the job is inert until a game
+   hand-edits every loaded part.
+
+   So:
+
+   - `pbrMetallicRoughness` -> `PBR_METALLIC`
+   - `KHR_materials_unlit` -> `UNLIT`
+   - `KHR_materials_pbrSpecularGlossiness` (archived, still in the wild) ->
+     `PBR_SPECGLOSS`
+   - a `load_model` parameter forcing one model for the whole file, for a game
+     that wants its old look back in one line rather than per part
+
+   **Why it waits for P3.** P3 is running in the same working tree and on a
+   branch off this one. Two actors editing one tree is the collision this
+   rework has avoided by sequencing every phase, and there is no urgency here
+   that would justify making an exception -- the change touches
+   `model_load.odin`, which P3 is explicitly scoped away from, but a shared
+   git index is enough of a hazard on its own.
+
 ---
 
 ## 8. Verification standard

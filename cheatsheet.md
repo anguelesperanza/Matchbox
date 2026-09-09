@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 362 of them -- with its arguments
+Every public procedure in the package -- 363 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 18
+- [Other](#other) -- 19
 
 ## Getting started
 
@@ -2515,6 +2515,17 @@ create_material_pbr_metallic :: proc(
 ) -> Material
 ```
 Cook-Torrance GGX under the metallic-roughness parameterization -- `brdf/pbr_metallic.hlsli` is the shading model this reads into.
+
+```odin
+create_material_pbr_specgloss :: proc(
+	base_color: [4]f32 = WHITE,
+	specular: [3]f32 = {0.04, 0.04, 0.04},
+	glossiness: f32 = 0.5,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+The same Cook-Torrance BRDF as `create_material_pbr_metallic`, under glTF's specular-glossiness parameterization instead -- `brdf/pbr_specgloss.hlsli` reads `specular` as the surface's reflectance at normal incidence directly (no metallic lerp) and `glossiness` as the inverse of roughness.
 
 ### `shadow_standard.odin`
 

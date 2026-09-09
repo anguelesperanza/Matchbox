@@ -21,9 +21,9 @@ package matchbox
 	scope creep: it is what lets P2c add the other four shading models one at
 	a time by touching the four places `shading.odin`'s own doc comment
 	describes, without a fifth place to also widen `Material_Frag_Data`'s
-	packed layout -- `metallic` and `roughness`, the first of those four
-	models' own fields, were already present and already reaching the shader,
-	unread, before P2c touched a single `.hlsli`.
+	packed layout -- `metallic`, `roughness`, `specular` and `glossiness`,
+	both PBR models' own fields, were already present and already reaching
+	the shader, unread, before P2c touched a single `.hlsli`.
 */
 
 import sdl "vendor:sdl3"
@@ -58,9 +58,9 @@ Material :: struct {
 	base_color: [4]f32,
 
 	// Per-model parameters, flat rather than a union: see this file's own
-	// top comment for why. Metallic-roughness is PBR's own parameterization
-	// (brdf/pbr_metallic.hlsli); specular/glossiness is its specular-
-	// glossiness alternate (P2); bands/rim are toon's (P2); subsurface/
+	// top comment for why. Metallic-roughness and specular-glossiness are
+	// PBR's two parameterizations (brdf/pbr_metallic.hlsli,
+	// brdf/pbr_specgloss.hlsli); bands/rim are toon's (P2); subsurface/
 	// thickness are the SSS model's (P2); specular_power is Blinn-Phong's
 	// (brdf/blinn_phong.hlsli).
 	metallic:       f32,
@@ -142,6 +142,33 @@ create_material_pbr_metallic :: proc(
 }
 
 /*
+	The same Cook-Torrance BRDF as `create_material_pbr_metallic`, under
+	glTF's specular-glossiness parameterization instead --
+	`brdf/pbr_specgloss.hlsli` reads `specular` as the surface's reflectance
+	at normal incidence directly (no metallic lerp) and `glossiness` as the
+	inverse of roughness. `specular`'s default, 0.04, is the same "unspecified
+	dielectric" stand-in `pbr_metallic.hlsli` derives internally -- this
+	parameterization has no metallic term to derive it from, so a caller
+	states it directly instead.
+*/
+create_material_pbr_specgloss :: proc(
+	base_color: [4]f32 = WHITE,
+	specular:   [3]f32 = {0.04, 0.04, 0.04},
+	glossiness: f32    = 0.5,
+	emissive:   [3]f32 = {0, 0, 0},
+	textures:   Material_Textures = {},
+) -> Material {
+	return Material{
+		shading    = .PBR_SPECGLOSS,
+		base_color = base_color,
+		specular   = specular,
+		glossiness = glossiness,
+		emissive   = emissive,
+		textures   = textures,
+	}
+}
+
+/*
 	112 bytes: the wire form of a `Material` plus the one thing that is not a
 	material property at all -- `tint`, `draw_model`'s own per-call multiplier,
 	carried here because both are pushed together, once per part, in the same
@@ -180,17 +207,21 @@ Material_Frag_Data :: struct #align(16) {
 	normalized copy that the caller would ever see. Packing is the last point
 	the value passes through before the GPU, so it is where the fixup goes.
 
-	**`metallic` and `roughness` are deliberately not in here**, and they are
-	why this rule is a per-field judgement rather than a sweep over every
-	number. Both have legitimate zeroes under the metallic-roughness model
-	P2c adds: zero metallic is a dielectric, which is most surfaces, and zero
-	roughness is a perfect mirror (clamped away from the literal 0 inside
-	`brdf/pbr_metallic.hlsli` for a numerical reason, not a semantic one --
-	see that file's own comment). The remaining P2c fields -- `specular`,
-	`glossiness`, `bands`, `rim`, `subsurface`, `thickness` -- are unread by
-	any model this far into P2c; whichever of them turn out to have no
-	sensible zero get added here by the model that starts reading them, the
-	same way these two were.
+	**`metallic`, `roughness` and `glossiness` are deliberately not in here**,
+	and they are why this rule is a per-field judgement rather than a sweep
+	over every number. Zero metallic is a dielectric, which is most surfaces;
+	zero roughness is a perfect mirror (clamped away from the literal 0
+	inside `brdf/pbr_metallic.hlsli` for a numerical reason, not a semantic
+	one -- see that file's own comment); zero glossiness is "as rough as
+	specular-glossiness can express", the same real answer from the other
+	parameterization's own side, which `brdf/pbr_specgloss.hlsli` reads
+	directly. `specular` (spec-gloss's own `f0`) is judged the same way in
+	`create_material_pbr_specgloss`'s own doc comment rather than swept here:
+	a caller who wants a material with genuinely zero specular reflectance
+	means exactly that. The remaining P2c fields -- `bands`, `rim`,
+	`subsurface`, `thickness` -- are unread by any model this far into P2c;
+	whichever of them turn out to have no sensible zero get added here by the
+	model that starts reading them, the same way these were.
 */
 @(private)
 material_normalized :: proc(material: Material) -> Material {

@@ -148,16 +148,20 @@ test_a_black_material_stays_black :: proc(t: ^testing.T) {
 @(test)
 test_material_exceptions_keep_their_zeroes :: proc(t: ^testing.T) {
 	/*
-		The rule is a per-field judgement, not a sweep, and these two are why.
-		Under the metallic-roughness model P2c adds, zero metallic is a
-		dielectric -- most surfaces in the world -- and zero roughness is a
-		perfect mirror. Both are values somebody means, so defaulting either
-		would put them out of reach.
+		The rule is a per-field judgement, not a sweep, and this file's own
+		material_normalized comment names each of these as a value somebody
+		can mean rather than an unset field: zero metallic is a dielectric
+		(most surfaces in the world), zero roughness is a perfect mirror, zero
+		glossiness is as rough as specular-glossiness can express, and zero
+		specular is a real F0. Defaulting any of them would put a value
+		somebody meant out of reach.
 	*/
 	m := material_normalized(Material{shading = .BLINN_PHONG})
 
-	testing.expect(t, m.metallic  == 0, "zero metallic is a dielectric, not an unset field")
-	testing.expect(t, m.roughness == 0, "zero roughness is a mirror, not an unset field")
+	testing.expect(t, m.metallic   == 0, "zero metallic is a dielectric, not an unset field")
+	testing.expect(t, m.roughness  == 0, "zero roughness is a mirror, not an unset field")
+	testing.expect(t, m.glossiness == 0, "zero glossiness is as rough as spec-gloss can express, not an unset field")
+	testing.expect(t, m.specular   == [3]f32{0, 0, 0}, "zero specular is a real F0, not an unset field")
 }
 
 @(test)

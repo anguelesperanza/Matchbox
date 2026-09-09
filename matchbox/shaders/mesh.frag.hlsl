@@ -26,7 +26,7 @@ cbuffer Material : register(b0, space3)
 {
     float4 tint;       // draw_model's own multiplier, not a material property
     float4 base_color;
-    float4 specular;   // xyz specular colour (spec-gloss, P2), w glossiness (spec-gloss, P2)
+    float4 specular;   // xyz specular colour (spec-gloss), w glossiness (spec-gloss)
     float4 emissive;   // xyz emissive colour,                  w specular_power (Blinn-Phong)
     float4 params;     // x metallic, y roughness, z bands (toon, P2), w rim (toon, P2)
     float4 subsurface; // xyz subsurface tint (P2),             w thickness (P2)

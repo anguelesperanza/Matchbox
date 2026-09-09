@@ -7,11 +7,8 @@ package matchbox
 	test for both PBR models -- under a uniform environment, an energy-
 	conserving BRDF must not return more energy than it received, at any
 	roughness -- plus the individual terms checked against independently
-	worked-out numbers rather than against this file's own output. This file
-	starts with `pbr_metallic`'s own share of that gate; `pbr_specgloss`'s own
-	furnace mirror joins it once that model lands, sharing the closed-form
-	anchors and the grid-resolution reasoning below rather than restating
-	them. Both halves follow `brdf_test.odin`'s own pattern (a hand-written
+	worked-out numbers rather than against this file's own output. Both
+	halves live here, following `brdf_test.odin`'s own pattern (a hand-written
 	CPU mirror of the shader maths, not an import of it -- there is nothing on
 	this side of the boundary to import, since the real maths is HLSL) and
 	`tonemap_test.odin`'s (closed-form or independently-derived expected
@@ -34,6 +31,14 @@ package matchbox
 	spherical coordinates is used rather than Monte Carlo so the test is
 	deterministic -- no seed to pin down or explain, and no flaked run to
 	investigate later.
+
+	`pbr_test_metallic_furnace_total` and `pbr_test_specgloss_furnace_total`
+	below duplicate the same integration loop rather than sharing it behind a
+	passed-in evaluator -- Odin's `proc` values do not close over locals, so
+	the natural way to parameterize the loop over "which model" would be a
+	context pointer threaded through by hand, which buys nothing here over
+	two short, obviously-parallel functions. `brdf_test.odin` makes the same
+	choice for its own fused/split mirrors.
 
 	**What "energy-conserving" does not mean here.** A single-scattering
 	microfacet BRDF is well known to *lose* energy at high roughness --
@@ -266,6 +271,88 @@ test_pbr_metallic_furnace_never_gains_energy :: proc(t: ^testing.T) {
 				testing.expectf(t, peak > 0,
 					"pbr_metallic furnace total was zero at roughness=%.2f, metallic=%.1f, view_cos=%.2f -- the integral is not exercising the BRDF",
 					roughness, metallic, view_cos)
+			}
+		}
+	}
+}
+
+// The same integral under the specular-glossiness parameterization -- mirrors
+// `brdf_light_pbr_specgloss` (`shaders/brdf/pbr_specgloss.hlsli`) the same
+// trimmed way `pbr_test_metallic_furnace_total` mirrors its own model. `f0`
+// is passed straight through rather than derived, since spec-gloss reads it
+// straight off `Surface.specular` with no metallic lerp.
+@(private = "file")
+pbr_test_specgloss_furnace_total :: proc(roughness: f32, f0, base_color: [3]f32, view_cos_theta: f32) -> [3]f32 {
+	n_theta := FURNACE_N_THETA
+	n_phi   := FURNACE_N_PHI
+
+	sin_v   := math.sqrt(max(f32(0), 1 - view_cos_theta * view_cos_theta))
+	view    := [3]f32{sin_v, 0, view_cos_theta}
+	normal  := [3]f32{0, 0, 1}
+	n_dot_v := max(view_cos_theta, 1e-4)
+
+	dtheta := (PBR_TEST_PI * 0.5) / f32(n_theta)
+	dphi   := (2 * PBR_TEST_PI) / f32(n_phi)
+
+	total := [3]f32{0, 0, 0}
+
+	for ti in 0 ..< n_theta {
+		theta   := (f32(ti) + 0.5) * dtheta
+		sin_t   := math.sin(theta)
+		cos_t   := math.cos(theta)
+		n_dot_l := cos_t
+		domega  := sin_t * dtheta * dphi
+
+		if n_dot_l <= 0 do continue
+
+		for pi_i in 0 ..< n_phi {
+			phi := (f32(pi_i) + 0.5) * dphi
+			l   := [3]f32{sin_t * math.cos(phi), sin_t * math.sin(phi), cos_t}
+			h   := linalg.normalize(view + l)
+
+			n_dot_h := max(linalg.dot(normal, h), 0)
+			v_dot_h := max(linalg.dot(view, h), 0)
+
+			d := pbr_test_distribution_ggx(n_dot_h, roughness)
+			v := pbr_test_visibility_smith_ggx(n_dot_v, n_dot_l, roughness)
+			f := pbr_test_fresnel_schlick(v_dot_h, f0)
+
+			specular := f * (d * v)
+
+			f_v     := pbr_test_fresnel_schlick(n_dot_v, f0)
+			f_l     := pbr_test_fresnel_schlick(n_dot_l, f0)
+			diffuse := (1 - f_v) * (1 - f_l) * base_color / PBR_TEST_PI
+
+			total += (diffuse + specular) * n_dot_l * domega
+		}
+	}
+
+	return total
+}
+
+@(test)
+test_pbr_specgloss_furnace_never_gains_energy :: proc(t: ^testing.T) {
+	base_color := [3]f32{1, 1, 1}
+
+	roughnesses := []f32{0.05, 0.15, 0.3, 0.5, 0.7, 0.85, 1.0}
+	view_angles := []f32{1.0, 0.2}
+	// A dielectric-typical f0 and a coloured, highly-reflective one -- the
+	// spec-gloss equivalent of the metallic sweep's two `metallic` values,
+	// since this parameterization has no metalness dial of its own to sweep.
+	f0s := [][3]f32{{0.04, 0.04, 0.04}, {0.9, 0.7, 0.3}}
+
+	for view_cos in view_angles {
+		for f0 in f0s {
+			for roughness in roughnesses {
+				total := pbr_test_specgloss_furnace_total(roughness, f0, base_color, view_cos)
+				peak  := max(total.x, max(total.y, total.z))
+
+				testing.expectf(t, peak < FURNACE_TEST_MARGIN,
+					"pbr_specgloss furnace total exceeded 1 at roughness=%.2f, f0=%v, view_cos=%.2f: got %.5f",
+					roughness, f0, view_cos, peak)
+				testing.expectf(t, peak > 0,
+					"pbr_specgloss furnace total was zero at roughness=%.2f, f0=%v, view_cos=%.2f -- the integral is not exercising the BRDF",
+					roughness, f0, view_cos)
 			}
 		}
 	}

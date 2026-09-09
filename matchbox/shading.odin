@@ -30,17 +30,19 @@ package matchbox
 	than an accident of how many lights a scene happened to have.
 
 	P2c adds the rest `lighting_plan.md` section 1 asks for, one at a time
-	against the four-place contract above. First: `PBR_METALLIC`, Cook-Torrance
+	against the four-place contract above. `PBR_METALLIC` is Cook-Torrance
 	(GGX distribution, Smith visibility, Schlick Fresnel) under the industry-
-	standard metallic-roughness parameterization -- `brdf/pbr_common.hlsli` is
-	the shared microfacet helper this and the specular-glossiness model still
-	to come both include, per this rework's own modularity test: two divergent
-	copies of GGX would not be one seam.
+	standard metallic-roughness parameterization; `PBR_SPECGLOSS` is the same
+	microfacet maths under glTF's specular-glossiness parameterization instead
+	-- `brdf/pbr_common.hlsli` is the shared GGX/Smith/Schlick helper both
+	include, per this rework's own modularity test: two divergent copies of
+	GGX would not be one seam.
 */
 Shading_Model :: enum {
 	BLINN_PHONG,
 	UNLIT,
 	PBR_METALLIC,
+	PBR_SPECGLOSS,
 }
 
 /*

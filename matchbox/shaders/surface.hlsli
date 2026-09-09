@@ -34,8 +34,8 @@ struct Surface
 
     float  metallic;   // metallic-roughness (brdf/pbr_metallic.hlsli)
     float  roughness;  // metallic-roughness (brdf/pbr_metallic.hlsli)
-    float3 specular;   // specular-glossiness (P2)
-    float  glossiness; // specular-glossiness (P2)
+    float3 specular;   // specular-glossiness (brdf/pbr_specgloss.hlsli)
+    float  glossiness; // specular-glossiness (brdf/pbr_specgloss.hlsli)
 
     float3 emissive;
     float  occlusion; // hardcoded to 1.0 until the occlusion texture lands (the loader job after this one)

@@ -185,6 +185,7 @@ Light_Sample sample_light(uint i, Surface surface)
 #include "brdf/unlit.hlsli"
 #include "brdf/pbr_common.hlsli"
 #include "brdf/pbr_metallic.hlsli"
+#include "brdf/pbr_specgloss.hlsli"
 
 /*
     Step two of the per-light contract: which model's `brdf_light_<name>`
@@ -202,6 +203,8 @@ Radiance brdf_light(Surface surface, Light_Sample light)
         return brdf_light_blinn_phong(surface, light);
     case SHADING_PBR_METALLIC:
         return brdf_light_pbr_metallic(surface, light);
+    case SHADING_PBR_SPECGLOSS:
+        return brdf_light_pbr_specgloss(surface, light);
     case SHADING_UNLIT:
     default:
         return brdf_light_unlit(surface, light);
@@ -218,6 +221,8 @@ float3 brdf_resolve(Surface surface, Radiance total)
         return brdf_resolve_blinn_phong(surface, total);
     case SHADING_PBR_METALLIC:
         return brdf_resolve_pbr_metallic(surface, total);
+    case SHADING_PBR_SPECGLOSS:
+        return brdf_resolve_pbr_specgloss(surface, total);
     case SHADING_UNLIT:
     default:
         return brdf_resolve_unlit(surface, total);

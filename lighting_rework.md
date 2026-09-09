@@ -785,6 +785,28 @@ already were.
 **Gate:** identical picture to plain forward for a scene of N lights, plus a
 measured light-count scaling curve for both.
 
+**Built CPU-side, not compute -- the parenthetical above assumed the wrong
+one.** There is no compute-shader path anywhere in this repo --
+`build_shaders.bat`/`.sh` compile `*.vert.hlsl`/`*.frag.hlsl` only, nothing
+calls `CreateGPUComputePipeline` -- and adding one would mean new build-script
+and API surface for the one part of this phase hardest to verify without a
+GPU. `light_cull.odin` assigns lights to a 16x9x24 grid on the CPU every
+frame `CLUSTERED` is selected, uploaded as two storage buffers
+(`cluster_ranges`/`cluster_light_indices`, t11/t12) the same way `set_lights`
+already uploads the light list itself. `shade_lights` (lighting_core.hlsli)
+branches on `Render_Pipeline_Kind` to loop either the full light list
+(FORWARD) or one cluster's own slice (CLUSTERED) -- the only difference
+between the two pipelines anywhere in the shader, per this file's own
+section 3.6.
+
+**Half the gate could not be run.** No GPU and no capture tooling in this
+environment means neither "identical picture" nor a scaling curve is
+measurable here -- what stands in for it is CPU-side cluster-assignment
+correctness, swept across a whole grid and against hand-derived boundary
+cases (`light_cull_test.odin`), plus a bookkeeping check that `cluster_build`'s
+own flattened output matches a direct per-light recomputation for a mixed
+scene. Both are checked; neither substitutes for actually seeing a frame.
+
 ### P6 -- Deferred
 
 - G-buffer fill writing `Surface` fields; fullscreen lighting pass

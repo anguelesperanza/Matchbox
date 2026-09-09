@@ -78,13 +78,42 @@ test_enabled_shadows_fill_in_their_numbers :: proc(t: ^testing.T) {
 	testing.expect(t, s.extent     == SHADOW_DEFAULTS.extent,     "a 0 extent would be a frustum of no width")
 	testing.expect(t, s.near       == SHADOW_DEFAULTS.near,       "a 0 near plane would be degenerate")
 	testing.expect(t, s.far        == SHADOW_DEFAULTS.far,        "a 0 far plane would be degenerate")
-	testing.expect(t, s.bias       == SHADOW_DEFAULTS.bias,       "a 0 bias is acne -- see the proc's own comment")
+	testing.expect(t, s.bias       == SHADOW_DEFAULTS.bias,       "a 0 bias (both fields) is acne -- see Shadow_Bias's own comment")
+	testing.expect(t, s.light_size == SHADOW_DEFAULTS.light_size, "a 0 PCSS light size collapses the penumbra to nothing")
+	testing.expect(t, s.cascade_count == SHADOW_DEFAULTS.cascade_count, "a 0 cascade count is 0 shadow maps for a light told to cast one")
+}
+
+// bias's two fields are each their own per-field judgement -- shadow.odin's
+// own comment on Shadow_Bias explains why -- so a caller overriding only one
+// of them must not have the other silently defaulted alongside it.
+@(test)
+test_shadow_bias_fields_default_independently :: proc(t: ^testing.T) {
+	depth_only := shadow_settings_normalized(Shadow_Settings{enabled = true, bias = {depth = 0.01}})
+	testing.expect(t, depth_only.bias.depth == 0.01, "a deliberate depth bias must survive")
+	testing.expect(t, depth_only.bias.normal_offset == SHADOW_DEFAULTS.bias.normal_offset,
+		"an unset normal-offset must still default even when depth was set")
+
+	offset_only := shadow_settings_normalized(Shadow_Settings{enabled = true, bias = {normal_offset = 0.1}})
+	testing.expect(t, offset_only.bias.normal_offset == 0.1, "a deliberate normal-offset must survive")
+	testing.expect(t, offset_only.bias.depth == SHADOW_DEFAULTS.bias.depth,
+		"an unset depth bias must still default even when normal-offset was set")
+}
+
+@(test)
+test_shadow_cascade_count_is_clamped :: proc(t: ^testing.T) {
+	over := shadow_settings_normalized(Shadow_Settings{enabled = true, cascade_count = MAX_CASCADES + 5})
+	testing.expect(t, over.cascade_count == MAX_CASCADES, "cascade_count must not exceed MAX_CASCADES")
+
+	under := shadow_settings_normalized(Shadow_Settings{enabled = true, cascade_count = -3})
+	testing.expect(t, under.cascade_count == 1, "cascade_count must not go below 1")
 }
 
 @(test)
 test_shadow_numbers_someone_meant_survive :: proc(t: ^testing.T) {
 	asked := Shadow_Settings{
-		enabled = true, technique = .PCF, resolution = 2048, extent = 5, near = 0.5, far = 100, bias = 0.01,
+		enabled = true, technique = .PCF, resolution = 2048, extent = 5, near = 0.5, far = 100,
+		bias = {depth = 0.01, normal_offset = 0.2}, light_size = 0.3,
+		cascade_count = 3, cascade_split_lambda = 0.8,
 	}
 	s := shadow_settings_normalized(asked)
 
@@ -104,7 +133,8 @@ test_disabled_shadows_keep_their_zeroes :: proc(t: ^testing.T) {
 	testing.expect(t, !s.enabled,       "shadows must stay off")
 	testing.expect(t, s.resolution == 0, "a switched-off shadow struct must not be filled in")
 	testing.expect(t, s.extent     == 0, "a switched-off shadow struct must not be filled in")
-	testing.expect(t, s.bias       == 0, "a switched-off shadow struct must not be filled in")
+	testing.expect(t, s.bias       == Shadow_Bias{}, "a switched-off shadow struct must not be filled in")
+	testing.expect(t, s.cascade_count == 0, "a switched-off shadow struct must not be filled in")
 }
 
 @(test)

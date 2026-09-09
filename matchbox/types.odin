@@ -191,11 +191,6 @@ Mesh_Vert_Data :: struct #align(16) {
 	normal_matrix: matrix[4, 4]f32,
 }
 
-// 16 bytes.
-Mesh_Frag_Data :: struct #align(16) {
-	tint: [4]f32,
-}
-
 /*
 	48 bytes: the camera's basis, ready to turn a screen position into a
 	direction.
@@ -211,6 +206,13 @@ Skybox_Vert_Data :: struct #align(16) {
 	forward: [4]f32,
 }
 
+// 16 bytes. The skybox's own fragment uniform -- a tint and nothing else, so
+// it does not share `Material_Frag_Data` (material.odin) with the meshes:
+// the sky is not a material and has no shading model to carry.
+Tint_Frag_Data :: struct #align(16) {
+	tint: [4]f32,
+}
+
 // 32 bytes. Shared by every post-processing shader, so one block serves all of
 // them and an effect that ignores a field simply ignores it.
 Post_Frag_Data :: struct #align(16) {
@@ -221,7 +223,11 @@ Post_Frag_Data :: struct #align(16) {
 }
 
 /*
-	One light, as the shader reads it. 64 bytes.
+	One light, as the shader reads it. 64 bytes. An element of the
+	`StructuredBuffer<Light>` `lighting_core.hlsli` declares (see
+	`light.odin`'s own `Lighting.light_buffer`) rather than a fixed-size
+	cbuffer array the way it was before this rework -- see `light.odin`'s top
+	comment for why an unbounded list replaced `MAX_LIGHTS`.
 
 	Everything is a [4]f32 and nothing is a [3]f32, which is the whole trick.
 	HLSL refuses to let a vector straddle a 16-byte boundary and silently pads
@@ -239,45 +245,6 @@ Light_Uniform :: struct #align(16) {
 	target:   [4]f32, // xyz direction (directional/spot), unused (point), w kind: 0/1/2
 	color:    [4]f32,
 	cone:     [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
-}
-
-/*
-	1248 bytes at MAX_LIGHTS = 16, measured with a scratch offset_of program
-	each time this has grown rather than assumed -- see init.odin's own size
-	assert and this struct's history: `matrix[4,4]f32` aligns to 32 bytes in
-	Odin, not 16, whatever a struct's own `#align` says, which has forced a
-	compiler-inserted gap here before that `lighting.hlsli`'s cbuffer needed
-	an explicit `_pad0` to reproduce.
-
-	No `_pad0` is needed at this size either: `Light_Uniform` is 64 bytes, a
-	multiple of 32, so `lights` as a whole is too for any `MAX_LIGHTS` --
-	growing or shrinking that constant shifts every field after it by a
-	multiple of 32 and changes nothing about whether `light_view_projection`
-	lands on a 32-byte boundary. That stops being free the moment
-	`Light_Uniform`'s own size stops being a multiple of 32 (adding a
-	`[3]f32` instead of a `[4]f32`, say) -- measure again then rather than
-	trust this comment.
-*/
-Lighting_Data :: struct #align(16) {
-	lights:               [MAX_LIGHTS]Light_Uniform,
-	ambient:              [4]f32, // rgb
-	view_pos:             [4]f32, // xyz, filled in from the active camera
-	fog_color:            [4]f32, // rgb
-	fog_range:            [4]f32, // x near, y far
-
-	// x how many lights are set, y 1 when fog is on, z the first shadow
-	// caster's light index or -1 for none, w the shadow depth-compare bias.
-	flags:                [4]f32,
-
-	// x the second shadow caster's light index or -1 for none -- see
-	// shadow.odin's MAX_SHADOW_CASTERS. y-w unused.
-	shadow_caster1:       [4]f32,
-
-	// Each caster's own view-projection, world space to its own clip space.
-	// light_view_projection is unused (and unread by the shader) whenever
-	// flags.z is -1; light_view_projection2 whenever shadow_caster1.x is -1.
-	light_view_projection:  matrix[4, 4]f32,
-	light_view_projection2: matrix[4, 4]f32,
 }
 
 // GPU handle bundle — shared by Sprite, Animation_Clip, and Font.

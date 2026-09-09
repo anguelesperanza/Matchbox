@@ -17,9 +17,19 @@ Shaders :: struct {
 	// 3D. The first vertex shader that is not `quad`, because it is the first
 	// thing that reads geometry instead of building it from a uniform block.
 	mesh:      ^sdl.GPUShader,
-	mesh_flat: ^sdl.GPUShader,
 	mesh_line: ^sdl.GPUShader,
-	mesh_textured: ^sdl.GPUShader,
+
+	/*
+		The one fragment shader every solid mesh pipeline shares now, textured
+		or not -- see mesh.frag.hlsl's own doc comment. Before this rework
+		there were two of these (`mesh_flat`/`mesh_textured`), differing only
+		in whether they sampled a base-colour texture, which forced
+		`lighting.hlsli`'s two shadow maps to sit at different register slots
+		in each and `draw_model_immediate` to compute which. Binding a 1x1
+		white default texture for an untextured part removes the need for a
+		second shader entirely.
+	*/
+	mesh_frag: ^sdl.GPUShader,
 
 	// mesh.vert with a skeleton in front of it. Shares every fragment shader
 	// the unskinned one uses -- only the vertex stage differs.
@@ -63,6 +73,7 @@ Pipelines :: struct {
 	// The odd one out, and the reason create_pipeline takes arguments now: it
 	// has its own vertex shader, a third vertex attribute, depth testing on,
 	// back faces culled, and a depth-stencil target the others do not have.
+	// Textured and untextured parts alike -- see `mesh_frag`'s own comment.
 	mesh:    ^sdl.GPUGraphicsPipeline,
 
 	// The same vertex shader and vertex layout as `mesh`, drawing line lists
@@ -70,15 +81,11 @@ Pipelines :: struct {
 	// and the ground grid.
 	line:    ^sdl.GPUGraphicsPipeline,
 
-	// The same again with a sampler, for a part that came out of a file with a
-	// base colour texture on it.
-	mesh_textured: ^sdl.GPUGraphicsPipeline,
-
-	// The two above again, for parts a skeleton deforms. Two rather than one for
-	// the same reason there are two unskinned ones: a part with a texture and a
-	// part without want different fragment shaders, and that is a pipeline.
-	mesh_skinned:          ^sdl.GPUGraphicsPipeline,
-	mesh_skinned_textured: ^sdl.GPUGraphicsPipeline,
+	// `mesh` again, for parts a skeleton deforms. One rather than the two
+	// this used to be (`mesh_skinned`/`mesh_skinned_textured`): both read
+	// `mesh_frag` now, so the only thing that ever distinguished them --
+	// whether a part carried a texture -- no longer picks a pipeline at all.
+	mesh_skinned: ^sdl.GPUGraphicsPipeline,
 
 	// Depth-only, biased, no colour target at all -- the shadow pass. Two for
 	// the same reason mesh/mesh_skinned are two: a skinned caster needs the
@@ -99,52 +106,29 @@ Pipelines :: struct {
 }
 
 /*
-	Everything the shadow pass owns, grouped the way the depth texture's own
-	fields on `Renderer` are not -- those predate this and are left alone,
-	but a second, sampled depth texture with its own size, format and
-	view-projection is enough state to earn its own struct rather than four
-	more loose fields.
-
-	`textures[n]` is never nil: `init` creates a 1x1 placeholder for each
-	slot immediately, so `mesh_flat`/`mesh_textured` -- which declare both
-	slots unconditionally, for every game -- always have something valid
-	bound, whether or not that game ever calls `enable_shadows` or ever has
-	more than one light marked `casts_shadow`. See shadow.odin.
-
-	Two of everything shadow-specific rather than one: `MAX_SHADOW_CASTERS`
-	lights can each cast a real shadow at once, each into its own map. One
-	`sampler`/`format`/`resolution` still serve both -- they are the shadow
-	system's own settings, not a per-light choice.
+	Everything lighting owns: the scene's own settings, the light list on both
+	sides of the upload, and the shadow system's state -- grouped under one
+	field on `Renderer` (`lighting` below) per CLAUDE.md's "group like data
+	into structs" rather than left as loose fields the way `Lighting_Data` and
+	`Shadow` used to be side by side. See `lighting_rework.md` section 4.
 */
-Shadow :: struct {
-	enabled:  bool,
-	settings: Shadow_Settings,
+Lighting :: struct {
+	settings: Lighting_Settings, // lighting.odin -- set by set_lighting
 
-	sampler:    ^sdl.GPUSampler,
-	format:     sdl.GPUTextureFormat,
-	resolution: i32,
+	// The light list, CPU side and GPU side. `light_data` is packed and
+	// ready to upload -- see `light_uniform` (light.odin) -- and
+	// `light_buffer`/`light_transfer` are its device-side twin, grown on
+	// demand and rewritten through the transfer buffer rather than
+	// recreated every call, the same shape `Animation_Pose.joint_buffer`
+	// already has for the joint palette. `light_capacity` is how many
+	// elements `light_buffer` currently holds, which is not `len(light_data)`
+	// once the list has shrunk from a previous, longer one.
+	light_data:     [dynamic]Light_Uniform,
+	light_buffer:   ^sdl.GPUBuffer,
+	light_transfer: ^sdl.GPUTransferBuffer,
+	light_capacity: int,
 
-	textures:         [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
-	view_projections: [MAX_SHADOW_CASTERS]matrix[4, 4]f32,
-	caster_indices:   [MAX_SHADOW_CASTERS]int, // which of Lighting_Data.lights each casts, or -1
-
-	// Which of the two the current shadow pass is filling -- read by
-	// draw_model_immediate to pick the matching view_projections entry.
-	active_slot: int,
-
-	// A game's `casts_shadow` on each `Light`, kept here rather than on
-	// `Light_Uniform` because the GPU has no use for it -- only
-	// `recompute_shadow_casters` (light.odin) ever reads this, to find which
-	// lights `caster_indices` should point at.
-	light_casts_shadow: [MAX_LIGHTS]bool,
-
-	// Whether begin_shadow_pass has already logged its "nothing to render"
-	// warning for the current stretch of no-caster/disabled frames, so a
-	// game that leaves the call in its loop with shadows off gets one line
-	// instead of one every frame. Only slot 0 ever warns -- an empty slot 1
-	// is the ordinary shape of a game with one shadow-casting light, not a
-	// misconfiguration.
-	warned: bool,
+	shadow: Shadow_State, // shadow.odin / shadow_standard.odin
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -169,6 +153,16 @@ Renderer :: struct {
 	// font atlas. The old backend allocated these out of a descriptor pool with
 	// room for 32, which put a ceiling of about two dozen sprites on a program.
 	sprite_sampler: ^sdl.GPUSampler,
+
+	/*
+		1x1 white, sampled wherever a mesh part has no base colour texture of
+		its own. This is what lets `mesh.frag.hlsl` be one shader for textured
+		and untextured parts alike -- see that file's own doc comment and
+		`lighting_rework.md` section 3.4. The same trick `init` already used
+		for the shadow maps' own placeholders, applied to the other side of
+		the same sampler slot.
+	*/
+	default_texture: ^sdl.GPUTexture,
 
 	// Linear, and wrapping across the seam where a panorama's longitude comes
 	// back round to itself. Clamped in v, so the poles do not bleed into each
@@ -214,20 +208,31 @@ Renderer :: struct {
 	// game is building. See render_target.odin.
 	target: ^Render_Target,
 
-	// Lights and fog, as the game last set them. Pushed to the GPU by
-	// begin_drawing_3d rather than when they are changed, so a game may set
-	// them anywhere -- including in the middle of building a frame. See
-	// light.odin.
-	lighting: Lighting_Data,
+	// Lighting settings, the light list and the shadow system -- see
+	// `Lighting`'s own doc comment. The scene half of this (`lighting.settings`,
+	// `lighting.light_data`) is set whenever a game calls `set_lighting` or
+	// `set_lights`; the per-frame half (the camera-derived `Scene_Frag_Data`)
+	// is worked out and pushed by `push_lighting`, called from
+	// `begin_drawing_3d` rather than from either setter, so a game may call
+	// them anywhere -- including before `begin_drawing`.
+	lighting: Lighting,
 
 	mode_3d:         bool, // true between begin_drawing_3d and end_drawing_3d
 	view_projection: matrix[4, 4]f32,
 	camera3d:        Camera3D,
 
-	// The shadow map's own state, and whether draw_model is currently filling
-	// it rather than drawing the scene it will be sampled by. See shadow.odin.
-	shadow:         Shadow,
+	// Whether draw_model is currently filling a shadow map rather than
+	// drawing the scene it will be sampled by. See shadow_standard.odin.
 	in_shadow_pass: bool,
+
+	// What draw_model_immediate has bound for the non-shadow-pass fragment
+	// shader beyond the per-part base texture (`bound_texture`/`bound_sampler`
+	// above): the two shadow maps and the light storage buffer, none of
+	// which change per part or per pipeline switch the way the base texture
+	// does, but which can change mid-pass if a game calls set_lighting or
+	// set_lights (growing the light buffer) between draw_model calls.
+	bound_shadow_maps:  [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
+	bound_light_buffer: ^sdl.GPUBuffer,
 
 	// draw_model calls made with casts_shadow = true before begin_drawing_3d
 	// has a pass of any kind open yet, held until it does. See draw_model's
@@ -258,6 +263,8 @@ bind_cache_reset :: proc() {
 	r.bound_sampler      = nil
 	r.bound_quad         = false
 	r.bound_joint_buffer = nil
+	r.bound_shadow_maps  = {}
+	r.bound_light_buffer = nil
 }
 
 // -----------------------------------------------------------------------

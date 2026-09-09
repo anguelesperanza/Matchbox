@@ -50,6 +50,17 @@ Shaders :: struct {
 	post: ^sdl.GPUShader,
 	psx:  ^sdl.GPUShader,
 	vhs:  ^sdl.GPUShader,
+
+	/*
+		The tonemap resolve -- exposure, one of `Tonemap`'s curves, then the
+		gamma encode every colour in this package has always used. Takes the
+		shared quad vertex shader, the same as the other post shaders above,
+		but is not one of them: `Post_Effect` is a game's own choice drawn
+		over a `Render_Target` it owns, and this runs unconditionally, once
+		per 3D pass, over the internal HDR target `Renderer.lighting.targets`
+		owns instead. See tonemap.odin.
+	*/
+	tonemap: ^sdl.GPUShader,
 }
 
 /*
@@ -103,6 +114,11 @@ Pipelines :: struct {
 	post: ^sdl.GPUGraphicsPipeline,
 	psx:  ^sdl.GPUGraphicsPipeline,
 	vhs:  ^sdl.GPUGraphicsPipeline,
+
+	// The tonemap resolve -- see Shaders.tonemap's own comment. Built against
+	// the swapchain's own format like every other 2D pipeline here: it writes
+	// into current_color_texture(), never into the HDR target itself.
+	tonemap: ^sdl.GPUGraphicsPipeline,
 }
 
 /*
@@ -129,6 +145,12 @@ Lighting :: struct {
 	light_capacity: int,
 
 	shadow: Shadow_State, // shadow.odin / shadow_standard.odin
+
+	// The HDR scene target the 3D pass actually draws into, and the tonemap
+	// resolve that turns it back into whatever begin_drawing_3d was called
+	// for. See tonemap.odin's own top comment for why this cannot simply be
+	// `Render_Target`'s own format.
+	targets: Lighting_Targets,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -207,6 +229,20 @@ Renderer :: struct {
 	// Where drawing is going: nil is the window, anything else is a texture the
 	// game is building. See render_target.odin.
 	target: ^Render_Target,
+
+	/*
+		The colour `clear_background` was last given, remembered rather than
+		written straight to whatever it is clearing. begin_drawing_3d reads
+		this to clear the internal HDR scene target (tonemap.odin) -- a
+		target that has never been drawn into this frame has nothing of its
+		own to load the way the old "load, do not clear" contract relied on,
+		see that procedure's own comment. Every example in this repo calls
+		clear_background immediately before its own begin_drawing_3d with
+		nothing 2D drawn in between (checked by hand across all of them for
+		this phase), so the background a game asked for is still what shows
+		through -- it is carried across the two calls explicitly instead.
+	*/
+	background_color: [4]f32,
 
 	// Lighting settings, the light list and the shadow system -- see
 	// `Lighting`'s own doc comment. The scene half of this (`lighting.settings`,
@@ -384,6 +420,9 @@ end_drawing :: proc() {
 clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 	r := &mbi.renderer
 	if !r.frame_active do return
+
+	// See Renderer.background_color's own comment for who reads this back.
+	r.background_color = color
 
 	if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)

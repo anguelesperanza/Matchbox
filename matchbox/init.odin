@@ -226,6 +226,20 @@ create_pipeline :: proc(
 	// agree with the pass it runs in or SDL3 rejects it outright.
 	depth_format: sdl.GPUTextureFormat = .INVALID,
 
+	/*
+		.INVALID means "the swapchain's own format", which is every 2D
+		pipeline, including the tonemap resolve itself -- it writes into
+		current_color_texture(), never into the HDR target it reads from.
+		The five pipelines that draw inside the 3D pass (mesh, mesh_skinned,
+		line, both skyboxes) pass mbi.renderer.lighting.targets.format
+		instead: SDL3 bakes a pipeline's colour format in at creation the
+		same way it does the depth format above, so a pipeline built against
+		the swapchain's format cannot be bound in the HDR pass and vice
+		versa. See tonemap.odin's own top comment for why that pass exists
+		at all.
+	*/
+	color_format: sdl.GPUTextureFormat = .INVALID,
+
 	// Zero for every pipeline except the shadow pair, which need a push away
 	// from the surface they are rasterizing before comparing it against
 	// itself from the light's own point of view -- see shadow.odin for why a
@@ -296,7 +310,7 @@ create_pipeline :: proc(
 
 	color_targets := [1]sdl.GPUColorTargetDescription{
 		{
-			format = sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
+			format = color_format if color_format != .INVALID else sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
 			blend_state = {
 				enable_blend            = true,
 				color_blend_op          = .ADD,
@@ -435,6 +449,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Light_Uniform)     == 64)
 	#assert(size_of(Scene_Frag_Data)   == 224)
 	#assert(size_of(Post_Frag_Data)    == 32)
+	#assert(size_of(Tonemap_Resolve_Frag_Data) == 16)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
 	// database along -- which is what lets a game ask for `.NORTH` rather than
@@ -553,6 +568,11 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.vhs = create_builtin_shader(
 		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
 
+	// The tonemap resolve -- one sampler (the HDR target) and one uniform
+	// block (exposure and which curve). See tonemap.odin.
+	mbi.renderer.shaders.tonemap = create_builtin_shader(
+		#load("shaders/tonemap.frag.spv"), #load("shaders/tonemap.frag.dxil"), .FRAGMENT, 1)
+
 	// Two uniform buffers -- the three matrices every mesh vertex shader
 	// takes, and the joint offset behind them -- plus one storage buffer: the
 	// joint palette itself, unbounded, where a uniform capped at 64 matrices
@@ -580,6 +600,12 @@ init :: proc(title: string, width: i32, height: i32) {
 	// that never draws 3D pays a function call for it and no memory.
 	mbi.renderer.depth_format = pick_depth_format()
 
+	// Asked for now, same reasoning: mesh/mesh_skinned/line/both skyboxes
+	// below all need it at creation, and the answer cannot change afterward.
+	// See tonemap.odin's own top comment for why these five need a format of
+	// their own at all.
+	mbi.renderer.lighting.targets.format = pick_hdr_format()
+
 	mbi.renderer.pipelines.sprite  = create_pipeline(mbi.renderer.shaders.sprite)
 	mbi.renderer.pipelines.rect    = create_pipeline(mbi.renderer.shaders.rect)
 	mbi.renderer.pipelines.outline = create_pipeline(mbi.renderer.shaders.outline)
@@ -588,22 +614,25 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	mbi.renderer.pipelines.mesh = create_pipeline(
 		mbi.renderer.shaders.mesh_frag,
-		vertex = mbi.renderer.shaders.mesh,
-		layout = .MESH,
-		depth  = true,
-		cull   = .BACK,
+		vertex       = mbi.renderer.shaders.mesh,
+		layout       = .MESH,
+		depth        = true,
+		cull         = .BACK,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
-	mbi.renderer.pipelines.post = create_pipeline(mbi.renderer.shaders.post)
-	mbi.renderer.pipelines.psx  = create_pipeline(mbi.renderer.shaders.psx)
-	mbi.renderer.pipelines.vhs  = create_pipeline(mbi.renderer.shaders.vhs)
+	mbi.renderer.pipelines.post    = create_pipeline(mbi.renderer.shaders.post)
+	mbi.renderer.pipelines.psx     = create_pipeline(mbi.renderer.shaders.psx)
+	mbi.renderer.pipelines.vhs     = create_pipeline(mbi.renderer.shaders.vhs)
+	mbi.renderer.pipelines.tonemap = create_pipeline(mbi.renderer.shaders.tonemap)
 
 	mbi.renderer.pipelines.mesh_skinned = create_pipeline(
 		mbi.renderer.shaders.mesh_frag,
-		vertex = mbi.renderer.shaders.mesh_skinned,
-		layout = .SKINNED,
-		depth  = true,
-		cull   = .BACK,
+		vertex       = mbi.renderer.shaders.mesh_skinned,
+		layout       = .SKINNED,
+		depth        = true,
+		cull         = .BACK,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	/*
@@ -652,6 +681,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth        = false,
 		cull         = .NONE,
 		depth_ignore = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	mbi.renderer.pipelines.skybox_cubemap = create_pipeline(
@@ -661,17 +691,19 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth        = false,
 		cull         = .NONE,
 		depth_ignore = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	// Lines are never culled -- an edge has no facing -- and they are biased
 	// towards the camera. See `lines` in create_pipeline for why.
 	mbi.renderer.pipelines.line = create_pipeline(
 		mbi.renderer.shaders.mesh_line,
-		vertex = mbi.renderer.shaders.mesh,
-		layout = .MESH,
-		depth  = true,
-		cull   = .NONE,
-		lines  = true,
+		vertex       = mbi.renderer.shaders.mesh,
+		layout       = .MESH,
+		depth        = true,
+		cull         = .NONE,
+		lines        = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	// Every sprite wants the same filtering, and the font wants smoothing, so
@@ -865,6 +897,7 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
+	if mbi.renderer.pipelines.tonemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.tonemap)
 
 	if mbi.renderer.shaders.quad    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.quad)
 	if mbi.renderer.shaders.sprite  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.sprite)
@@ -883,6 +916,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.post != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.post)
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
+	if mbi.renderer.shaders.tonemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.tonemap)
 
 	// The generated shapes, if anything ever asked for one.
 	destroy_shapes3d()
@@ -891,6 +925,13 @@ cleanup :: proc() {
 	if mbi.renderer.depth_texture != nil {
 		sdl.ReleaseGPUTexture(device, mbi.renderer.depth_texture)
 		mbi.renderer.depth_texture = nil
+	}
+
+	// The HDR scene target -- same "only ever made once 3D was asked for" as
+	// the depth texture just above. See tonemap.odin.
+	if mbi.renderer.lighting.targets.color != nil {
+		sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.targets.color)
+		mbi.renderer.lighting.targets.color = nil
 	}
 
 	// Only ever made if a skinned model was drawn with no animator.

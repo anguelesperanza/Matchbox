@@ -222,6 +222,16 @@ Post_Frag_Data :: struct #align(16) {
 	_pad:       [3]f32,
 }
 
+// 16 bytes. The tonemap resolve's own fragment uniform -- exposure and which
+// curve to run, nothing else. Does not share Post_Frag_Data: this is not a
+// Post_Effect a game chooses, it is the always-on step that turns the HDR
+// scene target back into a displayable one, see tonemap.odin.
+Tonemap_Resolve_Frag_Data :: struct #align(16) {
+	exposure: f32,
+	tonemap:  f32, // Tonemap's ordinal -- see shading_model_index's own comment (shading.odin) for why a float and why the ordinal rather than a second switch
+	_pad:     [2]f32,
+}
+
 /*
 	One light, as the shader reads it. 64 bytes. An element of the
 	`StructuredBuffer<Light>` `lighting_core.hlsli` declares (see

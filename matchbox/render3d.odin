@@ -22,6 +22,16 @@ package matchbox
 
 	The depth buffer is created the first time a game asks for 3D, so a 2D-only
 	program never allocates one.
+
+	**The colour target is not the game's own destination, since P1.** The
+	pass below writes into an internal HDR scene target
+	(`Renderer.lighting.targets`, `tonemap.odin`) rather than whatever
+	`current_color_texture()` names; `end_drawing_3d` resolves that target
+	through the tonemap curve and the gamma encode and writes the result,
+	opaque, over the window or a game's own `Render_Target` -- see
+	`tonemap.odin`'s own top comment for why the format has to be internal at
+	all, and `lighting_rework.md` section 3.7 for the consequences that
+	forced it.
 */
 
 import "core:log"
@@ -136,10 +146,31 @@ pick_shadow_format :: proc() -> sdl.GPUTextureFormat {
 	Opens the 3D pass and fixes the camera for everything drawn until
 	`end_drawing_3d`.
 
-	The colour target is loaded rather than cleared, so whatever
-	`clear_background` put there is still underneath. Depth is cleared to 1 --
-	the far plane -- every time, because last frame's depth is meaningless and
-	keeping it would make this frame's geometry lose to it.
+	**The colour target is cleared, not loaded, since P1.** Before the HDR
+	resolve existed, this loaded whatever `clear_background` had just painted
+	onto the real destination, so that background showed through underneath
+	the 3D geometry. The pass now opens against the internal HDR scene target
+	instead (`ensure_hdr_texture`, tonemap.odin), and a target that has never
+	been drawn into this frame has nothing meaningful to load -- so it is
+	cleared instead, to the last colour `clear_background` was given
+	(`Renderer.background_color`), converted to linear
+	(`linearize_background_color`) since everything else reaching this target
+	is linear light too. `end_drawing_3d` resolves the finished target back
+	onto the real destination afterward.
+
+	This changes behaviour for exactly one pattern: a game that draws 2D
+	*before* `begin_drawing_3d` and relies on it showing through the 3D pass
+	the old load contract preserved. Checked by hand across every example in
+	this repository (`cube`, `skybox`, `third-person`, `model`, `primitives`,
+	`first-person`, `animation-layers`, `post`, `lighting` -- the only ones
+	that call `begin_drawing_3d` at all): every one of them calls
+	`clear_background` immediately beforehand with nothing 2D drawn in
+	between, so none relied on it. A game that does draw 2D there today would
+	see that content disappear under the 3D pass rather than show through it.
+
+	Depth is cleared to 1 -- the far plane -- every time, because last frame's
+	depth is meaningless and keeping it would make this frame's geometry lose
+	to it.
 
 	Draw 2D after `end_drawing_3d`, not inside. A sprite drawn between these two
 	would be handed to a pipeline that does not match the pass it is in, which
@@ -173,11 +204,15 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 
 	depth_texture := current_depth_texture()
 	if depth_texture == nil do return
+	if !ensure_hdr_texture() do return
+
+	linear_background := linearize_background_color(r.background_color)
 
 	color := sdl.GPUColorTargetInfo{
-		texture  = current_color_texture(),
-		load_op  = .LOAD,
-		store_op = .STORE,
+		texture     = r.lighting.targets.color,
+		clear_color = {linear_background.x, linear_background.y, linear_background.z, linear_background.w},
+		load_op     = .CLEAR,
+		store_op    = .STORE,
 	}
 
 	depth := sdl.GPUDepthStencilTargetInfo{
@@ -205,7 +240,17 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	push_lighting(camera)
 }
 
-// Closes the 3D pass. Anything drawn after this is 2D again, on top.
+/*
+	Closes the 3D pass and resolves it. Anything drawn after this is 2D
+	again, on top.
+
+	The resolve (`resolve_tonemap`, tonemap.odin) runs here rather than
+	inside `begin_drawing_3d` of the *next* frame's pass, because the HDR
+	target's content is only complete once every draw between the matching
+	`begin_drawing_3d` and this call has happened -- tone mapping a
+	half-drawn scene would tonemap whatever was there minus whatever came
+	after this call had already run.
+*/
 end_drawing_3d :: proc() {
 	r := &mbi.renderer
 	if !r.mode_3d do return
@@ -230,7 +275,13 @@ end_drawing_3d :: proc() {
 		r.pass = nil
 	}
 
+	// Before the resolve, not after: draw_quad (inside resolve_tonemap)
+	// asserts that 2D drawing never happens between begin_drawing_3d and
+	// this call, and the resolve itself is 2D drawing -- a full-screen quad
+	// through the ordinary bind_quad_state/push_quad path, not a 3D draw.
 	r.mode_3d = false
+
+	resolve_tonemap()
 }
 
 // Whether a 3D pass is open. `draw_model` checks it so that a model drawn

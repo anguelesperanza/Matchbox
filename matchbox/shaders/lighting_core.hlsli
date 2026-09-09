@@ -124,14 +124,33 @@ float shadow_visibility(int light_index, float3 world)
     says "I am never lit"; a scene says "nothing is lit right now" without
     every material needing to agree on why.
 
-    Gamma is applied here, per shading model, rather than inside each
-    `brdf_eval_*` -- `BLINN_PHONG`'s output wants `pow(1/2.2)` because
-    PsxGame's own did, `UNLIT`'s does not, because its output is already the
-    colour the material asked for. This is P0's one carried-over wart: P1
-    moves the whole 3D pass to an HDR target and this pow call leaves every
-    BRDF for a proper tonemap resolve -- see `lighting_rework.md` section 3.7
-    for why it has to leave before a second shading model can be added
-    without deciding this question again.
+    **No gamma and no tone mapping here, since P1.** Before this phase,
+    `BLINN_PHONG`'s branch applied `pow(color, 1.0 / 2.2)` in place, inline,
+    before fog -- a transfer function baked into one shading model's own
+    case of this switch, which is exactly what `brdf/contract.hlsli`'s doc
+    comment on the BRDF contract warns against: the next shading model would
+    have had to decide the same question again, in its own branch, and there
+    would be two answers to "what encode does this pass use" alive at once.
+    This function now returns pure linear light -- fog mixed in below, still
+    nothing else -- and the whole 3D pass writes that into an `RGBA16_FLOAT`
+    scene target. The tonemap resolve (`tonemap.odin`,
+    `shaders/tonemap.frag.hlsl`) is the one place exposure, a tonemap curve
+    and the gamma encode run, once, after every shading model and every
+    fragment in the pass has already been decided rather than per-branch
+    here.
+
+    One consequence worth stating plainly: `UNLIT` and the skybox/line
+    shaders (which never call this function at all) used to write their
+    output straight through with no encode of any kind, so a material's
+    `base_color` or a skybox's `tint` was the literal pixel value. Now that
+    the whole HDR target is resolved uniformly, those colours are tonemapped
+    and gamma-encoded exactly like every lit surface's output is -- a value
+    like `{0.5, 0.5, 0.5}` no longer lands on screen as a 0.5 grey pixel, the
+    same way it no longer would for a lit one. There is no way to opt an
+    individual draw out of the resolve without reintroducing the per-branch
+    encode this phase removes; a material that wants to look identical to
+    before this phase needs a different `base_color`, not a different code
+    path.
 */
 float4 shade_surface(Surface surface)
 {
@@ -142,7 +161,6 @@ float4 shade_surface(Surface surface)
     {
     case SHADING_BLINN_PHONG:
         color = brdf_eval_blinn_phong(surface);
-        color = pow(max(color, 0.0), 1.0 / 2.2);
         break;
     case SHADING_UNLIT:
     default:
@@ -150,6 +168,20 @@ float4 shade_surface(Surface surface)
         break;
     }
 
+    /*
+        Fog moves into linear space here purely by virtue of where the
+        encode used to be relative to this line: before P1, this mix ran
+        *after* SHADING_BLINN_PHONG's own pow(1/2.2), so `fog_color` was
+        being blended against an already gamma-encoded value -- it meant
+        "the colour you picked", literally, because nothing further ever
+        touched it. The encode is gone from this function entirely now, so
+        the identical mix, unchanged, runs in linear light before the
+        tonemap resolve -- `fog_color` is no longer the final pixel value,
+        it is one more linear quantity the resolve's curve and gamma step
+        will still transform afterward, the same as every light's own
+        colour already was. See `Fog`'s own doc comment (lighting.odin) for
+        what a game should expect to look different.
+    */
     if (fog_range.z > 0.5)
     {
         float distance = length(view_pos.xyz - surface.position);

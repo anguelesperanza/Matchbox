@@ -3,7 +3,13 @@
     -------------
     Every shading model in this directory defines one function,
     `brdf_eval_<name>(Surface) -> float3`, returning a linear colour before
-    fog -- no gamma, no tone mapping (that machinery is P1). `shade_surface`
+    fog -- no gamma, no tone mapping, no exposure multiply. That machinery is
+    the tonemap resolve (`tonemap.odin`, `shaders/tonemap.frag.hlsl`), which
+    runs once, after `shade_surface` has mixed in fog, on the whole HDR scene
+    target -- not per shading model, and not in this directory. A BRDF file
+    that grows a transfer function, an exposure multiply or a tone-mapping
+    curve of its own has broken the seam P1 exists to draw: check for exactly
+    that before trusting a new model here. `shade_surface`
     (`lighting_core.hlsli`) is the one place that switches on
     `Surface.shading_model` to decide which one to call; nothing else in
     shared code calls one directly, and no `brdf_eval_*` may assume which

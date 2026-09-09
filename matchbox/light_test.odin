@@ -17,7 +17,7 @@ import "core:testing"
 @(test)
 test_spot_light_uniform_packing :: proc(t: ^testing.T) {
 	light := create_spot_light({1, 2, 3}, {0, -1, 0}, WHITE, 15, 25)
-	u := light_uniform(light)
+	u := light_uniform(light, SHADOW_DEFAULTS.bias)
 
 	testing.expect(t, u.target.w == 2, "a spotlight must pack as kind 2")
 	testing.expect(t, u.cone.x == 25, "cone.x should be the outer angle")
@@ -29,10 +29,10 @@ test_spot_light_uniform_packing :: proc(t: ^testing.T) {
 
 @(test)
 test_directional_and_point_still_pack_as_before :: proc(t: ^testing.T) {
-	d := light_uniform(create_directional_light({1, 0, 0}))
+	d := light_uniform(create_directional_light({1, 0, 0}), SHADOW_DEFAULTS.bias)
 	testing.expect(t, d.target.w == 0, "a directional light must still pack as kind 0")
 
-	p := light_uniform(create_point_light({0, 0, 0}))
+	p := light_uniform(create_point_light({0, 0, 0}), SHADOW_DEFAULTS.bias)
 	testing.expect(t, p.target.w == 1, "a point light must still pack as kind 1")
 }
 

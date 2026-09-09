@@ -38,25 +38,36 @@
 #include "shadow/contract.hlsli"
 #include "brdf/contract.hlsli"
 
-// One light, as the shader reads it -- the same shape as before this
-// rework, just an element of a StructuredBuffer now rather than a fixed-size
-// array inside this same cbuffer. See light.odin's own top comment for why.
+/*
+    One light, as the shader reads it -- the same shape as before this
+    rework, just an element of a StructuredBuffer now rather than a fixed-size
+    array inside this same cbuffer. See light.odin's own top comment for why.
+
+    `shadow_bias` joined the other four in P3 -- this light's own resolved
+    `Shadow_Bias` (shadow.odin), already defaulted from the scene's own
+    `Shadow_Settings.bias` at pack time if this light left either field zero
+    (see `light_uniform`, light.odin, and `Light_Uniform`'s own doc comment
+    in types.odin). Every technique's own `shadow_visibility_<name>` reads
+    `lights[light_index].shadow_bias` directly rather than a scene-wide
+    scalar the way this package's single `bias` field used to work.
+*/
 struct Light
 {
-    float4 position; // xyz where it is,                          w 1 when enabled
-    float4 target;   // xyz direction (directional/spot), unused (point), w kind: 0/1/2
+    float4 position;    // xyz where it is,                          w 1 when enabled
+    float4 target;      // xyz direction (directional/spot), unused (point), w kind: 0/1/2
     float4 color;
-    float4 cone;     // x outer half-angle degrees, y inner half-angle degrees -- spot only
+    float4 cone;        // x outer half-angle degrees, y inner half-angle degrees -- spot only
+    float4 shadow_bias; // x depth bias, y normal-offset bias -- see Shadow_Bias.  z-w unused
 };
 
-// Unbounded -- see light.odin's top comment on why MAX_LIGHTS retired. t6,
-// space2: sampled textures at t0-t5 (whichever the including shader
-// declares -- mesh.frag.hlsl's own six, as of the P2 loader job that added
-// the last three of them) come first in SDL_GPU's fragment-stage numbering,
-// storage buffers continue the same t[n] sequence after them. Any shader
-// that changes its own sampler count has to renumber this to match --
+// Unbounded -- see light.odin's top comment on why MAX_LIGHTS retired. t20,
+// space2: sampled textures at t0-t19 (whichever the including shader
+// declares -- mesh.frag.hlsl's own twenty, as of P3's cascade and cube
+// sampler arrays) come first in SDL_GPU's fragment-stage numbering, storage
+// buffers continue the same t[n] sequence after them. Any shader that
+// changes its own sampler count has to renumber this to match --
 // mesh.frag.hlsl's own top comment is the place that number is decided.
-StructuredBuffer<Light> lights : register(t6, space2);
+StructuredBuffer<Light> lights : register(t20, space2);
 
 cbuffer Scene : register(b1, space3)
 {
@@ -68,8 +79,11 @@ cbuffer Scene : register(b1, space3)
     float4 fog_range;
 
     // x how many lights are set, y 1 when Lighting_Settings.enabled is true,
-    // z the first shadow caster's uploaded light index or -1 for none, w the
-    // shadow depth-compare bias.
+    // z the first shadow caster's uploaded light index or -1 for none, w
+    // PCSS's own light_size pre-converted to the shadow map's UV units --
+    // see shadow/pcss.hlsli's own top comment. Unread by every other
+    // technique; the old scene-wide depth bias that used to live here moved
+    // to each light's own shadow_bias (Light, above) in P3.
     float4 flags;
 
     // x the second shadow caster's uploaded light index or -1 for none -- two
@@ -86,28 +100,42 @@ cbuffer Scene : register(b1, space3)
 };
 
 #include "shadow/pcf.hlsli"
+#include "shadow/pcss.hlsli"
+#include "shadow/cascaded.hlsli"
+#include "shadow/cube.hlsli"
 
 /*
     How much of one caster's light reaches `world`, switching on
-    `shadow_caster1.y` (`Shadow_Settings.technique`, set by `set_lighting`).
-    One technique in P0 -- see `shadow/contract.hlsli`'s own doc comment for
-    what adding a second touches; the `default` case is `PCF` rather than an
-    error so a technique value this shader does not yet know about degrades
-    to the one it does, the same silent-degrade shape an unsupported
-    combination gets elsewhere in this package.
+    `shadow_caster1.y` (`Shadow_Settings.technique`, set by `set_lighting`)
+    for a directional or spot caster -- except a point-light caster, checked
+    first and unconditionally, since it was never one of this switch's
+    choices in the first place. See `Shadow_Technique`'s own doc comment
+    (shadow.odin) for why `CUBE` is not a fourth case here, and
+    `shadow/contract.hlsli`'s own doc comment for what adding a genuinely new
+    directional/spot technique touches. The `default` case is `PCF` rather
+    than an error so a technique value this shader does not yet know about
+    degrades to the one it does, the same silent-degrade shape an
+    unsupported combination gets elsewhere in this package.
 
     Declared before `sample_light` below: that is the only caller left, since
     P2b moved the shadow lookup out of every BRDF's own light loop and into
     shared code -- see `brdf/contract.hlsli`'s own doc comment for why no
     `brdf_light_*`/`brdf_resolve_*` may call this directly any more.
 */
-float shadow_visibility(int light_index, float3 world)
+float shadow_visibility(int light_index, float3 world, float3 normal)
 {
+    if (light_index == int(cube_caster.x))
+        return shadow_visibility_cube(light_index, world, normal);
+
     switch (int(shadow_caster1.y))
     {
+        case SHADOW_TECHNIQUE_PCSS:
+            return shadow_visibility_pcss(light_index, world, normal);
+        case SHADOW_TECHNIQUE_CASCADED:
+            return shadow_visibility_cascaded(light_index, world, normal);
         case SHADOW_TECHNIQUE_PCF:
         default:
-            return shadow_visibility_pcf(light_index, world);
+            return shadow_visibility_pcf(light_index, world, normal);
     }
 }
 
@@ -176,7 +204,7 @@ Light_Sample sample_light(uint i, Surface surface)
     // shadow_visibility_pcf's own doc comment for why a light that is
     // neither still comes back 1 (unshadowed) rather than needing a special
     // case here.
-    float shadow = shadow_visibility(int(i), surface.position);
+    float shadow = shadow_visibility(int(i), surface.position, surface.normal);
 
     result.n_dot_l  = max(dot(surface.normal, result.direction), 0.0);
     result.radiance = lights[i].color.rgb * attenuation * shadow;

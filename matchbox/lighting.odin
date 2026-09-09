@@ -311,6 +311,53 @@ Scene_Frag_Data :: struct #align(16) {
 }
 
 /*
+	544 bytes -- `CASCADED`'s own per-cascade data, pushed alongside `Scene`
+	rather than folded into it: `Scene_Frag_Data` is 224 bytes and shared by
+	every technique, and most of them (`PCF`, `PCSS`, `CUBE`) never read a
+	single byte of this. Splitting it out means a scene running `PCF` still
+	pushes the same 224 bytes it always has, not 768.
+
+	`view_projection` is `[MAX_SHADOW_CASTERS][MAX_CASCADES]matrix[4,4]f32`,
+	caster-major and flattened -- HLSL's own array-of-matrices inside a cbuffer
+	reads the same flattening, see `shaders/lighting_core.hlsli`'s own comment
+	on `Cascade_Data`. Declared first, at offset 0, so its own 32-byte
+	alignment (the same requirement `Scene_Frag_Data`'s own two matrices
+	already have to satisfy, see that struct's doc comment) opens no gap
+	`init`'s size assert would otherwise have to account for -- `splits` and
+	`count` come after it rather than before for exactly that reason, not
+	because of any relationship between the three.
+*/
+Cascade_Frag_Data :: struct #align(16) {
+	view_projection: [MAX_SHADOW_CASTERS * MAX_CASCADES]matrix[4, 4]f32,
+
+	// View-space depth of each cascade's far edge, shared by both caster
+	// slots since both are directional lights sharing the one camera
+	// frustum. Unused entries (past `count`) are left at whatever
+	// shadow_cascaded.odin last computed and are never read past `count`.
+	splits: [MAX_CASCADES]f32,
+
+	// x how many cascades are actually configured (<= MAX_CASCADES), y-w unused.
+	count: [4]f32,
+}
+
+/*
+	400 bytes -- `CUBE`'s own per-face data, split out from `Scene` for the
+	same reason `Cascade_Frag_Data` is: most techniques never read it.
+
+	`view_projection` is the one caster's own six faces, in the same ±X ±Y ±Z
+	order `shadow_cube.odin` builds and renders them in -- `shadow_visibility_
+	cube` (shaders/shadow/cube.hlsli) has to pick the same face index this
+	package picked when it rendered into it, or it will sample the wrong
+	depth entirely rather than merely the wrong bias.
+*/
+Cube_Frag_Data :: struct #align(16) {
+	view_projection: [6]matrix[4, 4]f32,
+
+	// x the uploaded point light index this caster is, or -1 -- y-w unused.
+	caster: [4]f32,
+}
+
+/*
 	Hands the scene block to the GPU, with the camera filled in. Called by
 	`begin_drawing_3d` rather than by `set_lighting`/`set_lights`, for two
 	reasons: the view position is the pass's business and not the game's, and
@@ -318,7 +365,11 @@ Scene_Frag_Data :: struct #align(16) {
 	game may therefore set lights or lighting settings whenever it likes,
 	including before `begin_drawing`.
 
-	Fragment slot 1. Slot 0 is the per-part material (material.odin).
+	Fragment slot 1 is `Scene`, slot 2 `Cascade_Data`, slot 3 `Cube_Data`.
+	Slot 0 is the per-part material (material.odin). The last two are pushed
+	on every draw regardless of `settings.technique`, the same "always
+	something valid bound, whether or not this game uses it" shape the shadow
+	map placeholders already have -- see `Shadow_State`'s own doc comment.
 */
 @(private)
 push_lighting :: proc(camera: Camera3D) {
@@ -338,12 +389,22 @@ push_lighting :: proc(camera: Camera3D) {
 			shadow maps are 1x1 placeholders, never rendered into, until
 			`set_lighting` builds real ones, and the shader must never be told
 			to trust them.
+
+			`flags.w`, the old single depth bias, is retired to a new job --
+			see Light_Uniform's own doc comment (types.odin) for where a
+			light's resolved bias moved to instead. In its place: PCSS's own
+			`light_size` (world units), pre-converted here into the ortho
+			shadow map's UV units, since `shaders/shadow/pcss.hlsli` has no
+			other way to learn `extent` -- see that file's own top comment.
+			The conversion is exact only for PCF/PCSS's own single-extent
+			map; harmless when a different technique is running, since
+			nothing but `shadow_visibility_pcss` ever reads it.
 		*/
 		flags = {
 			f32(len(l.light_data)),
 			1 if l.settings.enabled else 0,
 			f32(sh.caster_indices[0]) if sh.settings.enabled else -1,
-			sh.settings.bias,
+			pcss_uv_radius(l.settings.shadows.light_size, l.settings.shadows.extent),
 		},
 		shadow_caster1 = {
 			f32(sh.caster_indices[1]) if sh.settings.enabled else -1,
@@ -356,4 +417,20 @@ push_lighting :: proc(camera: Camera3D) {
 	}
 
 	sdl.PushGPUFragmentUniformData(r.cmd, 1, &data, size_of(data))
+
+	cascade_data: Cascade_Frag_Data
+	for caster in 0 ..< MAX_SHADOW_CASTERS {
+		for cascade in 0 ..< MAX_CASCADES {
+			cascade_data.view_projection[caster * MAX_CASCADES + cascade] = sh.cascade_view_projections[caster][cascade]
+		}
+	}
+	cascade_data.splits = sh.cascade_splits
+	cascade_data.count  = {f32(clamp(sh.settings.cascade_count, 1, MAX_CASCADES)), 0, 0, 0}
+	sdl.PushGPUFragmentUniformData(r.cmd, 2, &cascade_data, size_of(cascade_data))
+
+	cube_data := Cube_Frag_Data{
+		view_projection = sh.cube_view_projections[0],
+		caster          = {f32(sh.cube_caster_index[0]) if sh.settings.enabled else -1, 0, 0, 0},
+	}
+	sdl.PushGPUFragmentUniformData(r.cmd, 3, &cube_data, size_of(cube_data))
 }

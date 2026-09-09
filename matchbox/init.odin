@@ -446,8 +446,10 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Mesh_Vert_Data)    == 192)
 	#assert(size_of(Tint_Frag_Data)    == 16)
 	#assert(size_of(Material_Frag_Data) == 112)
-	#assert(size_of(Light_Uniform)     == 64)
+	#assert(size_of(Light_Uniform)     == 80)
 	#assert(size_of(Scene_Frag_Data)   == 224)
+	#assert(size_of(Cascade_Frag_Data) == 544)
+	#assert(size_of(Cube_Frag_Data)    == 400)
 	#assert(size_of(Post_Frag_Data)    == 32)
 	#assert(size_of(Tonemap_Resolve_Frag_Data) == 16)
 
@@ -547,18 +549,23 @@ init :: proc(title: string, width: i32, height: i32) {
 		#load("shaders/mesh.vert.spv"), #load("shaders/mesh.vert.dxil"), .VERTEX, 0)
 	/*
 		One fragment shader for every solid mesh part, textured or not -- see
-		mesh.frag.hlsl's own doc comment and Shaders.mesh_frag's. Two uniform
-		buffers: slot 0 is the per-part material (material.odin), slot 1 the
-		scene (lighting.odin), pushed once for a whole pass. Six samplers --
-		base colour, metallic-roughness, occlusion and emissive, then the two
-		shadow maps, which is what mesh.frag.hlsl declares at t0-t5 -- and one
-		storage buffer, the light list (light.odin) at t6, which is what
-		replaced the fixed MAX_LIGHTS cbuffer array this rework retired. See
-		lighting_core.hlsli's own comment on `lights` for why the storage
-		buffer's register number has to track the sampler count like this.
+		mesh.frag.hlsl's own doc comment and Shaders.mesh_frag's. Four uniform
+		buffers: slot 0 the per-part material (material.odin), slot 1 the
+		scene (lighting.odin), slot 2 CASCADED's own Cascade_Data, slot 3
+		CUBE's own Cube_Data -- the last two pushed every pass regardless of
+		which technique is running, see Cascade_Frag_Data/Cube_Frag_Data's
+		own doc comments (lighting.odin) for why they are split out of Scene
+		rather than folded into it. Twenty samplers -- base colour,
+		metallic-roughness, occlusion and emissive, PCF/PCSS's two maps,
+		CASCADED's eight and CUBE's six, which is what mesh.frag.hlsl declares
+		at t0-t19 -- and one storage buffer, the light list (light.odin) at
+		t20, which is what replaced the fixed MAX_LIGHTS cbuffer array this
+		rework retired. See lighting_core.hlsli's own comment on `lights` for
+		why the storage buffer's register number has to track the sampler
+		count like this.
 	*/
 	mbi.renderer.shaders.mesh_frag = create_builtin_shader(
-		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, 6, 2, 1)
+		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, 20, 4, 1)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -784,8 +791,52 @@ init :: proc(title: string, width: i32, height: i32) {
 		shadow_placeholders_ok &= mbi.renderer.lighting.shadow.textures[slot] != nil
 	}
 
-	mbi.renderer.lighting.shadow.resolution = 1
-	mbi.renderer.lighting.shadow.caster_indices = {-1, -1} // Odin's zero value is 0, a real slot -- -1 has to be said
+	/*
+		The same 1x1 placeholder shape, for CASCADED's and CUBE's own map
+		groups -- `mesh.frag.hlsl` declares `cascade_maps[8]`/`cube_maps[6]`
+		unconditionally (see that file's own comment), so both need something
+		valid bound from the moment a device exists, whether or not this
+		game's scene ever selects CASCADED or ever casts a cube shadow.
+		Real maps replace these the same way `apply_cascade_shadow_textures`/
+		`apply_cube_shadow_textures` (shadow_cascaded.odin, shadow_cube.odin)
+		already replace the two just above, the first time their own
+		technique is actually turned on.
+	*/
+	for caster in 0 ..< MAX_SHADOW_CASTERS {
+		for cascade in 0 ..< MAX_CASCADES {
+			mbi.renderer.lighting.shadow.cascade_textures[caster][cascade] = sdl.CreateGPUTexture(mbi.renderer.device, {
+				type                 = .D2,
+				format               = mbi.renderer.lighting.shadow.format,
+				usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+				width                = 1,
+				height               = 1,
+				layer_count_or_depth = 1,
+				num_levels           = 1,
+			})
+			shadow_placeholders_ok &= mbi.renderer.lighting.shadow.cascade_textures[caster][cascade] != nil
+		}
+	}
+
+	for caster in 0 ..< MAX_POINT_SHADOW_CASTERS {
+		for face in 0 ..< 6 {
+			mbi.renderer.lighting.shadow.cube_textures[caster][face] = sdl.CreateGPUTexture(mbi.renderer.device, {
+				type                 = .D2,
+				format               = mbi.renderer.lighting.shadow.format,
+				usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+				width                = 1,
+				height               = 1,
+				layer_count_or_depth = 1,
+				num_levels           = 1,
+			})
+			shadow_placeholders_ok &= mbi.renderer.lighting.shadow.cube_textures[caster][face] != nil
+		}
+	}
+
+	mbi.renderer.lighting.shadow.resolution          = 1
+	mbi.renderer.lighting.shadow.cascade_resolution  = 1
+	mbi.renderer.lighting.shadow.cube_resolution     = 1
+	mbi.renderer.lighting.shadow.caster_indices      = {-1, -1} // Odin's zero value is 0, a real slot -- -1 has to be said
+	mbi.renderer.lighting.shadow.cube_caster_index   = {-1}
 
 	/*
 		1x1 white, sampled wherever a mesh part has no base colour, metallic-
@@ -897,6 +948,16 @@ cleanup :: proc() {
 	if mbi.renderer.lighting.shadow.sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.lighting.shadow.sampler)
 	for texture in mbi.renderer.lighting.shadow.textures {
 		if texture != nil do sdl.ReleaseGPUTexture(device, texture)
+	}
+	for row in mbi.renderer.lighting.shadow.cascade_textures {
+		for texture in row {
+			if texture != nil do sdl.ReleaseGPUTexture(device, texture)
+		}
+	}
+	for row in mbi.renderer.lighting.shadow.cube_textures {
+		for texture in row {
+			if texture != nil do sdl.ReleaseGPUTexture(device, texture)
+		}
 	}
 	if mbi.renderer.default_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_texture)
 

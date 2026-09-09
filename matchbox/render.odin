@@ -273,12 +273,17 @@ Renderer :: struct {
 	bound_material_textures: [3]^sdl.GPUTexture,
 
 	// What draw_model_immediate has bound for the non-shadow-pass fragment
-	// shader beyond the per-part textures above: the two shadow maps and the
-	// light storage buffer, none of which change per part or per pipeline
-	// switch the way the per-part textures do, but which can change mid-pass
-	// if a game calls set_lighting or set_lights (growing the light buffer)
-	// between draw_model calls.
+	// shader beyond the per-part textures above: the shadow maps for every
+	// technique group (PCF/PCSS's two, CASCADED's up to eight, CUBE's six --
+	// all three always bound regardless of which technique is actually
+	// running, see Shadow_State's own doc comment) and the light storage
+	// buffer. None of these change per part or per pipeline switch the way
+	// the per-part textures do, but they can change mid-pass if a game calls
+	// set_lighting or set_lights (growing the light buffer) between
+	// draw_model calls.
 	bound_shadow_maps:  [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
+	bound_cascade_maps: [MAX_SHADOW_CASTERS * MAX_CASCADES]^sdl.GPUTexture,
+	bound_cube_maps:    [6]^sdl.GPUTexture, // MAX_POINT_SHADOW_CASTERS is 1 -- see that constant's own doc comment
 	bound_light_buffer: ^sdl.GPUBuffer,
 
 	// draw_model calls made with casts_shadow = true before begin_drawing_3d
@@ -312,6 +317,8 @@ bind_cache_reset :: proc() {
 	r.bound_joint_buffer      = nil
 	r.bound_material_textures = {}
 	r.bound_shadow_maps       = {}
+	r.bound_cascade_maps      = {}
+	r.bound_cube_maps         = {}
 	r.bound_light_buffer      = nil
 }
 

@@ -56,15 +56,32 @@ Light_Kind :: enum {
 	obvious thing -- `set_lights` drops a disabled light rather than uploading
 	sixty-four zeroed bytes for it.
 
-	`casts_shadow` only ever does anything for a directional or spot light --
-	see shadow.odin for why a point light's shadow is not built -- and only
-	once `Lighting_Settings.shadows.enabled` is also true (`set_lighting`,
+	`casts_shadow` means a directional or spot light is routed into one of the
+	`MAX_SHADOW_CASTERS` two-dimensional-map slots, run through whichever of
+	`Shadow_Technique.PCF`/`.PCSS`/`.CASCADED` the scene picked, and a point
+	light into the single cube-map slot (`MAX_POINT_SHADOW_CASTERS`) instead,
+	always -- see `Shadow_Technique`'s own doc comment (shadow.odin) for why
+	cube shadows are not one of that field's values, and `shadow_cube.odin`
+	for why a point light was never eligible for the first shape at all.
+	Either way it only does anything once
+	`Lighting_Settings.shadows.enabled` is also true (`set_lighting`,
 	lighting.odin). Marking a light this way with shadows off is inert rather
 	than an error, the same "opt-in, nothing happens until both switches are
 	on" shape shadows have always had in this package.
 
 	`inner_angle`/`outer_angle` only ever mean anything for a spotlight -- see
 	`create_spot_light`.
+
+	`shadow_bias` overrides `Shadow_Settings.bias` (shadow.odin) for this light
+	alone, field by field -- zero in either component of it means "use the
+	scene's own default", the same rule `shadow_settings_normalized` already
+	applies to the scene-wide value this falls back to. Left zero, as every
+	constructor below leaves it, a light just uses whatever the scene picked;
+	set it when one particular light's own geometry needs more (or less)
+	clearance than the rest of the scene -- a light that mostly grazes its own
+	occluders' surfaces is the case `Shadow_Bias.normal_offset`'s own doc
+	comment names as needing more than a scene-wide number tuned for the
+	common case.
 */
 Light :: struct {
 	kind:         Light_Kind,
@@ -75,11 +92,24 @@ Light :: struct {
 	casts_shadow: bool,
 	inner_angle:  f32, // spot only, degrees -- full brightness inside this
 	outer_angle:  f32, // spot only, degrees -- faded to nothing by this
+	shadow_bias:  Shadow_Bias, // zero means "use Shadow_Settings.bias" -- see this struct's own doc comment
 }
 
-// A point light at `position`. The common case, and the one the campfire is.
-create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light {
-	return Light{kind = .POINT, position = position, color = color, enabled = true}
+/*
+	A point light at `position`. The common case, and the one the campfire is.
+
+	`casts_shadow` builds a real cube shadow map around this light --
+	`shadow_cube.odin` -- which is new in P3: before this phase a point light
+	had no way to cast one at all (see shadow.odin's own history of that
+	degrade). Six depth renders instead of one, since the
+	light radiates in every direction rather than down one axis or into one
+	cone, so this is markedly more expensive than a directional or spot
+	light's own shadow -- see shadow_cube.odin's own top comment for the
+	SDL_GPU limitation that forced six separate maps rather than one real
+	cube-mapped render target.
+*/
+create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE, casts_shadow := false) -> Light {
+	return Light{kind = .POINT, position = position, color = color, enabled = true, casts_shadow = casts_shadow}
 }
 
 // A light shining along `direction`, from nowhere in particular. A sun.
@@ -144,24 +174,41 @@ set_lights :: proc(lights: []Light) {
 	s := &l.shadow
 
 	clear(&l.light_data)
-	s.caster_indices = {-1, -1}
-	found := 0
+	s.caster_indices     = {-1, -1}
+	s.cube_caster_index  = {-1}
+	found      := 0
+	found_cube := 0
+
+	default_bias := s.settings.bias
 
 	for light in lights {
 		if !light.enabled do continue
 
 		index := len(l.light_data)
-		append(&l.light_data, light_uniform(light))
+		append(&l.light_data, light_uniform(light, default_bias))
 
-		// Which of the (up to MAX_SHADOW_CASTERS) uploaded lights, by the
-		// index they actually land at once disabled ones are dropped -- not
-		// their index in `lights`, which shadow_visibility (lighting_core.hlsli)
-		// never sees. A third casts_shadow light beyond the first two found
-		// degrades silently, the same as an unsupported point-light shadow
-		// already does elsewhere in this package.
-		if light.casts_shadow && found < MAX_SHADOW_CASTERS {
-			s.caster_indices[found] = index
-			found += 1
+		if !light.casts_shadow do continue
+
+		/*
+			Routed by kind, not by arrival order: a point light was never
+			eligible for the two `PCF`/`PCSS`/`CASCADED` slots below (see
+			shadow.odin's own top comment), so it goes into the single cube
+			slot instead. A third directional/spot caster beyond
+			MAX_SHADOW_CASTERS, or a second point-light caster beyond
+			MAX_POINT_SHADOW_CASTERS, each degrade silently -- the same shape
+			an unsupported combination already gets elsewhere in this package.
+		*/
+		switch light.kind {
+		case .POINT:
+			if found_cube < MAX_POINT_SHADOW_CASTERS {
+				s.cube_caster_index[found_cube] = index
+				found_cube += 1
+			}
+		case .DIRECTIONAL, .SPOT:
+			if found < MAX_SHADOW_CASTERS {
+				s.caster_indices[found] = index
+				found += 1
+			}
 		}
 	}
 
@@ -172,8 +219,16 @@ set_lights :: proc(lights: []Light) {
 // Internals
 // -----------------------------------------------------------------------
 
+/*
+	`default_bias` is the scene's own `Shadow_Settings.bias`, as last resolved
+	by `set_lighting` -- passed in rather than read off `mbi` directly so this
+	stays a pure function of its arguments, the same reason `material_frag_data`
+	takes `tint` as a parameter instead of reaching for global draw state.
+	`set_lights` is the one caller, and it already has `mbi.renderer.lighting.
+	shadow.settings.bias` in hand.
+*/
 @(private)
-light_uniform :: proc(light: Light) -> Light_Uniform {
+light_uniform :: proc(light: Light, default_bias: Shadow_Bias) -> Light_Uniform {
 	kind_flag: f32
 	switch light.kind {
 	case .DIRECTIONAL: kind_flag = 0
@@ -181,11 +236,24 @@ light_uniform :: proc(light: Light) -> Light_Uniform {
 	case .SPOT:         kind_flag = 2
 	}
 
+	// Per field, not "both zero or neither" -- a light might want a wider
+	// normal-offset than the scene default while leaving its depth bias
+	// alone, and there is no reason to force the two to be overridden
+	// together. Mirrors shadow_settings_normalized's own per-field zero
+	// handling, applied here instead of at store time because a Light
+	// belongs to whoever built it -- see Light_Uniform's own doc comment
+	// (types.odin) for why this is resolved at pack time rather than stored
+	// back.
+	bias := light.shadow_bias
+	if bias.depth         == 0 do bias.depth         = default_bias.depth
+	if bias.normal_offset == 0 do bias.normal_offset = default_bias.normal_offset
+
 	return Light_Uniform{
-		position = {light.position.x, light.position.y, light.position.z, 1 if light.enabled else 0},
-		target   = {light.target.x, light.target.y, light.target.z, kind_flag},
-		color    = light.color,
-		cone     = {light.outer_angle, light.inner_angle, 0, 0},
+		position    = {light.position.x, light.position.y, light.position.z, 1 if light.enabled else 0},
+		target      = {light.target.x, light.target.y, light.target.z, kind_flag},
+		color       = light.color,
+		cone        = {light.outer_angle, light.inner_angle, 0, 0},
+		shadow_bias = {bias.depth, bias.normal_offset, 0, 0},
 	}
 }
 

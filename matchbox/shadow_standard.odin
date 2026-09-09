@@ -3,11 +3,17 @@ package matchbox
 /*
 	Shadows -- standard shadow mapping
 	-----------------------------------
-	Depth-from-light-view, one map per caster slot, filtered by hardware PCF
-	on the sample -- see `shaders/shadow/pcf.hlsli`. This is what Matchbox had
-	before this rework, moved behind `Shadow_Technique.PCF` unchanged: the
-	whole point of doing that first is that it is the reference picture the
-	rest of P0 is checked against, not a new technique.
+	Depth-from-light-view, one map per caster slot. This is what
+	`Shadow_Technique.PCF` and `Shadow_Technique.PCSS` both render into and
+	both draw through `begin_shadow_pass`/`end_shadow_pass` below -- see
+	`shaders/shadow/pcss.hlsli`'s own top comment for why percentage-closer
+	*soft* shadows costs this file nothing at all: a blocker search and a
+	variable-width filter are what `shadow_visibility_pcss` does with the
+	exact same depth map `shadow_visibility_pcf` already reads, not a
+	different map or a different pass. `PCF` is what Matchbox had before this
+	rework, moved behind `Shadow_Technique.PCF` unchanged -- the whole point
+	of doing that first was that it gave P0 a reference picture to be checked
+	against, not a new technique.
 
 	**Explicit, not folded into `begin_drawing_3d`.** A game calls
 	`begin_shadow_pass`/`end_shadow_pass` itself, drawing whatever should cast
@@ -28,14 +34,21 @@ import sdl "vendor:sdl3"
 	Brings `Shadow_State` in line with `settings`, called by `set_lighting`
 	whenever the shadow half of `Lighting_Settings` changes.
 
-	Builds `MAX_SHADOW_CASTERS` real shadow maps at `settings.resolution` only
-	when turning shadows on for the first time or when the resolution itself
-	changed -- an unrelated setting flipping (fog, ambient, a light moving)
-	should not rebuild a texture every frame `set_lighting` happens to be
-	called with the same shadow resolution. Turning shadows off leaves
-	whatever maps already exist alone, the same "the map itself is left alone
-	rather than released" shape the old `disable_shadows` had, so a game
-	toggling this as a debug key does not rebuild a texture every press.
+	Dispatches to each technique group's own texture builder --
+	`apply_standard_shadow_textures` below for `PCF`/`PCSS`,
+	`apply_cascade_shadow_textures` (shadow_cascaded.odin) for `CASCADED`,
+	`apply_cube_shadow_textures` (shadow_cube.odin) for `CUBE`. Each of those
+	only actually builds real (non-1x1) textures when it is the technique
+	`settings` names; the other two groups are left exactly as they were --
+	1x1 placeholders if a game has never selected them, or whatever real maps
+	an earlier technique switch already built, since a technique switch is
+	not a reason to throw away a map a game might switch back to. This is
+	deliberately not the "build everything unconditionally" shape the shared
+	fragment shader's own always-bound sampler slots might suggest: those
+	slots must always have *something* valid bound (`init`'s 1x1
+	placeholders), but they need not always hold this frame's real shadow
+	data, since `shadow_visibility`'s dispatch never samples a slot that
+	is not the active technique's own.
 */
 @(private)
 apply_shadow_settings :: proc(settings: Shadow_Settings) {
@@ -48,12 +61,36 @@ apply_shadow_settings :: proc(settings: Shadow_Settings) {
 		return
 	}
 
+	if r.device == nil do return
+
+	apply_standard_shadow_textures(settings)
+	apply_cascade_shadow_textures(settings)
+	apply_cube_shadow_textures(settings)
+}
+
+/*
+	Builds `MAX_SHADOW_CASTERS` real shadow maps at `settings.resolution`,
+	only when `settings.technique` is `PCF` or `PCSS` (the two that read this
+	group at all) and only when turning them on for the first time or when
+	the resolution changed -- an unrelated setting flipping (fog, ambient, a
+	light moving) should not rebuild a texture every frame `set_lighting`
+	happens to be called with the same shadow resolution. Turning shadows off,
+	or switching to a different technique, leaves whatever maps already exist
+	alone, the same "the map itself is left alone rather than released" shape
+	the old `disable_shadows` had, so a game toggling this as a debug key or
+	trying a different technique does not rebuild a texture every time.
+*/
+@(private)
+apply_standard_shadow_textures :: proc(settings: Shadow_Settings) {
+	r := &mbi.renderer
+	s := &r.lighting.shadow
+
+	if settings.technique != .PCF && settings.technique != .PCSS do return
+
 	size := max(settings.resolution, 1)
 	if s.resolution == i32(size) && s.textures[0] != nil && s.textures[1] != nil {
 		return // already built at this resolution -- nothing to do
 	}
-
-	if r.device == nil do return
 
 	new_textures: [MAX_SHADOW_CASTERS]^sdl.GPUTexture
 	for slot in 0 ..< MAX_SHADOW_CASTERS {
@@ -104,6 +141,15 @@ is_shadows_active :: proc() -> bool {
 	render pass against that slot's shadow map, ready for whatever
 	`draw_model` calls come next to render into it as occluders rather than as
 	the visible scene.
+
+	Only meaningful for `PCF`/`PCSS` -- see `begin_cascade_shadow_pass`
+	(shadow_cascaded.odin) and `begin_point_shadow_pass` (shadow_cube.odin)
+	for `CASCADED`'s and `CUBE`'s own equivalents. Calling this while a
+	different technique is active still opens a pass and renders into the
+	`PCF`/`PCSS` maps -- harmlessly, since `shadow_visibility`'s dispatch never
+	samples them under a different technique -- rather than refusing, the same
+	"marking a light casts_shadow with shadows off is inert" shape the rest of
+	this system already has.
 
 	**Returns whether it actually opened one.** `false` when there is nothing
 	to render at this slot -- shadows are not enabled, or no light is marked
@@ -206,6 +252,7 @@ begin_shadow_pass :: proc(slot: int = 0) -> bool {
 
 	s.view_projections[slot] = proj * view
 	s.active_slot            = slot
+	s.active_kind            = .STANDARD
 
 	if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)

@@ -187,8 +187,46 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	// same pending list goes into both maps: an occluder blocks whichever
 	// light hits it, regardless of which slot that light landed in.
 	if len(r.pending_shadow_models) > 0 {
-		for slot in 0 ..< MAX_SHADOW_CASTERS {
-			if begin_shadow_pass(slot) {
+		/*
+			The directional/spot casters, through whichever of PCF/PCSS/
+			CASCADED the scene picked -- CASCADED needs a pass per cascade
+			per slot rather than one pass per slot, so it gets its own loop
+			shape rather than sharing PCF/PCSS's. See Shadow_Technique's own
+			doc comment for why CUBE (below, always attempted regardless of
+			this switch) is not a case here at all.
+		*/
+		switch r.lighting.shadow.settings.technique {
+		case .CASCADED:
+			count := clamp(r.lighting.shadow.settings.cascade_count, 1, MAX_CASCADES)
+			for slot in 0 ..< MAX_SHADOW_CASTERS {
+				for cascade in 0 ..< count {
+					if begin_cascade_shadow_pass(slot, cascade) {
+						for pending in r.pending_shadow_models {
+							draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+						}
+						end_shadow_pass()
+					}
+				}
+			}
+		case .PCF, .PCSS:
+			fallthrough
+		case:
+			for slot in 0 ..< MAX_SHADOW_CASTERS {
+				if begin_shadow_pass(slot) {
+					for pending in r.pending_shadow_models {
+						draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
+					}
+					end_shadow_pass()
+				}
+			}
+		}
+
+		// The point-light caster, independent of whichever technique above
+		// is running -- a no-op if shadows are off or no point light is
+		// marked casts_shadow, the same "opt in twice, harmless otherwise"
+		// shape the rest of this system already has.
+		for face in 0 ..< 6 {
+			if begin_point_shadow_pass(face) {
 				for pending in r.pending_shadow_models {
 					draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
 				}
@@ -361,11 +399,29 @@ draw_model_immediate :: proc(
 
 	model_matrix := transform_matrix(transform)
 
-	// Whichever slot's light is being drawn into its shadow map, the
-	// camera's everywhere else -- the one thing that actually makes this the
-	// shadow pass rather than an ordinary draw of the same geometry.
+	/*
+		Whichever pass is being drawn into its own shadow map, the camera's
+		everywhere else -- the one thing that actually makes this the shadow
+		pass rather than an ordinary draw of the same geometry. Which array
+		to read depends on which of the three pass shapes is currently open
+		(`Shadow_State.active_kind`) -- PCF/PCSS's flat two slots, CASCADED's
+		`[slot][cascade]`, or CUBE's `[face]` -- since each begin_*_shadow_pass
+		leaves that field naming its own shape.
+	*/
 	shadow := &r.lighting.shadow
-	view_projection := shadow.view_projections[shadow.active_slot] if r.in_shadow_pass else r.view_projection
+	view_projection := r.view_projection
+	if r.in_shadow_pass {
+		switch shadow.active_kind {
+		case .CASCADE:
+			view_projection = shadow.cascade_view_projections[shadow.active_slot][shadow.active_cascade]
+		case .CUBE:
+			view_projection = shadow.cube_view_projections[0][shadow.active_face]
+		case .STANDARD:
+			fallthrough
+		case:
+			view_projection = shadow.view_projections[shadow.active_slot]
+		}
+	}
 
 	vert_data := Mesh_Vert_Data{
 		mvp           = view_projection * model_matrix,
@@ -467,26 +523,32 @@ draw_model_immediate :: proc(
 			}
 
 			/*
-				The two shadow maps at t4/t5, and the light list at t6 as a
-				storage buffer -- both scene-wide rather than per-part, so
-				this only rebinds when either actually changed: the shadow
-				maps when set_lighting rebuilds them, the light buffer when
-				set_lights grows it past its previous capacity. A game
+				Every shadow technique's own maps -- PCF/PCSS's two at t4/t5,
+				CASCADED's up to eight at t6-t13, CUBE's six at t14-t19 -- and
+				the light list at t20 as a storage buffer, all scene-wide
+				rather than per-part, so each of these four bind calls only
+				fires when its own resource actually changed: the shadow
+				textures when set_lighting rebuilds them, the light buffer
+				when set_lights grows it past its previous capacity. A game
 				calling either mid-pass, between draw_model calls, is what
-				this cache check is for -- see `bound_shadow_maps`/
-				`bound_light_buffer`'s own comment on `Renderer`.
+				these cache checks are for -- see `bound_shadow_maps`/
+				`bound_cascade_maps`/`bound_cube_maps`/`bound_light_buffer`'s
+				own comment on `Renderer`.
 
-				Slot 4 here, not t4 -- BindGPUFragmentSamplers takes a slot
-				within the *sampler* category alone (0 = base, 1-3 = the
-				three material textures just above, 4-5 = these two), which
-				SDL_GPU numbers separately from the storage-buffer category
-				the light list below binds into. The two categories only
-				share a numbering *inside the HLSL register(tN) declarations*
-				-- see lighting_core.hlsli's own comment on `lights` for why
-				-- so the light buffer's own BindGPUFragmentStorageBuffers
-				call below still passes slot 0, unchanged, even though its
-				HLSL register moved from t3 to t6 to make room for the three
-				new samplers.
+				The slot numbers passed to BindGPUFragmentSamplers below (4,
+				6, 14) track the HLSL t-register each group starts at, kept
+				equal on purpose for readability -- but they need not be:
+				BindGPUFragmentSamplers takes a slot within the *sampler*
+				category alone (0 = base, 1-3 = the three material textures
+				above, 4-19 = every shadow map), which SDL_GPU numbers
+				separately from the storage-buffer category the light list
+				binds into below. The two categories only share a numbering
+				*inside the HLSL register(tN) declarations* -- see
+				lighting_core.hlsli's own comment on `lights` for why -- so
+				the light buffer's own BindGPUFragmentStorageBuffers call
+				below still passes slot 0, unchanged, even though its own
+				HLSL register moved again, from t6 to t20, to make room for
+				CASCADED's and CUBE's fourteen new samplers.
 			*/
 			if r.bound_shadow_maps != shadow.textures {
 				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
@@ -495,6 +557,43 @@ draw_model_immediate :: proc(
 				}
 				sdl.BindGPUFragmentSamplers(r.pass, 4, &shadow_bindings[0], MAX_SHADOW_CASTERS)
 				r.bound_shadow_maps = shadow.textures
+			}
+
+			/*
+				CASCADED's up-to-eight maps (slots 6-13) and CUBE's six
+				(slots 14-19) -- bound the same way the two PCF/PCSS maps
+				just above are, as one HLSL resource array each
+				(mesh.frag.hlsl's `cascade_maps`/`cube_maps`) rather than
+				individually-named textures, so this stays two bind calls
+				regardless of MAX_CASCADES. Always bound, whether or not
+				`settings.technique` is actually CASCADED or a point light is
+				actually casting a cube shadow this frame -- see
+				Shadow_State's own doc comment for why the shared fragment
+				shader cannot pick and choose which slots to declare.
+			*/
+			cascade_flat: [MAX_SHADOW_CASTERS * MAX_CASCADES]^sdl.GPUTexture
+			for caster in 0 ..< MAX_SHADOW_CASTERS {
+				for cascade in 0 ..< MAX_CASCADES {
+					cascade_flat[caster * MAX_CASCADES + cascade] = shadow.cascade_textures[caster][cascade]
+				}
+			}
+			if r.bound_cascade_maps != cascade_flat {
+				cascade_bindings: [MAX_SHADOW_CASTERS * MAX_CASCADES]sdl.GPUTextureSamplerBinding
+				for i in 0 ..< len(cascade_flat) {
+					cascade_bindings[i] = {texture = cascade_flat[i], sampler = shadow.sampler}
+				}
+				sdl.BindGPUFragmentSamplers(r.pass, 6, &cascade_bindings[0], u32(len(cascade_bindings)))
+				r.bound_cascade_maps = cascade_flat
+			}
+
+			cube_flat := shadow.cube_textures[0]
+			if r.bound_cube_maps != cube_flat {
+				cube_bindings: [6]sdl.GPUTextureSamplerBinding
+				for i in 0 ..< 6 {
+					cube_bindings[i] = {texture = cube_flat[i], sampler = shadow.sampler}
+				}
+				sdl.BindGPUFragmentSamplers(r.pass, 14, &cube_bindings[0], 6)
+				r.bound_cube_maps = cube_flat
 			}
 
 			if r.bound_light_buffer != r.lighting.light_buffer {

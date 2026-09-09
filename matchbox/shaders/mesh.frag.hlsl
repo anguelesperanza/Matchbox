@@ -35,6 +35,24 @@ SamplerComparisonState shadow_sampler0 : register(s4, space2);
 Texture2D<float>       shadow_map1     : register(t5, space2);
 SamplerComparisonState shadow_sampler1 : register(s5, space2);
 
+/*
+    CASCADED's up to MAX_SHADOW_CASTERS(2) * MAX_CASCADES(4) maps, and CUBE's
+    six -- fixed-size HLSL resource arrays rather than one declaration per
+    map, which is what lets `render3d.odin`'s own binding code stay two
+    `BindGPUFragmentSamplers` calls (one contiguous range each) regardless of
+    `MAX_CASCADES`, the same shape the two PCF/PCSS slots just above already
+    use for `MAX_SHADOW_CASTERS`. Always declared and always bound to
+    *something* valid (real maps or `init`'s 1x1 placeholders) whether or not
+    this game's scene ever selects `CASCADED` or ever has a point light
+    casting a cube shadow -- see `Shadow_State`'s own doc comment (shadow.odin)
+    for why the one shared fragment shader cannot pick and choose which
+    slots to declare per technique.
+*/
+Texture2D<float>       cascade_maps[8]     : register(t6, space2);
+SamplerComparisonState cascade_samplers[8] : register(s6, space2);
+Texture2D<float>       cube_maps[6]        : register(t14, space2);
+SamplerComparisonState cube_samplers[6]    : register(s14, space2);
+
 cbuffer Material : register(b0, space3)
 {
     float4 tint;       // draw_model's own multiplier, not a material property

@@ -249,12 +249,27 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 	The spare components are not spare: `position.w` is whether the light is on,
 	and `target.w` is which kind it is. `cone` only ever means anything for a
 	spotlight -- see `create_spot_light` -- and rides along unread otherwise.
+
+	**`shadow_bias` joined the other three in P3.** A shadow technique's own
+	bias -- depth-compare epsilon plus normal-offset distance, see
+	`Shadow_Bias` (shadow.odin) -- used to be one scalar shared by every light
+	in the scene (`Shadow_Settings.bias` alone). The framework this phase
+	builds is per-technique *and* per-light: a light at a grazing angle to its
+	own occluders wants more bias than one shining straight down, and P3's own
+	validation harness (`shadow_test.odin`) is what actually measures that.
+	Zero in both components means "use the scene's own `Shadow_Settings.bias`"
+	-- resolved once, at pack time in `light_uniform`, the same "normalize at
+	the point the value passes through before the GPU" shape
+	`material_frag_data` already uses for `Material`, and for the same reason:
+	a `Light` belongs to whoever built it, so there is nowhere on this struct
+	to store a normalized copy the caller would ever read back.
 */
 Light_Uniform :: struct #align(16) {
-	position: [4]f32, // xyz where it is,                     w 1 when enabled
-	target:   [4]f32, // xyz direction (directional/spot), unused (point), w kind: 0/1/2
-	color:    [4]f32,
-	cone:     [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
+	position:     [4]f32, // xyz where it is,                     w 1 when enabled
+	target:       [4]f32, // xyz direction (directional/spot), unused (point), w kind: 0/1/2
+	color:        [4]f32,
+	cone:         [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
+	shadow_bias:  [4]f32, // x depth bias, y normal-offset bias -- see Shadow_Bias.  z-w unused
 }
 
 // GPU handle bundle — shared by Sprite, Animation_Clip, and Font.

@@ -205,6 +205,18 @@ changed rather than five. Anything that changes attenuation is the same.
   needs either a second entry point on the contract or a representative-point
   approximation. Known now so P4 is not a surprise; it is not an argument
   against doing this for the four punctual-light models.
+
+  **Answered by P4, and the contract held.** The representative-point route was
+  taken: `area_light_representative_point` (`lighting_core.hlsli`) reduces a
+  rect or disk to a single point by reflecting the view ray against the light's
+  own plane and clamping onto its shape, which `sample_light` then packs into an
+  ordinary `Light_Sample`. **No `brdf/*.hlsli` file mentions an area light** --
+  verified by grep across the directory, not by assertion -- so `Light_Sample`
+  needed no second entry point and no widening. The contract absorbed a light
+  kind it was not designed for, which is the strongest evidence so far that the
+  seam is in the right place. What it costs is stated rather than hidden: this
+  is an approximation, not an integral, and an area light does not cast a shadow
+  this phase.
 - **One wrinkle in the port.** P0 accumulates specular *uncoloured* (`spec *
   attenuation * shadow`) while diffuse carries the light's colour. Folding
   colour into `radiance` means specular would have to divide it back out to

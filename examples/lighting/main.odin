@@ -66,6 +66,31 @@ package lighting_example
 	    the campfire is a poor occluder of itself but the props around it
 	    should each pick up a shadow radiating outward from the fire now,
 	    on every side, the way a point light's shadow actually has to look
+	  - **press B** to step bloom through off, the shipped `BLOOM_DEFAULTS`,
+	    and a second stop tuned for a dark scene (`post.odin`, `bloom.odin`).
+	    The shipped default only spills light brighter than white, which is
+	    right for a scene lit for HDR and may be nothing at all in this one --
+	    the brightest thing here is a clamped ember. That is what the second
+	    stop is for. **Whether either shows anything is genuinely not known:
+	    no frame of this rework has been rendered.** If the second stop is
+	    what does it, the number to carry back into a game is `threshold`,
+	    not `intensity`
+	  - **press B then M.** Bloom is what makes `Tonemap`'s four curves tell
+	    themselves apart: it is the thing that pushes pixels past white, and
+	    NONE clips them flat where REINHARD, ACES and AGX each compress them
+	    differently. On the dark stop, look at the ember's core rather than
+	    its halo
+	  - **press C** to step colour grading through off, warm-and-contrasty
+	    and cold-and-flat. Both stops are deliberately overdone -- a grade
+	    tuned to be tasteful and a grade that is not running look far too
+	    alike to tell apart. The off stop is `Color_Grade{}`, which is an
+	    exact no-op rather than a grade that happens to be near one: every
+	    field of that struct is a delta from identity, which is what lets a
+	    partial literal naming two fields mean what it looks like it means
+	  - **press C then L.** Grading runs in the tonemap resolve, after the
+	    3D pass, so it applies to an unlit scene exactly as it does to a lit
+	    one -- and so does bloom. Neither knows which shading model ran, or
+	    which of the three render pipelines drew the frame
 
 	Models are PsxGame's own, loaded by stage 4.
 */
@@ -135,6 +160,28 @@ main :: proc() {
 	fire_cube_shadow := false // G -- the fire's own cube shadow, see this file's own top comment
 
 	/*
+		B and C step through the post chain (post.odin) rather than toggling
+		it, and that is the point of them here.
+
+		Bloom's default threshold is 1 -- only light brighter than white
+		spills -- which is the right default for a scene lit for HDR and may
+		well show nothing at all in this one, where the brightest thing is a
+		clamped ember a couple of units from the camera. **Whether it does has
+		not been checked: nothing in this rework has been seen to render.** So
+		B offers a second stop with the threshold well below 1 and the
+		intensity up, which is what a dark scene wants, and stepping between
+		the two answers the question in one keypress instead of needing a
+		recompile.
+
+		C is the same idea for grading: the two stops are deliberately
+		exaggerated (a warm, contrasty one and a cold, flat one), because a
+		grade tuned to be tasteful and a grade that is not running look far
+		too alike to tell apart from across a room.
+	*/
+	bloom_step := 0
+	grade_step := 0
+
+	/*
 		One value held for the whole run and re-submitted whenever a toggle
 		changes it -- `set_lighting` replaces the entire struct each call, the
 		same way `set_lights` replaces the entire light list, so there is no
@@ -202,6 +249,67 @@ main :: proc() {
 		}
 
 		if mb.is_key_pressed(.G) do fire_cube_shadow = !fire_cube_shadow
+
+		// Off -> the shipped defaults -> a dark-scene tuning. See bloom_step's
+		// own comment above for why there are two on-stops rather than one.
+		if mb.is_key_pressed(.B) {
+			bloom_step = (bloom_step + 1) % 3
+
+			switch bloom_step {
+			case 0: settings.post.bloom = {}
+			case 1: settings.post.bloom = mb.BLOOM_DEFAULTS
+			case 2: settings.post.bloom = {enabled = true, threshold = 0.35, knee = 0.2, intensity = 0.2, scatter = 0.8, levels = 5}
+			}
+
+			settings_changed = true
+		}
+
+		/*
+			Off -> warm and contrasty -> cold and flat. Every field is a delta
+			from identity (`Color_Grade`, post.odin), so the first stop is the
+			zero value and is an exact no-op rather than a grade that happens
+			to be close to one.
+		*/
+		if mb.is_key_pressed(.C) {
+			grade_step = (grade_step + 1) % 3
+
+			switch grade_step {
+			case 0:
+				settings.post.grade = {}
+			case 1:
+				settings.post.grade = {
+					enabled    = true,
+					gain       = {0.12, 0, -0.12}, // warmer highlights
+					lift       = {0.01, 0, -0.01},
+					contrast   = 0.25,
+					saturation = 0.15,
+				}
+			case 2:
+				settings.post.grade = {
+					enabled    = true,
+					gain       = {-0.08, -0.02, 0.10}, // colder highlights
+					lift       = {0.04, 0.04, 0.06},   // milky blacks
+					contrast   = -0.15,
+					saturation = -0.35,
+				}
+			}
+
+			settings_changed = true
+		}
+
+		// The tonemap curve, which decides what happens to anything bloom
+		// pushed past white -- NONE clips it flat, the other three compress
+		// it. Worth having beside B: bloom is most of what makes the
+		// difference between them visible at all.
+		if mb.is_key_pressed(.M) {
+			switch settings.tonemap {
+			case .NONE:     settings.tonemap = .REINHARD
+			case .REINHARD: settings.tonemap = .ACES
+			case .ACES:     settings.tonemap = .AGX
+			case .AGX:      settings.tonemap = .NONE
+			}
+			settings_changed = true
+		}
 
 		if settings_changed do mb.set_lighting(settings)
 
@@ -323,6 +431,7 @@ main :: proc() {
 
 		font := &mb.mbi.font
 		mb.draw_text(font, "L lights, K moon, F fog, H shadows, T torch, Y technique, G fire shadow, WASD walk, ESC pointer", 20, 40, mb.WHITE)
+		mb.draw_text(font, "B bloom, C grade, M tonemap", 20, 70, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v (%v)   torch %v   fire shadow %v",
 			"on" if settings.enabled else "off (unlit)",
 			"on" if moon_on else "off",
@@ -330,7 +439,17 @@ main :: proc() {
 			"on" if settings.shadows.enabled else "off",
 			settings.shadows.technique,
 			"on" if torch_on else "off",
-			"on" if fire_cube_shadow else "off"), 20, 70, mb.WHITE)
+			"on" if fire_cube_shadow else "off"), 20, 100, mb.WHITE)
+
+		bloom_label := "off"
+		if settings.post.bloom.enabled {
+			bloom_label = fmt.tprintf("threshold %.2f, intensity %.2f", settings.post.bloom.threshold, settings.post.bloom.intensity)
+		}
+
+		grade_labels := [3]string{"off", "warm", "cold"}
+
+		mb.draw_text(font, fmt.tprintf("bloom %v   grade %v   tonemap %v",
+			bloom_label, grade_labels[grade_step], settings.tonemap), 20, 130, mb.WHITE)
 
 		cx := f32(mb.mbi.width) * 0.5
 		cy := f32(mb.mbi.height) * 0.5

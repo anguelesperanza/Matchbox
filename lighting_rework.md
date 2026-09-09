@@ -827,13 +827,18 @@ had: these are three different jobs wearing one heading.** P2 became four
 sub-phases and P3 grew a P3b, and in both cases the split was what kept each
 piece verifiable. Proposed shape:
 
-- **P7a -- the post chain: bloom and colour grading.** Pure consumers of the
-  HDR colour buffer, needing no scene data beyond it. The real deliverable is
-  the *chain* itself: `draw_post` (render_target.odin) applies one effect to a
-  render target, and bloom is inherently multi-pass -- threshold, downsample,
-  blur, upsample, composite -- so it needs ping-pong buffers and an ordered
-  chain that P1's tonemap resolve then ends. That architecture is what P7b and
-  anything later reuses, which is why it goes first.
+- **P7a -- the post chain: bloom and colour grading.** *Built. `post.odin`,
+  `bloom.odin`, `shaders/bloom*.hlsl`, `post_test.odin`; the tonemap resolve
+  grew a second sampler and the grade. See §7.8 for the two decisions it
+  made and the four bugs its own tests found.*
+
+  Pure consumers of the HDR colour buffer, needing no scene data beyond it.
+  The real deliverable is the *chain* itself: `draw_post` (render_target.odin)
+  applies one effect to a render target, and bloom is inherently multi-pass --
+  threshold, downsample, blur, upsample, composite -- so it needs ping-pong
+  buffers and an ordered chain that P1's tonemap resolve then ends. That
+  architecture is what P7b and anything later reuses, which is why it goes
+  first.
 - **P7b -- screen-space effects needing scene data: SSAO and volumetrics.**
   Both want depth, and SSAO wants normals too. Note the asymmetry worth
   planning around: under `DEFERRED` the G-buffer already has both, while
@@ -1057,6 +1062,85 @@ now; what changes is how the result is *sampled*, which is where the sampler
 budget is actually spent.
 
 </details>
+
+---
+
+## 7.8 P7a's two decisions, and what the tests found
+
+**The chain does not hold every stage, and that is the design.** The obvious
+reading of "post chain" -- an ordered list of effects, each its own pass, each
+reading the last one's output through a ping-pong pair -- is the wrong shape
+here. `post.odin` states the rule it went with instead: *a stage that needs a
+pass gets one; a stage that is a per-pixel function of one texel does not.*
+Bloom needs passes, because a kernel cannot see a neighbour's finished value
+from inside the draw that produces its own. Colour grading does not, and a
+ping-pong pair of full-screen `RGBA16_FLOAT` buffers to run it in would have
+bought a texture, a pass and a round trip through memory in exchange for
+nothing. So grading lives inside the resolve, alongside the exposure and the
+curve that were already there.
+
+Which is also why `exposure` and `tonemap` did not move onto `Post_Settings`
+beside `bloom` and `grade`: they are two parameters of the resolve stage, not
+stages of their own. Moving them would also have silently changed what every
+`Lighting_Settings{... exposure = 1 ...}` literal in the repo meant, for a
+tidier-looking struct and no behaviour.
+
+**Zero-means-default has a second answer, and it is the better one where it
+is available.** §3.7.1 settled that rule and warned that every phase adding
+fields to these structs re-opens it. `Color_Grade` is the case where the
+sentinel does not work: zero saturation (greyscale) and zero contrast (flat)
+are both values somebody legitimately means, so a sentinel would collide with
+one, which is the test §3.7.1 sets for itself. The way out was to spell every
+field as a *delta from identity* -- `saturation = 0` leaves it alone,
+`saturation = -1` is greyscale -- which makes `Color_Grade{}` an exact no-op
+and needs no normalization entry at all. Prefer that shape whenever a field
+admits it; a normalization entry is what you write when it does not.
+`Bloom.intensity` is one that does not, and it carries the wart to prove it:
+a game animating intensity to exactly zero snaps back to the default.
+
+**Four bugs, all found by the tests, none of them visible without a GPU.**
+Worth listing because three are the same *kind* of bug -- an identity that is
+only nearly an identity -- and that kind is invisible to `odin check`, to
+`dxc`, and to looking at a frame.
+
+1. **The upsample summed levels instead of mixing them.** Both filter kernels
+   sum to 1, so every level of the chain holds the same total light as the
+   level below it; summing `n` of them into level 0 puts `n` copies of the
+   scene's bright light there. A flat bright wall blooms half again as bright
+   from a 6-level chain as from a 4-level one, and `intensity` stops meaning
+   anything fixed. Fixed with a `scatter` mix weight written into the
+   upsample's own alpha, which the ordinary source-alpha blend then applies --
+   so `levels` controls how wide the bloom is, `intensity` how strong, and
+   neither moves the other. It also took `Color_Blend.ADDITIVE` back out
+   again: the upsample was its only caller and it turned out to want the blend
+   that already existed.
+2. **`pow(x, 1)` is not `x`.** It is `exp2(log2(x))` on both sides of the
+   CPU/HLSL mirror, and 0.001 comes back as 0.0009999871. Never visible, and
+   it made `Color_Grade`'s central claim untestable. The gamma step is skipped
+   on a uniform branch when the delta is zero.
+3. **`(c - 0.5) * (1 + contrast) + 0.5` cancels the same way**, and so does
+   `lerp(luma, c, 1 + saturation)`. Both are written as deltas now --
+   `c + (c - 0.5) * contrast` -- which is the identical arithmetic, the same
+   single multiply-add, and exactly zero when the field is zero.
+4. **A disabled `Bloom` grew four defaults nothing would read**, so `Bloom{}`
+   was not a fixed point of normalization and `LIGHTING_DEFAULTS` could not be
+   read off its own constant. `shadow_settings_normalized`'s own first line was
+   already the answer.
+
+**What was verified, and what was not.** Grading and the bloom knee are
+checked in full against numbers derived independently in Python; the kernels
+are checked for the one property everything downstream rests on -- that a
+constant image survives the chain unchanged; the level sizing is swept across
+1200 resolutions for its invariants rather than checked at three sizes. **No
+frame was rendered.** Nothing confirms that bloom looks like bloom, that the
+`scatter` alpha blend behaves as reasoned on any backend, or that
+`BLOOM_DEFAULTS`' threshold of 1 shows anything in a scene as dark as
+`examples/lighting` -- which is why that example's own B key steps through two
+different tunings rather than toggling one.
+
+**Deliberately not built**, each needing a frame to tune against: the Karis
+luminance average inside the downsample (so a lone bright pixel can still
+flicker as it moves), a lens dirt mask, and per-level weighting.
 
 ---
 

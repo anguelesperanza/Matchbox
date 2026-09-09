@@ -822,6 +822,34 @@ SSAO, light probes, baked lightmaps, reflection probes; bloom, colour grading,
 volumetrics as consumers of the HDR buffer. Each optional and layered, none
 assuming a pipeline or a shading model upstream.
 
+**Not yet dispatched. Split recommended, for the reason every earlier split
+had: these are three different jobs wearing one heading.** P2 became four
+sub-phases and P3 grew a P3b, and in both cases the split was what kept each
+piece verifiable. Proposed shape:
+
+- **P7a -- the post chain: bloom and colour grading.** Pure consumers of the
+  HDR colour buffer, needing no scene data beyond it. The real deliverable is
+  the *chain* itself: `draw_post` (render_target.odin) applies one effect to a
+  render target, and bloom is inherently multi-pass -- threshold, downsample,
+  blur, upsample, composite -- so it needs ping-pong buffers and an ordered
+  chain that P1's tonemap resolve then ends. That architecture is what P7b and
+  anything later reuses, which is why it goes first.
+- **P7b -- screen-space effects needing scene data: SSAO and volumetrics.**
+  Both want depth, and SSAO wants normals too. Note the asymmetry worth
+  planning around: under `DEFERRED` the G-buffer already has both, while
+  `FORWARD` and `CLUSTERED` would need a depth prepass or a normal target to
+  supply them. That is the interesting design question of the phase and should
+  be stated in its brief rather than discovered.
+- **P7c -- reflection probes**, extending P4's `Environment_Probe` from one
+  scene-wide bake to localized probes with blending between them.
+
+**Baked lightmaps and real-time GI are recommended out of P7 entirely**, on
+the same grounds normal mapping left P2 (§7.5): a lightmap baker is an offline
+tool, and lightmap UVs are a second UV set, which is a vertex-format change
+touching every pipeline's vertex layout -- exactly the class of decision that
+deserves its own briefing rather than arriving as a side effect. Real-time GI
+is a research-scale feature next to everything else on this list.
+
 ### P8 -- 2D
 
 Only after 3D is done, per the brief. Both halves of §7.3, sharing the 3D

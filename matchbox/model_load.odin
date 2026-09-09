@@ -319,7 +319,9 @@ primitive_part :: proc(
 		return {}, nil, false
 	}
 
-	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
+	// upload_mesh already set part.material to MATERIAL_DEFAULTS; only the
+	// texture this loader actually reads (D8) needs filling in.
+	part.material.textures.base, part.material.textures.base_sampler = material_texture(data, primitive.material, uploaded)
 
 	return part, vertices, true
 }
@@ -456,7 +458,7 @@ skinned_primitive_part :: proc(
 	}
 	part.joint_map = order[:]
 
-	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
+	part.material.textures.base, part.material.textures.base_sampler = material_texture(data, primitive.material, uploaded)
 
 	return part, vertices, true
 }

@@ -568,6 +568,7 @@ upload_skinned_mesh :: proc(
 		topology    = .TRIANGLES,
 		skin        = skin,
 		node        = node,
+		material    = MATERIAL_DEFAULTS,
 	}, nil
 }
 

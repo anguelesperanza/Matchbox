@@ -313,7 +313,8 @@ draw_model_immediate :: proc(
 	// Whichever slot's light is being drawn into its shadow map, the
 	// camera's everywhere else -- the one thing that actually makes this the
 	// shadow pass rather than an ordinary draw of the same geometry.
-	view_projection := r.shadow.view_projections[r.shadow.active_slot] if r.in_shadow_pass else r.view_projection
+	shadow := &r.lighting.shadow
+	view_projection := shadow.view_projections[shadow.active_slot] if r.in_shadow_pass else r.view_projection
 
 	vert_data := Mesh_Vert_Data{
 		mvp           = view_projection * model_matrix,
@@ -327,8 +328,6 @@ draw_model_immediate :: proc(
 		normal_matrix = linalg.matrix4_inverse_transpose_f32(model_matrix),
 	}
 
-	frag_data := Mesh_Frag_Data{tint = tint}
-
 	skin_data: Skin_Vert_Data
 
 	for part, part_index in model.parts {
@@ -339,68 +338,76 @@ draw_model_immediate :: proc(
 		// nothing else needs.
 		if r.in_shadow_pass && part.topology == .LINES do continue
 
-		skinned  := part.skin >= 0
-		textured := part.texture != nil
+		skinned := part.skin >= 0
 
-		// Per part rather than per model: a part says whether it is lines or
-		// triangles, whether it has a texture, and whether a skeleton deforms
-		// it, and between them those decide the pipeline. One loaded file
-		// routinely holds parts that differ. The shadow pass only ever cares
-		// about the skinned/unskinned half of that -- its fragment shader
-		// writes nothing, so a textured part and an untextured one cast the
-		// same shadow.
+		/*
+			Per part rather than per model: a part says whether it is lines or
+			triangles and whether a skeleton deforms it, and between them
+			those decide the pipeline. One loaded file routinely holds parts
+			that differ. Whether a part carries a texture no longer picks a
+			pipeline at all -- `mesh`/`mesh_skinned` share one fragment shader
+			for textured and untextured parts alike (see `mesh.frag.hlsl` and
+			`Shaders.mesh_frag`'s own comment), so what used to be four mesh
+			pipelines is two. The shadow pass only ever cares about the
+			skinned/unskinned half of this -- its fragment shader writes
+			nothing, so a textured part and an untextured one cast the same
+			shadow.
+		*/
 		pipeline := r.pipelines.mesh
 		switch {
-		case r.in_shadow_pass && skinned:     pipeline = r.pipelines.shadow_skinned
-		case r.in_shadow_pass:                pipeline = r.pipelines.shadow
-		case part.topology == .LINES:         pipeline = r.pipelines.line
-		case skinned && textured:             pipeline = r.pipelines.mesh_skinned_textured
-		case skinned:                         pipeline = r.pipelines.mesh_skinned
-		case textured:                        pipeline = r.pipelines.mesh_textured
+		case r.in_shadow_pass && skinned: pipeline = r.pipelines.shadow_skinned
+		case r.in_shadow_pass:            pipeline = r.pipelines.shadow
+		case part.topology == .LINES:     pipeline = r.pipelines.line
+		case skinned:                     pipeline = r.pipelines.mesh_skinned
 		}
 
 		if r.bound_pipeline != pipeline {
 			sdl.BindGPUGraphicsPipeline(r.pass, pipeline)
 			r.bound_pipeline = pipeline
-
-			/*
-				Both shadow maps, at whichever slots this pipeline's own
-				fragment shader declares them -- 0/1 for the untextured
-				pipelines, 1/2 for the textured ones, since SDL_GPU numbers a
-				shader's sampled textures contiguously from t0 and
-				mesh_textured's own albedo already occupies t0. See
-				lighting.hlsli's comment on why the two shaders cannot agree
-				on one fixed pair of slots for them. One comparison sampler
-				serves both maps.
-
-				Not bound at all in the shadow pass itself: that fragment
-				shader samples nothing, so there is nothing here to give it.
-			*/
-			if !r.in_shadow_pass {
-				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
-					{texture = r.shadow.textures[0], sampler = r.shadow.sampler},
-					{texture = r.shadow.textures[1], sampler = r.shadow.sampler},
-				}
-				shadow_slot: u32 = 1 if textured else 0
-				sdl.BindGPUFragmentSamplers(r.pass, shadow_slot, &shadow_bindings[0], MAX_SHADOW_CASTERS)
-
-				// The pipeline switch just changed what slot 0 even means --
-				// the shadow map a moment ago, on an untextured part, an
-				// albedo texture now. Either way the cache below no longer
-				// describes what is actually bound there.
-				r.bound_texture = nil
-				r.bound_sampler = nil
-			}
 		}
 
-		if !r.in_shadow_pass && textured {
-			sampler := part.sampler if part.sampler != nil else r.sprite_sampler
+		if !r.in_shadow_pass {
+			/*
+				Base colour at t0, always -- the 1x1 white default whenever
+				the part has none of its own, per `mesh.frag.hlsl`'s own
+				collapse of what used to be two shaders. Slot numbering no
+				longer depends on the pipeline the way it did before this
+				rework, so this does not need redoing on a pipeline switch
+				the way the old shadow-map binding below used to.
+			*/
+			base    := part.material.textures.base    if part.material.textures.base    != nil else r.default_texture
+			sampler := part.material.textures.base_sampler if part.material.textures.base_sampler != nil else r.sprite_sampler
 
-			if r.bound_texture != part.texture || r.bound_sampler != sampler {
-				texture_binding := sdl.GPUTextureSamplerBinding{texture = part.texture, sampler = sampler}
+			if r.bound_texture != base || r.bound_sampler != sampler {
+				texture_binding := sdl.GPUTextureSamplerBinding{texture = base, sampler = sampler}
 				sdl.BindGPUFragmentSamplers(r.pass, 0, &texture_binding, 1)
-				r.bound_texture = part.texture
+				r.bound_texture = base
 				r.bound_sampler = sampler
+			}
+
+			/*
+				The two shadow maps at t1/t2, and the light list at t3 as a
+				storage buffer -- both scene-wide rather than per-part, so
+				this only rebinds when either actually changed: the shadow
+				maps when set_lighting rebuilds them, the light buffer when
+				set_lights grows it past its previous capacity. A game
+				calling either mid-pass, between draw_model calls, is what
+				this cache check is for -- see `bound_shadow_maps`/
+				`bound_light_buffer`'s own comment on `Renderer`.
+			*/
+			if r.bound_shadow_maps != shadow.textures {
+				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
+					{texture = shadow.textures[0], sampler = shadow.sampler},
+					{texture = shadow.textures[1], sampler = shadow.sampler},
+				}
+				sdl.BindGPUFragmentSamplers(r.pass, 1, &shadow_bindings[0], MAX_SHADOW_CASTERS)
+				r.bound_shadow_maps = shadow.textures
+			}
+
+			if r.bound_light_buffer != r.lighting.light_buffer {
+				light_buffer := r.lighting.light_buffer
+				sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)
+				r.bound_light_buffer = light_buffer
 			}
 		}
 
@@ -417,7 +424,11 @@ draw_model_immediate :: proc(
 
 		// The shadow pass's fragment shader declares no uniform buffer at
 		// all -- see shadow.frag.hlsl -- so there is nothing to push here.
+		// Built per part rather than once for the whole model: the material
+		// (shading model, base colour, specular power, ...) is a part's own,
+		// only `tint` is the same for every part of this draw_model call.
 		if !r.in_shadow_pass {
+			frag_data := material_frag_data(part.material, tint)
 			sdl.PushGPUFragmentUniformData(r.cmd, 0, &frag_data, size_of(frag_data))
 		}
 

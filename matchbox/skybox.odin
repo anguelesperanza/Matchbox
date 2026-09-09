@@ -226,7 +226,7 @@ draw_skybox :: proc(skybox: Skybox) {
 		forward = {forward.x, forward.y, forward.z, 0},
 	}
 
-	frag_data := Mesh_Frag_Data{tint = skybox.tint}
+	frag_data := Tint_Frag_Data{tint = skybox.tint}
 
 	pipeline := r.pipelines.skybox_panorama
 	if skybox.kind == .CUBEMAP do pipeline = r.pipelines.skybox_cubemap

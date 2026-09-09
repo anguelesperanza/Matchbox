@@ -1,30 +1,40 @@
 package matchbox
 
 /*
-	Lights and fog
-	--------------
-	What a 3D scene is lit by, and what it fades into at a distance.
+	Lights
+	------
+	What a 3D scene is lit by.
 
-	**Lighting is opt-in.** A game that never touches any of this gets the fixed
-	shading every 3D draw had before lights existed: one direction, hard-coded
-	in the shader, enough to tell the faces of a cube apart. The moment one
-	enabled light is set, the real model takes over -- diffuse, specular,
-	distance attenuation, ambient, and gamma. The alternative, where no lights
-	means no light, would have turned every scene written up to now black.
+	**Lighting itself is scene state, not a count.** Before this file, a call
+	to `set_lights` with anything in it also turned the whole lighting model
+	on, and an empty list turned it off in favour of a fixed hard-coded
+	direction -- see `lighting_rework.md` section 1's first defect. That
+	coupling is gone: whether lighting runs at all is `Lighting_Settings.enabled`
+	(`lighting.odin`), set once via `set_lighting`, and a material that wants
+	no lighting says so itself with `Shading_Model.UNLIT`
+	(`create_material_unlit`, `material.odin`). `set_lights` now only ever
+	means "these are the lights in the scene" -- nothing about their count
+	changes what shading model anything runs.
 
-	The model is PsxGame's, ported constant for constant: the same attenuation
-	curve, the same specular exponent, the same ambient divided by ten, the same
-	gamma before fog. A game moving over should look the way it already looks.
+	**Unbounded**, where the old version capped at `MAX_LIGHTS` (16) inside a
+	fixed cbuffer array. The array is gone -- lights are a `StructuredBuffer`
+	now, the same move `Skin_Vert_Data` made for the joint palette when it hit
+	SDL's Vulkan uniform sectioning (see that struct's own comment in
+	types.odin) -- so there is no cap to document or hit. An unbounded list is
+	also a hard prerequisite for clustered light culling later
+	(`lighting_rework.md` section 3.3), which is why this happens now rather
+	than being deferred alongside it.
 
-	**Four lights.** That is what `rlights.odin` allows and more than either game
-	uses -- the campfire is one. A fixed-size uniform block is the reason: four
-	lights are 192 bytes pushed once a pass, where an unbounded number would mean
-	a storage buffer and a bindless path for a feature nothing has asked for.
+	NOTE: The rlights.odin was originally a file from github that was then used as base
+	for Matchbox's lights implementation https://github.com/Bigfoot71/rlights.git
+	I do not remember where I got the original rlights.odin from sadly as that was closer to the start of 2026
+
+	(Might move this credit into the README.md with the rest of the credit)
 */
 
-import sdl "vendor:sdl3"
+import "core:log"
 
-MAX_LIGHTS :: 16
+import sdl "vendor:sdl3"
 
 Light_Kind :: enum {
 	DIRECTIONAL, // a direction only; distance does not matter
@@ -41,15 +51,17 @@ Light_Kind :: enum {
 	place it aims at, so a spotlight's own `position` is not involved in
 	reading it back out. A point light ignores it.
 
-	The zero value is a disabled light, which is what makes `set_lights` with a
-	short slice do the obvious thing.
+	The zero value is a disabled light, which is what makes handing `set_lights`
+	a slice that includes one the game built but has not turned on yet do the
+	obvious thing -- `set_lights` drops a disabled light rather than uploading
+	sixty-four zeroed bytes for it.
 
 	`casts_shadow` only ever does anything for a directional or spot light --
 	see shadow.odin for why a point light's shadow is not built -- and only
-	once `enable_shadows` has also been called. Marking a light this way with
-	shadows never enabled is inert rather than an error, the same "opt-in,
-	nothing happens until both switches are on" shape `enable_shadows` itself
-	has.
+	once `Lighting_Settings.shadows.enabled` is also true (`set_lighting`,
+	lighting.odin). Marking a light this way with shadows off is inert rather
+	than an error, the same "opt-in, nothing happens until both switches are
+	on" shape shadows have always had in this package.
 
 	`inner_angle`/`outer_angle` only ever mean anything for a spotlight -- see
 	`create_spot_light`.
@@ -80,7 +92,7 @@ create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE, casts
 
 /*
 	A cone of light at `position`, pointing along `direction`. Distance fades
-	the same curve a point light's own does -- see `lighting.hlsli`'s
+	the same curve a point light's own does -- see `brdf/blinn_phong.hlsli`'s
 	attenuation -- the cone is an extra factor on top of that, not a
 	replacement for it.
 
@@ -91,7 +103,7 @@ create_directional_light :: proc(direction: [3]f32, color: [4]f32 = WHITE, casts
 
 	`casts_shadow` builds a perspective shadow frustum sized to the cone --
 	`fov = outer_angle * 2` -- from the spotlight's own real position, rather
-	than the camera-centred trick a directional light's shadow needs for
+		than the camera-centred trick a directional light's shadow needs for
 	having none. See `Light`'s own doc comment for the same "opt-in twice"
 	contract every shadow-casting light has.
 */
@@ -111,137 +123,49 @@ create_spot_light :: proc(
 }
 
 /*
-	Sets every light at once, and turns lighting on.
+	Sets every light in the scene at once, replacing whatever was there.
 
-	Up to `MAX_LIGHTS` of them; anything past that is ignored, and anything short
-	leaves the rest disabled. Call it every frame if the lights move -- it copies
-	into a block that is pushed at the start of the next 3D pass, so there is no
-	GPU work here and no cost to setting the same thing repeatedly.
+	Unbounded -- see this file's own top comment -- and disabled lights are
+	dropped rather than uploaded, so a caller may freely hand over a slice
+	that includes lights it built but has not turned on. Call it every frame
+	if the lights move; it rewrites a GPU buffer through a persistent transfer
+	buffer rather than reallocating one; growing past the current capacity is
+	the one time that costs a real allocation, the same "grown on demand,
+	never shrunk" shape `ensure_identity_joint_buffer` already has.
 
 		matchbox.set_lights({matchbox.create_point_light(fire_position, ember)})
+
+	Does **not** turn lighting on -- see `set_lighting`. A scene with lights
+	set and `Lighting_Settings.enabled == false` renders every material as if
+	it were `Shading_Model.UNLIT`; see that struct's own doc comment.
 */
 set_lights :: proc(lights: []Light) {
 	l := &mbi.renderer.lighting
-	s := &mbi.renderer.shadow
+	s := &l.shadow
 
-	count := min(len(lights), MAX_LIGHTS)
-
-	for i in 0 ..< MAX_LIGHTS {
-		if i < count {
-			l.lights[i]             = light_uniform(lights[i])
-			s.light_casts_shadow[i] = lights[i].casts_shadow
-		} else {
-			l.lights[i]             = {}
-			s.light_casts_shadow[i] = false
-		}
-	}
-
-	// How many were handed over, not how many are switched on: a game that sets
-	// one light and disables it wants a dark scene, not the fallback shading.
-	l.flags.x = f32(count)
-
-	recompute_shadow_casters()
-}
-
-// One light, by slot, leaving the others alone. For a scene that turns a single
-// lamp on and off without rebuilding the list.
-set_light :: proc(index: int, light: Light) {
-	if index < 0 || index >= MAX_LIGHTS do return
-
-	l := &mbi.renderer.lighting
-	s := &mbi.renderer.shadow
-
-	l.lights[index]             = light_uniform(light)
-	s.light_casts_shadow[index] = light.casts_shadow
-	l.flags.x = max(l.flags.x, f32(index + 1))
-
-	recompute_shadow_casters()
-}
-
-/*
-	Back to the fixed shading that needs no lights.
-
-	Not the same as setting four disabled lights, which is a scene lit by
-	nothing and therefore black.
-*/
-clear_lights :: proc() {
-	l := &mbi.renderer.lighting
-	s := &mbi.renderer.shadow
-
-	l.lights  = {}
-	l.flags.x = 0
-
-	s.light_casts_shadow = {}
-	s.caster_indices     = {-1, -1}
-}
-
-/*
-	Which of `Lighting_Data.lights`, if any, cast a shadow -- up to
-	`MAX_SHADOW_CASTERS` enabled lights marked `casts_shadow`, by slot order.
-	Recomputed after every change to the light list rather than
-	incrementally, since four lights is cheap enough to scan outright and
-	"the first two matches" is otherwise a subtle thing to keep correct
-	through `set_light` touching one slot at a time.
-
-	`-1` (no caster) in either slot is what makes marking a light
-	`casts_shadow` harmless before `enable_shadows` is ever called:
-	`push_lighting` only trusts these values when `mbi.renderer.shadow.enabled`
-	is also true, so this alone never points the shader at a shadow map that
-	was never actually rendered into. A third `casts_shadow` light beyond the
-	first two found is not an error, the same silent degrade a point light's
-	own `casts_shadow` would be if one were hand-built with it set.
-*/
-@(private)
-recompute_shadow_casters :: proc() {
-	l := &mbi.renderer.lighting
-	s := &mbi.renderer.shadow
-
+	clear(&l.light_data)
 	s.caster_indices = {-1, -1}
 	found := 0
-	for i in 0 ..< MAX_LIGHTS {
-		if found >= MAX_SHADOW_CASTERS do break
-		if l.lights[i].position.w >= 0.5 && s.light_casts_shadow[i] {
-			s.caster_indices[found] = i
+
+	for light in lights {
+		if !light.enabled do continue
+
+		index := len(l.light_data)
+		append(&l.light_data, light_uniform(light))
+
+		// Which of the (up to MAX_SHADOW_CASTERS) uploaded lights, by the
+		// index they actually land at once disabled ones are dropped -- not
+		// their index in `lights`, which shadow_visibility (lighting_core.hlsli)
+		// never sees. A third casts_shadow light beyond the first two found
+		// degrades silently, the same as an unsupported point-light shadow
+		// already does elsewhere in this package.
+		if light.casts_shadow && found < MAX_SHADOW_CASTERS {
+			s.caster_indices[found] = index
 			found += 1
 		}
 	}
-}
 
-/*
-	The light that reaches everything regardless of where it faces.
-
-	Divided by ten inside the shader, which is PsxGame's scaling and is kept so
-	that a value carried over from there means the same thing.
-*/
-set_ambient :: proc(color: [4]f32) {
-	mbi.renderer.lighting.ambient = color
-}
-
-/*
-	Distance fade: nothing changes nearer than `start`, everything is `color` by
-	`end`.
-
-	Fog is what makes a dark scene readable rather than a black one with objects
-	popping out of it, and it is most of the mood in PsxGame -- there it is a
-	dark blue from 3 units to 12.
-*/
-set_fog :: proc(color: [4]f32, start, end: f32) {
-	l := &mbi.renderer.lighting
-
-	l.fog_color = color
-	l.fog_range = {start, max(end, start + 0.001), 0, 0} // never divide by zero
-	l.flags.y   = 1
-}
-
-// Turns fog off, leaving its colour and range where they were.
-disable_fog :: proc() {
-	mbi.renderer.lighting.flags.y = 0
-}
-
-// Whether a game has set any lights. Mostly for an example that wants to say so
-// on screen.
-is_lighting_active :: proc() -> bool {
-	return mbi.renderer.lighting.flags.x > 0
+	upload_light_buffer()
 }
 
 // -----------------------------------------------------------------------
@@ -266,32 +190,62 @@ light_uniform :: proc(light: Light) -> Light_Uniform {
 }
 
 /*
-	Hands the whole block to the GPU, with the camera filled in.
+	Rewrites `light_buffer` from `light_data`, growing it first if the CPU
+	list no longer fits.
 
-	Called by `begin_drawing_3d` rather than by the setters, for two reasons: the
-	view position is the pass's business and not the game's, and a uniform push
-	needs a command buffer, which only exists inside a frame. A game may
-	therefore set lights whenever it likes, including before `begin_drawing`.
+	The same shape `update_animator` already established for the joint
+	palette: a device buffer plus a persistent transfer buffer, rewritten
+	through `rewrite_buffer` rather than recreated, because the common case is
+	the same handful of lights moving every frame and not the count changing.
+	Growth releases the old pair and makes a bigger one -- never smaller, so a
+	scene that briefly has many lights and then few does not pay for a
+	reallocation on the way back down.
 
-	Fragment slot 1. Slot 0 is the per-draw tint, pushed once per part.
+	At least one element's worth of capacity always exists once a device is
+	present, even with zero lights set: the fragment shader declares a
+	`StructuredBuffer<Light>` unconditionally, the same reason `init` makes
+	1x1 placeholder shadow maps so a game that never calls `enable_shadows`
+	-- now `set_lighting` -- still has something valid bound.
 */
 @(private)
-push_lighting :: proc(camera: Camera3D) {
-	r := &mbi.renderer
+upload_light_buffer :: proc() {
+	l := &mbi.renderer.lighting
+	if mbi.renderer.device == nil do return
 
-	r.lighting.view_pos = {camera.position.x, camera.position.y, camera.position.z, 0}
+	// At least one element even with nothing set -- see this proc's own doc
+	// comment on why the buffer may never be empty. The scratch element is
+	// never read by anything: flags.x (Lighting_Settings, pushed by
+	// push_lighting) is 0 whenever light_data is, and shade_surface's light
+	// loop runs zero iterations rather than reading it.
+	scratch := [1]Light_Uniform{}
+	data    := l.light_data[:] if len(l.light_data) > 0 else scratch[:]
+	size    := u32(len(data)) * size_of(Light_Uniform)
 
-	/*
-		-1 in both slots whenever shadows are not enabled, even if lights are
-		marked `casts_shadow` and `caster_indices` names them -- the shadow
-		maps are 1x1 placeholders, never rendered into, until `enable_shadows`
-		builds real ones, and the shader must never be told to trust them.
-	*/
-	r.lighting.flags.z          = f32(r.shadow.caster_indices[0]) if r.shadow.enabled else -1
-	r.lighting.flags.w          = r.shadow.settings.bias
-	r.lighting.shadow_caster1.x = f32(r.shadow.caster_indices[1]) if r.shadow.enabled else -1
-	r.lighting.light_view_projection  = r.shadow.view_projections[0]
-	r.lighting.light_view_projection2 = r.shadow.view_projections[1]
+	if len(data) > l.light_capacity {
+		if l.light_buffer   != nil do sdl.ReleaseGPUBuffer(mbi.renderer.device, l.light_buffer)
+		if l.light_transfer != nil do sdl.ReleaseGPUTransferBuffer(mbi.renderer.device, l.light_transfer)
+		l.light_buffer, l.light_transfer, l.light_capacity = nil, nil, 0
 
-	sdl.PushGPUFragmentUniformData(r.cmd, 1, &r.lighting, size_of(Lighting_Data))
+		buffer, err := upload_buffer(raw_data(data), size, {.GRAPHICS_STORAGE_READ})
+		if err != nil {
+			log.errorf("could not create the light buffer: %v", err)
+			return
+		}
+
+		l.light_buffer   = buffer
+		l.light_transfer = sdl.CreateGPUTransferBuffer(mbi.renderer.device, {usage = .UPLOAD, size = size})
+		l.light_capacity = len(data)
+		return // upload_buffer already wrote this frame's data; no rewrite needed
+	}
+
+	if l.light_buffer == nil || l.light_transfer == nil do return
+
+	// Only `size` bytes are written even though the buffer may have more
+	// capacity than that (light_capacity only ever grows) -- whatever is
+	// past them is stale data from a previous, longer light list, and
+	// nothing reads past flags.x (Lighting_Settings, pushed by push_lighting)
+	// lights regardless.
+	if err := rewrite_buffer(l.light_buffer, l.light_transfer, raw_data(data), size); err != nil {
+		log.errorf("could not update the light buffer: %v", err)
+	}
 }

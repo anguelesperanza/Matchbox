@@ -48,10 +48,17 @@ Model_Part :: struct {
 	index_count: u32,
 	topology:    Mesh_Topology,
 
-	// Filled in by the loader in stage 4. A part with no texture is drawn by
-	// the flat pipeline in its tint alone.
-	texture:     ^sdl.GPUTexture,
-	sampler:     ^sdl.GPUSampler,
+	/*
+		What this part is made of. `MATERIAL_DEFAULTS` (material.odin) for
+		everything generated in code and for a glTF part with no texture --
+		lit, white, Blinn-Phong -- and for a textured one, the same with
+		`material.textures.base`/`base_sampler` filled in by `material_texture`
+		(model_load.odin). A part with no base texture is drawn with the 1x1
+		white default `init` makes for exactly that -- see `render3d.odin` --
+		rather than a separate untextured pipeline the way it was before this
+		rework.
+	*/
+	material: Material,
 
 	/*
 		Which skin deforms this part, and which node its mesh hangs off. `skin`
@@ -167,6 +174,7 @@ upload_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topol
 		index_count = u32(len(indices)),
 		topology    = topology,
 		skin        = -1,
+		material    = MATERIAL_DEFAULTS,
 	}, nil
 }
 
@@ -218,16 +226,16 @@ destroy_model :: proc(model: ^Model) {
 		if part.vertices != nil do sdl.ReleaseGPUBuffer(device, part.vertices)
 		if part.indices  != nil do sdl.ReleaseGPUBuffer(device, part.indices)
 
-		if part.texture != nil {
-			if _, seen := released[part.texture]; !seen {
-				sdl.ReleaseGPUTexture(device, part.texture)
-				released[part.texture] = true
+		if base := part.material.textures.base; base != nil {
+			if _, seen := released[base]; !seen {
+				sdl.ReleaseGPUTexture(device, base)
+				released[base] = true
 			}
 		}
 
 		part.vertices = nil
 		part.indices  = nil
-		part.texture  = nil
+		part.material.textures.base = nil
 	}
 
 	delete(model.parts)

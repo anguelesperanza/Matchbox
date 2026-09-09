@@ -915,7 +915,35 @@ Answered once, and not re-litigated per phase.
 
 ## 7.7 P3's sampler count, and the wrong premise under it
 
-**Open. Recommended to fix before P4.**
+**Resolved by P3b.** `cascade_maps[8]`/`cube_maps[6]` are now one
+`Texture2DArray` apiece (`mesh.frag.hlsl`, `t6`/`t7`), each layer rendered
+into via `GPUDepthStencilTargetInfo.layer` rather than via a texture of its
+own (`shadow_cascaded.odin`, `shadow_cube.odin`) -- the mesh fragment shader
+is at **8** sampled textures/samplers, `t0`-`t7`, with the light
+`StructuredBuffer` following at `t8`. `render_test.odin` pins the actual
+value `init.odin` passes `CreateGPUShader` under Vulkan's floor of 16.
+
+One correction to this section's own account, found while building the fix
+rather than assumed going in: **`cube_maps[6]` became a `Texture2DArray`, not
+a `TextureCube`.** This section suggested either was available with the array
+"or" framing above. A real depth-format `TextureCube` may well work -- SDL_GPU
+does have `GPUTextureType.CUBE` and nothing in the API forbids
+`{.DEPTH_STENCIL_TARGET, .SAMPLER}` on one -- but there is no GPU in this
+environment to confirm any backend actually creates one, and the array
+sidesteps the question while collapsing the sampler count exactly as much:
+`shadow_cube_face_index` already resolves a direction to a face number, so
+indexing a `Texture2DArray` by it costs nothing but the hardware
+seam-blending a real cube texture would have bought back. Revisit if that
+seam ever turns out to matter more than it did when this was first written.
+
+The two caveats below held up: the layer field is real and behaves as
+documented in every backend `dxc`/SDL_GPU validation could exercise (compiling
+successfully is not the same as rendering, and no frame was rendered to
+confirm it), and the six render passes per cube caster are unchanged -- only
+the sampling side collapsed.
+
+<details>
+<summary>Original write-up, kept for the record</summary>
 
 P3 ships a mesh fragment shader with **20 sampled textures and 20 samplers**
 (`t0`-`t19`/`s0`-`s19`, with the light `StructuredBuffer` pushed out to `t20`):
@@ -957,6 +985,8 @@ weak" are different claims, and only the second one is true. And rendering
 each cube face into a real cube texture still needs the six passes it needs
 now; what changes is how the result is *sampled*, which is where the sampler
 budget is actually spent.
+
+</details>
 
 ---
 

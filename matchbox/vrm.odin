@@ -22,10 +22,17 @@ package matchbox
 
 	What is deliberately not here: blend shapes, spring bone physics, MToon
 	materials, node constraints, and `meta`. See `vrm.md`'s "Not in this
-	document, and why" for each -- the short version is that spring bones and
-	MToon are out of Matchbox's rendering-and-input scope per `refactor.md`,
-	and the rest are blocked on subsystems (morph targets) this package does
-	not have yet.
+	document, and why" for each.
+
+	**The reason for two of those has changed, and the answer has not.** Spring
+	bones and MToon used to be ruled out as outside Matchbox's rendering-and-
+	input scope; that narrowing was reversed on 2026-09-09 (CLAUDE.md's own
+	"Scope" section), so neither is out of scope any more. Both are simply not
+	built. MToon in particular now has an obvious shape if it is ever wanted --
+	a `Shading_Model` value and one `.hlsli` under `shaders/brdf`, the same
+	five places every other model costs (`shading.odin`) -- and spring bones
+	want the physics this package still does not have. "Not in scope" became
+	"not written", which is a weaker claim and the honest one.
 */
 
 import "core:encoding/json"

@@ -3,6 +3,33 @@
 House style. Follow it for new code and when touching old code; `refactor.md`
 tracks bringing the rest of the package into line.
 
+## Scope: a complete framework, not a rendering layer
+
+Matchbox covers the parts of building a game -- and of building software
+around one -- rather than rendering and input alone. Audio, physics, an event
+system and whatever else a game actually needs belong here, as first-class
+parts of the package, not as separate libraries a game is left to bolt on.
+
+**This reverses an earlier narrowing, deliberately.** Matchbox began as an
+all-encompassing framework, was cut back to rendering and input on the
+reasoning that everything else could arrive as its own package, and is now
+widened again because those packages did not materialise and the split cost
+more than it bought: a game still needed sound, so `sound.odin` sat in the
+package anyway contradicting the stated scope, and `utility.odin` became an
+explicit "holding pen" for helpers that were useful and had nowhere to live.
+Both of those stop being anomalies under this rule. `refactor.md`'s own scope
+section has the full history.
+
+**What it does not license.** A wider scope is about *what* may live here, not
+*how* it is built. Everything else in this file still governs: no callbacks,
+`mbi` as the only global, configuration as defaulted structs rather than loose
+constants, comments that explain why. A subsystem that arrives ignoring those
+is a subsystem to send back, whatever its subject. And breadth is not an
+invitation to speculative work -- a thing belongs here when a game needs it,
+not because a complete framework would plausibly have one.
+
+The audio API is the first of these to land, merging in from separate work.
+
 ## Naming
 
 - **Procedures are `snake_case`** -- `draw_sprite`, `update_animation`,

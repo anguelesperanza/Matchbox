@@ -198,6 +198,22 @@ changed rather than five. Anything that changes attenuation is the same.
   deletes the awkward line. **This is a deliberate look change to
   `blinn_phong`, and the first one this rework makes.**
 
+**Known cost, accepted when P2b landed: `UNLIT` pays for the whole loop.**
+`shade_lights` calls `sample_light` -- including its shadow lookup -- once per
+light before dispatching into a model that, for `UNLIT`, throws every one of
+them away. P0's `brdf_eval_unlit` did none of that. It bites in two places: a
+material that chose `Shading_Model.UNLIT` inside a lit scene, and *every*
+material when `Lighting_Settings.enabled` is false while lights are still set
+-- which is meant to be the cheap path.
+
+Left alone deliberately, for two reasons. Special-casing `UNLIT` inside
+`shade_lights` reopens the exact seam this phase closed, and the
+seam-preserving alternative -- a per-model "does this integrate lights"
+declaration the loop consults -- is a fifth place to touch, bought for a cost
+nobody in this environment can measure. There is no GPU capture here, so
+"optimize it" would mean guessing, which §8 rules out. Revisit when it can be
+measured, or when P6's deferred pipeline restructures this loop anyway.
+
 ---
 
 ## 3. Architecture
@@ -675,18 +691,45 @@ change. This is one worker, and it blocks the rest of P2: every model below is
 written against the new contract, so writing them first would mean writing
 four light loops that then get deleted.
 
-Then one worker per model, each writing one `.hlsli`, two enum-adjacent
-one-line dispatcher edits, one test. They do not share files beyond those
-edits.
+**Third, the models themselves -- and they are not as parallel as they look.**
+`pbr_metallic`, `pbr_specgloss`, `toon` and `subsurface` each want their own
+`.hlsli`, but all four also edit `shading.odin`'s enum, `contract.hlsli`'s
+defines, and both switches in `lighting_core.hlsli`. Four workers on those
+same three shared files is four conflicts, not four times the speed. One
+worker takes all four; the formulaic part is the part that would have been
+parallel anyway.
 
 - `pbr_metallic` (Cook-Torrance GGX + Smith + Schlick)
 - `pbr_specgloss`
 - `toon`
 - `subsurface`
-- `unlit`
-- `model_load.odin` reads the full glTF material (metallic-roughness factors
-  and textures, normal, occlusion, emissive) -- a separate worker; it touches
-  the loader and no shader.
+
+Driven by `Material`'s existing scalar factors, which P0 already added in
+full. **Textures are a separate job after it** -- see below -- so this one
+needs no loader change, no new texture bindings, and no vertex-format change,
+which is what keeps it to one worker and one seam.
+
+**Fourth, and genuinely separate: the loader and the material textures.**
+`model_load.odin` reads the full glTF material -- metallic-roughness factors
+and textures, normal, occlusion, emissive -- and the renderer binds them.
+Disjoint from the models above in everything but timing.
+
+**It carries a problem worth naming before it starts: there are no tangents.**
+`Vertex3D` is position, normal, uv and nothing else, and nothing in
+`model_load.odin` reads glTF's `TANGENT` attribute. A tangent-space normal map
+cannot be applied without a basis to apply it in. Three ways out, and the
+choice is a real one rather than an obvious one:
+
+- read `TANGENT` when a file has it and generate it when it does not, which
+  means a fourth vertex attribute, a wider `Vertex3D`, and a change to every
+  pipeline's vertex layout;
+- derive the basis in the fragment shader from screen-space derivatives of
+  position and uv, which costs no vertex memory and is standard practice, but
+  is lower quality on low-poly geometry -- which is what this renderer mostly
+  draws;
+- read the other maps now and leave normal mapping to its own phase.
+
+Decide it when that job is briefed, not inside it.
 
 **Gate:** white-furnace test for both PBR models (uniform environment in,
 energy-conserving out, no energy gain at any roughness), asserted against an

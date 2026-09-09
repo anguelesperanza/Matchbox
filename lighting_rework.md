@@ -443,6 +443,62 @@ you picked". Under HDR that mix moves into linear space before tone mapping,
 and a fog colour carried over from PsxGame will not land on the same pixel
 value. See §6.
 
+### 3.7.1 What P1 left open, found reviewing it
+
+**Textures are never decoded to linear, and that now shows.** Every texture in
+this package is uploaded as `R8G8B8A8_UNORM` (`upload.odin`), so a sampled
+texel is the gamma-encoded value the artist authored, and every shader treats
+it as if it were linear light.
+
+That was already true before P1 and was half-wrong-but-consistent: albedo went
+in encoded, lighting multiplied it, and `pow(1/2.2)` went on at the end. P1
+changes the *other* paths, and there it is a visible regression rather than a
+wash:
+
+- `skybox_cubemap.frag` / `skybox_panorama.frag` sample a texture and return it
+  straight. Before P1 that value went to the swapchain untouched -- encoded in,
+  encoded out, a correct round trip. Now it lands in the HDR target and the
+  resolve applies `pow(1/2.2)` on top, so **the sky is double-encoded and comes
+  out washed out.**
+- The same applies to `mesh_line.frag` (wireframes, `draw_grid`) and to any
+  material choosing `Shading_Model.UNLIT`, which is also what every material
+  becomes when `Lighting_Settings.enabled` is false.
+
+**This blocks P2, not just the picture.** A metallic-roughness BRDF operating
+on non-linear albedo is not physically based in any meaningful sense -- the
+whole point of the model is that the arithmetic happens in linear light. So
+the fix belongs *before* the PBR models land, not after.
+
+The fix is sRGB-aware sampling: upload colour textures as
+`R8G8B8A8_UNORM_SRGB` so the hardware decodes on sample, leaving data textures
+(metallic-roughness, normal maps, occlusion -- all of which arrive in P2)
+on plain `UNORM`, because those carry numbers rather than colours and decoding
+them would be actively wrong. That means `upload.odin` needs to be told which
+kind it is being handed rather than assuming one format for everything.
+
+**`exposure` has no safe zero, and the same trap is waiting for every field
+added after it.** P1 added `exposure: f32` to `Lighting_Settings`, whose zero
+value multiplies the scene to black. Nine examples built the struct as a
+partial composite literal and had to be edited to say `exposure = 1`; any game
+doing the same goes black on upgrade, with nothing to point at.
+
+P1 argued for keeping it, on the grounds that auto-defaulting a zero would mean
+the value read back out of a struct is not the value that ran. That is a real
+concern but the wrong trade, and this package has already made the opposite
+call for the identical problem: `Body.tint` (`types.odin`) treats an all-zero
+tint as "as it was painted" rather than "transparent black", and its comment
+gives the reason -- *a struct that has not been filled in has to draw the
+picture and not a hole*. Exposure is stronger still, because zero is never a
+legitimate value there, so a sentinel cannot collide with one the way tint's
+had to reason about.
+
+The deeper point is that this recurs. Every phase adds fields to
+`Lighting_Settings`, `Material` and `Shadow_Settings`, and every one of them
+silently changes what an existing partial literal means. Either those structs
+get a documented "zero means the default" rule applied consistently, or the
+API stops encouraging partial literals -- but the current position, one field
+with a landmine and a comment warning about it, is the one that will not hold.
+
 ### 3.8 File layout
 
 Flat, in `matchbox/` -- Matchbox is one package and a subdirectory would break
@@ -568,7 +624,13 @@ each tonemap curve, asserted numerically. Documented before/after for
 
 ### P2 -- Shading models (parallelizable)
 
-**First, before any new model: land §2.1's split contract.** `sample_light`,
+**First, before anything else: §3.7.1's sRGB decode.** A metallic-roughness
+BRDF on gamma-encoded albedo is not physically based, so this is a
+prerequisite for the models below rather than a tidy-up after them. It also
+un-washes the skybox, the grid and every `UNLIT` material, which P1 left
+double-encoded.
+
+**Second, before any new model: land §2.1's split contract.** `sample_light`,
 `Light_Sample`, `Radiance`, the shared loop in `lighting_core.hlsli`, and
 `blinn_phong` rewritten into `brdf_light_blinn_phong` + `brdf_resolve_blinn_phong`
 -- with specular becoming coloured, this rework's first deliberate look

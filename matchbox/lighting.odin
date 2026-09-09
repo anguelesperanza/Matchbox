@@ -59,6 +59,23 @@ Ambient :: struct {
 	Fog is what makes a dark scene readable rather than a black one with
 	objects popping out of it, and it is most of the mood in PsxGame -- there
 	it is a dark blue from 3 units to 12.
+
+	**`color` is a linear value now, not a display one.** Before P1, this was
+	mixed into `shade_surface`'s output *after* that function's own gamma
+	encode -- see `shade_surface`'s doc comment in `lighting_core.hlsli` for
+	why that was the one place gamma ran per shading model rather than once
+	for the whole pass. That made `color` mean exactly what a game picked: it
+	was the last thing written before the pixel left the shader. P1 deletes
+	that per-model encode entirely -- the whole 3D pass writes linear light to
+	an HDR target now, and gamma happens once, in the tonemap resolve
+	(`tonemap.odin`), after fog is mixed in. So `color` is mixed alongside
+	every light's own linear colour and then run through whatever curve
+	`Lighting_Settings.tonemap` is, the same as everything else in the scene --
+	it is no longer the exact pixel value a game will see, the same way a
+	light's own `color` never was. A game carrying a fog colour over from
+	before this phase should expect it to look different, not just gamma-
+	shifted: see `Lighting_Settings.tonemap`'s own doc comment for why a
+	tonemap curve changes more than a straight gamma decode would.
 */
 Fog :: struct {
 	enabled:    bool,
@@ -67,14 +84,46 @@ Fog :: struct {
 }
 
 /*
+	Which curve the tonemap resolve (`tonemap.odin`) runs after exposure and
+	before the final gamma encode, turning the 3D pass's unbounded linear
+	light into the [0, 1] range a display expects. `NONE` is not "no curve
+	ran" -- it still clamps to [0, 1] and still gets the same encode every
+	other value does, which is what makes it useful as a baseline: comparing
+	`NONE` against `REINHARD` isolates exactly what the curve itself changed,
+	because the encode on both sides is identical. See `tonemap.odin`'s own
+	top comment for the arithmetic each one runs, mirrored statement for
+	statement between there (tested, `tonemap_test.odin`) and
+	`shaders/tonemap.frag.hlsl` (not directly testable -- there is no GPU
+	capture tooling here, so the shader is trusted to match its own CPU-side
+	mirror rather than verified rendering).
+
+	`REINHARD` is the simplest compression curve that exists (`c / (1 + c)`)
+	and the cheapest way to stop a bright light from clipping to a flat white
+	disc. `ACES` is Narkowicz's fitted approximation to the ACES filmic
+	reference curve -- the three-line version nearly every engine that calls
+	its tonemap "ACES" actually means, not the real RRT+ODT, which is a 3D
+	LUT. `AGX` is a minimal approximation of Troy Sobotka's AgX (the inset
+	matrix, the log2 encode, the polynomial contrast fit) -- see
+	`tonemap_agx`'s own doc comment in `tonemap.odin` for what is deliberately
+	left out and why.
+*/
+Tonemap :: enum {
+	NONE,
+	REINHARD,
+	ACES,
+	AGX,
+}
+
+/*
 	One struct, set explicitly, replacing the "count of lights implies the
 	mode" arrangement this file's own top comment describes.
 
 		mb.set_lighting({
-			enabled = true,
-			ambient = {color = {0.35, 0.35, 0.55, 1}},
-			fog     = {enabled = true, color = FOG_COLOR, start = 3, end = 12},
-			shadows = mb.SHADOW_DEFAULTS,
+			enabled  = true,
+			ambient  = {color = {0.35, 0.35, 0.55, 1}},
+			fog      = {enabled = true, color = FOG_COLOR, start = 3, end = 12},
+			shadows  = mb.SHADOW_DEFAULTS,
+			exposure = 1,
 		})
 
 	Every call replaces the whole struct rather than patching one field, the
@@ -88,12 +137,50 @@ Lighting_Settings :: struct {
 	shadows:  Shadow_Settings,      // technique + its own parameters
 	ambient:  Ambient,
 	fog:      Fog,
+
+	/*
+		Multiplies every linear colour the 3D pass produces before the
+		tonemap curve (`tonemap` below) runs -- see `resolve_tonemap`
+		(tonemap.odin). 1 leaves the numbers alone; above 1 brightens a scene
+		that reads too dark under whichever curve is running, below 1 darkens
+		one that clips too much of its own highlights.
+
+		**Has no sensible zero, unlike every other field here.** `Ambient{}`
+		is legitimately no ambient light, `Fog{}` is legitimately no fog, and
+		`Lighting_Settings{}` is meant to be safe to build as a composite
+		literal naming only the fields a caller cares about -- every example
+		in this repo does exactly that. `exposure` cannot follow the same
+		pattern: its zero multiplies every colour to black, which is never a
+		sensible scene and is indistinguishable from a forgotten field until
+		the picture is on screen. A literal that omits it --
+		`{enabled = true, ambient = {...}}`, the shape every example used
+		before this field existed -- now renders solid black. Either start
+		from `LIGHTING_DEFAULTS` and override only what changes
+		(`settings := mb.LIGHTING_DEFAULTS; settings.fog = ...`) or set
+		`exposure = 1` explicitly; both are one line, and the alternative
+		(defaulting a missing field to 1 automatically) would mean the value
+		read back out of a `Lighting_Settings` a caller built is not always
+		the value that actually ran -- exactly the emergent-state problem
+		this file's own top comment exists to remove.
+	*/
+	exposure: f32,
+	tonemap:  Tonemap,
 }
 
-// A lit scene with shadows and fog both off -- the ordinary starting point.
-// `BUTTON_STYLE` (ui.odin) is the precedent CLAUDE.md names for a defaulted
-// struct constant standing in for a package-level variable.
-LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD}
+/*
+	A lit scene with shadows and fog both off, full exposure and no tonemap
+	curve -- the ordinary starting point. `BUTTON_STYLE` (ui.odin) is the
+	precedent CLAUDE.md names for a defaulted struct constant standing in for
+	a package-level variable.
+
+	`tonemap = .NONE` rather than a curve chosen to look nicer is deliberate:
+	`lighting_rework.md` section 7.4 already released the old picture, so
+	there is no look here to preserve, but P1's own job is the resolve
+	machinery, not picking a house curve -- a curve is one field on this
+	struct exactly so a game (or a later phase) can choose one without this
+	default having to be relitigated.
+*/
+LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD, exposure = 1, tonemap = .NONE}
 
 /*
 	Applies `settings` to the scene: whether lighting runs, whether shadows do

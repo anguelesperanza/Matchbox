@@ -15,23 +15,24 @@ package lighting_example
 	  - **walk backwards.** The fog is dark blue from 3 units to 12, so the
 	    world does not end at a black wall, it fades. Turn it off with F and
 	    watch how much worse an unlit scene reads without it
-	  - **press L.** That clears the lights, which is not the same as having
-	    lights that are off: with none set at all, Matchbox falls back to the
-	    fixed shading every 3D draw used before stage 5, so the scene goes
-	    flat-lit rather than black. Every example written before this one is
-	    still running down that path
+	  - **press L.** That turns `Lighting_Settings.enabled` off, which is a
+	    scene-level statement now rather than an accident of how many lights
+	    happen to be set -- the fire and the moon are still set the whole
+	    time, they are just not being run through any BRDF while this is off.
+	    Every part still draws, in its own material's base colour, because
+	    that is what `Shading_Model.UNLIT` (which this forces every material
+	    through while lighting is off) means
 	  - **watch the specular highlight on the stove.** It moves, because the
 	    light does. The flicker offsets the position by a few centimetres on
 	    two different sine waves and the highlight follows it
-	  - **press K** for a second, cold, directional light -- a moon. Four are
-	    allowed; both games use one
+	  - **press K** for a second, cold, directional light -- a moon
 	  - **press H** for an actual cast shadow -- the moon's, since only a
 	    directional light can have one here (see `shadow.odin`). The stove,
 	    pot, cube and the ring of cubes further out all block it, each with a
 	    dark patch on the ground stretching away from the moon's own
 	    direction. Needs K on as well: marking the moon `casts_shadow` and
-	    turning shadows on are two separate switches, and neither alone does
-	    anything
+	    turning `Lighting_Settings.shadows.enabled` on are two separate
+	    switches, and neither alone does anything
 	  - **press T** for a flashlight -- a spotlight glued to the camera, aimed
 	    wherever it looks. Point straight at the stove or pot and it lights
 	    up; turn away and it goes back to whatever the fire and ambient alone
@@ -112,14 +113,26 @@ main :: proc() {
 		eye_offset = {0, 1.8, 0},
 	)
 
-	lights_on   := true
-	fog_on      := true
-	moon_on     := false
-	shadows_on  := false
-	torch_on    := false
+	moon_on  := false
+	torch_on := false
 
-	mb.set_ambient({0.35, 0.35, 0.55, 1})
-	mb.set_fog(FOG_COLOR, FOG_START, FOG_END)
+	/*
+		One value held for the whole run and re-submitted whenever a toggle
+		changes it -- `set_lighting` replaces the entire struct each call, the
+		same way `set_lights` replaces the entire light list, so there is no
+		"just flip the fog bit" call to make. `shadows` carries `SHADOW_DEFAULTS`'
+		numbers from the start, with `enabled` forced off until H turns it on,
+		so turning shadows on later does not also mean inventing a resolution
+		and an extent on the spot.
+	*/
+	settings := mb.Lighting_Settings{
+		enabled = true,
+		ambient = {color = {0.35, 0.35, 0.55, 1}},
+		fog     = {enabled = true, color = FOG_COLOR, start = FOG_START, end = FOG_END},
+		shadows = mb.SHADOW_DEFAULTS,
+	}
+	settings.shadows.enabled = false
+	mb.set_lighting(settings)
 
 	mb.set_cursor_locked(true)
 
@@ -133,14 +146,18 @@ main :: proc() {
 		}
 		if !mb.is_cursor_locked() && mb.is_mouse_pressed(.LEFT) do mb.set_cursor_locked(true)
 
-		if mb.is_key_pressed(.L) do lights_on = !lights_on
-		if mb.is_key_pressed(.K) do moon_on   = !moon_on
-		if mb.is_key_pressed(.T) do torch_on  = !torch_on
+		settings_changed := false
+
+		if mb.is_key_pressed(.L) {
+			settings.enabled = !settings.enabled
+			settings_changed = true
+		}
+		if mb.is_key_pressed(.K) do moon_on  = !moon_on
+		if mb.is_key_pressed(.T) do torch_on = !torch_on
 
 		if mb.is_key_pressed(.F) {
-			fog_on = !fog_on
-			if fog_on do mb.set_fog(FOG_COLOR, FOG_START, FOG_END)
-			else      do mb.disable_fog()
+			settings.fog.enabled = !settings.fog.enabled
+			settings_changed = true
 		}
 
 		// Only the moon casts one -- see create_directional_light's
@@ -148,53 +165,51 @@ main :: proc() {
 		// on. Left as two independent switches rather than one, the same
 		// "opt in twice" shape shadow.odin's own doc comment explains.
 		if mb.is_key_pressed(.H) {
-			shadows_on = !shadows_on
-			if shadows_on do mb.enable_shadows()
-			else          do mb.disable_shadows()
+			settings.shadows.enabled = !settings.shadows.enabled
+			settings_changed = true
 		}
+
+		if settings_changed do mb.set_lighting(settings)
 
 		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
 		}
 
-		if lights_on {
-			// PsxGame's flicker, unchanged. Two sines that do not divide into
-			// each other, so the fire never repeats on a beat you can hear.
-			flicker := 1.0 + math.sin(time * 1.0) * 0.1 + math.sin(time * 0.5) * 0.05
+		// PsxGame's flicker, unchanged. Two sines that do not divide into
+		// each other, so the fire never repeats on a beat you can hear.
+		flicker := 1.0 + math.sin(time * 1.0) * 0.1 + math.sin(time * 0.5) * 0.05
 
-			fire := mb.create_point_light(
-				{math.sin(time * 8.0) * 0.05, 1.0, math.cos(time * 6.0) * 0.05},
-				{
-					clamp(EMBER.r * flicker, 0, 1),
-					clamp(EMBER.g * flicker, 0, 0.31), // green capped much lower,
-					0,                                 // or it drifts to yellow
-					1,
-				})
+		fire := mb.create_point_light(
+			{math.sin(time * 8.0) * 0.05, 1.0, math.cos(time * 6.0) * 0.05},
+			{
+				clamp(EMBER.r * flicker, 0, 1),
+				clamp(EMBER.g * flicker, 0, 0.31), // green capped much lower,
+				0,                                 // or it drifts to yellow
+				1,
+			})
 
-			// Fire is always on here; the moon and torch are each an extra
-			// slot, filled in only when their own key has turned them on.
-			slots: [4]mb.Light
-			count := 0
-			slots[count] = fire; count += 1
+		// Fire is always in the scene; the moon and torch are each an extra
+		// slot, filled in only when their own key has turned them on. Set
+		// every frame regardless of `settings.enabled` -- the light list and
+		// whether lighting runs are independent statements now, see this
+		// file's own top comment on L.
+		slots: [3]mb.Light
+		count := 0
+		slots[count] = fire; count += 1
 
-			if moon_on {
-				slots[count] = mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1}, casts_shadow = true)
-				count += 1
-			}
-			if torch_on {
-				slots[count] = mb.create_spot_light(rig.camera.position, mb.camera3d_forward(rig.camera), mb.WHITE, 15, 25, casts_shadow = true)
-				count += 1
-			}
-
-			mb.set_lights(slots[:count])
-		} else {
-			// Not four disabled lights -- none at all, which is what puts the
-			// fallback shading back.
-			mb.clear_lights()
+		if moon_on {
+			slots[count] = mb.create_directional_light({-0.4, -1, -0.3}, {0.18, 0.20, 0.40, 1}, casts_shadow = true)
+			count += 1
+		}
+		if torch_on {
+			slots[count] = mb.create_spot_light(rig.camera.position, mb.camera3d_forward(rig.camera), mb.WHITE, 15, 25, casts_shadow = true)
+			count += 1
 		}
 
+		mb.set_lights(slots[:count])
+
 		mb.begin_drawing()
-		mb.clear_background(FOG_COLOR if fog_on else {0.02, 0.02, 0.05, 1})
+		mb.clear_background(FOG_COLOR if settings.fog.enabled else {0.02, 0.02, 0.05, 1})
 
 		/*
 			Whatever should cast a shadow, drawn once per active caster
@@ -251,10 +266,10 @@ main :: proc() {
 		font := &mb.mbi.font
 		mb.draw_text(font, "L lights, K moon, F fog, H shadows, T torch, WASD walk, ESC pointer", 20, 40, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v   torch %v",
-			"on" if lights_on else "off (fallback shading)",
+			"on" if settings.enabled else "off (unlit)",
 			"on" if moon_on else "off",
-			"on" if fog_on else "off",
-			"on" if shadows_on else "off",
+			"on" if settings.fog.enabled else "off",
+			"on" if settings.shadows.enabled else "off",
 			"on" if torch_on else "off"), 20, 70, mb.WHITE)
 
 		cx := f32(mb.mbi.width) * 0.5

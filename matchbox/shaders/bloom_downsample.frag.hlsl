@@ -20,7 +20,14 @@
 cbuffer FragData : register(b0, space3)
 {
     float2 texel; // one texel of the source level, in uv -- not the destination's
-    float2 _pad;
+
+    // Rides along unread. bloom_upsample.frag.hlsl is the pass that needs it,
+    // and both share matchbox.Bloom_Filter_Frag_Data rather than having a
+    // struct apiece for one float -- the same "a field a given consumer does
+    // not use rides along" shape Light_Uniform.cone already has for a light
+    // that is not a spot.
+    float scatter;
+    float _pad;
 };
 
 Texture2D<float4> tex : register(t0, space2);

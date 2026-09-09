@@ -213,13 +213,45 @@ color_grade_apply :: proc(color: [3]f32, grade: Color_Grade) -> [3]f32 {
 	for i in 0 ..< 3 {
 		c[i] = c[i] * (1 + grade.gain[i]) + grade.lift[i]
 
-		// max() on the base because lift can push a channel negative and a
-		// negative to a fractional power is undefined; max() on the divisor
-		// because a gamma delta at or below -1 would divide by zero or turn
-		// the curve inside out. Both mirror the shader's own guards.
-		c[i] = math.pow(max(c[i], 0), 1.0 / max(1 + grade.gamma[i], 1e-4))
+		// Lift can push a channel negative and a negative to a fractional
+		// power is undefined. Applied whether or not the pow below runs, so
+		// that skipping it changes nothing but the pow.
+		c[i] = max(c[i], 0)
+	}
 
-		c[i] = (c[i] - 0.5) * (1 + grade.contrast) + 0.5
+	/*
+		**Skipped entirely at the zero value, and that is not an
+		optimization.** `pow(x, 1)` is not exactly `x` -- it is
+		`exp2(log2(x))` on both sides of this mirror, and 0.001 comes back as
+		0.0009999871. Small enough never to be seen, but `Color_Grade`'s whole
+		design rests on the claim that its zero value is an *exact* no-op, and
+		a claim that is only nearly true is one nobody can test. The branch is
+		on a uniform, so it costs nothing per pixel either.
+
+		max() on the divisor because a gamma delta at or below -1 would divide
+		by zero or turn the curve inside out. Mirrors the shader's own guard.
+	*/
+	no_gamma := [3]f32{0, 0, 0}
+	if grade.gamma != no_gamma {
+		for i in 0 ..< 3 {
+			c[i] = math.pow(c[i], 1.0 / max(1 + grade.gamma[i], 1e-4))
+		}
+	}
+
+	/*
+		**Written as a delta rather than as `(c - 0.5) * (1 + contrast) + 0.5`,
+		which is the same arithmetic and is not an identity at zero.** Going
+		out to -0.499 and back loses the low bits of a small channel: 0.001
+		comes back as 0.0009999871. The form below adds exactly zero when
+		`contrast` is zero, so the guarantee `Color_Grade` makes about its own
+		zero value holds by construction rather than to within a tolerance --
+		and it is one multiply-add either way, so it costs nothing to prefer.
+
+		Algebraically identical: c + (c - 0.5)k = c(1 + k) - 0.5k, and
+		(c - 0.5)(1 + k) + 0.5 = c(1 + k) - 0.5(1 + k) + 0.5 = c(1 + k) - 0.5k.
+	*/
+	for i in 0 ..< 3 {
+		c[i] = c[i] + (c[i] - 0.5) * grade.contrast
 	}
 
 	// Rec. 709, matching the primaries the rest of this package assumes --
@@ -227,9 +259,10 @@ color_grade_apply :: proc(color: [3]f32, grade: Color_Grade) -> [3]f32 {
 	// channels would desaturate blue and green the wrong way round.
 	luma := 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
 
-	saturation := 1 + grade.saturation
+	// The same delta form, for the same reason -- `luma + (c - luma) * (1 + s)`
+	// is the usual spelling and cancels the same way at s = 0.
 	for i in 0 ..< 3 {
-		c[i] = luma + (c[i] - luma) * saturation
+		c[i] = c[i] + (c[i] - luma) * grade.saturation
 	}
 
 	return c

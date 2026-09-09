@@ -183,31 +183,6 @@ create_builtin_shader :: proc(
 @(private)
 MAX_COLOR_TARGETS :: 4
 
-/*
-	How a pipeline's colour target combines what a fragment produces with what
-	is already there.
-
-	`ALPHA` is the source-alpha blend every draw in this package used before
-	there was anything else, and is still what all but four pipelines want.
-	`NONE` writes the fragment straight through -- the G-buffer fill needs it,
-	because blending two unrelated materials' normals or roughness together
-	where their triangles anti-alias against each other is not a value a
-	lighting pass could make sense of. `ADDITIVE` sums colour and overwrites
-	alpha, which is what the bloom chain's upsample is built on: each level
-	adds itself into the larger one above it (bloom_upsample.frag.hlsl).
-
-	An enum rather than the `color_blend: bool` this replaced, because a third
-	answer arrived and a bool with three meanings is not a bool. The two
-	G-buffer callers that said `color_blend = false` say `blend = .NONE` now
-	and are otherwise unchanged.
-*/
-@(private)
-Color_Blend :: enum {
-	ALPHA,
-	NONE,
-	ADDITIVE,
-}
-
 // Which geometry a pipeline reads: the shared quad, or a model's own vertices.
 @(private)
 Vertex_Layout :: enum {
@@ -310,11 +285,24 @@ create_pipeline :: proc(
 	*/
 	color_formats: []sdl.GPUTextureFormat = nil,
 
-	// How the colour target(s) built here combine with what is already in
-	// them -- see `Color_Blend`. `.ALPHA` is what every pipeline in this
-	// package wanted before the G-buffer and the bloom chain each needed
-	// something else.
-	blend: Color_Blend = .ALPHA,
+	/*
+		Whether the colour target(s) built here blend -- true (the existing
+		behaviour, for every pipeline but the G-buffer fill) or false: a fill
+		pass writes a `Surface` field's own raw value into each target, and
+		blending two unrelated materials' normals or roughness together where
+		two triangles' edges anti-alias against each other is not a colour a
+		lighting pass could ever make sense of, unlike alpha-blending two
+		colours which is exactly what every 2D/3D draw before that pipeline
+		wanted.
+
+		Still one source-alpha blend and not a mode enum, after P7a
+		considered making it one: the bloom chain's upsample looked like it
+		needed an additive mode, and it turned out to want this exact blend
+		with `scatter` written into its own alpha instead -- which is a
+		better answer for a reason that has nothing to do with blend state.
+		See bloom_upsample.frag.hlsl.
+	*/
+	color_blend: bool = true,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -377,18 +365,10 @@ create_pipeline :: proc(
 	}
 
 	blend_state := sdl.GPUColorTargetBlendState{
-		enable_blend            = blend != .NONE,
+		enable_blend            = color_blend,
 		color_blend_op          = .ADD,
-
-		// ONE rather than SRC_ALPHA for the additive case, which is the whole
-		// difference between the two enabled modes: the source contributes in
-		// full instead of being weighted by an alpha nothing in the bloom
-		// chain writes. Alpha itself is ONE/ZERO in both, so the destination's
-		// alpha is the source's either way -- nothing downstream of either
-		// mode reads it.
-		src_color_blendfactor   = .ONE if blend == .ADDITIVE else .SRC_ALPHA,
-		dst_color_blendfactor   = .ONE if blend == .ADDITIVE else .ONE_MINUS_SRC_ALPHA,
-
+		src_color_blendfactor   = .SRC_ALPHA,
+		dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
 		alpha_blend_op          = .ADD,
 		src_alpha_blendfactor   = .ONE,
 		dst_alpha_blendfactor   = .ZERO,
@@ -802,9 +782,10 @@ init :: proc(title: string, width: i32, height: i32) {
 		side: these draw after that pass has closed but still never touch the
 		swapchain.
 
-		The upsample is the one additive pipeline in this package. Everything
-		else here, including the other two bloom passes, overwrites or
-		alpha-blends.
+		All three take the ordinary source-alpha blend, including the
+		upsample: it writes `scatter` into its own alpha and lets that blend
+		do the mixing, rather than needing a blend mode of its own. See
+		bloom_upsample.frag.hlsl for why mixing and not adding.
 	*/
 	mbi.renderer.pipelines.bloom_prefilter = create_pipeline(
 		mbi.renderer.shaders.bloom_prefilter,
@@ -817,7 +798,6 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.pipelines.bloom_upsample = create_pipeline(
 		mbi.renderer.shaders.bloom_upsample,
 		color_format = mbi.renderer.lighting.targets.format,
-		blend        = .ADDITIVE,
 	)
 
 	/*
@@ -882,7 +862,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull           = .BACK,
 		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
 		color_formats  = gbuffer_formats[:],
-		blend          = .NONE, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
+		color_blend    = false, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
 	)
 
 	mbi.renderer.pipelines.gbuffer_skinned = create_pipeline(
@@ -893,7 +873,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull           = .BACK,
 		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
 		color_formats  = gbuffer_formats[:],
-		blend          = .NONE,
+		color_blend    = false,
 	)
 
 	// Built the same shape skybox_panorama/skybox_cubemap already are (just

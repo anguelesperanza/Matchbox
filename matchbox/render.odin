@@ -190,7 +190,7 @@ Pipelines :: struct {
 		built against the four G-buffer targets (`color_formats`,
 		`create_pipeline`) and the G-buffer's own depth texture rather than
 		the HDR target and the shared main depth texture, with blending off
-		(`blend = .NONE`) -- see `Material.transparent`'s own doc
+		(`color_blend = false`) -- see `Material.transparent`'s own doc
 		comment (material.odin) for why a G-buffer fill pass cannot blend at
 		all. `deferred_lighting` is the fullscreen resolve, built the same
 		shape `skybox_panorama`/`skybox_cubemap` already are
@@ -228,13 +228,10 @@ Pipelines :: struct {
 		The bloom chain -- all three built against the HDR target's own float
 		format, not the swapchain's, because every level of the chain holds
 		unbounded linear light the same way the scene target does (bloom.odin).
-		Depthless like every other 2D pipeline here.
-
-		`bloom_upsample` is the one pipeline in this package with an additive
-		blend rather than the alpha blend everything else shares
-		(`Color_Blend.ADDITIVE`, create_pipeline) -- see
-		bloom_upsample.frag.hlsl for why adding into the destination *is* the
-		mechanism rather than an optimization of it.
+		Depthless like every other 2D pipeline here, and on the same
+		source-alpha blend -- including the upsample, which writes its own
+		mix weight into alpha rather than needing a blend mode of its own.
+		See bloom_upsample.frag.hlsl.
 	*/
 	bloom_prefilter:  ^sdl.GPUGraphicsPipeline,
 	bloom_downsample: ^sdl.GPUGraphicsPipeline,

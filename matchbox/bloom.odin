@@ -10,24 +10,35 @@ package matchbox
 	**How it is built, and why it is not a blur.** A gaussian wide enough to
 	read as bloom at 1080p is several hundred taps, per pixel, per frame. The
 	way every engine actually does it is a chain of half-resolution images:
-	threshold the scene once, shrink it five times, then walk back up adding
+	threshold the scene once, shrink it five times, then walk back up folding
 	each level into the one above it. Each level's own small kernel covers
-	twice the *screen* distance the level below it did, so the sum of five
-	cheap kernels has the skirt of one enormous one. What it costs is that the
+	twice the *screen* distance the level below it did, so five cheap kernels
+	between them have the skirt of one enormous one. What it costs is that the
 	skirt is a stack of overlapping blurs rather than a real gaussian, which
 	is visible only if you go looking for it.
 
 	The passes, per frame, for `levels` levels:
 
 		prefilter   HDR target -> level 0    (13-tap downsample + the knee)
-		downsample  level i    -> level i+1  (13-tap)              x levels-1
-		upsample    level i+1  -> level i    (3x3 tent, ADDITIVE)  x levels-1
+		downsample  level i    -> level i+1  (13-tap)             x levels-1
+		upsample    level i+1  -> level i    (3x3 tent, mixed)    x levels-1
 
 	so 1 + 2*(levels-1) passes, and level 0 is what the tonemap resolve
 	composites. The kernels themselves are in `shaders/bloom.hlsli`; the
 	weights are mirrored here, as literals, so `post_test.odin` has two
 	independently-typed copies to compare rather than one checked against
 	itself.
+
+	**The way back up mixes rather than adds, and that is the one place this
+	chain differs from the presentations it is taken from.** Both kernels sum
+	to 1, so every level holds the same total light as the level below it;
+	summing them into level 0 would put `levels` copies of the scene's bright
+	light there, which makes a flat bright wall come out brighter from a
+	6-level chain than a 4-level one and leaves `intensity` meaning nothing
+	fixed. `Bloom.scatter` is the mix weight instead, so the total stays at
+	exactly one copy however many levels there are -- `levels` decides how
+	wide, `intensity` decides how strong, and neither moves the other. See
+	`bloom_upsample.frag.hlsl`, which is where the blend that does it lives.
 
 	**Why a texture per level rather than one texture's mip chain.** SDL_GPU
 	will happily render into a chosen mip level (`GPUColorTargetInfo.mip_level`),
@@ -91,10 +102,16 @@ MAX_BLOOM_LEVELS :: 8
 
 	`intensity` is how much of the blurred result is added back on top of the
 	scene, and `levels` is how many times the image is halved -- more levels
-	is a wider, softer skirt, not a stronger one. Both have no sensible zero
-	while `enabled` is true (a bloom that adds nothing, or has no chain, is
-	spelled `enabled = false`), so both take their defaults from
-	`BLOOM_DEFAULTS` when left at zero -- see `bloom_settings_normalized`,
+	is a wider, softer skirt, and genuinely *only* that, which is what the
+	mixing upsample buys (see this file's own top comment). `scatter` is how
+	that fixed amount of light is distributed between the tight levels and
+	the wide ones: 0 is the tightest halo the chain can make, 1 is the widest
+	and softest, and the total added back is the same either way.
+
+	`intensity`, `scatter` and `levels` all have no sensible zero while
+	`enabled` is true -- a bloom that adds nothing, spreads nothing, or has no
+	chain is spelled `enabled = false` -- so all three take their defaults
+	from `BLOOM_DEFAULTS` when left at zero. See `bloom_settings_normalized`,
 	including the one wart that creates.
 */
 Bloom :: struct {
@@ -102,6 +119,7 @@ Bloom :: struct {
 	threshold: f32,
 	knee:      f32,
 	intensity: f32,
+	scatter:   f32,
 	levels:    int,
 }
 
@@ -110,12 +128,16 @@ Bloom :: struct {
 	white spills, it fades in over the half-stop below that, and what comes
 	back is a subtle halo rather than a glow.
 
-	`intensity = 0.05` looks small and is not -- the chain's own kernels
-	preserve total energy, so level 0 holds the *same* light the scene did,
-	spread out. Adding 5% of it back is already a clearly visible halo around
+	`intensity = 0.05` looks small and is not -- the chain preserves total
+	light, so level 0 holds the *same* light that passed the knee, spread
+	out. Adding 5% of it back is already a clearly visible halo around
 	anything bright; 1.0 would be a white screen.
+
+	`scatter = 0.7` leans toward the wider levels, which is the halo most
+	people mean by "bloom". It is the one number here picked by convention
+	rather than derived, since picking it properly needs a frame to look at.
 */
-BLOOM_DEFAULTS :: Bloom{enabled = true, threshold = 1, knee = 0.5, intensity = 0.05, levels = 5}
+BLOOM_DEFAULTS :: Bloom{enabled = true, threshold = 1, knee = 0.5, intensity = 0.05, scatter = 0.7, levels = 5}
 
 /*
 	The chain's own textures -- one per level, each half the width and half the
@@ -142,11 +164,12 @@ Bloom_Targets :: struct {
 	for the rule, and `Bloom` itself for which fields it covers here and which
 	are deliberately taken literally.
 
-	`intensity` gets the treatment and `threshold` does not, which looks
-	inconsistent until you ask what a zero means in each. A zero threshold is
-	"everything blooms", which is a look somebody wants; a zero intensity is
-	"run eleven passes and add nothing", which is what `enabled = false`
-	already says more cheaply and more clearly.
+	`intensity` and `scatter` get the treatment and `threshold` does not,
+	which looks inconsistent until you ask what a zero means in each. A zero
+	threshold is "everything blooms", which is a look somebody wants; a zero
+	intensity is "run eleven passes and add nothing" and a zero scatter is
+	"build ten blurred levels and use none of them", both of which
+	`enabled = false` already says more cheaply and more clearly.
 
 	**The wart, stated rather than found later:** a game fading bloom out by
 	animating `intensity` toward zero snaps back to 0.05 at exactly zero. The
@@ -162,10 +185,24 @@ Bloom_Targets :: struct {
 bloom_settings_normalized :: proc(settings: Bloom) -> Bloom {
 	s := settings
 
+	// A disabled Bloom is left exactly as it came, so `Bloom{}` -- and
+	// therefore `Post_Settings{}` and `LIGHTING_DEFAULTS` -- is a fixed point
+	// of this rule rather than something that grows four numbers nothing will
+	// read. `shadow_settings_normalized` (shadow.odin) opens with the
+	// identical line, for the identical reason.
+	if !s.enabled do return s
+
 	if s.intensity == 0 do s.intensity = BLOOM_DEFAULTS.intensity
+	if s.scatter   == 0 do s.scatter   = BLOOM_DEFAULTS.scatter
 	if s.levels    == 0 do s.levels    = BLOOM_DEFAULTS.levels
 
-	s.levels = clamp(s.levels, 1, MAX_BLOOM_LEVELS)
+	// scatter is a blend weight and nothing outside [0, 1] is one -- past 1
+	// the source-alpha blend it drives would subtract the destination rather
+	// than mix with it, which is a negative bloom level and then a black
+	// halo. Clamped rather than rejected, since a caller reaching for 1.5
+	// means "as wide as it goes".
+	s.scatter = clamp(s.scatter, 0, 1)
+	s.levels  = clamp(s.levels, 1, MAX_BLOOM_LEVELS)
 
 	return s
 }
@@ -496,10 +533,15 @@ bloom_run :: proc() {
 		}
 	}
 
-	// Back up, smallest first, each level adding itself into the one above.
-	// By the time this reaches level 0 it holds the sum of every level.
+	// Back up, smallest first, each level mixing itself into the one above by
+	// `scatter`. By the time this reaches level 0 it holds one copy of the
+	// light that passed the knee, distributed across the levels rather than
+	// summed over them -- see this file's own top comment.
 	for i := b.count - 2; i >= 0; i -= 1 {
-		up := Bloom_Filter_Frag_Data{texel = {1.0 / f32(b.sizes[i + 1].x), 1.0 / f32(b.sizes[i + 1].y)}}
+		up := Bloom_Filter_Frag_Data{
+			texel   = {1.0 / f32(b.sizes[i + 1].x), 1.0 / f32(b.sizes[i + 1].y)},
+			scatter = settings.scatter,
+		}
 
 		if !bloom_pass(r.pipelines.bloom_upsample, b.levels[i + 1], b.levels[i], b.sizes[i], &up, size_of(up), true) {
 			return

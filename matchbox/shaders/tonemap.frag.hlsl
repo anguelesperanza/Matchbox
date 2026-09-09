@@ -163,20 +163,44 @@ float3 color_grade(float3 c)
 {
     c = c * (1.0 + grade_gain.rgb) + grade_lift.rgb;
 
-    // max() on the base, because lift can legitimately push a channel
-    // negative and pow() of a negative is undefined; max() on the exponent's
-    // divisor, because a gamma delta at or below -1 would otherwise divide
-    // by zero or flip the curve inside out.
-    c = pow(max(c, 0.0), 1.0 / max(1.0 + grade_gamma.rgb, 1e-4));
+    // Lift can legitimately push a channel negative and pow() of a negative
+    // is undefined. Applied whether or not the pow below runs, so that
+    // skipping it changes nothing but the pow.
+    c = max(c, 0.0);
 
-    c = (c - 0.5) * (1.0 + grade_contrast) + 0.5;
+    /*
+        Skipped entirely at the zero value, and not as an optimization:
+        pow(x, 1) is exp2(log2(x)) and does not return x exactly, which would
+        make Color_Grade's zero value a nearly-no-op rather than the exact one
+        its whole design rests on. See color_grade_apply (post.odin), which
+        skips it the same way and for the same reason. The branch is uniform.
+
+        max() on the exponent's divisor, because a gamma delta at or below -1
+        would otherwise divide by zero or flip the curve inside out.
+    */
+    if (any(grade_gamma.rgb != 0.0))
+    {
+        c = pow(c, 1.0 / max(1.0 + grade_gamma.rgb, 1e-4));
+    }
+
+    /*
+        Written as a delta rather than as (c - 0.5) * (1 + contrast) + 0.5,
+        which is the same arithmetic and is not an identity at zero: going out
+        to -0.499 and back loses the low bits of a small channel. Same
+        multiply-add either way. See color_grade_apply (post.odin) for the
+        algebra and for why the exactness is the point.
+    */
+    c = c + (c - 0.5) * grade_contrast;
 
     // Rec. 709 luminance, matching the primaries everything else in this
     // package assumes -- desaturating toward a flat average of the three
     // channels instead would turn a saturated blue lighter than a saturated
     // green, which is backwards.
     float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
-    c = lerp(luma.xxx, c, 1.0 + grade_saturation);
+
+    // The same delta form, for the same reason -- lerp(luma, c, 1 + s) is the
+    // usual spelling and cancels the same way at s = 0.
+    c = c + (c - luma) * grade_saturation;
 
     return c;
 }

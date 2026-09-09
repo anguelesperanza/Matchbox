@@ -274,12 +274,15 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 }
 
 // 16 bytes. bloom_downsample.frag.hlsl and bloom_upsample.frag.hlsl share
-// this one -- both need exactly one number, the size of a texel of whatever
-// they are *reading*, and nothing else. See bloom.odin's own bloom_run for
-// why the source's texel size and not the destination's.
+// this one. Both need the size of a texel of whatever they are *reading* --
+// see bloom.odin's own bloom_run for why the source's and not the
+// destination's -- and only the upsample reads `scatter`, which rides along
+// unread in the other, the same shape Light_Uniform.cone already has for a
+// light that is not a spot.
 Bloom_Filter_Frag_Data :: struct #align(16) {
-	texel: [2]f32,
-	_pad:  [2]f32,
+	texel:   [2]f32,
+	scatter: f32,
+	_pad:    f32,
 }
 
 // 32 bytes. bloom_prefilter.frag.hlsl's own: the same texel size the two

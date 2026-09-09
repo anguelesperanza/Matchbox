@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 365 of them -- with its arguments
+Every public procedure in the package -- 370 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 21
+- [Other](#other) -- 26
 
 ## Getting started
 
@@ -1916,7 +1916,11 @@ A grid of lines on the ground plane, centred on the origin, `slices` squares acr
 ### `light.odin`
 
 ```odin
-create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light
+create_point_light :: proc(
+	position: [3]f32,
+	color: [4]f32 = WHITE,
+	casts_shadow := false,
+) -> Light
 ```
 A point light at `position`.
 
@@ -2548,6 +2552,42 @@ create_material_subsurface :: proc(
 ) -> Material
 ```
 A wrapped-diffuse translucency approximation -- see `brdf/subsurface.hlsli`'s own doc comment for exactly what this does and does not model (it is not a real BSSRDF).
+
+### `shadow.odin`
+
+```odin
+pcss_uv_radius :: proc(light_size, extent: f32) -> f32
+```
+`Shadow_Settings.light_size` (world units) converted into the ortho shadow map's own UV units -- `shaders/shadow/pcss.hlsli` has no other way to learn `extent` (see that file's own top comment), so `push_lighting` (lighting.odin) does this division once, here, rather than pushing `extent` itself just for this one technique to divide by every fragment.
+
+### `shadow_cascaded.odin`
+
+```odin
+compute_cascade_splits :: proc(
+	near,
+	far: f32,
+	count: int,
+	lambda: f32,
+) -> [MAX_CASCADES]f32
+```
+Splits `[near, far]` into up to `MAX_CASCADES` sub-ranges, each entry being that cascade's own far edge (its near edge is the previous entry's far edge, or `near` itself for cascade 0) -- the "practical split scheme" most real-time renderers use: a `lambda` blend of a uniform split (every cascade the same depth range) and a logarithmic one (every cascade closer to the same *projected* footprint, since perspective already compresses distant depth into fewer screen pixels on its own).
+
+```odin
+begin_cascade_shadow_pass :: proc(slot: int, cascade: int) -> bool
+```
+Opens the shadow pass for `slot`'s `cascade`-th map (0 up to `Shadow_Settings.cascade_count`, not inclusive).
+
+### `shadow_cube.odin`
+
+```odin
+shadow_cube_face_index :: proc(direction: [3]f32) -> int
+```
+Which of the six faces built by `shadow_cube_face_direction` a direction away from the light falls into -- the ordinary major-axis cubemap face test (whichever axis has the largest magnitude component picks the pair, that component's sign picks which of the pair), mirrored exactly in `shaders/shadow/cube.hlsli`'s own `shadow_cube_face_index`.
+
+```odin
+begin_point_shadow_pass :: proc(face: int) -> bool
+```
+Opens the shadow pass for the single point-light caster's `face`-th map (0..5, `shadow_cube_face_direction`'s own order).
 
 ### `shadow_standard.odin`
 

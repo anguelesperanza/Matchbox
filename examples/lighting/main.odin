@@ -27,12 +27,13 @@ package lighting_example
 	    two different sine waves and the highlight follows it
 	  - **press K** for a second, cold, directional light -- a moon
 	  - **press H** for an actual cast shadow -- the moon's, since only a
-	    directional light can have one here (see `shadow.odin`). The stove,
-	    pot, cube and the ring of cubes further out all block it, each with a
-	    dark patch on the ground stretching away from the moon's own
-	    direction. Needs K on as well: marking the moon `casts_shadow` and
-	    turning `Lighting_Settings.shadows.enabled` on are two separate
-	    switches, and neither alone does anything
+	    directional or spot light uses `Shadow_Settings.technique`'s three
+	    map-based choices (see `shadow.odin`). The stove, pot, cube and the
+	    ring of cubes further out all block it, each with a dark patch on the
+	    ground stretching away from the moon's own direction. Needs K on as
+	    well: marking the moon `casts_shadow` and turning
+	    `Lighting_Settings.shadows.enabled` on are two separate switches, and
+	    neither alone does anything
 	  - **press T** for a flashlight -- a spotlight glued to the camera, aimed
 	    wherever it looks. Point straight at the stove or pot and it lights
 	    up; turn away and it goes back to whatever the fire and ambient alone
@@ -49,6 +50,22 @@ package lighting_example
 	    everywhere, not just outside the beam, since only one light could
 	    ever be the caster; watch the moon's own shadows on the ground stay
 	    put while the torch's beam adds its own
+	  - **press Y** to cycle `Shadow_Settings.technique` through PCF, PCSS
+	    and CASCADED (H must be on too, or there is nothing to see it change
+	    on) -- PCSS softens the moon's shadow edge more the further the
+	    penumbra has to spread; CASCADED is the one to check up close: walk
+	    right up to the stove's own shadow edge and the crawling, blocky
+	    aliasing PCF shows at this resolution should read cleaner, since the
+	    nearest cascade covers far less ground per texel than the single map
+	    PCF/PCSS share
+	  - **press G** for the fire's own cube shadow (P3's point-light case,
+	    `shadow_cube.odin`) -- independent of Y's own technique switch, since
+	    a point light was never eligible for that switch's three choices in
+	    the first place (see `Shadow_Technique`'s own doc comment). Six
+	    passes instead of one, so watch for it costing more than the others;
+	    the campfire is a poor occluder of itself but the props around it
+	    should each pick up a shadow radiating outward from the fire now,
+	    on every side, the way a point light's shadow actually has to look
 
 	Models are PsxGame's own, loaded by stage 4.
 */
@@ -113,8 +130,9 @@ main :: proc() {
 		eye_offset = {0, 1.8, 0},
 	)
 
-	moon_on  := false
-	torch_on := false
+	moon_on   := false
+	torch_on  := false
+	fire_cube_shadow := false // G -- the fire's own cube shadow, see this file's own top comment
 
 	/*
 		One value held for the whole run and re-submitted whenever a toggle
@@ -170,6 +188,21 @@ main :: proc() {
 			settings_changed = true
 		}
 
+		// Cycles PCF -> PCSS -> CASCADED -> PCF. Only the directional/spot
+		// casters (the moon, the torch) are affected -- see this file's own
+		// top comment on G for why the fire's own shadow is a separate
+		// switch entirely.
+		if mb.is_key_pressed(.Y) {
+			switch settings.shadows.technique {
+			case .PCF:      settings.shadows.technique = .PCSS
+			case .PCSS:     settings.shadows.technique = .CASCADED
+			case .CASCADED: settings.shadows.technique = .PCF
+			}
+			settings_changed = true
+		}
+
+		if mb.is_key_pressed(.G) do fire_cube_shadow = !fire_cube_shadow
+
 		if settings_changed do mb.set_lighting(settings)
 
 		if mb.is_cursor_locked() {
@@ -187,7 +220,8 @@ main :: proc() {
 				clamp(EMBER.g * flicker, 0, 0.31), // green capped much lower,
 				0,                                 // or it drifts to yellow
 				1,
-			})
+			},
+			casts_shadow = fire_cube_shadow)
 
 		// Fire is always in the scene; the moon and torch are each an extra
 		// slot, filled in only when their own key has turned them on. Set
@@ -243,6 +277,29 @@ main :: proc() {
 			}
 		}
 
+		// The fire's own cube shadow -- six passes, one per face, entirely
+		// separate from the loop just above since a point light was never
+		// one of MAX_SHADOW_CASTERS's own two slots (see shadow_cube.odin).
+		// A no-op loop when G is off: begin_point_shadow_pass returns false
+		// with no point light marked casts_shadow, the same "opt in twice,
+		// harmless otherwise" shape H's own switch already has.
+		for face in 0 ..< 6 {
+			if mb.begin_point_shadow_pass(face) {
+				for prop in props {
+					if prop.loaded do mb.draw_model_at(prop.model, prop.position, prop.scale)
+				}
+				for i in 0 ..< 9 {
+					angle := f32(i) * math.TAU / 9
+					radius := 7 + f32(i % 3) * 2.5
+					mb.draw_cube(
+						{math.cos(angle) * radius, 0.6, math.sin(angle) * radius},
+						{1.2, 1.2, 1.2},
+						{0.55, 0.5, 0.45, 1})
+				}
+				mb.end_shadow_pass()
+			}
+		}
+
 		mb.begin_drawing_3d(rig.camera)
 
 		mb.draw_plane({0, 0, 0}, {60, 60}, {0.30, 0.26, 0.22, 1})
@@ -265,13 +322,15 @@ main :: proc() {
 		mb.end_drawing_3d()
 
 		font := &mb.mbi.font
-		mb.draw_text(font, "L lights, K moon, F fog, H shadows, T torch, WASD walk, ESC pointer", 20, 40, mb.WHITE)
-		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v   torch %v",
+		mb.draw_text(font, "L lights, K moon, F fog, H shadows, T torch, Y technique, G fire shadow, WASD walk, ESC pointer", 20, 40, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("lights %v   moon %v   fog %v   shadows %v (%v)   torch %v   fire shadow %v",
 			"on" if settings.enabled else "off (unlit)",
 			"on" if moon_on else "off",
 			"on" if settings.fog.enabled else "off",
 			"on" if settings.shadows.enabled else "off",
-			"on" if torch_on else "off"), 20, 70, mb.WHITE)
+			settings.shadows.technique,
+			"on" if torch_on else "off",
+			"on" if fire_cube_shadow else "off"), 20, 70, mb.WHITE)
 
 		cx := f32(mb.mbi.width) * 0.5
 		cy := f32(mb.mbi.height) * 0.5

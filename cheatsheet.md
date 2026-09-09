@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 365 of them -- with its arguments
+Every public procedure in the package -- 361 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -21,14 +21,14 @@ any.
 - [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 42
-- [3D drawing](#3d-drawing) -- 27
+- [3D drawing](#3d-drawing) -- 21
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 15
+- [Other](#other) -- 17
 
 ## Getting started
 
@@ -1944,37 +1944,7 @@ A cone of light at `position`, pointing along `direction`.
 ```odin
 set_lights :: proc(lights: []Light)
 ```
-Sets every light at once, and turns lighting on.
-
-```odin
-set_light :: proc(index: int, light: Light)
-```
-One light, by slot, leaving the others alone.
-
-```odin
-clear_lights :: proc()
-```
-Back to the fixed shading that needs no lights.
-
-```odin
-set_ambient :: proc(color: [4]f32)
-```
-The light that reaches everything regardless of where it faces.
-
-```odin
-set_fog :: proc(color: [4]f32, start, end: f32)
-```
-Distance fade: nothing changes nearer than `start`, everything is `color` by `end`.
-
-```odin
-disable_fog :: proc()
-```
-Turns fog off, leaving its colour and range where they were.
-
-```odin
-is_lighting_active :: proc() -> bool
-```
-Whether a game has set any lights.
+Sets every light in the scene at once, replacing whatever was there.
 
 ### `skybox.odin`
 
@@ -2504,22 +2474,43 @@ Whether the pointer is over a sprite.
 
 ## Other
 
-### `shadow.odin`
+### `lighting.odin`
 
 ```odin
-enable_shadows :: proc(settings: Shadow_Settings = SHADOW_DEFAULTS)
+set_lighting :: proc(settings: Lighting_Settings = LIGHTING_DEFAULTS)
 ```
-Turns shadows on: builds `MAX_SHADOW_CASTERS` real shadow maps at `settings.resolution`, one per potential caster, replacing whatever textures were bound in their place -- the 1x1 placeholders `init` made, or earlier real maps from a previous call with different settings.
+Applies `settings` to the scene: whether lighting runs, whether shadows do and with what parameters, ambient, fog.
 
 ```odin
-disable_shadows :: proc()
+is_lighting_active :: proc() -> bool
 ```
-Back to no shadow at all -- the map itself is left alone rather than released, so a game toggling this as a debug key does not rebuild a texture every press.
+Whether the lighting model is currently running.
+
+### `material.odin`
+
+```odin
+create_material_phong :: proc(
+	base_color: [4]f32 = WHITE,
+	specular_power: f32 = 16,
+	textures: Material_Textures = {},
+) -> Material
+```
+A lit, Blinn-Phong-shaded material.
+
+```odin
+create_material_unlit :: proc(
+	base_color: [4]f32 = WHITE,
+	textures: Material_Textures = {},
+) -> Material
+```
+A material no light reaches -- `shade_surface` (lighting_core.hlsli) returns `base_color` for one of these regardless of what the scene's lights or `Lighting_Settings.enabled` say, the same as it does for every surface when lighting is off scene-wide.
+
+### `shadow_standard.odin`
 
 ```odin
 is_shadows_active :: proc() -> bool
 ```
-Whether enable_shadows has been called and disable_shadows has not undone it.
+Whether the shadow system is currently running -- set_lighting's own Lighting_Settings.shadows.enabled, as last resolved.
 
 ```odin
 begin_shadow_pass :: proc(slot: int = 0) -> bool

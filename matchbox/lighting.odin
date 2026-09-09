@@ -50,10 +50,25 @@ import sdl "vendor:sdl3"
 	`draw_model_immediate` binds are the identical objects either way. See
 	`pipeline_clustered.odin` and `light_cull.odin`'s own top comment for why
 	the assignment itself runs on the CPU rather than in a compute shader.
+
+	`DEFERRED` -- P6's own addition. An opaque triangle part fills a
+	`Surface`'s worth of values into four G-buffer targets instead of
+	shading directly (`gbuffer.frag.hlsl`); one fullscreen pass then decodes
+	those targets back into the identical `Surface` shape and calls the
+	identical `shade_surface` (`deferred_lighting.frag.hlsl`) -- the same
+	claim `CLUSTERED`'s own dispatcher already tests one way, tested the
+	other way this phase: a shading model written once runs unmodified from
+	either a forward fragment shader or a deferred lighting pass. A
+	transparent or LINES-topology part cannot go through the G-buffer at all
+	(`Material.transparent`'s own doc comment, material.odin) and falls back
+	to the ordinary forward mesh/line pipelines inside the same frame,
+	drawn after the deferred lighting pass -- see `pipeline_deferred.odin`'s
+	own top comment for the pass sequence this requires.
 */
 Render_Pipeline_Kind :: enum {
 	FORWARD,
 	CLUSTERED,
+	DEFERRED,
 }
 
 /*

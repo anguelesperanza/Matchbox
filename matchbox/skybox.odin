@@ -199,6 +199,35 @@ draw_skybox :: proc(skybox: Skybox) {
 
 	ensure(r.mode_3d, "draw_skybox must be called between begin_drawing_3d and end_drawing_3d")
 
+	/*
+		DEFERRED queues this rather than drawing it now -- see
+		Renderer.pending_skybox's own doc comment (render.odin).
+		`r.pass` right now is the G-buffer pass (pipeline_deferred.odin's
+		own top comment): four targets in the G-buffer's own format, not the
+		one HDR-format target skybox_panorama/skybox_cubemap were built
+		against, so binding either pipeline into it here would be a
+		validation failure rather than a wrong picture. `pipeline_deferred_end`
+		calls `draw_skybox_immediate` directly, once the final HDR pass is
+		open, which is why this check excludes it
+		(`in_deferred_forward_pass`) rather than queuing forever.
+	*/
+	if r.lighting.settings.pipeline == .DEFERRED && !r.in_deferred_forward_pass {
+		r.pending_skybox     = skybox
+		r.has_pending_skybox = true
+		return
+	}
+
+	draw_skybox_immediate(skybox)
+}
+
+// The actual draw -- see draw_skybox's own doc comment for the one thing
+// that changed about calling it (DEFERRED's own queuing) and this proc's own
+// doc comment there for why in_deferred_forward_pass is the flag that lets
+// pipeline_deferred_end call straight through to here instead.
+@(private)
+draw_skybox_immediate :: proc(skybox: Skybox) {
+	r := &mbi.renderer
+
 	camera  := camera3d_defaults(r.camera3d)
 	forward := camera3d_forward(camera)
 	right   := camera3d_right(camera)

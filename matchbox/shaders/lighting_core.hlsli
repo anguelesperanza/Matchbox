@@ -50,6 +50,38 @@
 #include "brdf/contract.hlsli"
 
 /*
+    Where `lights`/`cluster_ranges`/`cluster_light_indices` (below) actually
+    land, as t-registers -- parametrized since P6, not hardcoded to 10/11/12
+    the way this file shipped through P5. `mesh.frag.hlsl` has ten sampled
+    textures ahead of these three storage buffers (this file's own comment
+    on `lights` explains why the count has to match exactly), so it never
+    defines these and gets 10/11/12 back, unchanged. `deferred_lighting.frag.hlsl`
+    has eleven of its own -- four G-buffer targets and its own sampled depth
+    target stand in for the four material textures `mesh.frag.hlsl` reads,
+    plus the same six shadow/probe samplers both shaders share -- so it
+    `#define`s these three before including this file, to 11/12/13, rather
+    than this file guessing which shader is including it.
+
+    `CONCAT`/`CONCAT_` is the standard double-indirection needed to paste a
+    macro's own *value* rather than its name into `tN` -- `##` alone pastes
+    the literal argument text, so `register(t##LIGHTS_T, space2)` would
+    produce the token `tLIGHTS_T`, not `t11`; routing through one more macro
+    layer forces `LIGHTS_T` to expand to `11` before the paste happens.
+*/
+#ifndef LIGHTS_T
+#define LIGHTS_T 10
+#endif
+#ifndef CLUSTER_RANGES_T
+#define CLUSTER_RANGES_T 11
+#endif
+#ifndef CLUSTER_LIGHT_INDICES_T
+#define CLUSTER_LIGHT_INDICES_T 12
+#endif
+
+#define CONCAT_(a, b) a##b
+#define CONCAT(a, b) CONCAT_(a, b)
+
+/*
     One light, as the shader reads it -- the same shape as before this
     rework, just an element of a StructuredBuffer now rather than a fixed-size
     array inside this same cbuffer. See light.odin's own top comment for why.
@@ -94,7 +126,7 @@ struct Light
     renumber this to match -- mesh.frag.hlsl's own top comment is the place
     that number is decided.
 */
-StructuredBuffer<Light> lights : register(t10, space2);
+StructuredBuffer<Light> lights : register(CONCAT(t, LIGHTS_T), space2);
 
 /*
     One cluster's own slice of `cluster_light_indices` below -- `count`
@@ -114,8 +146,8 @@ struct Cluster_Range
 // below, which `tx + ty*nx + tz*nx*ny` (light_cull.odin's own
 // `cluster_build`) has to agree with byte for byte or a fragment reads a
 // neighbouring cluster's own light list.
-StructuredBuffer<Cluster_Range> cluster_ranges        : register(t11, space2);
-StructuredBuffer<uint>          cluster_light_indices  : register(t12, space2);
+StructuredBuffer<Cluster_Range> cluster_ranges        : register(CONCAT(t, CLUSTER_RANGES_T), space2);
+StructuredBuffer<uint>          cluster_light_indices  : register(CONCAT(t, CLUSTER_LIGHT_INDICES_T), space2);
 
 cbuffer Scene : register(b1, space3)
 {

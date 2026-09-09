@@ -63,6 +63,30 @@ Material :: struct {
 	shading:    Shading_Model,
 	base_color: [4]f32,
 
+	/*
+		Routes this part around the deferred G-buffer, P6's own addition --
+		see `pipeline_deferred.odin`'s own top comment for why a G-buffer
+		fill pass cannot blend at all: it writes one material's worth of
+		`Surface` fields per pixel, and blending two triangles' worth of
+		normals or roughness where their edges anti-alias is not a value any
+		lighting pass could make sense of, unlike blending two colours.
+
+		A part with this set to true is drawn through the ordinary forward
+		mesh pipeline instead, straight into the HDR scene target, after the
+		deferred lighting pass has already lit everything opaque -- see
+		`draw_model_immediate`'s own doc comment on `Renderer.in_deferred_forward_pass`
+		for exactly when. Under `FORWARD`/`CLUSTERED` this field changes
+		nothing: every mesh pipeline already blends
+		(`create_pipeline`'s own default `color_blend = true`), so a
+		transparent part looks the same whether or not it is marked.
+
+		False is the correct zero -- an opaque part is the ordinary case,
+		and this field only exists to name the uncommon one, the same "opt
+		in, nothing happens" shape an unsupported combination already gets
+		elsewhere in this package.
+	*/
+	transparent: bool,
+
 	// Per-model parameters, flat rather than a union: see this file's own
 	// top comment for why. Metallic-roughness and specular-glossiness are
 	// PBR's two parameterizations (brdf/pbr_metallic.hlsli,

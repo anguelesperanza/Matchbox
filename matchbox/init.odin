@@ -517,6 +517,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Post_Frag_Data)    == 32)
 	#assert(size_of(Tonemap_Resolve_Frag_Data) == 16)
 	#assert(size_of(Probe_Prefilter_Frag_Data) == 16)
+	#assert(size_of(Deferred_Lighting_Frag_Data) == 64)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
 	// database along -- which is what lets a game ask for `.NORTH` rather than
@@ -645,6 +646,29 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
+	/*
+		DEFERRED's own two fragment shaders (pipeline_deferred.odin).
+		`gbuffer_frag` reads the four material textures and the identical
+		`Material` cbuffer mesh_frag does (one uniform buffer, no storage
+		buffers, four samplers) -- see gbuffer.frag.hlsl's own top comment
+		for why it needs nothing shade_surface itself needs.
+		`deferred_lighting_frag` is DEFERRED_LIGHTING_SAMPLER_COUNT samplers,
+		its own one uniform buffer (Deferred_Lighting_Frag_Data) plus the
+		three lighting_core.hlsli always pushes (Scene/Cascade/Cube, the same
+		4 total mesh_frag takes), and the same three storage buffers
+		(lights/cluster_ranges/cluster_light_indices) mesh_frag also
+		declares -- see deferred_lighting.frag.hlsl's own top comment for
+		the register renumbering that makes eleven samplers fit ahead of
+		them instead of ten.
+	*/
+	mbi.renderer.shaders.gbuffer_frag = create_builtin_shader(
+		#load("shaders/gbuffer.frag.spv"), #load("shaders/gbuffer.frag.dxil"), .FRAGMENT, 4, 1, 0)
+	mbi.renderer.shaders.fullscreen = create_builtin_shader(
+		#load("shaders/fullscreen.vert.spv"), #load("shaders/fullscreen.vert.dxil"), .VERTEX, 0, 0)
+	mbi.renderer.shaders.deferred_lighting_frag = create_builtin_shader(
+		#load("shaders/deferred_lighting.frag.spv"), #load("shaders/deferred_lighting.frag.dxil"),
+		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 4, 3)
+
 	// Post-processing. One sampler -- the render target -- and one uniform
 	// block shared by all three, so an effect that ignores a field ignores it.
 	mbi.renderer.shaders.post = create_builtin_shader(
@@ -758,6 +782,63 @@ init :: proc(title: string, width: i32, height: i32) {
 		layout       = .SKINNED,
 		depth        = true,
 		cull         = .BACK,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+
+	/*
+		DEFERRED's own three pipelines -- see pipeline_deferred.odin's own
+		top comment and Pipelines.gbuffer's own doc comment (render.odin)
+		just above. Both formats are asked for now, same reasoning as
+		`lighting.targets.format`/`lighting.shadow.format` just above and
+		below: a depth-testing or MRT pipeline has to name its formats at
+		creation and the answer cannot change afterward, so `ensure_gbuffer_targets`
+		(gbuffer.odin) later finds both already resolved rather than picking
+		them itself.
+	*/
+	mbi.renderer.lighting.gbuffer.format       = pick_gbuffer_format()
+	mbi.renderer.lighting.gbuffer.depth_format = pick_shadow_format()
+
+	gbuffer_formats := [4]sdl.GPUTextureFormat{
+		mbi.renderer.lighting.gbuffer.format,
+		mbi.renderer.lighting.gbuffer.format,
+		mbi.renderer.lighting.gbuffer.format,
+		mbi.renderer.lighting.gbuffer.format,
+	}
+
+	mbi.renderer.pipelines.gbuffer = create_pipeline(
+		mbi.renderer.shaders.gbuffer_frag,
+		vertex         = mbi.renderer.shaders.mesh,
+		layout         = .MESH,
+		depth          = true,
+		cull           = .BACK,
+		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
+		color_formats  = gbuffer_formats[:],
+		color_blend    = false, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
+	)
+
+	mbi.renderer.pipelines.gbuffer_skinned = create_pipeline(
+		mbi.renderer.shaders.gbuffer_frag,
+		vertex         = mbi.renderer.shaders.mesh_skinned,
+		layout         = .SKINNED,
+		depth          = true,
+		cull           = .BACK,
+		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
+		color_formats  = gbuffer_formats[:],
+		color_blend    = false,
+	)
+
+	// Built the same shape skybox_panorama/skybox_cubemap already are (just
+	// below) -- Vertex_Layout.NONE, depth_ignore rather than depth, the HDR
+	// target's own colour format -- so it runs in the identical final pass
+	// those two and the forward-fallback mesh/line pipelines already share.
+	// See pipeline_deferred.odin's own top comment for that pass's shape.
+	mbi.renderer.pipelines.deferred_lighting = create_pipeline(
+		mbi.renderer.shaders.deferred_lighting_frag,
+		vertex       = mbi.renderer.shaders.fullscreen,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		depth_ignore = true,
 		color_format = mbi.renderer.lighting.targets.format,
 	)
 
@@ -1173,6 +1254,9 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.mesh    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh)
 	if mbi.renderer.pipelines.line    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.line)
 	if mbi.renderer.pipelines.mesh_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned)
+	if mbi.renderer.pipelines.gbuffer           != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.gbuffer)
+	if mbi.renderer.pipelines.gbuffer_skinned   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.gbuffer_skinned)
+	if mbi.renderer.pipelines.deferred_lighting != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.deferred_lighting)
 	if mbi.renderer.pipelines.shadow != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shadow)
 	if mbi.renderer.pipelines.shadow_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shadow_skinned)
 	if mbi.renderer.pipelines.skybox_panorama != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.skybox_panorama)
@@ -1194,6 +1278,9 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.mesh_frag != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_frag)
 	if mbi.renderer.shaders.mesh_line != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_line)
 	if mbi.renderer.shaders.mesh_skinned != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_skinned)
+	if mbi.renderer.shaders.gbuffer_frag           != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.gbuffer_frag)
+	if mbi.renderer.shaders.fullscreen             != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.fullscreen)
+	if mbi.renderer.shaders.deferred_lighting_frag != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.deferred_lighting_frag)
 	if mbi.renderer.shaders.shadow != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.shadow)
 	if mbi.renderer.shaders.skybox != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox)
 	if mbi.renderer.shaders.skybox_panorama != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox_panorama)
@@ -1221,6 +1308,18 @@ cleanup :: proc() {
 		mbi.renderer.lighting.targets.color = nil
 	}
 
+	// DEFERRED's own targets -- only ever made once a game selects that
+	// pipeline. See Gbuffer_Targets' own doc comment (gbuffer.odin).
+	{
+		g := &mbi.renderer.lighting.gbuffer
+		if g.a     != nil do sdl.ReleaseGPUTexture(device, g.a)
+		if g.b     != nil do sdl.ReleaseGPUTexture(device, g.b)
+		if g.c     != nil do sdl.ReleaseGPUTexture(device, g.c)
+		if g.d     != nil do sdl.ReleaseGPUTexture(device, g.d)
+		if g.depth != nil do sdl.ReleaseGPUTexture(device, g.depth)
+		g^ = {}
+	}
+
 	// Only ever made if a skinned model was drawn with no animator.
 	if mbi.renderer.identity_joints != nil {
 		sdl.ReleaseGPUBuffer(device, mbi.renderer.identity_joints)
@@ -1244,6 +1343,7 @@ cleanup :: proc() {
 	delete(c.light_indices)
 
 	delete(mbi.renderer.pending_shadow_models)
+	delete(mbi.renderer.pending_deferred_forward_models)
 
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
 	sdl.DestroyGPUDevice(device)

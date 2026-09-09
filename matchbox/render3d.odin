@@ -164,6 +164,8 @@ pipeline_begin_frame :: proc(camera: Camera3D) {
 	switch mbi.renderer.lighting.settings.pipeline {
 	case .CLUSTERED:
 		pipeline_clustered_begin(camera)
+	case .DEFERRED:
+		pipeline_deferred_begin(camera)
 	case .FORWARD:
 		fallthrough
 	case:
@@ -182,6 +184,8 @@ pipeline_cluster_buffers :: proc() -> (ranges, indices: ^sdl.GPUBuffer) {
 	switch mbi.renderer.lighting.settings.pipeline {
 	case .CLUSTERED:
 		return pipeline_clustered_cluster_buffers()
+	case .DEFERRED:
+		return pipeline_deferred_cluster_buffers()
 	case .FORWARD:
 		fallthrough
 	case:
@@ -295,29 +299,43 @@ begin_drawing_3d :: proc(camera: Camera3D) {
 	if depth_texture == nil do return
 	if !ensure_hdr_texture() do return
 
-	linear_background := linearize_background_color(r.background_color)
+	/*
+		DEFERRED opens its own G-buffer pass here instead -- see
+		pipeline_deferred.odin's own top comment for the frame this
+		pipeline actually runs and why it needs more than the one pass
+		every other pipeline has always opened. The HDR target is still
+		ensured just above regardless of which branch runs: DEFERRED's own
+		final pass (pipeline_deferred_end, called from end_drawing_3d)
+		needs it to already exist, the same way FORWARD/CLUSTERED already
+		needed it here.
+	*/
+	if r.lighting.settings.pipeline == .DEFERRED {
+		if !pipeline_deferred_open_gbuffer_pass() do return
+	} else {
+		linear_background := linearize_background_color(r.background_color)
 
-	color := sdl.GPUColorTargetInfo{
-		texture     = r.lighting.targets.color,
-		clear_color = {linear_background.x, linear_background.y, linear_background.z, linear_background.w},
-		load_op     = .CLEAR,
-		store_op    = .STORE,
+		color := sdl.GPUColorTargetInfo{
+			texture     = r.lighting.targets.color,
+			clear_color = {linear_background.x, linear_background.y, linear_background.z, linear_background.w},
+			load_op     = .CLEAR,
+			store_op    = .STORE,
+		}
+
+		depth := sdl.GPUDepthStencilTargetInfo{
+			texture     = depth_texture,
+			clear_depth = 1,
+			load_op     = .CLEAR,
+			store_op    = .DONT_CARE, // nothing reads it after the pass ends
+			stencil_load_op  = .DONT_CARE,
+			stencil_store_op = .DONT_CARE,
+		}
+
+		r.pass = sdl.BeginGPURenderPass(r.cmd, &color, 1, &depth)
+		if r.pass == nil do return
+
+		bind_cache_reset()
+		apply_clip()
 	}
-
-	depth := sdl.GPUDepthStencilTargetInfo{
-		texture     = depth_texture,
-		clear_depth = 1,
-		load_op     = .CLEAR,
-		store_op    = .DONT_CARE, // nothing reads it after the pass ends
-		stencil_load_op  = .DONT_CARE,
-		stencil_store_op = .DONT_CARE,
-	}
-
-	r.pass = sdl.BeginGPURenderPass(r.cmd, &color, 1, &depth)
-	if r.pass == nil do return
-
-	bind_cache_reset()
-	apply_clip()
 
 	r.mode_3d        = true
 	r.view_projection = camera3d_view_projection(camera)
@@ -365,7 +383,16 @@ end_drawing_3d :: proc() {
 	}
 	clear(&r.pending_shadow_models)
 
-	if r.pass != nil {
+	/*
+		DEFERRED closes its own G-buffer pass and runs its own final pass
+		here (the skybox it queued, the lighting quad, then the transparent/
+		LINES parts it also queued) instead of the plain "close whatever is
+		open" every other pipeline needed -- see pipeline_deferred.odin's
+		own top comment.
+	*/
+	if r.lighting.settings.pipeline == .DEFERRED {
+		pipeline_deferred_end()
+	} else if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)
 		r.pass = nil
 	}
@@ -454,6 +481,40 @@ draw_model_immediate :: proc(
 	ensure(r.mode_3d || r.in_shadow_pass,
 		"draw_model must be called between begin_drawing_3d/begin_shadow_pass and their matching end")
 
+	/*
+		DEFERRED's own routing -- see pipeline_deferred.odin's own top
+		comment for the pass shape this exists to feed. `deferred_active` is
+		true for every draw_model call made under DEFERRED outside a shadow
+		pass, whether this is the ordinary "fill the G-buffer" call every
+		game already makes or the later replay `pipeline_deferred_end`
+		makes with `in_deferred_forward_pass` set once the final HDR pass is
+		open.
+
+		A part whose material is transparent, or whose topology is LINES,
+		cannot go through the G-buffer at all (Material.transparent's own
+		doc comment, material.odin -- a fill pass writes one material's
+		worth of Surface fields per pixel, and LINES has no Surface-filling
+		fragment shader in the first place, the plain flat mesh_line.frag.hlsl
+		instead). The whole draw_model call is queued once, here, if it has
+		any such part -- not per part, since the queue replays the entire
+		call and lets the per-part switch below sort out which of its parts
+		actually need drawing that second time.
+	*/
+	deferred_active := !r.in_shadow_pass && r.lighting.settings.pipeline == .DEFERRED
+
+	if deferred_active && !r.in_deferred_forward_pass {
+		needs_forward_fallback := false
+		for part in model.parts {
+			if part.topology == .LINES || part.material.transparent {
+				needs_forward_fallback = true
+				break
+			}
+		}
+		if needs_forward_fallback {
+			append(&r.pending_deferred_forward_models, Pending_Shadow_Model{model, transform, tint, animator})
+		}
+	}
+
 	model_matrix := transform_matrix(transform)
 
 	/*
@@ -505,6 +566,24 @@ draw_model_immediate :: proc(
 		skinned := part.skin >= 0
 
 		/*
+			Whether this part fills the G-buffer (opaque, triangle-topology,
+			drawn during the ordinary fill call) or is one the
+			forward-fallback replay handles instead (transparent and/or
+			LINES, drawn only once in_deferred_forward_pass is set) -- see
+			draw_model_immediate's own top comment. A part that needs the
+			replay is skipped outright the first time through, the mirror
+			image of the continue two lines below skipping an already-filled
+			part the second time through.
+		*/
+		is_deferred_fill := deferred_active && !r.in_deferred_forward_pass &&
+			part.topology != .LINES && !part.material.transparent
+
+		if deferred_active && r.in_deferred_forward_pass &&
+			part.topology != .LINES && !part.material.transparent {
+			continue // already drawn during the fill pass
+		}
+
+		/*
 			Per part rather than per model: a part says whether it is lines or
 			triangles and whether a skeleton deforms it, and between them
 			those decide the pipeline. One loaded file routinely holds parts
@@ -515,13 +594,17 @@ draw_model_immediate :: proc(
 			pipelines is two. The shadow pass only ever cares about the
 			skinned/unskinned half of this -- its fragment shader writes
 			nothing, so a textured part and an untextured one cast the same
-			shadow.
+			shadow. `is_deferred_fill` picks DEFERRED's own pair
+			(`gbuffer`/`gbuffer_skinned`) the identical way skinning already
+			picks between `mesh`/`mesh_skinned`.
 		*/
 		pipeline := r.pipelines.mesh
 		switch {
 		case r.in_shadow_pass && skinned: pipeline = r.pipelines.shadow_skinned
 		case r.in_shadow_pass:            pipeline = r.pipelines.shadow
 		case part.topology == .LINES:     pipeline = r.pipelines.line
+		case is_deferred_fill && skinned: pipeline = r.pipelines.gbuffer_skinned
+		case is_deferred_fill:            pipeline = r.pipelines.gbuffer
 		case skinned:                     pipeline = r.pipelines.mesh_skinned
 		}
 
@@ -580,118 +663,132 @@ draw_model_immediate :: proc(
 			}
 
 			/*
-				Every shadow technique's own maps -- PCF/PCSS's two at t4/t5,
-				CASCADED's one Texture2DArray at t6, CUBE's one at t7 -- and
-				the light list at t8 as a storage buffer, all scene-wide
-				rather than per-part, so each of these four bind calls only
-				fires when its own resource actually changed: the shadow
-				textures when set_lighting rebuilds them, the light buffer
-				when set_lights grows it past its previous capacity. A game
-				calling either mid-pass, between draw_model calls, is what
-				these cache checks are for -- see `bound_shadow_maps`/
-				`bound_cascade_maps`/`bound_cube_maps`/`bound_light_buffer`'s
-				own comment on `Renderer`.
-
-				The slot numbers passed to BindGPUFragmentSamplers below (4,
-				6, 7) track the HLSL t-register each group starts at, kept
-				equal on purpose for readability -- but they need not be:
-				BindGPUFragmentSamplers takes a slot within the *sampler*
-				category alone (0 = base, 1-3 = the three material textures
-				above, 4-7 = every shadow map), which SDL_GPU numbers
-				separately from the storage-buffer category the light list
-				binds into below. The two categories only share a numbering
-				*inside the HLSL register(tN) declarations* -- see
-				lighting_core.hlsli's own comment on `lights` for why -- so
-				the light buffer's own BindGPUFragmentStorageBuffers call
-				below still passes slot 0, unchanged, even though its own
-				HLSL register moved again, from t20 down to t8, once P3b
-				collapsed CASCADED's fourteen flat-map samplers (eight
-				cascade, six cube) down to two Texture2DArray ones.
+				Everything below is what `shade_surface` needs and
+				`gbuffer.frag.hlsl` does not -- a G-buffer fill pass writes a
+				`Surface`'s own values, it does not shade one (see that
+				shader's own top comment), so none of the shadow maps, the
+				probe, the light list or the cluster buffers are bound while
+				`is_deferred_fill` is filling it. `deferred_lighting.frag.hlsl`
+				binds its own copies of all of these itself, once per frame,
+				in `draw_deferred_lighting_quad` (pipeline_deferred.odin) --
+				this cache would not even help there, since that draw runs
+				in a different pass than this one.
 			*/
-			if r.bound_shadow_maps != shadow.textures {
-				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
-					{texture = shadow.textures[0], sampler = shadow.sampler},
-					{texture = shadow.textures[1], sampler = shadow.sampler},
+			if !is_deferred_fill {
+				/*
+					Every shadow technique's own maps -- PCF/PCSS's two at t4/t5,
+					CASCADED's one Texture2DArray at t6, CUBE's one at t7 -- and
+					the light list at t8 as a storage buffer, all scene-wide
+					rather than per-part, so each of these four bind calls only
+					fires when its own resource actually changed: the shadow
+					textures when set_lighting rebuilds them, the light buffer
+					when set_lights grows it past its previous capacity. A game
+					calling either mid-pass, between draw_model calls, is what
+					these cache checks are for -- see `bound_shadow_maps`/
+					`bound_cascade_maps`/`bound_cube_maps`/`bound_light_buffer`'s
+					own comment on `Renderer`.
+
+					The slot numbers passed to BindGPUFragmentSamplers below (4,
+					6, 7) track the HLSL t-register each group starts at, kept
+					equal on purpose for readability -- but they need not be:
+					BindGPUFragmentSamplers takes a slot within the *sampler*
+					category alone (0 = base, 1-3 = the three material textures
+					above, 4-7 = every shadow map), which SDL_GPU numbers
+					separately from the storage-buffer category the light list
+					binds into below. The two categories only share a numbering
+					*inside the HLSL register(tN) declarations* -- see
+					lighting_core.hlsli's own comment on `lights` for why -- so
+					the light buffer's own BindGPUFragmentStorageBuffers call
+					below still passes slot 0, unchanged, even though its own
+					HLSL register moved again, from t20 down to t8, once P3b
+					collapsed CASCADED's fourteen flat-map samplers (eight
+					cascade, six cube) down to two Texture2DArray ones.
+				*/
+				if r.bound_shadow_maps != shadow.textures {
+					shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
+						{texture = shadow.textures[0], sampler = shadow.sampler},
+						{texture = shadow.textures[1], sampler = shadow.sampler},
+					}
+					sdl.BindGPUFragmentSamplers(r.pass, 4, &shadow_bindings[0], MAX_SHADOW_CASTERS)
+					r.bound_shadow_maps = shadow.textures
 				}
-				sdl.BindGPUFragmentSamplers(r.pass, 4, &shadow_bindings[0], MAX_SHADOW_CASTERS)
-				r.bound_shadow_maps = shadow.textures
-			}
 
-			/*
-				CASCADED's array (slot 6) and CUBE's (slot 7) -- one
-				GPUTextureSamplerBinding each, since P3b: both groups are one
-				Texture2DArray apiece now (mesh.frag.hlsl's
-				`cascade_maps`/`cube_maps`), not an HLSL resource array of
-				flat `Texture2D`s needing one binding per layer. Always
-				bound, whether or not `settings.technique` is actually
-				CASCADED or a point light is actually casting a cube shadow
-				this frame -- see Shadow_State's own doc comment for why the
-				shared fragment shader cannot pick and choose which slots to
-				declare.
-			*/
-			if r.bound_cascade_maps != shadow.cascade_texture {
-				cascade_binding := sdl.GPUTextureSamplerBinding{texture = shadow.cascade_texture, sampler = shadow.sampler}
-				sdl.BindGPUFragmentSamplers(r.pass, 6, &cascade_binding, 1)
-				r.bound_cascade_maps = shadow.cascade_texture
-			}
-
-			if r.bound_cube_maps != shadow.cube_texture {
-				cube_binding := sdl.GPUTextureSamplerBinding{texture = shadow.cube_texture, sampler = shadow.sampler}
-				sdl.BindGPUFragmentSamplers(r.pass, 7, &cube_binding, 1)
-				r.bound_cube_maps = shadow.cube_texture
-			}
-
-			/*
-				The environment probe's own two maps, slots 8 and 9 -- one
-				`default_probe_texture` placeholder standing in for whichever
-				half (or both) `Renderer.lighting.probe` does not currently
-				have, the same "always something valid bound" shape every
-				other always-declared slot in this shader already has. Bound
-				as a pair, unlike the shadow slots above, since a game
-				replacing its probe (`set_environment_probe`, ambient.odin)
-				always replaces both maps together -- there is no technique
-				switch here that leaves one stale while the other updates.
-			*/
-			probe_maps := [2]^sdl.GPUTexture{
-				r.lighting.probe.irradiance  if r.lighting.probe.irradiance  != nil else r.default_probe_texture,
-				r.lighting.probe.prefiltered if r.lighting.probe.prefiltered != nil else r.default_probe_texture,
-			}
-			if r.bound_probe_maps != probe_maps {
-				probe_bindings := [2]sdl.GPUTextureSamplerBinding{
-					{texture = probe_maps[0], sampler = r.probe_sampler},
-					{texture = probe_maps[1], sampler = r.probe_sampler},
+				/*
+					CASCADED's array (slot 6) and CUBE's (slot 7) -- one
+					GPUTextureSamplerBinding each, since P3b: both groups are one
+					Texture2DArray apiece now (mesh.frag.hlsl's
+					`cascade_maps`/`cube_maps`), not an HLSL resource array of
+					flat `Texture2D`s needing one binding per layer. Always
+					bound, whether or not `settings.technique` is actually
+					CASCADED or a point light is actually casting a cube shadow
+					this frame -- see Shadow_State's own doc comment for why the
+					shared fragment shader cannot pick and choose which slots to
+					declare.
+				*/
+				if r.bound_cascade_maps != shadow.cascade_texture {
+					cascade_binding := sdl.GPUTextureSamplerBinding{texture = shadow.cascade_texture, sampler = shadow.sampler}
+					sdl.BindGPUFragmentSamplers(r.pass, 6, &cascade_binding, 1)
+					r.bound_cascade_maps = shadow.cascade_texture
 				}
-				sdl.BindGPUFragmentSamplers(r.pass, 8, &probe_bindings[0], 2)
-				r.bound_probe_maps = probe_maps
-			}
 
-			if r.bound_light_buffer != r.lighting.light_buffer {
-				light_buffer := r.lighting.light_buffer
-				sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)
-				r.bound_light_buffer = light_buffer
-			}
+				if r.bound_cube_maps != shadow.cube_texture {
+					cube_binding := sdl.GPUTextureSamplerBinding{texture = shadow.cube_texture, sampler = shadow.sampler}
+					sdl.BindGPUFragmentSamplers(r.pass, 7, &cube_binding, 1)
+					r.bound_cube_maps = shadow.cube_texture
+				}
 
-			/*
-				CLUSTERED's own two storage buffers (slots 1/2, HLSL t11/t12
-				-- lighting_core.hlsli's own comment), or FORWARD's
-				placeholders for the same slots -- pipeline_cluster_buffers
-				(this file's own "Render pipeline dispatch" section) is the
-				one place that decides which, so this stays a plain bind-if-
-				changed the same shape every other resource in this function
-				already has, rather than a pipeline switch of its own.
-			*/
-			cluster_ranges, cluster_light_indices := pipeline_cluster_buffers()
+				/*
+					The environment probe's own two maps, slots 8 and 9 -- one
+					`default_probe_texture` placeholder standing in for whichever
+					half (or both) `Renderer.lighting.probe` does not currently
+					have, the same "always something valid bound" shape every
+					other always-declared slot in this shader already has. Bound
+					as a pair, unlike the shadow slots above, since a game
+					replacing its probe (`set_environment_probe`, ambient.odin)
+					always replaces both maps together -- there is no technique
+					switch here that leaves one stale while the other updates.
+				*/
+				probe_maps := [2]^sdl.GPUTexture{
+					r.lighting.probe.irradiance  if r.lighting.probe.irradiance  != nil else r.default_probe_texture,
+					r.lighting.probe.prefiltered if r.lighting.probe.prefiltered != nil else r.default_probe_texture,
+				}
+				if r.bound_probe_maps != probe_maps {
+					probe_bindings := [2]sdl.GPUTextureSamplerBinding{
+						{texture = probe_maps[0], sampler = r.probe_sampler},
+						{texture = probe_maps[1], sampler = r.probe_sampler},
+					}
+					sdl.BindGPUFragmentSamplers(r.pass, 8, &probe_bindings[0], 2)
+					r.bound_probe_maps = probe_maps
+				}
 
-			if r.bound_cluster_ranges != cluster_ranges {
-				buffer := cluster_ranges
-				sdl.BindGPUFragmentStorageBuffers(r.pass, 1, &buffer, 1)
-				r.bound_cluster_ranges = cluster_ranges
-			}
+				if r.bound_light_buffer != r.lighting.light_buffer {
+					light_buffer := r.lighting.light_buffer
+					sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)
+					r.bound_light_buffer = light_buffer
+				}
 
-			if r.bound_cluster_light_indices != cluster_light_indices {
-				buffer := cluster_light_indices
-				sdl.BindGPUFragmentStorageBuffers(r.pass, 2, &buffer, 1)
-				r.bound_cluster_light_indices = cluster_light_indices
+				/*
+					CLUSTERED's own two storage buffers (slots 1/2, HLSL t11/t12
+					-- lighting_core.hlsli's own comment), or FORWARD's
+					placeholders for the same slots -- pipeline_cluster_buffers
+					(this file's own "Render pipeline dispatch" section) is the
+					one place that decides which, so this stays a plain bind-if-
+					changed the same shape every other resource in this function
+					already has, rather than a pipeline switch of its own.
+				*/
+				cluster_ranges, cluster_light_indices := pipeline_cluster_buffers()
+
+				if r.bound_cluster_ranges != cluster_ranges {
+					buffer := cluster_ranges
+					sdl.BindGPUFragmentStorageBuffers(r.pass, 1, &buffer, 1)
+					r.bound_cluster_ranges = cluster_ranges
+				}
+
+				if r.bound_cluster_light_indices != cluster_light_indices {
+					buffer := cluster_light_indices
+					sdl.BindGPUFragmentStorageBuffers(r.pass, 2, &buffer, 1)
+					r.bound_cluster_light_indices = cluster_light_indices
+				}
 			}
 		}
 

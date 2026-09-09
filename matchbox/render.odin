@@ -33,6 +33,25 @@ import sdl "vendor:sdl3"
 */
 MESH_FRAG_SAMPLER_COUNT :: 10
 
+/*
+	How many sampled textures/samplers `deferred_lighting.frag.hlsl`
+	declares -- the shader at risk P6 was warned about, since it needs
+	everything `mesh.frag.hlsl` needs for shading (shadow maps, the
+	environment probe's own two) *plus* the four G-buffer targets and its
+	own sampled depth target, even though it drops the four material
+	textures `mesh.frag.hlsl` reads (base colour, metallic-roughness,
+	occlusion, emissive arrive through the G-buffer instead): four G-buffer
+	targets, one depth target, two PCF/PCSS shadow maps, one CASCADED array,
+	one CUBE array, two environment-probe maps -- t0-t10.
+
+	Five under Vulkan's guaranteed per-stage floor of 16
+	(`gbuffer_test.odin` pins the actual value the same way
+	`render_test.odin` pins `MESH_FRAG_SAMPLER_COUNT`), so this did not need
+	the "stop and report" the phase brief asked for if it had come out
+	otherwise.
+*/
+DEFERRED_LIGHTING_SAMPLER_COUNT :: 11
+
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
 // One vertex shader serves every draw: the old test.vert and font.vert had
@@ -65,6 +84,21 @@ Shaders :: struct {
 	// mesh.vert with a skeleton in front of it. Shares every fragment shader
 	// the unskinned one uses -- only the vertex stage differs.
 	mesh_skinned: ^sdl.GPUShader,
+
+	/*
+		DEFERRED's own two shaders -- see pipeline_deferred.odin's own top
+		comment and gbuffer.frag.hlsl/deferred_lighting.frag.hlsl. `gbuffer_frag`
+		pairs with mesh.vert/mesh_skinned.vert exactly the way mesh_frag
+		does, since a G-buffer fill pass reads the identical vertex layout
+		and the identical Material cbuffer a forward draw does -- only the
+		fragment stage's own job (fill four targets rather than shade one
+		colour) differs. `fullscreen` is deferred_lighting.frag.hlsl's own
+		vertex shader (fullscreen.vert.hlsl) -- see that file's own doc
+		comment for why it is not skybox's.
+	*/
+	gbuffer_frag:           ^sdl.GPUShader,
+	fullscreen:             ^sdl.GPUShader,
+	deferred_lighting_frag: ^sdl.GPUShader,
 
 	// The shadow pass's fragment shader -- writes nothing, paired with
 	// mesh/mesh_skinned's own vertex shaders rather than one of its own. See
@@ -136,6 +170,24 @@ Pipelines :: struct {
 	// `mesh_frag` now, so the only thing that ever distinguished them --
 	// whether a part carried a texture -- no longer picks a pipeline at all.
 	mesh_skinned: ^sdl.GPUGraphicsPipeline,
+
+	/*
+		DEFERRED's own three -- see pipeline_deferred.odin's own top comment.
+		`gbuffer`/`gbuffer_skinned` are `mesh`/`mesh_skinned`'s own siblings,
+		built against the four G-buffer targets (`color_formats`,
+		`create_pipeline`) and the G-buffer's own depth texture rather than
+		the HDR target and the shared main depth texture, with blending off
+		(`color_blend = false`) -- see `Material.transparent`'s own doc
+		comment (material.odin) for why a G-buffer fill pass cannot blend at
+		all. `deferred_lighting` is the fullscreen resolve, built the same
+		shape `skybox_panorama`/`skybox_cubemap` already are
+		(`Vertex_Layout.NONE`, `depth_ignore = true`, the HDR target's own
+		colour format) so it can run in the identical final pass those two
+		and the forward-fallback mesh pipelines already share.
+	*/
+	gbuffer:           ^sdl.GPUGraphicsPipeline,
+	gbuffer_skinned:   ^sdl.GPUGraphicsPipeline,
+	deferred_lighting: ^sdl.GPUGraphicsPipeline,
 
 	// Depth-only, biased, no colour target at all -- the shadow pass. Two for
 	// the same reason mesh/mesh_skinned are two: a skinned caster needs the
@@ -211,6 +263,14 @@ Lighting :: struct {
 	// for. See tonemap.odin's own top comment for why this cannot simply be
 	// `Render_Target`'s own format.
 	targets: Lighting_Targets,
+
+	// DEFERRED's own four fill targets and their own depth texture -- see
+	// Gbuffer_Targets' own doc comment (gbuffer.odin) for why this is a
+	// texture set of its own rather than reusing targets/depth_texture.
+	// Zero value ("no textures yet") until a game actually selects
+	// DEFERRED, the same "allocated on first use" shape targets/
+	// depth_texture already have for 3D itself.
+	gbuffer: Gbuffer_Targets,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -404,6 +464,36 @@ Renderer :: struct {
 	// has a pass of any kind open yet, held until it does. See draw_model's
 	// own doc comment.
 	pending_shadow_models: [dynamic]Pending_Shadow_Model,
+
+	/*
+		DEFERRED's own queues -- see pipeline_deferred.odin's own top
+		comment for the pass shape these exist to bridge. A draw_model call
+		made while the G-buffer pass is open cannot draw a transparent or
+		LINES-topology part into it at all (see Material.transparent's own
+		doc comment, material.odin, and draw_model_immediate's own comment
+		on in_deferred_forward_pass below) -- every such call is queued here,
+		re-played once the final HDR pass is open, the same "hold until the
+		right pass exists" shape pending_shadow_models above already has for
+		a model marked casts_shadow before any pass exists yet.
+
+		draw_skybox has the identical problem for a different reason: its
+		own pipelines are built against the HDR target's single colour
+		format, incompatible with the G-buffer pass's own four -- one
+		pending slot rather than a list, since a game draws its sky at most
+		once a frame (draw_skybox's own doc comment: "call it first").
+	*/
+	pending_deferred_forward_models: [dynamic]Pending_Shadow_Model,
+	pending_skybox:                  Skybox,
+	has_pending_skybox:              bool,
+
+	// True while draw_model_immediate is replaying pending_deferred_forward_models
+	// into the final HDR pass -- see that proc's own doc comment for exactly
+	// which parts this makes it draw (transparent and/or LINES) versus skip
+	// (everything already filled into the G-buffer). Not the same axis as
+	// in_shadow_pass: a model can be replayed into the shadow pass and the
+	// deferred forward pass in the same frame, for the same reason it can be
+	// drawn into the ordinary scene pass and a shadow pass today.
+	in_deferred_forward_pass: bool,
 
 	// The shapes draw_cube and friends draw, built the first time one is asked
 	// for. Same reasoning as the depth texture: a game that draws no 3D should

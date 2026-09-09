@@ -30,26 +30,31 @@ package matchbox
 import sdl "vendor:sdl3"
 
 /*
-	The textures a material may bind. `base` is the only one any loader fills
-	in today -- `model_load.odin` still reads a glTF material's base-colour
-	texture alone, exactly as it did before this rework (see D8, and P2's
-	"model_load.odin reads the full glTF material" for when that changes).
-	The rest exist so that day is a loader change and not also a struct
-	change.
+	The textures a material may bind. `model_load.odin`'s `read_material`
+	fills in every one of these but `normal` from a glTF material's own
+	channels -- base colour, metallic-roughness, occlusion, emissive.
+
+	`normal` stays present and unfilled: applying a tangent-space normal map
+	needs a tangent basis this package does not have (no `TANGENT` read at
+	load, no fourth `Vertex3D` attribute), and `lighting_rework.md` section
+	7.5 makes normal mapping its own phase rather than a side effect of this
+	loader job landing.
 
 	`base_sampler` travels with `base` rather than living on `Model_Part`,
-	because a texture and the sampler it was authored for are one decision --
-	glTF's own per-texture sampler is what `material_texture` (model_load.odin)
-	already reads.
+	because a texture and the sampler it was authored for are one decision.
+	The other three textures have no sampler field of their own: every glTF
+	texture this loader resolves shares one hardcoded nearest-neighbour
+	sampler regardless of which material channel it came from (see
+	`resolve_texture`'s own doc comment for why), so a second, third and
+	fourth sampler field would each always hold the same value `base_sampler`
+	does.
 */
 Material_Textures :: struct {
 	base:         ^sdl.GPUTexture,
 	base_sampler: ^sdl.GPUSampler,
 
-	// Unused until P2's loader work reads them. Present now so that work is
-	// additive to this struct rather than a second pass over every caller.
 	metal_rough: ^sdl.GPUTexture,
-	normal:      ^sdl.GPUTexture,
+	normal:      ^sdl.GPUTexture, // present, unfilled -- see this struct's own doc comment
 	occlusion:   ^sdl.GPUTexture,
 	emissive:    ^sdl.GPUTexture,
 }

@@ -129,12 +129,17 @@ upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -
 	its bytes are coverage expanded to RGBA, not colour, so there is nothing
 	for a decode to mean.
 
-	**Left for P2's next job, not decided here.** Metallic-roughness, normal
-	and occlusion textures arrive when `model_load.odin` is extended to read
-	them. They are `UNORM`: a roughness value or a tangent-space normal is a
+	**Metallic-roughness and occlusion (`model_load.odin`'s `read_material`)
+	are `UNORM`, and emissive is `SRGB`.** A roughness or occlusion value is a
 	number the shader reads back exactly, and decoding it through sRGB would
 	distort every value that is not precisely 0 or 1 -- the same reason this
 	type exists rather than a `bool` that only happened to read right today.
+	Emissive is photometric colour like base colour is, sampled by the same
+	linear-end-to-end 3D pass, so it gets the same answer base colour does.
+	A normal map would be `UNORM` for the same reason as roughness -- a
+	tangent-space direction is also a number, not a colour -- but this
+	package reads no `normal` texture at all; see `Material_Textures.normal`'s
+	own doc comment (material.odin).
 */
 @(private)
 Texture_Encoding :: enum {

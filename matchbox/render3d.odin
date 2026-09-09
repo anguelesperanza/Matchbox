@@ -437,7 +437,37 @@ draw_model_immediate :: proc(
 			}
 
 			/*
-				The two shadow maps at t1/t2, and the light list at t3 as a
+				Metallic-roughness, occlusion and emissive at t1-t3 -- the
+				same 1x1 white default as base whenever a part's material
+				carries none of its own. White is the right stand-in for all
+				three, the same reasoning as base colour's: every one of
+				these is read as factor * texture (mesh.frag.hlsl), so the
+				identity value for a missing texture is 1.0 in every channel,
+				not 0. Getting this backwards for emissive specifically would
+				be easy and wrong in a way nothing would flag -- a black
+				default would silently zero out any material that sets an
+				emissive *factor* with no emissive texture at all, which is
+				every emissive material `create_material_pbr_metallic` builds
+				today (its own textures default to {}).
+			*/
+			material_textures := [3]^sdl.GPUTexture{
+				part.material.textures.metal_rough if part.material.textures.metal_rough != nil else r.default_texture,
+				part.material.textures.occlusion   if part.material.textures.occlusion   != nil else r.default_texture,
+				part.material.textures.emissive    if part.material.textures.emissive    != nil else r.default_texture,
+			}
+
+			if r.bound_material_textures != material_textures {
+				bindings := [3]sdl.GPUTextureSamplerBinding{
+					{texture = material_textures[0], sampler = r.sprite_sampler},
+					{texture = material_textures[1], sampler = r.sprite_sampler},
+					{texture = material_textures[2], sampler = r.sprite_sampler},
+				}
+				sdl.BindGPUFragmentSamplers(r.pass, 1, &bindings[0], 3)
+				r.bound_material_textures = material_textures
+			}
+
+			/*
+				The two shadow maps at t4/t5, and the light list at t6 as a
 				storage buffer -- both scene-wide rather than per-part, so
 				this only rebinds when either actually changed: the shadow
 				maps when set_lighting rebuilds them, the light buffer when
@@ -445,13 +475,25 @@ draw_model_immediate :: proc(
 				calling either mid-pass, between draw_model calls, is what
 				this cache check is for -- see `bound_shadow_maps`/
 				`bound_light_buffer`'s own comment on `Renderer`.
+
+				Slot 4 here, not t4 -- BindGPUFragmentSamplers takes a slot
+				within the *sampler* category alone (0 = base, 1-3 = the
+				three material textures just above, 4-5 = these two), which
+				SDL_GPU numbers separately from the storage-buffer category
+				the light list below binds into. The two categories only
+				share a numbering *inside the HLSL register(tN) declarations*
+				-- see lighting_core.hlsli's own comment on `lights` for why
+				-- so the light buffer's own BindGPUFragmentStorageBuffers
+				call below still passes slot 0, unchanged, even though its
+				HLSL register moved from t3 to t6 to make room for the three
+				new samplers.
 			*/
 			if r.bound_shadow_maps != shadow.textures {
 				shadow_bindings := [MAX_SHADOW_CASTERS]sdl.GPUTextureSamplerBinding{
 					{texture = shadow.textures[0], sampler = shadow.sampler},
 					{texture = shadow.textures[1], sampler = shadow.sampler},
 				}
-				sdl.BindGPUFragmentSamplers(r.pass, 1, &shadow_bindings[0], MAX_SHADOW_CASTERS)
+				sdl.BindGPUFragmentSamplers(r.pass, 4, &shadow_bindings[0], MAX_SHADOW_CASTERS)
 				r.bound_shadow_maps = shadow.textures
 			}
 

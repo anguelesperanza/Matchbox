@@ -7,9 +7,9 @@
     shadow maps sat at t0/t1 in one and t1/t2 in the other, and it forced
     draw_model_immediate to compute `shadow_slot: u32 = 1 if textured else 0`
     to match. Binding a 1x1 white default texture for an untextured part
-    (Renderer.default_texture, init.odin) removes all of it: `tex` is always
-    bound to something, so the shadow maps always sit at t1/t2 and the two
-    shaders collapse into this one.
+    (Renderer.default_texture, init.odin) removes all of it: every one of the
+    four textures below is always bound to something, so the shadow maps
+    always sit at t4/t5 and the two shaders collapse into this one.
 
     Must match matchbox.Material_Frag_Data and matchbox.Scene_Frag_Data.
 */
@@ -17,10 +17,23 @@
 Texture2D<float4> tex : register(t0, space2);
 SamplerState      smp : register(s0, space2);
 
-Texture2D<float>       shadow_map0     : register(t1, space2);
-SamplerComparisonState shadow_sampler0 : register(s1, space2);
-Texture2D<float>       shadow_map1     : register(t2, space2);
-SamplerComparisonState shadow_sampler1 : register(s2, space2);
+// Metallic-roughness, occlusion and emissive -- read into Surface below the
+// same way `tex`/`smp` already were. One sampler state per texture even
+// though every one of them is, in practice, the same nearest-neighbour
+// sampler (matchbox.resolve_texture's own doc comment says why) -- HLSL
+// samplers are declared per texture regardless, so there is no shorter way
+// to write this that SDL_GPU's binding model would accept.
+Texture2D<float4> metal_rough_tex : register(t1, space2);
+SamplerState      metal_rough_smp : register(s1, space2);
+Texture2D<float4> occlusion_tex   : register(t2, space2);
+SamplerState      occlusion_smp   : register(s2, space2);
+Texture2D<float4> emissive_tex    : register(t3, space2);
+SamplerState      emissive_smp    : register(s3, space2);
+
+Texture2D<float>       shadow_map0     : register(t4, space2);
+SamplerComparisonState shadow_sampler0 : register(s4, space2);
+Texture2D<float>       shadow_map1     : register(t5, space2);
+SamplerComparisonState shadow_sampler1 : register(s5, space2);
 
 cbuffer Material : register(b0, space3)
 {
@@ -45,7 +58,10 @@ struct PSInput
 
 float4 main(PSInput input) : SV_Target0
 {
-    float4 sampled = tex.Sample(smp, input.uv);
+    float4 sampled      = tex.Sample(smp, input.uv);
+    float4 metal_rough  = metal_rough_tex.Sample(metal_rough_smp, input.uv);
+    float  occlusion_tx = occlusion_tex.Sample(occlusion_smp, input.uv).r;
+    float3 emissive_tx  = emissive_tex.Sample(emissive_smp, input.uv).rgb;
 
     Surface surface;
     surface.position      = input.world;
@@ -53,12 +69,35 @@ float4 main(PSInput input) : SV_Target0
     surface.view           = normalize(view_pos.xyz - input.world);
     surface.base_color    = sampled.rgb * base_color.rgb * tint.rgb;
     surface.alpha         = sampled.a * base_color.a * tint.a;
-    surface.metallic      = params.x;
-    surface.roughness     = params.y;
+
+    // glTF's own packing: roughness in green, metalness in blue -- red and
+    // alpha are unused by the metallic-roughness texture itself, though red
+    // doubles as occlusion when occlusionTexture names the same image (see
+    // matchbox.read_material's own comment on that sharing). factor * texture
+    // is the spec's own combine, so a part with no metallic-roughness texture
+    // reads its factor unchanged: the default texture bound in its place
+    // (Renderer.default_texture, init.odin) is white, and white is 1.0.
+    surface.metallic      = params.x * metal_rough.b;
+    surface.roughness     = params.y * metal_rough.g;
+
     surface.specular      = specular.rgb;
     surface.glossiness    = specular.a;
-    surface.emissive      = emissive.rgb;
-    surface.occlusion     = 1.0;
+
+    // Same factor * texture combine as metallic-roughness above, and the
+    // same reason a missing texture must not read as black: a material with
+    // an emissive factor and no emissive texture -- every emissive material
+    // create_material_pbr_metallic builds, since it has no texture parameter
+    // at all -- would otherwise go dark the moment a mesh pipeline started
+    // sampling this slot.
+    surface.emissive      = emissive.rgb * emissive_tx;
+
+    // glTF's occlusion is a plain texture sample with no factor to multiply
+    // against (matchbox.read_material's own doc comment on why
+    // occlusionTexture.strength is not read) -- the red channel is the whole
+    // answer, and 1.0 (a missing texture's default) means "no occlusion",
+    // exactly the constant this used to be hardcoded to.
+    surface.occlusion     = occlusion_tx;
+
     surface.subsurface    = subsurface.rgb;
     surface.thickness     = subsurface.a;
     surface.shading_model = uint(shading.x);

@@ -261,12 +261,23 @@ Renderer :: struct {
 	// drawing the scene it will be sampled by. See shadow_standard.odin.
 	in_shadow_pass: bool,
 
+	// The metallic-roughness, occlusion and emissive textures
+	// draw_model_immediate last bound for the current part, in that order --
+	// a second per-part cache alongside bound_texture/bound_sampler above
+	// (which stays base-colour-only) rather than a fourth slot folded into
+	// it, because bind_quad_state's 2D draws share bound_texture/bound_sampler
+	// too and a sprite has never had three more textures to go with it. One
+	// sampler serves all three (see Material_Textures' own doc comment on
+	// why), so unlike bound_texture/bound_sampler there is no paired sampler
+	// array to also compare.
+	bound_material_textures: [3]^sdl.GPUTexture,
+
 	// What draw_model_immediate has bound for the non-shadow-pass fragment
-	// shader beyond the per-part base texture (`bound_texture`/`bound_sampler`
-	// above): the two shadow maps and the light storage buffer, none of
-	// which change per part or per pipeline switch the way the base texture
-	// does, but which can change mid-pass if a game calls set_lighting or
-	// set_lights (growing the light buffer) between draw_model calls.
+	// shader beyond the per-part textures above: the two shadow maps and the
+	// light storage buffer, none of which change per part or per pipeline
+	// switch the way the per-part textures do, but which can change mid-pass
+	// if a game calls set_lighting or set_lights (growing the light buffer)
+	// between draw_model calls.
 	bound_shadow_maps:  [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
 	bound_light_buffer: ^sdl.GPUBuffer,
 
@@ -294,13 +305,14 @@ Renderer :: struct {
 @(private)
 bind_cache_reset :: proc() {
 	r := &mbi.renderer
-	r.bound_pipeline     = nil
-	r.bound_texture      = nil
-	r.bound_sampler      = nil
-	r.bound_quad         = false
-	r.bound_joint_buffer = nil
-	r.bound_shadow_maps  = {}
-	r.bound_light_buffer = nil
+	r.bound_pipeline          = nil
+	r.bound_texture           = nil
+	r.bound_sampler           = nil
+	r.bound_quad              = false
+	r.bound_joint_buffer      = nil
+	r.bound_material_textures = {}
+	r.bound_shadow_maps       = {}
+	r.bound_light_buffer      = nil
 }
 
 // -----------------------------------------------------------------------

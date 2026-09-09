@@ -549,13 +549,16 @@ init :: proc(title: string, width: i32, height: i32) {
 		One fragment shader for every solid mesh part, textured or not -- see
 		mesh.frag.hlsl's own doc comment and Shaders.mesh_frag's. Two uniform
 		buffers: slot 0 is the per-part material (material.odin), slot 1 the
-		scene (lighting.odin), pushed once for a whole pass. Three samplers --
-		the base colour and the two shadow maps mesh.frag.hlsl declares at
-		t0-t2 -- and one storage buffer, the light list (light.odin), which is
-		what replaced the fixed MAX_LIGHTS cbuffer array this rework retired.
+		scene (lighting.odin), pushed once for a whole pass. Six samplers --
+		base colour, metallic-roughness, occlusion and emissive, then the two
+		shadow maps, which is what mesh.frag.hlsl declares at t0-t5 -- and one
+		storage buffer, the light list (light.odin) at t6, which is what
+		replaced the fixed MAX_LIGHTS cbuffer array this rework retired. See
+		lighting_core.hlsli's own comment on `lights` for why the storage
+		buffer's register number has to track the sampler count like this.
 	*/
 	mbi.renderer.shaders.mesh_frag = create_builtin_shader(
-		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, 3, 2, 1)
+		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, 6, 2, 1)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -785,22 +788,30 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.lighting.shadow.caster_indices = {-1, -1} // Odin's zero value is 0, a real slot -- -1 has to be said
 
 	/*
-		1x1 white, sampled wherever a mesh part has no base colour texture --
-		see Renderer.default_texture's own doc comment (render.odin) and
+		1x1 white, sampled wherever a mesh part has no base colour, metallic-
+		roughness, occlusion or emissive texture of its own -- see
+		Renderer.default_texture's own doc comment (render.odin) and
 		mesh.frag.hlsl. The same reasoning as the shadow placeholders just
 		above: a slot mesh.frag.hlsl declares unconditionally must always have
 		something valid bound, whether or not this particular part was ever
-		textured.
+		textured on that channel.
+
+		One texture standing in for all four rather than one per channel:
+		every one of them is read as factor * texture, so the identity value
+		a missing texture needs is 1.0 in every channel, for all four --
+		see render3d.odin's own comment on this same reasoning for why that
+		is also right for emissive, not just an accident of reusing what was
+		already here for base colour.
 	*/
 	white_pixel := [4]u8{255, 255, 255, 255}
 	default_texture_ok := false
 
-	// SRGB, though it makes no numeric difference here -- white is 1.0 under
-	// either encoding, since sRGB's transfer function fixes both endpoints.
-	// The reason to say SRGB anyway is consistency: this stands in for a base
-	// colour texture in the same 3D pass and the same sampler slot a real one
-	// would occupy (mesh.frag.hlsl), so it should ask for the same format a
-	// textured part's own base colour does -- see Texture_Encoding.
+	// SRGB, though it makes no numeric difference to any of the four slots
+	// this stands in for -- white is 1.0 under either encoding, since sRGB's
+	// transfer function fixes both endpoints. The reason to say SRGB anyway
+	// is consistency: two of those slots (base colour, emissive) are SRGB
+	// themselves, so this asks for the same format a textured part's own
+	// colour channel would -- see Texture_Encoding.
 	if texture, err := upload_texture(&white_pixel, 1, 1, .SRGB); err == nil {
 		mbi.renderer.default_texture = texture
 		default_texture_ok = true

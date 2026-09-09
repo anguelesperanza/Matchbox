@@ -38,7 +38,7 @@ struct Surface
     float  glossiness; // specular-glossiness (brdf/pbr_specgloss.hlsli)
 
     float3 emissive;
-    float  occlusion; // hardcoded to 1.0 until the occlusion texture lands (the loader job after this one)
+    float  occlusion; // ambient occlusion -- 1.0 (no occlusion) wherever a part has no occlusion texture
 
     float3 subsurface; // tint for the SSS model (brdf/subsurface.hlsli)
     float  thickness;  // brdf/subsurface.hlsli

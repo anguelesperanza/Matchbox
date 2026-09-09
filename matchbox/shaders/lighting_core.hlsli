@@ -49,11 +49,14 @@ struct Light
     float4 cone;     // x outer half-angle degrees, y inner half-angle degrees -- spot only
 };
 
-// Unbounded -- see light.odin's top comment on why MAX_LIGHTS retired. t3,
-// space2: sampled textures at t0-t2 (whichever the including shader
-// declares) come first in SDL_GPU's fragment-stage numbering, storage
-// buffers continue the same t[n] sequence after them.
-StructuredBuffer<Light> lights : register(t3, space2);
+// Unbounded -- see light.odin's top comment on why MAX_LIGHTS retired. t6,
+// space2: sampled textures at t0-t5 (whichever the including shader
+// declares -- mesh.frag.hlsl's own six, as of the P2 loader job that added
+// the last three of them) come first in SDL_GPU's fragment-stage numbering,
+// storage buffers continue the same t[n] sequence after them. Any shader
+// that changes its own sampler count has to renumber this to match --
+// mesh.frag.hlsl's own top comment is the place that number is decided.
+StructuredBuffer<Light> lights : register(t6, space2);
 
 cbuffer Scene : register(b1, space3)
 {

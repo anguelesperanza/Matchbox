@@ -132,16 +132,65 @@ Material_Frag_Data :: struct #align(16) {
 	shading:    [4]f32, // x shading_model_index -- see shading.odin.  y-w unused
 }
 
+/*
+	Zero means the default, for the two fields here that have no sensible
+	zero -- see `lighting_settings_normalized` (lighting.odin) for the rule
+	and the reasoning behind it.
+
+	This is what makes a hand-built `Material{shading = .BLINN_PHONG}` draw
+	something, rather than an invisible surface with a blown-out specular
+	highlight over all of it.
+
+	**Applied at pack time rather than stored back**, which is the one place
+	this rule works differently from `Lighting_Settings` and
+	`Shadow_Settings`. Those two are Matchbox's own state and are normalized
+	when they are handed over, so a read reports what runs. A `Material`
+	belongs to whoever built it -- it lives on a caller's `Model_Part`, and
+	`draw_model` takes its `Model` by value -- so there is nowhere to store a
+	normalized copy that the caller would ever see. Packing is the last point
+	the value passes through before the GPU, so it is where the fixup goes.
+
+	**`metallic` and `roughness` are deliberately not in here**, and they are
+	why this rule is a per-field judgement rather than a sweep over every
+	number. Both have legitimate zeroes under the metallic-roughness model
+	P2 adds: zero metallic is a dielectric, which is most surfaces, and zero
+	roughness is a perfect mirror. Defaulting either would make a value
+	somebody meant unreachable. The remaining P2 fields -- `specular`,
+	`glossiness`, `bands`, `rim`, `subsurface`, `thickness`, `emissive` --
+	are unread by any model P0 or P1 built; whichever of them turn out to
+	have no sensible zero get added here by the phase that starts reading
+	them, and the ones that do are named here as exceptions, the same way
+	these two are.
+*/
+@(private)
+material_normalized :: proc(material: Material) -> Material {
+	m := material
+
+	// All-zero is an invisible surface, which no caller means -- and it
+	// cannot collide with a legitimately black one, since that is
+	// {0, 0, 0, 1} and carries its alpha. Body.tint (types.odin) is the
+	// same sentinel and the same argument.
+	if m.base_color == {0, 0, 0, 0} do m.base_color = MATERIAL_DEFAULTS.base_color
+
+	// pow(x, 0) is 1 for every x, so a zero exponent is not a dull highlight
+	// -- it is a full-strength one across the entire surface.
+	if m.specular_power == 0 do m.specular_power = MATERIAL_DEFAULTS.specular_power
+
+	return m
+}
+
 // `material`'s numbers plus this draw's own tint, packed for the GPU.
 @(private)
 material_frag_data :: proc(material: Material, tint: [4]f32) -> Material_Frag_Data {
+	m := material_normalized(material)
+
 	return Material_Frag_Data{
 		tint       = tint,
-		base_color = material.base_color,
-		specular   = {material.specular.x, material.specular.y, material.specular.z, material.glossiness},
-		emissive   = {material.emissive.x, material.emissive.y, material.emissive.z, material.specular_power},
-		params     = {material.metallic, material.roughness, material.bands, material.rim},
-		subsurface = {material.subsurface.x, material.subsurface.y, material.subsurface.z, material.thickness},
-		shading    = {shading_model_index(material.shading), 0, 0, 0},
+		base_color = m.base_color,
+		specular   = {m.specular.x, m.specular.y, m.specular.z, m.glossiness},
+		emissive   = {m.emissive.x, m.emissive.y, m.emissive.z, m.specular_power},
+		params     = {m.metallic, m.roughness, m.bands, m.rim},
+		subsurface = {m.subsurface.x, m.subsurface.y, m.subsurface.z, m.thickness},
+		shading    = {shading_model_index(m.shading), 0, 0, 0},
 	}
 }

@@ -107,7 +107,6 @@ main :: proc() {
 		enabled  = true,
 		ambient  = {color = {0.35, 0.35, 0.55, 1}},
 		fog      = {enabled = true, color = FOG_COLOR, start = 3, end = 12},
-		exposure = 1,
 	})
 	mb.set_cursor_locked(true)
 

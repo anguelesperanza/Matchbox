@@ -145,23 +145,19 @@ Lighting_Settings :: struct {
 		that reads too dark under whichever curve is running, below 1 darkens
 		one that clips too much of its own highlights.
 
-		**Has no sensible zero, unlike every other field here.** `Ambient{}`
-		is legitimately no ambient light, `Fog{}` is legitimately no fog, and
-		`Lighting_Settings{}` is meant to be safe to build as a composite
-		literal naming only the fields a caller cares about -- every example
-		in this repo does exactly that. `exposure` cannot follow the same
-		pattern: its zero multiplies every colour to black, which is never a
-		sensible scene and is indistinguishable from a forgotten field until
-		the picture is on screen. A literal that omits it --
+		**Has no sensible zero, unlike every other field here**, so zero is
+		read as "not set" and becomes 1. `Ambient{}` is legitimately no
+		ambient light and `Fog{}` is legitimately no fog; a zero exposure is
+		nothing but a black screen, and is indistinguishable from a field
+		nobody filled in until the picture is already up. `set_lighting`
+		normalizes it on the way in -- see `lighting_settings_normalized` for
+		the rule this is one instance of, and for why the fixup happens at
+		store time rather than at use time.
+
+		So a partial literal that never mentions exposure --
 		`{enabled = true, ambient = {...}}`, the shape every example used
-		before this field existed -- now renders solid black. Either start
-		from `LIGHTING_DEFAULTS` and override only what changes
-		(`settings := mb.LIGHTING_DEFAULTS; settings.fog = ...`) or set
-		`exposure = 1` explicitly; both are one line, and the alternative
-		(defaulting a missing field to 1 automatically) would mean the value
-		read back out of a `Lighting_Settings` a caller built is not always
-		the value that actually ran -- exactly the emergent-state problem
-		this file's own top comment exists to remove.
+		before this field existed -- keeps working, and keeps working the
+		same way when a later phase adds another field beside this one.
 	*/
 	exposure: f32,
 	tonemap:  Tonemap,
@@ -194,10 +190,72 @@ LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD, expo
 	placeholders `init` made, or an earlier call's own maps at a different
 	size. See `apply_shadow_settings` (shadow_standard.odin) for exactly when
 	that rebuild happens and when it does not.
+
+	A field left at zero that has no sensible zero gets its default here
+	rather than being taken literally -- see `lighting_settings_normalized`
+	below for the rule and which fields it covers. What is stored is the
+	normalized value, so what a later read reports is what actually ran.
 */
 set_lighting :: proc(settings: Lighting_Settings = LIGHTING_DEFAULTS) {
-	mbi.renderer.lighting.settings = settings
-	apply_shadow_settings(settings.shadows)
+	normalized := lighting_settings_normalized(settings)
+
+	mbi.renderer.lighting.settings = normalized
+	apply_shadow_settings(normalized.shadows)
+}
+
+/*
+	Zero means the default -- the rule, stated once here and applied by
+	`shadow_settings_normalized` (shadow.odin) and `material_normalized`
+	(material.odin) as well.
+
+	**The problem it solves.** These structs are built as partial composite
+	literals -- `{enabled = true, ambient = {...}}` -- naming only the fields
+	a caller cares about, which is the shape every example in this repo uses
+	and the shape CLAUDE.md's "configuration rides in as a defaulted struct"
+	encourages. Odin fills the rest with zeroes. So every field added to one
+	of these structs in a later phase silently changes what an existing
+	literal means, and a field whose zero is not a sensible value turns every
+	such literal into a broken scene with nothing to point at. `exposure`
+	arrived that way in P1 and rendered nine examples solid black.
+
+	**The rule.** Where zero is not a value anybody could mean, it is read as
+	"I did not set this" and replaced with the default. Where zero *is* a
+	legitimate value, it is taken literally and stays that way -- so the rule
+	is a per-field judgement, not a blanket sweep, and each exception is named
+	at the field it applies to.
+
+	`Body.tint` (types.odin) is the precedent and the reasoning: an all-zero
+	tint means "as it was painted" rather than "transparent black", because a
+	struct that has not been filled in has to draw the picture and not a hole.
+	It also shows the test a sentinel has to pass -- it must not collide with
+	a value someone might legitimately want. Fading a sprite out is
+	`{1, 1, 1, a}`, never all-zero, so the two cannot be confused. Every
+	default below passes the same test.
+
+	**Normalized on the way in, not on the way out.** What gets stored is the
+	normalized struct, so a field read back later is the one that actually
+	ran. The alternative -- resolving zeroes at the point of use and leaving
+	the stored copy alone -- would mean the settings a game can inspect are
+	not the settings running, which is exactly the emergent-state problem this
+	file's own top comment exists to remove.
+
+	Covered here: `exposure` alone. Every other field of `Lighting_Settings`
+	has a legitimate zero -- `enabled = false` is a scene that is not lit,
+	`Ambient{}` is no ambient light, `Fog{}` is no fog, and `pipeline` and
+	`tonemap` both have a real first enum value (`FORWARD`, `NONE`).
+*/
+@(private)
+lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Settings {
+	s := settings
+
+	// Zero multiplies the whole scene to black, which is never a scene
+	// anybody asked for and is indistinguishable from a field nobody filled
+	// in until the picture is already on screen.
+	if s.exposure == 0 do s.exposure = LIGHTING_DEFAULTS.exposure
+
+	s.shadows = shadow_settings_normalized(s.shadows)
+
+	return s
 }
 
 // Whether the lighting model is currently running. `Lighting_Settings.enabled`,

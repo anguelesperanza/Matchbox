@@ -125,6 +125,49 @@ SHADOW_DEFAULTS :: Shadow_Settings{
 }
 
 /*
+	Zero means the default, for the numbers here that have no sensible zero
+	-- see `lighting_settings_normalized` (lighting.odin) for the rule, why
+	it exists, and why the fixup lands at store time.
+
+	This is what makes `shadows = {enabled = true}` a working way to turn
+	shadows on with sane numbers, rather than a 0x0 shadow map inside a
+	frustum of zero width and zero depth. `SHADOW_DEFAULTS` stays the more
+	readable spelling of the same thing, and stays the one to copy and adjust
+	when a scene wants its own scale.
+
+	`enabled` and `technique` are untouched: false is a scene that casts no
+	shadows, and `technique`'s zero is `PCF`, a real value and the only one
+	P0 built.
+
+	Every number is left alone while `enabled` is false, rather than filled
+	in and ignored. A caller that turns shadows off and later back on should
+	get the numbers it actually wrote back, including deliberate zeroes it
+	set while they were off.
+
+	`bias` is the one judgement call here. A zero shader-side bias is
+	arguably legitimate -- the shadow pipelines carry a rasterizer-level
+	bias of their own (`create_pipeline`'s `depth_bias`/`depth_bias_slope`),
+	so zero here is not the same as no bias at all. It is defaulted anyway,
+	because acne is an artifact `lighting_plan.md` section 2 is explicit
+	about not shipping, and "I wrote zero deliberately" is far rarer than "I
+	did not fill this in". P3 replaces this single number with a per-technique
+	bias framework and should revisit the call then.
+*/
+@(private)
+shadow_settings_normalized :: proc(settings: Shadow_Settings) -> Shadow_Settings {
+	s := settings
+	if !s.enabled do return s
+
+	if s.resolution == 0 do s.resolution = SHADOW_DEFAULTS.resolution
+	if s.extent     == 0 do s.extent     = SHADOW_DEFAULTS.extent
+	if s.near       == 0 do s.near       = SHADOW_DEFAULTS.near
+	if s.far        == 0 do s.far        = SHADOW_DEFAULTS.far
+	if s.bias       == 0 do s.bias       = SHADOW_DEFAULTS.bias
+
+	return s
+}
+
+/*
 	Everything the shadow pass owns at runtime, as last resolved by
 	`set_lighting` -- grouped the way `Lighting` (render.odin) groups
 	everything lighting owns, rather than as loose fields on `Renderer`.

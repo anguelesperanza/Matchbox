@@ -494,10 +494,35 @@ had to reason about.
 
 The deeper point is that this recurs. Every phase adds fields to
 `Lighting_Settings`, `Material` and `Shadow_Settings`, and every one of them
-silently changes what an existing partial literal means. Either those structs
-get a documented "zero means the default" rule applied consistently, or the
-API stops encouraging partial literals -- but the current position, one field
-with a landmine and a comment warning about it, is the one that will not hold.
+silently changes what an existing partial literal means.
+
+**Settled: zero means the default, and the rule is now in the code.**
+`lighting_settings_normalized` (lighting.odin) states it once and is the
+place to read it; `shadow_settings_normalized` (shadow.odin) and
+`material_normalized` (material.odin) apply it to their own structs. Three
+things about it are worth carrying into later phases:
+
+- **It is a per-field judgement, not a sweep.** Zero is replaced only where
+  no caller could mean it. `metallic` and `roughness` are named exceptions --
+  zero metallic is a dielectric and zero roughness is a mirror, both real
+  answers -- and so are `Ambient{}`, `Fog{}` and a `Shadow_Settings` whose
+  `enabled` is false. A phase that starts reading a field currently unread
+  decides which side it falls on and says so at the field.
+- **The sentinel must not collide with a legitimate value**, which is the
+  test `Body.tint` already set. A black material is `{0, 0, 0, 1}` and keeps
+  its alpha, so it cannot be confused with one nobody filled in.
+- **Settings normalize on store; materials normalize at pack time.**
+  `Lighting_Settings` and `Shadow_Settings` are Matchbox's own state, so the
+  normalized value is what is stored and a read reports what actually runs --
+  which answers the "the value read back is not the value that ran" objection
+  by removing the divergence rather than accepting it. A `Material` belongs to
+  the caller's `Model_Part` and there is nowhere to store a copy they would
+  see, so it is normalized in `material_frag_data` on the way to the GPU.
+
+`normalize_test.odin` covers both halves, and the half that matters is the
+one where nothing happens: every default is paired with a test that a
+deliberate zero survives, because an over-applied rule silently puts a value
+somebody meant out of reach.
 
 ### 3.8 File layout
 

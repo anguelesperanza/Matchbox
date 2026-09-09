@@ -165,18 +165,36 @@ linearize_background_color :: proc(c: [4]f32) -> [4]f32 {
 	Tonemaps and gamma-encodes the HDR scene target, writing the result into
 	whatever `begin_drawing_3d` rendered for -- the window, or a game's own
 	`Render_Target`, both still in the swapchain's own format. Called once
-	from `end_drawing_3d`, after that pass has closed.
+	from `end_drawing_3d`, after that pass has closed and after
+	`post_chain_run` (post.odin) has built whatever the chain's earlier stages
+	produce.
 
-	A full-screen quad through `draw_quad`, the same shape `draw_post`
-	(render_target.odin) already uses to bring a `Render_Target` back to the
-	window -- this is exactly that operation with a fixed effect (tonemap +
-	gamma) and a fixed, internal source (the HDR target, never a game's own
-	texture).
+	**It is also the end of the post chain**, which is why this now composites
+	bloom and runs the colour grade rather than only exposure and a curve: both
+	are per-pixel functions of one texel, and post.odin's own top comment gives
+	the rule that keeps a stage like that out of a pass of its own.
 
-	The nearest sampler (`sprite_sampler`) is deliberate, not the linear one
-	other 2D drawing uses: this quad is always exactly the size of the
-	texture it reads, so nearest and linear sample the identical texel and
-	nearest is the one that does not pretend otherwise.
+	A full-screen quad, the same shape `draw_post` (render_target.odin) already
+	uses to bring a `Render_Target` back to the window -- this is exactly that
+	operation with a fixed effect and a fixed, internal source (the HDR target,
+	never a game's own texture).
+
+	**Two samplers, bound by hand rather than through `draw_quad`.** That
+	helper binds one texture at slot 0 and nothing else, which was the whole
+	shape of every quad in this package until the bloom chain gave this one a
+	second source. Binding both here and then clearing `bound_texture` is what
+	keeps `bind_quad_state`'s own cache honest: it skips a rebind when the
+	texture it last recorded matches, and a texture bound behind its back
+	would make the next 2D draw skip a bind the GPU never received.
+
+	The nearest sampler (`sprite_sampler`) on the scene target is deliberate,
+	not the linear one other 2D drawing uses: that quad is always exactly the
+	size of the texture it reads, so nearest and linear sample the identical
+	texel and nearest is the one that does not pretend otherwise. The bloom
+	texture is the opposite case and gets the opposite sampler -- it is half
+	the resolution of this quad, so the bilinear filter in
+	`linear_clamp_sampler` is what smoothly upscales it and saves the chain a
+	pass it would otherwise need.
 */
 @(private)
 resolve_tonemap :: proc() {
@@ -195,12 +213,48 @@ resolve_tonemap :: proc() {
 	}
 
 	settings := r.lighting.settings
+	grade    := settings.post.grade
+
+	bloom_texture := bloom_output()
+
 	frag_data := Tonemap_Resolve_Frag_Data{
 		exposure = settings.exposure,
 		tonemap  = f32(settings.tonemap),
+
+		// Zero whenever the chain produced nothing this frame, so the 1x1
+		// black placeholder bound below is multiplied by zero as well as being
+		// black -- either alone would do, and having both means neither is
+		// load-bearing.
+		bloom_intensity = settings.post.bloom.intensity if bloom_texture != nil else 0,
+
+		grade_enabled = 1 if grade.enabled else 0,
+		grade_lift    = {grade.lift[0],  grade.lift[1],  grade.lift[2],  0},
+		grade_gamma   = {grade.gamma[0], grade.gamma[1], grade.gamma[2], 0},
+		grade_gain    = {grade.gain[0],  grade.gain[1],  grade.gain[2],  0},
+
+		grade_contrast   = grade.contrast,
+		grade_saturation = grade.saturation,
 	}
 
-	draw_quad(r.pipelines.tonemap, &vert_data, &frag_data, size_of(frag_data), t.color, r.sprite_sampler)
+	if !bind_quad_state(r.pipelines.tonemap) do return
+
+	// default_probe_texture is 1x1 black and is exactly what "no bloom" wants
+	// -- reused rather than given a placeholder of its own, the same way one
+	// linear clamped sampler now serves both the probe and the chain. See
+	// Renderer.default_probe_texture's own doc comment for why black rather
+	// than white is the right stand-in for emitted light.
+	bindings := [2]sdl.GPUTextureSamplerBinding{
+		{texture = t.color, sampler = r.sprite_sampler},
+		{texture = bloom_texture if bloom_texture != nil else r.default_probe_texture, sampler = r.linear_clamp_sampler},
+	}
+	sdl.BindGPUFragmentSamplers(r.pass, 0, &bindings[0], 2)
+
+	// Bound behind bind_quad_state's back, so tell it so -- see this proc's
+	// own doc comment.
+	r.bound_texture = nil
+	r.bound_sampler = nil
+
+	push_quad(&vert_data, &frag_data, size_of(frag_data))
 }
 
 // -----------------------------------------------------------------------
@@ -356,13 +410,28 @@ tonemap_encode :: proc(color: [3]f32) -> [3]f32 {
 	}
 }
 
-// The whole resolve, CPU side: exposure, the curve `tonemap` selects, then
-// the shared encode -- mirrors `shaders/tonemap.frag.hlsl`'s `main`
-// statement for statement. Not called by `resolve_tonemap` itself, which
-// pushes the raw settings to the GPU and lets the shader run this same
-// arithmetic; this exists so `tonemap_test.odin` has something to call.
+/*
+	The whole resolve, CPU side: exposure, the curve `tonemap` selects, the
+	colour grade, then the shared encode -- mirrors
+	`shaders/tonemap.frag.hlsl`'s `main` statement for statement. Not called
+	by `resolve_tonemap` itself, which pushes the raw settings to the GPU and
+	lets the shader run this same arithmetic; this exists so
+	`tonemap_test.odin` and `post_test.odin` have something to call.
+
+	`grade` is defaulted to the zero value, which `Color_Grade` (post.odin)
+	guarantees is an exact no-op -- so every call written before grading
+	existed still means exactly what it meant, and the tests that predate P7a
+	are a check that grading did not disturb the curves rather than tests that
+	had to be edited to keep passing.
+
+	The bloom composite is deliberately *not* here. It is the one step of the
+	resolve that is not a function of its own arguments -- it reads a texture
+	eleven earlier passes built -- so a CPU mirror of it could only be asserted
+	against itself. What is testable about bloom is the knee and the kernels,
+	and those have their own mirrors in `bloom.odin`.
+*/
 @(private)
-tonemap_apply :: proc(color: [3]f32, exposure: f32, tonemap: Tonemap) -> [3]f32 {
+tonemap_apply :: proc(color: [3]f32, exposure: f32, tonemap: Tonemap, grade := Color_Grade{}) -> [3]f32 {
 	c := tonemap_expose(color, exposure)
 
 	switch tonemap {
@@ -371,6 +440,15 @@ tonemap_apply :: proc(color: [3]f32, exposure: f32, tonemap: Tonemap) -> [3]f32 
 	case .ACES:     c = tonemap_aces(c)
 	case .AGX:      c = tonemap_agx(c)
 	}
+
+	// Clamped after the grade rather than trusted to stay in range: every
+	// curve above hands over a [0, 1] value, but lift, contrast and a
+	// saturation boost can each push back out of it, and `tonemap_encode`'s
+	// own pow() of a negative is a NaN. `tonemap_none` is reused for it
+	// because that is exactly what it is -- a clamp to [0, 1] -- and mirrors
+	// the shader's own saturate() there.
+	c = color_grade_apply(c, grade)
+	c = tonemap_none(c)
 
 	return tonemap_encode(c)
 }

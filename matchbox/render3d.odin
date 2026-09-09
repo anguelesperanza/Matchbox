@@ -397,11 +397,26 @@ end_drawing_3d :: proc() {
 		r.pass = nil
 	}
 
-	// Before the resolve, not after: draw_quad (inside resolve_tonemap)
+	// Before the resolve, not after: bind_quad_state (inside resolve_tonemap)
 	// asserts that 2D drawing never happens between begin_drawing_3d and
 	// this call, and the resolve itself is 2D drawing -- a full-screen quad
 	// through the ordinary bind_quad_state/push_quad path, not a 3D draw.
 	r.mode_3d = false
+
+	/*
+		The post chain's earlier stages, between the last 3D draw and the
+		resolve that ends the chain -- see post.odin's own top comment for
+		what is in it and for the rule that decides whether a stage needs a
+		pass of its own at all.
+
+		Here rather than inside resolve_tonemap for the reason the ordering
+		above already gives once: every stage in the chain opens render passes
+		of its own into its own targets, and the resolve's own pass is the
+		frame's, opened against current_color_texture(). Running the chain
+		first means that pass is opened once, at the end, with everything it
+		reads already finished.
+	*/
+	post_chain_run()
 
 	resolve_tonemap()
 }
@@ -754,8 +769,8 @@ draw_model_immediate :: proc(
 				}
 				if r.bound_probe_maps != probe_maps {
 					probe_bindings := [2]sdl.GPUTextureSamplerBinding{
-						{texture = probe_maps[0], sampler = r.probe_sampler},
-						{texture = probe_maps[1], sampler = r.probe_sampler},
+						{texture = probe_maps[0], sampler = r.linear_clamp_sampler},
+						{texture = probe_maps[1], sampler = r.linear_clamp_sampler},
 					}
 					sdl.BindGPUFragmentSamplers(r.pass, 8, &probe_bindings[0], 2)
 					r.bound_probe_maps = probe_maps

@@ -183,6 +183,31 @@ create_builtin_shader :: proc(
 @(private)
 MAX_COLOR_TARGETS :: 4
 
+/*
+	How a pipeline's colour target combines what a fragment produces with what
+	is already there.
+
+	`ALPHA` is the source-alpha blend every draw in this package used before
+	there was anything else, and is still what all but four pipelines want.
+	`NONE` writes the fragment straight through -- the G-buffer fill needs it,
+	because blending two unrelated materials' normals or roughness together
+	where their triangles anti-alias against each other is not a value a
+	lighting pass could make sense of. `ADDITIVE` sums colour and overwrites
+	alpha, which is what the bloom chain's upsample is built on: each level
+	adds itself into the larger one above it (bloom_upsample.frag.hlsl).
+
+	An enum rather than the `color_blend: bool` this replaced, because a third
+	answer arrived and a bool with three meanings is not a bool. The two
+	G-buffer callers that said `color_blend = false` say `blend = .NONE` now
+	and are otherwise unchanged.
+*/
+@(private)
+Color_Blend :: enum {
+	ALPHA,
+	NONE,
+	ADDITIVE,
+}
+
 // Which geometry a pipeline reads: the shared quad, or a model's own vertices.
 @(private)
 Vertex_Layout :: enum {
@@ -285,17 +310,11 @@ create_pipeline :: proc(
 	*/
 	color_formats: []sdl.GPUTextureFormat = nil,
 
-	/*
-		Whether the colour target(s) built here blend -- true (the existing
-		behaviour, for every pipeline before this phase) or false, for the
-		G-buffer: a fill pass writes a `Surface` field's own raw value into
-		each target, and blending two unrelated materials' normals or
-		roughness together where two triangles' edges anti-alias against each
-		other is not a colour a lighting pass could ever make sense of, unlike
-		alpha-blending two colours which is exactly what every 2D/3D draw
-		before this pipeline wanted.
-	*/
-	color_blend: bool = true,
+	// How the colour target(s) built here combine with what is already in
+	// them -- see `Color_Blend`. `.ALPHA` is what every pipeline in this
+	// package wanted before the G-buffer and the bloom chain each needed
+	// something else.
+	blend: Color_Blend = .ALPHA,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -358,10 +377,18 @@ create_pipeline :: proc(
 	}
 
 	blend_state := sdl.GPUColorTargetBlendState{
-		enable_blend            = color_blend,
+		enable_blend            = blend != .NONE,
 		color_blend_op          = .ADD,
-		src_color_blendfactor   = .SRC_ALPHA,
-		dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
+
+		// ONE rather than SRC_ALPHA for the additive case, which is the whole
+		// difference between the two enabled modes: the source contributes in
+		// full instead of being weighted by an alpha nothing in the bloom
+		// chain writes. Alpha itself is ONE/ZERO in both, so the destination's
+		// alpha is the source's either way -- nothing downstream of either
+		// mode reads it.
+		src_color_blendfactor   = .ONE if blend == .ADDITIVE else .SRC_ALPHA,
+		dst_color_blendfactor   = .ONE if blend == .ADDITIVE else .ONE_MINUS_SRC_ALPHA,
+
 		alpha_blend_op          = .ADD,
 		src_alpha_blendfactor   = .ONE,
 		dst_alpha_blendfactor   = .ZERO,
@@ -515,8 +542,10 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Cascade_Frag_Data) == 544)
 	#assert(size_of(Cube_Frag_Data)    == 400)
 	#assert(size_of(Post_Frag_Data)    == 32)
-	#assert(size_of(Tonemap_Resolve_Frag_Data) == 16)
+	#assert(size_of(Tonemap_Resolve_Frag_Data) == 80)
 	#assert(size_of(Probe_Prefilter_Frag_Data) == 16)
+	#assert(size_of(Bloom_Filter_Frag_Data)    == 16)
+	#assert(size_of(Bloom_Prefilter_Frag_Data) == 32)
 	#assert(size_of(Deferred_Lighting_Frag_Data) == 64)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
@@ -678,10 +707,24 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.shaders.vhs = create_builtin_shader(
 		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
 
-	// The tonemap resolve -- one sampler (the HDR target) and one uniform
-	// block (exposure and which curve). See tonemap.odin.
+	// The tonemap resolve -- **two** samplers since P7a (the HDR target at
+	// t0, the bloom chain's level 0 at t1, which is a 1x1 black placeholder
+	// whenever bloom is off) and one uniform block: exposure, which curve,
+	// the bloom intensity and the whole colour grade. See tonemap.odin, and
+	// post.odin for why the grade rides here rather than in a pass of its own.
 	mbi.renderer.shaders.tonemap = create_builtin_shader(
-		#load("shaders/tonemap.frag.spv"), #load("shaders/tonemap.frag.dxil"), .FRAGMENT, 1)
+		#load("shaders/tonemap.frag.spv"), #load("shaders/tonemap.frag.dxil"), .FRAGMENT, 2)
+
+	// The bloom chain (bloom.odin). One sampler each -- whichever level or
+	// scene target that pass is reading -- and one uniform block each, which
+	// is a texel size for two of them and a texel size plus the brightness
+	// knee for the prefilter.
+	mbi.renderer.shaders.bloom_prefilter = create_builtin_shader(
+		#load("shaders/bloom_prefilter.frag.spv"), #load("shaders/bloom_prefilter.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.bloom_downsample = create_builtin_shader(
+		#load("shaders/bloom_downsample.frag.spv"), #load("shaders/bloom_downsample.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.bloom_upsample = create_builtin_shader(
+		#load("shaders/bloom_upsample.frag.spv"), #load("shaders/bloom_upsample.frag.dxil"), .FRAGMENT, 1)
 
 	/*
 		Environment probe baking (ambient.odin). Both read one sampler -- the
@@ -752,6 +795,32 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.pipelines.tonemap = create_pipeline(mbi.renderer.shaders.tonemap)
 
 	/*
+		The bloom chain (bloom.odin). Built against the HDR target's own float
+		format rather than the swapchain's, because every level of the chain
+		holds unbounded linear light -- the same reason the five pipelines
+		that draw *inside* the 3D pass need it, arrived at from the other
+		side: these draw after that pass has closed but still never touch the
+		swapchain.
+
+		The upsample is the one additive pipeline in this package. Everything
+		else here, including the other two bloom passes, overwrites or
+		alpha-blends.
+	*/
+	mbi.renderer.pipelines.bloom_prefilter = create_pipeline(
+		mbi.renderer.shaders.bloom_prefilter,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+	mbi.renderer.pipelines.bloom_downsample = create_pipeline(
+		mbi.renderer.shaders.bloom_downsample,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+	mbi.renderer.pipelines.bloom_upsample = create_pipeline(
+		mbi.renderer.shaders.bloom_upsample,
+		color_format = mbi.renderer.lighting.targets.format,
+		blend        = .ADDITIVE,
+	)
+
+	/*
 		Environment probe baking -- the skybox's own vertex shader (no
 		geometry, SV_VertexID triangle, see Vertex_Layout.NONE), no depth
 		(these write into a Texture2DArray of their own, never into any pass
@@ -813,7 +882,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull           = .BACK,
 		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
 		color_formats  = gbuffer_formats[:],
-		color_blend    = false, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
+		blend          = .NONE, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
 	)
 
 	mbi.renderer.pipelines.gbuffer_skinned = create_pipeline(
@@ -824,7 +893,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		cull           = .BACK,
 		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
 		color_formats  = gbuffer_formats[:],
-		color_blend    = false,
+		blend          = .NONE,
 	)
 
 	// Built the same shape skybox_panorama/skybox_cubemap already are (just
@@ -943,17 +1012,20 @@ init :: proc(title: string, width: i32, height: i32) {
 		address_mode_w = .CLAMP_TO_EDGE,
 	})
 	/*
-		The environment probe's own sampler. Linear, clamped on both axes --
-		there is no wrap-around to be had inside one face's own image, the
-		same reasoning `skybox_clamp_sampler` already gives for a cube map's
-		own faces. Mip filtering is irrelevant: `probe_layer_uv`
+		Linear, clamped on all three axes -- the environment probe's own two
+		maps and every pass of the bloom chain (bloom.odin) read through this
+		one. There is no wrap-around to be had inside one probe face's own
+		image, nor across the edge of the screen a bloom level is a shrunken
+		copy of, the same reasoning `skybox_clamp_sampler` already gives for a
+		cube map's own faces. See `Renderer.linear_clamp_sampler` for why one
+		sampler serves both. Mip filtering is irrelevant: `probe_layer_uv`
 		(lighting_core.hlsli) always reads mip 0 of whichever layer it
 		picked, since roughness selects a *layer* here rather than a real mip
 		level (ambient.odin's own top comment explains why) -- `min_lod`/
 		`max_lod` are left at their zero-value default for exactly that
 		reason, not tuned for a mip chain neither probe texture actually has.
 	*/
-	mbi.renderer.probe_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+	mbi.renderer.linear_clamp_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
 		min_filter     = .LINEAR,
 		mag_filter     = .LINEAR,
 		address_mode_u = .CLAMP_TO_EDGE,
@@ -1154,7 +1226,7 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil &&
 		mbi.renderer.lighting.shadow.sampler != nil && shadow_placeholders_ok && default_texture_ok &&
-		mbi.renderer.probe_sampler != nil && default_probe_texture_ok && cluster_placeholders_ok,
+		mbi.renderer.linear_clamp_sampler != nil && default_probe_texture_ok && cluster_placeholders_ok,
 		"could not create samplers")
 
 	// The one quad every draw uses.
@@ -1240,7 +1312,7 @@ cleanup :: proc() {
 	if mbi.renderer.default_probe_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_probe_texture)
 	if mbi.renderer.default_cluster_ranges_buffer        != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.default_cluster_ranges_buffer)
 	if mbi.renderer.default_cluster_light_indices_buffer != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.default_cluster_light_indices_buffer)
-	if mbi.renderer.probe_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.probe_sampler)
+	if mbi.renderer.linear_clamp_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.linear_clamp_sampler)
 
 	// A game's own probe, if one was ever loaded and set -- see
 	// set_environment_probe (ambient.odin).
@@ -1265,6 +1337,9 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
 	if mbi.renderer.pipelines.tonemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.tonemap)
+	if mbi.renderer.pipelines.bloom_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_prefilter)
+	if mbi.renderer.pipelines.bloom_downsample != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_downsample)
+	if mbi.renderer.pipelines.bloom_upsample   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_upsample)
 	if mbi.renderer.pipelines.probe_irradiance != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_irradiance)
 	if mbi.renderer.pipelines.probe_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_prefilter)
 
@@ -1289,6 +1364,9 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
 	if mbi.renderer.shaders.tonemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.tonemap)
+	if mbi.renderer.shaders.bloom_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_prefilter)
+	if mbi.renderer.shaders.bloom_downsample != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_downsample)
+	if mbi.renderer.shaders.bloom_upsample   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_upsample)
 	if mbi.renderer.shaders.probe_irradiance != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_irradiance)
 	if mbi.renderer.shaders.probe_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_prefilter)
 
@@ -1307,6 +1385,10 @@ cleanup :: proc() {
 		sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.targets.color)
 		mbi.renderer.lighting.targets.color = nil
 	}
+
+	// The bloom chain's own levels -- only ever made once a game turns bloom
+	// on. See bloom.odin.
+	release_bloom_targets()
 
 	// DEFERRED's own targets -- only ever made once a game selects that
 	// pipeline. See Gbuffer_Targets' own doc comment (gbuffer.odin).

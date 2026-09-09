@@ -230,14 +230,66 @@ Probe_Prefilter_Frag_Data :: struct #align(16) {
 	_pad:      [3]f32,
 }
 
-// 16 bytes. The tonemap resolve's own fragment uniform -- exposure and which
-// curve to run, nothing else. Does not share Post_Frag_Data: this is not a
-// Post_Effect a game chooses, it is the always-on step that turns the HDR
-// scene target back into a displayable one, see tonemap.odin.
+/*
+	80 bytes. The tonemap resolve's own fragment uniform -- and, since P7a, the
+	end of the post chain's own: the bloom composite and the whole colour
+	grade ride here too, because both are per-pixel functions of one texel and
+	so belong inside the resolve rather than in passes of their own. See
+	post.odin's own top comment for that rule.
+
+	Does not share Post_Frag_Data: that is a Post_Effect a game chooses for a
+	Render_Target it owns; this is the always-on step that turns the HDR scene
+	target back into a displayable one. See tonemap.odin.
+
+	16 bytes of scalars, then three float4s, then two more scalars -- the
+	float4s are float4 rather than float3 for the packing reason this package
+	repeats at every uniform block: HLSL pads a vector that would straddle a
+	16-byte boundary, invisibly from the Odin side, and float4-everywhere is
+	what makes the two sides agree by construction rather than by counting.
+*/
 Tonemap_Resolve_Frag_Data :: struct #align(16) {
 	exposure: f32,
 	tonemap:  f32, // Tonemap's ordinal -- see shading_model_index's own comment (shading.odin) for why a float and why the ordinal rather than a second switch
-	_pad:     [2]f32,
+
+	// How much of the bloom chain's level 0 is added back before exposure --
+	// Bloom.intensity, or 0 whenever bloom is off. See bloom.odin.
+	bloom_intensity: f32,
+
+	// 1 when Color_Grade.enabled, 0 otherwise. A float rather than a b32 for
+	// the same reason `tonemap` above is one: a uniform block of nothing but
+	// 4-byte floats cannot disagree between the two languages about a bool's
+	// own size.
+	grade_enabled: f32,
+
+	// Color_Grade's three per-channel deltas, xyz each, w unused. See
+	// Color_Grade (post.odin) for why every one of them is a delta from
+	// identity rather than a factor.
+	grade_lift:  [4]f32,
+	grade_gamma: [4]f32,
+	grade_gain:  [4]f32,
+
+	grade_contrast:   f32,
+	grade_saturation: f32,
+	_pad:             [2]f32,
+}
+
+// 16 bytes. bloom_downsample.frag.hlsl and bloom_upsample.frag.hlsl share
+// this one -- both need exactly one number, the size of a texel of whatever
+// they are *reading*, and nothing else. See bloom.odin's own bloom_run for
+// why the source's texel size and not the destination's.
+Bloom_Filter_Frag_Data :: struct #align(16) {
+	texel: [2]f32,
+	_pad:  [2]f32,
+}
+
+// 32 bytes. bloom_prefilter.frag.hlsl's own: the same texel size the two
+// filter passes take, plus the packed brightness knee -- see
+// bloom_prefilter_curve (bloom.odin) for what the four components are and
+// why the shader is handed them already worked out.
+Bloom_Prefilter_Frag_Data :: struct #align(16) {
+	texel: [2]f32,
+	_pad:  [2]f32,
+	curve: [4]f32,
 }
 
 /*

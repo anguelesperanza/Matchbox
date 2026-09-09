@@ -247,6 +247,20 @@ Lighting_Settings :: struct {
 	*/
 	exposure: f32,
 	tonemap:  Tonemap,
+
+	/*
+		P7a's own addition: the stages of the post chain that need a pass of
+		their own or a branch inside the resolve -- bloom and colour grading.
+		See `Post_Settings` (post.odin), and that file's top comment for why
+		`exposure` and `tonemap` above did **not** move in beside them.
+
+		The zero value is bloom off and no grade, which is exactly the picture
+		every scene got before this phase, so an existing `Lighting_Settings`
+		literal that never mentions `post` is unchanged by its arrival -- the
+		property `lighting_settings_normalized`'s own doc comment says every
+		new field on this struct has to be checked for, rather than assumed.
+	*/
+	post: Post_Settings,
 }
 
 /*
@@ -262,7 +276,7 @@ Lighting_Settings :: struct {
 	struct exactly so a game (or a later phase) can choose one without this
 	default having to be relitigated.
 */
-LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD, exposure = 1, tonemap = .NONE, cluster = CLUSTER_DEFAULTS}
+LIGHTING_DEFAULTS :: Lighting_Settings{enabled = true, pipeline = .FORWARD, exposure = 1, tonemap = .NONE, cluster = CLUSTER_DEFAULTS, post = POST_DEFAULTS}
 
 /*
 	Applies `settings` to the scene: whether lighting runs, whether shadows do
@@ -332,7 +346,11 @@ set_lighting :: proc(settings: Lighting_Settings = LIGHTING_DEFAULTS) {
 	delegates to `cluster_settings_normalized` (light_cull.odin) the same way
 	`shadows` delegates to `shadow_settings_normalized`, since a grid of zero
 	clusters along any axis is exactly this same "not a value anybody could
-	mean" case, one struct over.
+	mean" case, one struct over. `post` delegates to
+	`post_settings_normalized` (post.odin), which is worth reading for the
+	other half of the rule: half of what it covers needed no entry at all,
+	because `Color_Grade`'s fields are spelled as deltas from identity and so
+	have no wrong zero to fix.
 */
 @(private)
 lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Settings {
@@ -345,6 +363,7 @@ lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Se
 
 	s.shadows = shadow_settings_normalized(s.shadows)
 	s.cluster = cluster_settings_normalized(s.cluster)
+	s.post    = post_settings_normalized(s.post)
 
 	return s
 }

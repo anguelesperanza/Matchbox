@@ -274,8 +274,8 @@ draw_deferred_lighting_quad :: proc() {
 		r.lighting.probe.prefiltered if r.lighting.probe.prefiltered != nil else r.default_probe_texture,
 	}
 	probe_bindings := [2]sdl.GPUTextureSamplerBinding{
-		{texture = probe_maps[0], sampler = r.probe_sampler},
-		{texture = probe_maps[1], sampler = r.probe_sampler},
+		{texture = probe_maps[0], sampler = r.linear_clamp_sampler},
+		{texture = probe_maps[1], sampler = r.linear_clamp_sampler},
 	}
 	sdl.BindGPUFragmentSamplers(r.pass, 9, &probe_bindings[0], 2)
 

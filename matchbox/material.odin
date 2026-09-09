@@ -77,7 +77,7 @@ Material :: struct {
 		`draw_model_immediate`'s own doc comment on `Renderer.in_deferred_forward_pass`
 		for exactly when. Under `FORWARD`/`CLUSTERED` this field changes
 		nothing: every mesh pipeline already blends
-		(`create_pipeline`'s own default `color_blend = true`), so a
+		(`create_pipeline`'s own default `blend = .ALPHA`), so a
 		transparent part looks the same whether or not it is marked.
 
 		False is the correct zero -- an opaque part is the ordinary case,

@@ -116,6 +116,19 @@ Shaders :: struct {
 	psx:  ^sdl.GPUShader,
 	vhs:  ^sdl.GPUShader,
 
+	/*
+		The bloom chain's own three -- also on the shared quad vertex shader,
+		since every one of them is a full-screen rectangle over some level of
+		the chain. Three rather than one because the three passes genuinely
+		differ: the prefilter reads a brightness knee the other two do not
+		have, and the upsample runs a different kernel and a different blend.
+		See bloom.odin's own top comment for the pass order and
+		shaders/bloom.hlsli for the two kernels they share.
+	*/
+	bloom_prefilter:  ^sdl.GPUShader,
+	bloom_downsample: ^sdl.GPUShader,
+	bloom_upsample:   ^sdl.GPUShader,
+
 	// Environment probe baking -- both take the skybox's own vertex shader
 	// (Shaders.skybox), reused rather than duplicated: a per-face camera
 	// basis is a per-face camera basis whether the fragment shader that
@@ -177,7 +190,7 @@ Pipelines :: struct {
 		built against the four G-buffer targets (`color_formats`,
 		`create_pipeline`) and the G-buffer's own depth texture rather than
 		the HDR target and the shared main depth texture, with blending off
-		(`color_blend = false`) -- see `Material.transparent`'s own doc
+		(`blend = .NONE`) -- see `Material.transparent`'s own doc
 		comment (material.odin) for why a G-buffer fill pass cannot blend at
 		all. `deferred_lighting` is the fullscreen resolve, built the same
 		shape `skybox_panorama`/`skybox_cubemap` already are
@@ -210,6 +223,22 @@ Pipelines :: struct {
 	// the swapchain's own format like every other 2D pipeline here: it writes
 	// into current_color_texture(), never into the HDR target itself.
 	tonemap: ^sdl.GPUGraphicsPipeline,
+
+	/*
+		The bloom chain -- all three built against the HDR target's own float
+		format, not the swapchain's, because every level of the chain holds
+		unbounded linear light the same way the scene target does (bloom.odin).
+		Depthless like every other 2D pipeline here.
+
+		`bloom_upsample` is the one pipeline in this package with an additive
+		blend rather than the alpha blend everything else shares
+		(`Color_Blend.ADDITIVE`, create_pipeline) -- see
+		bloom_upsample.frag.hlsl for why adding into the destination *is* the
+		mechanism rather than an optimization of it.
+	*/
+	bloom_prefilter:  ^sdl.GPUGraphicsPipeline,
+	bloom_downsample: ^sdl.GPUGraphicsPipeline,
+	bloom_upsample:   ^sdl.GPUGraphicsPipeline,
 
 	// Environment probe baking -- see Shaders.probe_irradiance/probe_prefilter's
 	// own comment. Built against the HDR target's own float format
@@ -271,6 +300,14 @@ Lighting :: struct {
 	// DEFERRED, the same "allocated on first use" shape targets/
 	// depth_texture already have for 3D itself.
 	gbuffer: Gbuffer_Targets,
+
+	// The bloom chain's own half-resolution levels -- see Bloom_Targets
+	// (bloom.odin). Zero value until a game actually turns bloom on, and
+	// released again the first frame after it turns it off, which is the one
+	// place this differs from the two texture sets above: a game toggling
+	// bloom is an ordinary thing to do, where a game toggling DEFERRED is
+	// not.
+	bloom: Bloom_Targets,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -335,12 +372,25 @@ Renderer :: struct {
 	default_cluster_ranges_buffer:        ^sdl.GPUBuffer,
 	default_cluster_light_indices_buffer: ^sdl.GPUBuffer,
 
-	// The environment probe's own sampler -- mipmap-linear (see
-	// ambient.odin's own doc comment on why the prefiltered map is read with
-	// an explicit level rather than automatic derivatives), shared by both
-	// probe slots and by the 1x1 placeholder above the same way
-	// `sprite_sampler` is shared by every untextured material slot.
-	probe_sampler: ^sdl.GPUSampler,
+	/*
+		Linear, clamped on all three axes -- the sampler for reading an
+		internal texture whose edges are edges rather than a wrap-around.
+
+		Two things want that. The environment probe reads both its own maps
+		through it (see ambient.odin's own doc comment on why the prefiltered
+		map is read with an explicit level rather than automatic derivatives),
+		shared by both probe slots and by the 1x1 placeholder above the same
+		way `sprite_sampler` is shared by every untextured material slot. And
+		every pass of the bloom chain reads through it too (bloom.odin), where
+		the filtering *is* the effect and the clamping is what keeps a bright
+		spot on the left edge of the screen from bleeding into the right one.
+
+		Named for what it is rather than for the first thing that wanted it:
+		it was `probe_sampler` until bloom turned out to want the identical
+		state, and two identical samplers with different names would have been
+		the worse answer.
+	*/
+	linear_clamp_sampler: ^sdl.GPUSampler,
 
 	// Linear, and wrapping across the seam where a panorama's longitude comes
 	// back round to itself. Clamped in v, so the poles do not bleed into each

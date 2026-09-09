@@ -76,10 +76,25 @@ dispatcher is greppable, debuggable, and cannot be left dangling. It also
 keeps the no-callbacks rule intact by construction rather than by discipline.
 
 **The test for "is this actually modular"** is stated once and applied at
-every review: *adding a sixth shading model must touch only its own file, one
-enum value, and one line in each dispatcher* -- three places under P0's single
-dispatcher, four once §2.1's split contract lands. If it touches shared code
-anywhere else, the seam is in the wrong place.
+every review: *adding a shading model must touch only its own file, one enum
+value, and one line in each dispatcher.* If it touches shared code anywhere
+else, the seam is in the wrong place.
+
+**The honest count is five, measured rather than predicted.** P2c added four
+models and the footprint of each was: its own `.hlsli`; one `Shading_Model`
+value paired with its `SHADING_*` define; one `#include` in
+`lighting_core.hlsli`; one line in `brdf_light`'s switch; one line in
+`brdf_resolve`'s switch. The `#include` is the one this section did not
+foresee, and it is mechanical rather than a judgement -- but a count that
+quietly omits it is a count nobody can check a diff against, so five it is.
+
+Two things P2c proved rather than assumed. `pbr_common.hlsli` -- the GGX,
+Smith and Schlick maths both PBR models share -- is a plain function library
+neither dispatcher knows about, the same relationship `shadow/pcf.hlsli` has
+to `shadow_visibility`; a shared helper is not a sixth place. And the only
+edits to `mesh.frag.hlsl` and `surface.hlsli` across the whole phase were
+comment corrections, which is the strongest evidence available here that
+shared code really does not know which model is running.
 
 ### 2.1 The per-light contract -- what P0 shipped, and what P2 replaces it with
 

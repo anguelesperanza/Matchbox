@@ -44,6 +44,6 @@ struct Surface
     float  thickness;  // P2
 
     uint  shading_model; // which brdf_light/brdf_resolve this point runs -- see shading.odin
-    float bands;         // toon (P2)
-    float rim;           // toon (P2)
+    float bands;         // toon (brdf/toon.hlsli)
+    float rim;           // toon (brdf/toon.hlsli)
 };

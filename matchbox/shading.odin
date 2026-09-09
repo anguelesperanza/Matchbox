@@ -36,13 +36,16 @@ package matchbox
 	microfacet maths under glTF's specular-glossiness parameterization instead
 	-- `brdf/pbr_common.hlsli` is the shared GGX/Smith/Schlick helper both
 	include, per this rework's own modularity test: two divergent copies of
-	GGX would not be one seam.
+	GGX would not be one seam. `TOON` is cel shading: `Surface.bands`
+	quantizes the diffuse response into discrete steps and `Surface.rim` is a
+	silhouette rim-light term.
 */
 Shading_Model :: enum {
 	BLINN_PHONG,
 	UNLIT,
 	PBR_METALLIC,
 	PBR_SPECGLOSS,
+	TOON,
 }
 
 /*

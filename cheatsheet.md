@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 363 of them -- with its arguments
+Every public procedure in the package -- 364 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 19
+- [Other](#other) -- 20
 
 ## Getting started
 
@@ -2526,6 +2526,17 @@ create_material_pbr_specgloss :: proc(
 ) -> Material
 ```
 The same Cook-Torrance BRDF as `create_material_pbr_metallic`, under glTF's specular-glossiness parameterization instead -- `brdf/pbr_specgloss.hlsli` reads `specular` as the surface's reflectance at normal incidence directly (no metallic lerp) and `glossiness` as the inverse of roughness.
+
+```odin
+create_material_toon :: proc(
+	base_color: [4]f32 = WHITE,
+	bands: f32 = 4,
+	rim: f32 = 0,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+Cel shading -- `brdf/toon.hlsli` reads `bands` as how many discrete steps the diffuse response quantizes into (4, this proc's own default, is a common cel-shading choice: a dark band, two mid bands and a lit one) and `rim` as the strength of a silhouette-edge highlight, 0 by default because not every toon-shaded material wants one.
 
 ### `shadow_standard.odin`
 

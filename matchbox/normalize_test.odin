@@ -128,6 +128,8 @@ test_zero_material_draws_something :: proc(t: ^testing.T) {
 	testing.expect(t, m.base_color == WHITE, "an all-zero base_color would be an invisible surface")
 	testing.expect(t, m.specular_power == MATERIAL_DEFAULTS.specular_power,
 		"pow(x, 0) is 1 everywhere -- a zero exponent is a blown-out highlight, not a dull one")
+	testing.expect(t, m.bands == MATERIAL_DEFAULTS.bands,
+		"brdf/toon.hlsli guards bands with max(bands, 1) -- an un-set zero would silently become one flat band rather than the toon material a caller likely meant")
 }
 
 @(test)
@@ -152,9 +154,11 @@ test_material_exceptions_keep_their_zeroes :: proc(t: ^testing.T) {
 		material_normalized comment names each of these as a value somebody
 		can mean rather than an unset field: zero metallic is a dielectric
 		(most surfaces in the world), zero roughness is a perfect mirror, zero
-		glossiness is as rough as specular-glossiness can express, and zero
-		specular is a real F0. Defaulting any of them would put a value
-		somebody meant out of reach.
+		glossiness is as rough as specular-glossiness can express, zero
+		specular is a real F0, and zero rim is no rim light. Defaulting any of
+		them would put a value somebody meant out of reach -- `bands`, checked
+		separately in test_zero_material_draws_something, is the one P2c field
+		that fails this test instead.
 	*/
 	m := material_normalized(Material{shading = .BLINN_PHONG})
 
@@ -162,11 +166,17 @@ test_material_exceptions_keep_their_zeroes :: proc(t: ^testing.T) {
 	testing.expect(t, m.roughness  == 0, "zero roughness is a mirror, not an unset field")
 	testing.expect(t, m.glossiness == 0, "zero glossiness is as rough as spec-gloss can express, not an unset field")
 	testing.expect(t, m.specular   == [3]f32{0, 0, 0}, "zero specular is a real F0, not an unset field")
+	testing.expect(t, m.rim        == 0, "zero rim is no rim light, not an unset field")
 }
 
 @(test)
 test_material_numbers_someone_meant_survive :: proc(t: ^testing.T) {
-	asked := Material{shading = .UNLIT, base_color = {0.2, 0.4, 0.6, 0.5}, specular_power = 64}
+	// bands joined specular_power here in P2c -- see material_normalized's
+	// own comment for why a zero bands is treated as unset while roughness,
+	// metallic, glossiness, specular and rim are not -- so a "fully
+	// specified" material for this test has to give bands a real value too,
+	// the same reason specular_power already had to.
+	asked := Material{shading = .UNLIT, base_color = {0.2, 0.4, 0.6, 0.5}, specular_power = 64, bands = 8}
 	m     := material_normalized(asked)
 
 	testing.expect(t, m == asked, "a fully specified Material must come back untouched")

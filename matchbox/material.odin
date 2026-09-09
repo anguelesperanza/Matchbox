@@ -21,9 +21,10 @@ package matchbox
 	scope creep: it is what lets P2c add the other four shading models one at
 	a time by touching the four places `shading.odin`'s own doc comment
 	describes, without a fifth place to also widen `Material_Frag_Data`'s
-	packed layout -- `metallic`, `roughness`, `specular` and `glossiness`,
-	both PBR models' own fields, were already present and already reaching
-	the shader, unread, before P2c touched a single `.hlsli`.
+	packed layout -- `metallic`, `roughness`, `specular`, `glossiness`,
+	`bands` and `rim`, three models' own fields between them, were already
+	present and already reaching the shader, unread, before P2c touched a
+	single `.hlsli`.
 */
 
 import sdl "vendor:sdl3"
@@ -60,9 +61,9 @@ Material :: struct {
 	// Per-model parameters, flat rather than a union: see this file's own
 	// top comment for why. Metallic-roughness and specular-glossiness are
 	// PBR's two parameterizations (brdf/pbr_metallic.hlsli,
-	// brdf/pbr_specgloss.hlsli); bands/rim are toon's (P2); subsurface/
-	// thickness are the SSS model's (P2); specular_power is Blinn-Phong's
-	// (brdf/blinn_phong.hlsli).
+	// brdf/pbr_specgloss.hlsli); bands/rim are toon's (brdf/toon.hlsli);
+	// subsurface/thickness are the SSS model's (P2); specular_power is
+	// Blinn-Phong's (brdf/blinn_phong.hlsli).
 	metallic:       f32,
 	roughness:      f32,
 	specular:       [3]f32,
@@ -85,7 +86,7 @@ Material :: struct {
 	defaults and `upload_mesh`'s generated parts both read it, so "what does
 	an untouched Model_Part look like" is answered in one place.
 */
-MATERIAL_DEFAULTS :: Material{shading = .BLINN_PHONG, base_color = {1, 1, 1, 1}, specular_power = 16}
+MATERIAL_DEFAULTS :: Material{shading = .BLINN_PHONG, base_color = {1, 1, 1, 1}, specular_power = 16, bands = 4}
 
 // A lit, Blinn-Phong-shaded material. What every model was, implicitly,
 // before this file existed -- this just gives that a name and lets the
@@ -169,6 +170,30 @@ create_material_pbr_specgloss :: proc(
 }
 
 /*
+	Cel shading -- `brdf/toon.hlsli` reads `bands` as how many discrete steps
+	the diffuse response quantizes into (4, this proc's own default, is a
+	common cel-shading choice: a dark band, two mid bands and a lit one) and
+	`rim` as the strength of a silhouette-edge highlight, 0 by default
+	because not every toon-shaded material wants one.
+*/
+create_material_toon :: proc(
+	base_color: [4]f32 = WHITE,
+	bands:      f32    = 4,
+	rim:        f32    = 0,
+	emissive:   [3]f32 = {0, 0, 0},
+	textures:   Material_Textures = {},
+) -> Material {
+	return Material{
+		shading    = .TOON,
+		base_color = base_color,
+		bands      = bands,
+		rim        = rim,
+		emissive   = emissive,
+		textures   = textures,
+	}
+}
+
+/*
 	112 bytes: the wire form of a `Material` plus the one thing that is not a
 	material property at all -- `tint`, `draw_model`'s own per-call multiplier,
 	carried here because both are pushed together, once per part, in the same
@@ -218,10 +243,19 @@ Material_Frag_Data :: struct #align(16) {
 	directly. `specular` (spec-gloss's own `f0`) is judged the same way in
 	`create_material_pbr_specgloss`'s own doc comment rather than swept here:
 	a caller who wants a material with genuinely zero specular reflectance
-	means exactly that. The remaining P2c fields -- `bands`, `rim`,
-	`subsurface`, `thickness` -- are unread by any model this far into P2c;
-	whichever of them turn out to have no sensible zero get added here by the
-	model that starts reading them, the same way these were.
+	means exactly that. `rim` (toon's silhouette highlight) is the same story
+	-- zero rim is no rim light, a real and common choice. The remaining P2c
+	fields -- `subsurface`, `thickness` -- are unread by any model this far
+	into P2c; whichever of them turn out to have no sensible zero get added
+	here by the model that starts reading them, the same way these were.
+
+	**`bands` is in here, and it is the one field P2c decided the other way.**
+	Zero bands is not a real cel-shading choice -- `brdf/toon.hlsli` guards
+	its own division with `max(bands, 1)`, so an un-set zero would silently
+	become one flat band (everything either fully dark or fully lit at the
+	single peak) rather than the "no banding" a caller might have expected
+	from a zero. Nobody chooses that on purpose, so it is defaulted the same
+	way `specular_power` already is.
 */
 @(private)
 material_normalized :: proc(material: Material) -> Material {
@@ -236,6 +270,10 @@ material_normalized :: proc(material: Material) -> Material {
 	// pow(x, 0) is 1 for every x, so a zero exponent is not a dull highlight
 	// -- it is a full-strength one across the entire surface.
 	if m.specular_power == 0 do m.specular_power = MATERIAL_DEFAULTS.specular_power
+
+	// See this proc's own doc comment for why bands joins these two and
+	// roughness/metallic/glossiness/specular/rim do not.
+	if m.bands == 0 do m.bands = MATERIAL_DEFAULTS.bands
 
 	return m
 }

@@ -913,6 +913,53 @@ Answered once, and not re-litigated per phase.
 
 ---
 
+## 7.7 P3's sampler count, and the wrong premise under it
+
+**Open. Recommended to fix before P4.**
+
+P3 ships a mesh fragment shader with **20 sampled textures and 20 samplers**
+(`t0`-`t19`/`s0`-`s19`, with the light `StructuredBuffer` pushed out to `t20`):
+base colour, three material maps, two shadow maps, `cascade_maps[8]`, and
+`cube_maps[6]`.
+
+**Vulkan's guaranteed minimum for `maxPerStageDescriptorSampledImages` is 16,
+and for `maxPerStageDescriptorSamplers` is also 16.** Desktop drivers report
+far higher numbers and will not notice. Devices sitting at or near the spec
+floor will fail at shader or pipeline creation -- and Matchbox targets Android
+(`android.odin`, `android_apk.bat`), where near-the-floor is ordinary. Nothing
+in `odin check` or `dxc` catches this; it is a runtime failure on a device
+neither this session nor the phase that wrote it can test.
+
+**The premise that produced those counts is false.** P3 reported, as its
+headline finding, that "SDL_GPU cannot render into a specific face/layer of a
+depth-stencil target -- `GPUDepthStencilTargetInfo` has no
+`layer_or_depth_plane` field, unlike `GPUColorTargetInfo`", and built six
+separate `D2` depth textures per cube caster and eight separate cascade
+textures on that basis.
+
+`GPUDepthStencilTargetInfo` does have the field. It is spelled `layer`:
+
+	layer: Uint8,  /**< The layer index to use as the depth stencil target. */
+
+-- `vendor/sdl3/sdl3_gpu.odin`, in the same struct, two fields from the end.
+The search was for the colour target's spelling (`layer_or_depth_plane`), and
+its absence was read as the capability's absence.
+
+So the array-and-cube approach the phase ruled out is available:
+`cascade_maps[8]` becomes one `Texture2DArray` (1 sampler), `cube_maps[6]`
+becomes one `TextureCube` or one array (1 sampler), and the shader drops from
+20 sampled textures to **8**, comfortably under the floor.
+
+Two honest caveats. The API affording a layer is not proof every SDL backend
+honours it for depth targets, and that cannot be verified here either -- but
+"the API does not offer this" and "the API offers this and a backend may be
+weak" are different claims, and only the second one is true. And rendering
+each cube face into a real cube texture still needs the six passes it needs
+now; what changes is how the result is *sampled*, which is where the sampler
+budget is actually spent.
+
+---
+
 ## 8. Verification standard
 
 CLAUDE.md: verify by measuring, not by looking. For this system specifically:

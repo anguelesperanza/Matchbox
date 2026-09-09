@@ -29,7 +29,10 @@
     its early-z, which for a few thousand line pixels is not worth measuring, and
     it is the one place the offset can be applied where it certainly happens.
 
-    Must match matchbox.Mesh_Frag_Data.
+    Declares only the field it actually reads, `tint` -- `draw_model_immediate`
+    pushes the full `matchbox.Material_Frag_Data` for every part regardless of
+    pipeline, and a cbuffer smaller than what was pushed simply leaves the
+    rest unread. `tint` is that struct's first field, so this still lines up.
 */
 cbuffer FragData : register(b0, space3)
 {

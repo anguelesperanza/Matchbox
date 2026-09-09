@@ -1,0 +1,48 @@
+/*
+    Surface
+    -------
+    Everything a BRDF needs to know about one point, with nothing in it about
+    how that point was reached. A forward fragment shader (today, the only
+    kind this package has) fills one from interpolants and texture samples; a
+    future deferred lighting pass would fill the identical struct from
+    G-buffer reads instead. No `brdf_eval` in any shading model's own .hlsli
+    ever learns which of the two happened -- that is the property that lets a shading model be
+    written once and used from any render pipeline, see
+    `lighting_rework.md` section 3.2.
+
+    **Must also be fillable from a 2D sprite fragment**, even though that is
+    P8's work and not this phase's. That is a decision made now rather than
+    later (`lighting_rework.md` section 7.3) and it constrains this struct:
+    no field here may assume a 3D mesh produced it. A sprite would fill
+    `position` with its world position at z = 0, `normal` with {0, 0, 1} or
+    its own normal map, and `view` with the 2D camera's forward -- every field
+    below already accepts those values, so nothing needs to change when that
+    phase arrives.
+
+    Fields a given shading model does not use ride along unread, the same way
+    `Light_Uniform.cone` already does for a light that is not a spot.
+*/
+struct Surface
+{
+    float3 position; // world
+    float3 normal;   // world, normalized, normal map already applied
+    float3 view;     // normalized, toward the eye
+
+    float3 base_color;
+    float  alpha;
+
+    float  metallic;   // metallic-roughness (P2)
+    float  roughness;  // metallic-roughness (P2)
+    float3 specular;   // specular-glossiness (P2)
+    float  glossiness; // specular-glossiness (P2)
+
+    float3 emissive;  // P2
+    float  occlusion; // P2
+
+    float3 subsurface; // tint for the SSS model (P2)
+    float  thickness;  // P2
+
+    uint  shading_model; // which brdf_eval this point runs -- see shading.odin
+    float bands;         // toon (P2)
+    float rim;           // toon (P2)
+};

@@ -22,16 +22,21 @@ if errorlevel 1 (
 
 echo === Compiling HLSL shaders ===
 
+REM -I points -include lookups at shaders/ itself, so a module can
+REM #include "brdf/blinn_phong.hlsli" (say) by a stable path from any file
+REM rather than a relative one -- dxc resolves a bare #include relative to
+REM the including file regardless, so this only matters for an include
+REM written relative to shaders/ rather than to its own directory.
 for %%F in ("%SHADER_DIR%\*.vert.hlsl") do (
     echo -- %%~nxF
-    dxc -T vs_6_0 -E main -spirv -Fo "%SHADER_DIR%\%%~nF.spv"  "%%F" || exit /b 1
-    dxc -T vs_6_0 -E main         -Fo "%SHADER_DIR%\%%~nF.dxil" "%%F" || exit /b 1
+    dxc -T vs_6_0 -E main -I "%SHADER_DIR%" -spirv -Fo "%SHADER_DIR%\%%~nF.spv"  "%%F" || exit /b 1
+    dxc -T vs_6_0 -E main -I "%SHADER_DIR%"         -Fo "%SHADER_DIR%\%%~nF.dxil" "%%F" || exit /b 1
 )
 
 for %%F in ("%SHADER_DIR%\*.frag.hlsl") do (
     echo -- %%~nxF
-    dxc -T ps_6_0 -E main -spirv -Fo "%SHADER_DIR%\%%~nF.spv"  "%%F" || exit /b 1
-    dxc -T ps_6_0 -E main         -Fo "%SHADER_DIR%\%%~nF.dxil" "%%F" || exit /b 1
+    dxc -T ps_6_0 -E main -I "%SHADER_DIR%" -spirv -Fo "%SHADER_DIR%\%%~nF.spv"  "%%F" || exit /b 1
+    dxc -T ps_6_0 -E main -I "%SHADER_DIR%"         -Fo "%SHADER_DIR%\%%~nF.dxil" "%%F" || exit /b 1
 )
 
 echo === Done ===

@@ -122,6 +122,13 @@ every brief:
 - **Do not spot-check where a sweep is possible.** P2c's white-furnace sweep
   found three separate bugs precisely because it swept roughness rather than
   testing one value; P5's cluster sweep caught a bug in its own test setup.
+- **A test can pin a defect as firmly as a property.** P7c's SSAO kernel was a
+  spiral -- a tap's angle around the normal and its distance from it both
+  driven by the index, correlation 0.965 -- which printed the per-pixel noise
+  function straight into the image. A test asserted exactly that shape
+  ("lengths rise monotonically with index") and passed for two phases. Ask
+  what a test would *rule out*, not only what it requires: a passing suite is
+  not evidence the shape is right.
 
 **Tell every agent to commit early and often.** P4's first attempt was killed
 by a rate limit having written ~520 lines with zero commits, and a second agent

@@ -1450,6 +1450,61 @@ reported. It also enforces the four-uniform-buffer limit, the sampler floor,
 and the storage-buffer register sequence. Both of this phase's bugs would have
 been caught by it before the program ran; run it after touching any shader.
 
+### The second frame anybody looked at
+
+The lab started, and the first thing in it was a **fine diagonal weave over
+every lit surface** whenever SSAO was on. Two bugs, both measurable from a
+machine with no GPU once there was a picture pointing at them.
+
+**The sample kernel was a spiral.** `phi` came from `i/n` and the radius from
+`0.1 + 0.9*(i/n)^2` -- both driven by the index, so a tap's angle around the
+normal and its distance from it rose together. Measured correlation: **0.965**.
+
+Every pixel rotates the whole tap set by its own angle before sampling, and
+when the set is a rigid spiral the occlusion it measures is a strong smooth
+function of that rotation -- so whatever structure the rotation has prints
+straight through at full contrast. `interleaved_gradient_noise` has a great
+deal of structure: a fine diagonal weave. The picture was showing the noise
+function. The radius comes off a third independent low-discrepancy coordinate
+now (Halton base 3), which drops the correlation under 0.25.
+
+**And a test was holding it in place.**
+`test_ssao_kernel_lengths_grow_toward_the_rim` required a tap's length to rise
+monotonically with its index -- which, since the index also drives the
+azimuth, *is* the statement "the kernel is a spiral". It passed for two phases
+and pinned the defect. This is a new entry on §8's list of anti-patterns and
+the least comfortable one: not asserting on source text, not copying the
+implementation's output, not spot-checking -- and now, **a test can pin a
+defect as firmly as a property, and a passing suite is not evidence the shape
+is right.** What replaced it says what was actually wanted: azimuth and radius
+independent, and the length *distribution* still leaning toward the origin.
+
+**The second bug was in the terminal beside the screenshot**, which is worth
+noting on its own -- the report was about shading, and the console visible at
+the edge of the image had a column of repeated warnings in it.
+`Shadow_State.warned` was a single latch guarding the "nothing to render"
+message for `begin_shadow_pass`, `begin_cascade_shadow_pass` and
+`begin_point_shadow_pass` alike. Every frame `begin_drawing_3d` runs the
+map-based pass and then six cube faces; with a directional caster and no point
+caster, the first cleared the latch and the second re-armed and fired it. The
+mechanism built to turn one-per-frame into one-per-stretch was producing one
+per frame. One latch each now.
+
+That generalises past shadows: **a latch shared by several independent
+conditions is re-armed by whichever of them is doing fine**, so the one that
+is not reports continuously. It stayed hidden because no example combined
+`casts_shadow` on a directional light with an unlit point light until the lab
+did.
+
+**Also from this round, and not a bug:** the SSAO bias now scales with view
+depth (one depth texel covers more world space further away, so a position
+reconstructed from it is proportionally less exact -- a fixed bias tuned up
+close leaves a grazing surface self-occluding at distance), and the lab has
+`1/2` and `3/4` on SSAO's radius and bias with the numbers on screen. Those
+two genuinely cannot be chosen from here: `radius` is in world units so it
+depends on the scale a scene is built at, and `bias` depends on the depth
+format the device handed back.
+
 ---
 
 ## 8. Verification standard

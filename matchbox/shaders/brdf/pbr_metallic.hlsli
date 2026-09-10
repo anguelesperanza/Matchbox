@@ -117,11 +117,48 @@ Radiance brdf_light_pbr_metallic(Surface surface, Light_Sample light)
     recomputing four scalars is cheaper than a second field on `Radiance`
     every other shading model would then carry unread.
 */
+/*
+    **`ambient_light` is irradiance arriving, not light leaving**, so the
+    diffuse half of it has to be multiplied by what the surface actually
+    reflects. This read `ambient_light(surface) + ambient_specular` until P7c,
+    adding the raw ambient colour to every pixel whatever it was made of --
+    so a scene with `Ambient_Kind.HEMISPHERE` set to a pale blue sky got that
+    pale blue added to every surface in it, and every material washed toward
+    it. A red box came out pink; a *black* surface came out pale blue, which
+    is the version of the bug that cannot be argued with.
+
+    It survived because nothing tested it. `pbr_test.odin`'s white-furnace
+    sweep checks `brdf_light_pbr_metallic`, which is the per-light half and
+    was correct; `brdf_test.odin` mirrors `brdf_resolve_blinn_phong`, which
+    is a different model and multiplies by `base_color` as it should. The two
+    PBR resolves were the only ones doing it wrong and the only ones with no
+    mirror. `brdf_test.odin` now checks the property directly for every model.
+
+    **It also made SSAO look broken**, which is how it was found: occlusion
+    multiplies the ambient term, so with ambient a large flat addition rather
+    than a modulation of the surface, AO darkened a uniform wash laid over the
+    picture instead of shading the surface -- a grey smudge rather than
+    contact shadow.
+
+    `(1 - metallic)` for the same reason `brdf_light_pbr_metallic` has it: a
+    metal does not scatter light back out from underneath its surface, so it
+    has no diffuse response to ambient either. Its ambient comes entirely
+    through `pbr_environment_specular`, which is already weighted by `f0` and
+    was always correct.
+
+    No `/ PBR_PI` here, unlike the per-light diffuse term. `Ambient.color` is
+    a look knob a game picks by eye (see `Ambient`'s own doc comment,
+    lighting.odin) rather than a measured irradiance, and dividing it by pi
+    would mean the number a game types is not the brightness it gets. The
+    per-light term divides because its `radiance` really is one.
+*/
 float3 brdf_resolve_pbr_metallic(Surface surface, Radiance total)
 {
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), surface.base_color, surface.metallic);
     float3 ambient_specular = pbr_environment_specular(surface, f0);
 
+    float3 ambient_diffuse = ambient_light(surface) * surface.base_color * (1.0 - surface.metallic);
+
     return total.diffuse + total.specular + surface.emissive +
-        (ambient_light(surface) + ambient_specular) * surface.occlusion;
+        (ambient_diffuse + ambient_specular) * surface.occlusion;
 }

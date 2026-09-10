@@ -219,15 +219,20 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
             the way. `bias` is what stops a flat surface from occluding itself
             through the reconstruction's own error.
 
-            **Scaled by distance**, because that error is not constant: one
-            texel of the depth buffer covers more world space the further away
-            it is, so a position reconstructed from it is proportionally less
-            exact -- and a flat surface seen at a grazing angle is the case
-            where neighbouring texels are furthest apart and the reconstruction
-            is worst. A fixed bias tuned to look right up close leaves that
-            surface self-occluding in a pattern further away. Linear in view
-            depth, floored at 1 so a surface right against the camera is not
-            handed a bias smaller than the one that was asked for.
+            **Not scaled by distance, after trying it.** P7c scaled this by
+            view depth on the reasoning that a depth texel covers more world
+            space further away, so the reconstruction is proportionally less
+            exact. The reasoning is sound and the constant was not: at the
+            default radius of 0.5 and a scene ten units deep it made the
+            effective bias 0.2 world units, comparable to the whole sampling
+            hemisphere, and almost no tap could clear it. It removed the
+            effect rather than cleaning it up.
+
+            That was a fix aimed at an artifact nobody could see from the
+            machine it was written on, which is what section 8 exists to rule
+            out. `Ssao.bias` is a constant in world units again, and
+            `examples/lighting-lab` puts it on a key so it can be tuned by
+            somebody with a screen.
 
             The range check is what keeps a wall two metres behind a railing
             from being reported as occluding it: the further apart the two
@@ -235,9 +240,7 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
             gap exceeds the sampling radius. Without it a foreground object
             draws a dark halo on everything behind it.
         */
-        float scaled_bias = bias * max(center_depth, 1.0);
-
-        if (scene_depth < sample_depth - scaled_bias)
+        if (scene_depth < sample_depth - bias)
         {
             float range = saturate(radius / max(abs(center_depth - scene_depth), 1e-4));
             occlusion += range;

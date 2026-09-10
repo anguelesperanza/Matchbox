@@ -256,3 +256,123 @@ test_coloured_light_specular_is_tinted_where_fused_loop_was_not :: proc(t: ^test
 	testing.expect(t, total.specular.g == 0 && total.specular.b == 0,
 		"a pure-red light's specular highlight must carry no green or blue -- that is the whole change")
 }
+
+// -----------------------------------------------------------------------
+// What every model must do with ambient light
+// -----------------------------------------------------------------------
+
+/*
+	The diffuse-ambient term of each shading model's own resolve, mirrored
+	from its own file under `shaders/brdf`. (Not written as a glob: Odin block
+	comments nest, so a star-slash inside one closes it early -- the trap
+	`lighting_rework_handover.md` records from P6.)
+
+	Only that term, not the whole resolve: the rest of each resolve is already
+	covered (Blinn-Phong above, the per-light PBR halves in `pbr_test.odin`),
+	and the ambient term is the one no mirror reached -- which is exactly why
+	the bug below lived in it.
+
+	`UNLIT` has no entry because it reads no scene lighting at all; that is
+	itself a property, and the test asserts it.
+*/
+@(private)
+brdf_test_ambient_diffuse :: proc(
+	model:      Shading_Model,
+	base_color: [3]f32,
+	ambient:    [3]f32,
+	metallic:   f32,
+) -> [3]f32 {
+	switch model {
+	case .BLINN_PHONG: return base_color * (ambient / 10)
+	case .PBR_METALLIC: return base_color * ambient * (1 - metallic)
+	case .PBR_SPECGLOSS: return base_color * ambient
+	case .TOON: return base_color * ambient
+	case .SUBSURFACE: return base_color * ambient
+	case .UNLIT: return {0, 0, 0}
+	}
+
+	return {0, 0, 0}
+}
+
+/*
+	**Ambient light is irradiance arriving, so what a surface does with it has
+	to depend on what the surface is made of.** Two consequences, and each is
+	a property no shading model may break:
+
+	  - a **black** surface reflects none of it, so ambient cannot make one
+	    glow;
+	  - doubling the albedo doubles the response, since the term is a plain
+	    product.
+
+	**This test exists because `pbr_metallic` and `pbr_specgloss` broke both.**
+	Their resolves added `ambient_light(surface)` straight into the output
+	rather than multiplying it by `base_color`, so every surface in a scene
+	got the raw ambient colour laid over it whatever it was made of. With
+	`Ambient_Kind.HEMISPHERE` and a pale blue sky, every material washed toward
+	pale blue and a black surface came out pale blue -- which is the version of
+	it that cannot be argued with, and the one asserted first below.
+
+	It survived two phases because of a gap in what was mirrored, not a gap in
+	rigour: `pbr_test.odin` sweeps a white furnace through
+	`brdf_light_pbr_metallic`, which is the per-light half and was right, and
+	the resolve half had no CPU mirror at all. Three of the five models did it
+	correctly; the two with no mirror were the two that did not. **Where there
+	is no mirror there is no check**, which is worth more than the bug.
+*/
+@(test)
+test_ambient_is_modulated_by_albedo :: proc(t: ^testing.T) {
+	ambient := [3]f32{0.35, 0.45, 0.62}
+
+	for model in Shading_Model {
+		// A black surface reflects nothing, ambient included.
+		black := brdf_test_ambient_diffuse(model, {0, 0, 0}, ambient, 0)
+
+		testing.expectf(t, black == [3]f32{0, 0, 0},
+			"%v: a black surface emits %v of ambient light -- ambient is being added rather than reflected",
+			model, black)
+
+		if model == .UNLIT do continue
+
+		// And the response is proportional to the albedo, which is what makes
+		// it a reflection rather than an offset.
+		half   := brdf_test_ambient_diffuse(model, {0.4, 0.4, 0.4}, ambient, 0)
+		double := brdf_test_ambient_diffuse(model, {0.8, 0.8, 0.8}, ambient, 0)
+
+		for i in 0 ..< 3 {
+			testing.expectf(t, abs(double[i] - 2 * half[i]) < 1e-6,
+				"%v: doubling the albedo took the ambient response from %.6f to %.6f, not to %.6f",
+				model, half[i], double[i], 2 * half[i])
+		}
+	}
+}
+
+/*
+	A metal has no diffuse response to ambient either, for the same reason it
+	has none to a light: metalness is exactly the statement that light does not
+	scatter back out from underneath the surface. Its ambient arrives through
+	`pbr_environment_specular` instead, which is weighted by `f0` and was
+	always correct.
+
+	`PBR_METALLIC` is the only model with a metalness to check -- spec-gloss
+	carries its specular colour in its own field rather than deriving it from
+	one, which is the whole difference between the two parameterizations.
+*/
+@(test)
+test_ambient_diffuse_vanishes_on_a_metal :: proc(t: ^testing.T) {
+	ambient := [3]f32{0.35, 0.45, 0.62}
+	base    := [3]f32{0.9, 0.8, 0.5}
+
+	full := brdf_test_ambient_diffuse(.PBR_METALLIC, base, ambient, 1)
+	testing.expectf(t, full == [3]f32{0, 0, 0},
+		"a full metal has a diffuse ambient response of %v, which it should not have at all", full)
+
+	// And it fades linearly on the way there, rather than switching at some
+	// threshold -- glTF's metalness is a blend, not a flag.
+	dielectric := brdf_test_ambient_diffuse(.PBR_METALLIC, base, ambient, 0)
+	half       := brdf_test_ambient_diffuse(.PBR_METALLIC, base, ambient, 0.5)
+
+	for i in 0 ..< 3 {
+		testing.expectf(t, abs(half[i] - dielectric[i] * 0.5) < 1e-6,
+			"metalness 0.5 gave %.6f, want half of the dielectric's %.6f", half[i], dielectric[i])
+	}
+}

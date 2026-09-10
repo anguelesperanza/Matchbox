@@ -77,10 +77,19 @@ Radiance brdf_light_pbr_specgloss(Surface surface, Light_Sample light)
 // only in how each arrives at the per-light `Radiance` and in what `f0` is
 // (`surface.specular`, painted directly -- see this file's own top comment
 // -- rather than metallic-roughness's own lerp).
+/*
+    The same correction `brdf_resolve_pbr_metallic` carries, for the same
+    reason -- see its own doc comment. `ambient_light` is irradiance arriving
+    and has to be multiplied by the diffuse albedo, which in this
+    parameterization is `base_color` outright: spec-gloss keeps the specular
+    colour in its own field rather than deriving it from a metalness, so
+    there is no `(1 - metallic)` factor to apply here and none is missing.
+*/
 float3 brdf_resolve_pbr_specgloss(Surface surface, Radiance total)
 {
     float3 ambient_specular = pbr_environment_specular(surface, surface.specular);
+    float3 ambient_diffuse  = ambient_light(surface) * surface.base_color;
 
     return total.diffuse + total.specular + surface.emissive +
-        (ambient_light(surface) + ambient_specular) * surface.occlusion;
+        (ambient_diffuse + ambient_specular) * surface.occlusion;
 }

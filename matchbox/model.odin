@@ -48,10 +48,18 @@ Model_Part :: struct {
 	index_count: u32,
 	topology:    Mesh_Topology,
 
-	// Filled in by the loader in stage 4. A part with no texture is drawn by
-	// the flat pipeline in its tint alone.
-	texture:     ^sdl.GPUTexture,
-	sampler:     ^sdl.GPUSampler,
+	/*
+		What this part is made of. `MATERIAL_DEFAULTS` (material.odin) for
+		everything generated in code and for a glTF part with no material at
+		all -- lit, white, Blinn-Phong -- and for one that has a material,
+		`read_material` (model_load.odin)'s full reading of it: base colour,
+		metallic-roughness, occlusion and emissive, factors and textures
+		alike. A part missing any one of those textures is drawn with the 1x1
+		white default `init` makes for exactly that -- see `render3d.odin` --
+		rather than a separate untextured pipeline the way it was before this
+		rework.
+	*/
+	material: Material,
 
 	/*
 		Which skin deforms this part, and which node its mesh hangs off. `skin`
@@ -167,6 +175,7 @@ upload_mesh :: proc(vertices: []Vertex3D, indices: []u32, topology := Mesh_Topol
 		index_count = u32(len(indices)),
 		topology    = topology,
 		skin        = -1,
+		material    = MATERIAL_DEFAULTS,
 	}, nil
 }
 
@@ -205,29 +214,43 @@ destroy_model :: proc(model: ^Model) {
 	device := mbi.renderer.device
 	if device == nil do return
 
-	// The loader uploads each glTF image once and hands the same texture to
-	// every part whose material points at it -- a model built round a single
-	// atlas has all of its parts sharing one. Releasing per part would then
-	// give the same texture back as many times as there are parts, so each is
-	// only released the first time it is seen.
+	/*
+		The loader uploads each glTF image once and hands the same texture to
+		every material field that points at it -- a model built round a
+		single atlas has all of its parts sharing one, and
+		`read_material`/`resolve_texture` (model_load.odin) additionally
+		share one GPU texture between, say, `metal_rough` and `occlusion`
+		when a file packs both into the same image (the "ORM" convention --
+		see `read_material`'s own comment). Releasing per field would then
+		give the same texture back as many times as there are references to
+		it, so each is only released the first time it is seen, keyed by the
+		pointer rather than by which field held it.
+	*/
 	released := make(map[^sdl.GPUTexture]bool, len(model.parts), context.temp_allocator)
 	defer delete(released)
+
+	release_once :: proc(device: ^sdl.GPUDevice, released: ^map[^sdl.GPUTexture]bool, texture: ^sdl.GPUTexture) {
+		if texture == nil do return
+		if _, seen := released[texture]; seen do return
+		sdl.ReleaseGPUTexture(device, texture)
+		released[texture] = true
+	}
 
 	for &part in model.parts {
 		delete(part.joint_map)
 		if part.vertices != nil do sdl.ReleaseGPUBuffer(device, part.vertices)
 		if part.indices  != nil do sdl.ReleaseGPUBuffer(device, part.indices)
 
-		if part.texture != nil {
-			if _, seen := released[part.texture]; !seen {
-				sdl.ReleaseGPUTexture(device, part.texture)
-				released[part.texture] = true
-			}
-		}
+		release_once(device, &released, part.material.textures.base)
+		release_once(device, &released, part.material.textures.metal_rough)
+		release_once(device, &released, part.material.textures.occlusion)
+		release_once(device, &released, part.material.textures.emissive)
+		// .normal is never filled in by this loader -- see Material_Textures'
+		// own doc comment -- so there is nothing there to release.
 
 		part.vertices = nil
 		part.indices  = nil
-		part.texture  = nil
+		part.material.textures = {}
 	}
 
 	delete(model.parts)

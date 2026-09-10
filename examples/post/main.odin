@@ -103,8 +103,11 @@ main :: proc() {
 	effect := mb.Post_Effect.PSX
 	grid   := [2]f32{320, 240}
 
-	mb.set_ambient({0.35, 0.35, 0.55, 1})
-	mb.set_fog(FOG_COLOR, 3, 12)
+	mb.set_lighting({
+		enabled  = true,
+		ambient  = {color = {0.35, 0.35, 0.55, 1}},
+		fog      = {enabled = true, color = FOG_COLOR, start = 3, end = 12},
+	})
 	mb.set_cursor_locked(true)
 
 	for mb.is_running() {

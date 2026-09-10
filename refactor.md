@@ -622,13 +622,31 @@ Small and already mostly realised, not a case for merging the render paths:
 
 ---
 
-## Scope: Matchbox is rendering + input only
+## Scope: a complete framework again (superseded 2026-09-09)
 
-Matchbox was originally meant to be an all-encompassing game framework.
-Scope was later narrowed to rendering and input, with physics, audio, and
-an event system meant to arrive as separate packages once they exist.
-Reviewed 2026-09-04 for what has crept in under the old, wider scope and is
-still sitting here.
+**This section is history now. See CLAUDE.md's own "Scope" section for the
+rule in force.**
+
+Matchbox was originally meant to be an all-encompassing game framework. Scope
+was later narrowed to rendering and input, with physics, audio, and an event
+system meant to arrive as separate packages once they exist. Reviewed
+2026-09-04 for what had crept in under the old, wider scope.
+
+**Reversed 2026-09-09.** Those separate packages did not materialise, and the
+narrowing cost more than it bought. The evidence was already sitting in the
+package: `sound.odin` shipped a WAV loader because a game needs sound whatever
+the stated scope says, and `utility.odin` had to describe itself as a "holding
+pen" for helpers that were useful, used by a real game, and had nowhere else
+to go. A scope that the code keeps contradicting is a scope that is wrong
+rather than code that is undisciplined.
+
+So audio, physics, an event system and the rest are in scope, and the audit
+below is retained for what it recorded rather than as a standing instruction
+to evict anything. The one finding worth carrying forward on its own merits is
+the note on event systems: there is still no subscribe/publish API here, and
+`sdl.Event` is still polled internally rather than exposed. That stays true
+because CLAUDE.md's no-callbacks rule says so, which is a rule about *how*
+this package is built and survives the scope change untouched.
 
 **No event system exists today**, which is correct and worth confirming stays
 true -- the only `Event` in the package is `sdl.Event`, polled internally by

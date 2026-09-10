@@ -84,7 +84,10 @@ create_pixel_buffer :: proc(width, height: i32) -> (Pixel_Buffer, Error) {
 	})
 	if transfer == nil do return {}, Gpu_Error.Transfer_Buffer_Creation_Failed
 
-	texture, err := create_gpu_texture(width, height)
+	// UNORM: a Pixel_Buffer is drawn through draw_pixel_buffer, the same 2D
+	// path a sprite takes -- straight to the swapchain, nothing downstream to
+	// re-encode a decoded value. See Texture_Encoding.
+	texture, err := create_gpu_texture(width, height, .UNORM)
 	if err != nil {
 		sdl.ReleaseGPUTransferBuffer(mbi.renderer.device, transfer)
 		return {}, err

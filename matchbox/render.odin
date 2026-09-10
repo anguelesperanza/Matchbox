@@ -2,6 +2,106 @@ package matchbox
 
 import sdl "vendor:sdl3"
 
+/*
+	How many sampled textures/samplers mesh.frag.hlsl declares -- 1 base
+	colour, 3 material maps, 2 PCF/PCSS shadow maps, 1 CASCADED array, 1 CUBE
+	array, 1 environment probe irradiance map, 1 environment probe
+	prefiltered map, at t0-t9/s0-s9 (see that file's own top comment). Passed
+	to `create_builtin_shader` for `Shaders.mesh_frag` below rather than a
+	bare literal at the call site, so `render_test.odin` can pin
+	the actual value `init` hands `CreateGPUShader` under Vulkan's guaranteed
+	per-stage floor (16, for both `maxPerStageDescriptorSampledImages` and
+	`maxPerStageDescriptorSamplers`) rather than merely asserting on source
+	text.
+
+	**Grew to 13 in P7c**, for the two arrays every localized reflection probe
+	is baked into (`reflection.odin`) -- also declared in
+	`lighting_core.hlsli` rather than here, since the deferred lighting pass
+	blends the identical probes in the identical place.
+
+	**Three under the cap now, and the deferred lighting shader is two under.**
+	That is worth stating plainly rather than leaving to be discovered: this is
+	the first phase where the headroom is small enough to matter. The next
+	feature wanting a per-fragment texture should look first at whether it can
+	share an array with something already bound -- which is exactly what these
+	two do, and why four probes cost two slots rather than eight.
+
+	**And 16 is SDL's own hard cap, not only Vulkan's guaranteed floor**, which
+	is a correction to what this comment said before P7c. `SDL_CreateGPUShader`
+	checks `num_samplers > MAX_TEXTURE_SAMPLERS_PER_STAGE` (SDL_sysgpu.h, 16)
+	and fires `SDL_assert_release` -- an abort, not an error a caller can
+	report, so `create_builtin_shader`'s own panic is never even reached. Both
+	numbers being 16 is why the Vulkan framing survived this long; it is an
+	understatement rather than a mistake. A desktop GPU reporting a million
+	sampler slots does not help. Section 7.7's rule stands and is firmer than
+	it read: past 16 is a stop-and-ask, not a pin to raise.
+
+	**Grew to 11 in P7b**, for the ambient-occlusion texture `shade_surface`
+	multiplies into `Surface.occlusion` -- declared in `lighting_core.hlsli`
+	rather than in `mesh.frag.hlsl` itself, since the deferred lighting pass
+	reads the identical texture in the identical place. Adding it pushed the
+	three storage buffers behind it up a register in **both** shaders, which
+	is the trap to remember: a sampler added anywhere ahead of them renumbers
+	every one of them.
+
+	**Grew from 8 to 10 in P4**, for the environment probe's own two maps
+	(`ambient.odin`) -- still five under the floor `render_test.odin` pins,
+	and comfortably clear of it: a real BRDF integration LUT would have been
+	a third texture and pushed this to 11, still fine, but P4 approximates
+	that term analytically instead (`pbr_env_brdf_approx`,
+	brdf/pbr_common.hlsli) rather than spending a slot and a bake pass on it
+	-- see that function's own doc comment for the trade.
+
+	Not a CLAUDE.md "configuration" constant -- nothing about this number is a
+	judgement call a game could reasonably want to override, since it has to
+	equal however many `Texture2D`/`Texture2DArray` slots the compiled shader
+	binary actually declares or `CreateGPUShader` and every bind call built
+	against it disagree with reality. The same "a fixed compile-time number
+	that only a comment keeps in step with the shader source" shape
+	`MAX_CASCADES`/`MAX_CASCADES_HLSL` (shadow.odin,
+	shaders/shadow/cascaded.hlsli) already has.
+*/
+MESH_FRAG_SAMPLER_COUNT :: 13
+
+/*
+	How many sampled textures/samplers `deferred_lighting.frag.hlsl`
+	declares -- the shader at risk P6 was warned about, since it needs
+	everything `mesh.frag.hlsl` needs for shading (shadow maps, the
+	environment probe's own two) *plus* the four G-buffer targets and its
+	own sampled depth target, even though it drops the four material
+	textures `mesh.frag.hlsl` reads (base colour, metallic-roughness,
+	occlusion, emissive arrive through the G-buffer instead): four G-buffer
+	targets, one depth target, two PCF/PCSS shadow maps, one CASCADED array,
+	one CUBE array, two environment-probe maps, the AO texture P7b added and
+	the two localized-probe arrays P7c added -- t0-t13. Two under Vulkan's
+	floor of 16, which is the least headroom this package has ever had; see
+	`MESH_FRAG_SAMPLER_COUNT`'s own note on what to do about it.
+
+	Five under Vulkan's guaranteed per-stage floor of 16
+	(`gbuffer_test.odin` pins the actual value the same way
+	`render_test.odin` pins `MESH_FRAG_SAMPLER_COUNT`), so this did not need
+	the "stop and report" the phase brief asked for if it had come out
+	otherwise.
+*/
+DEFERRED_LIGHTING_SAMPLER_COUNT :: 14
+
+/*
+	How many sampled textures/samplers `volumetric.frag.hlsl` declares: this
+	frame's depth, the two PCF/PCSS shadow maps, CASCADED's array, CUBE's
+	array, the two environment-probe maps and the AO texture -- t0-t7.
+
+	Only the first five are ever read. The other three come with including
+	`lighting_core.hlsli` at all, which declares them for every shader that
+	includes it, and a declared sampler has to have something bound in it --
+	see `volumetric_run` (volumetric.odin) for the placeholders that go there.
+
+	Eight under Vulkan's guaranteed per-stage floor of 16, and pinned by
+	`volumetric_test.odin` the same way the other two counts are pinned, for
+	the same reason: the number has to equal what the compiled binary actually
+	declares, and only a comment keeps it in step.
+*/
+VOLUMETRIC_SAMPLER_COUNT :: 10
+
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
 // One vertex shader serves every draw: the old test.vert and font.vert had
@@ -17,13 +117,38 @@ Shaders :: struct {
 	// 3D. The first vertex shader that is not `quad`, because it is the first
 	// thing that reads geometry instead of building it from a uniform block.
 	mesh:      ^sdl.GPUShader,
-	mesh_flat: ^sdl.GPUShader,
 	mesh_line: ^sdl.GPUShader,
-	mesh_textured: ^sdl.GPUShader,
+
+	/*
+		The one fragment shader every solid mesh pipeline shares now, textured
+		or not -- see mesh.frag.hlsl's own doc comment. Before this rework
+		there were two of these (`mesh_flat`/`mesh_textured`), differing only
+		in whether they sampled a base-colour texture, which forced
+		`lighting.hlsli`'s two shadow maps to sit at different register slots
+		in each and `draw_model_immediate` to compute which. Binding a 1x1
+		white default texture for an untextured part removes the need for a
+		second shader entirely.
+	*/
+	mesh_frag: ^sdl.GPUShader,
 
 	// mesh.vert with a skeleton in front of it. Shares every fragment shader
 	// the unskinned one uses -- only the vertex stage differs.
 	mesh_skinned: ^sdl.GPUShader,
+
+	/*
+		DEFERRED's own two shaders -- see pipeline_deferred.odin's own top
+		comment and gbuffer.frag.hlsl/deferred_lighting.frag.hlsl. `gbuffer_frag`
+		pairs with mesh.vert/mesh_skinned.vert exactly the way mesh_frag
+		does, since a G-buffer fill pass reads the identical vertex layout
+		and the identical Material cbuffer a forward draw does -- only the
+		fragment stage's own job (fill four targets rather than shade one
+		colour) differs. `fullscreen` is deferred_lighting.frag.hlsl's own
+		vertex shader (fullscreen.vert.hlsl) -- see that file's own doc
+		comment for why it is not skybox's.
+	*/
+	gbuffer_frag:           ^sdl.GPUShader,
+	fullscreen:             ^sdl.GPUShader,
+	deferred_lighting_frag: ^sdl.GPUShader,
 
 	// The shadow pass's fragment shader -- writes nothing, paired with
 	// mesh/mesh_skinned's own vertex shaders rather than one of its own. See
@@ -40,6 +165,56 @@ Shaders :: struct {
 	post: ^sdl.GPUShader,
 	psx:  ^sdl.GPUShader,
 	vhs:  ^sdl.GPUShader,
+
+	/*
+		The bloom chain's own three -- also on the shared quad vertex shader,
+		since every one of them is a full-screen rectangle over some level of
+		the chain. Three rather than one because the three passes genuinely
+		differ: the prefilter reads a brightness knee the other two do not
+		have, and the upsample runs a different kernel and a different blend.
+		See bloom.odin's own top comment for the pass order and
+		shaders/bloom.hlsli for the two kernels they share.
+	*/
+	bloom_prefilter:  ^sdl.GPUShader,
+	bloom_downsample: ^sdl.GPUShader,
+	bloom_upsample:   ^sdl.GPUShader,
+
+	// SSAO's own two (ssao.odin) -- also on the shared quad vertex shader,
+	// since both are a full-screen rectangle over a texture. `ssao` reads the
+	// depth buffer and writes occlusion; `ssao_blur` takes the sampling noise
+	// off what it wrote.
+	ssao:      ^sdl.GPUShader,
+	ssao_blur: ^sdl.GPUShader,
+
+	// Volumetric light (volumetric.odin) -- the shared quad vertex shader
+	// again, and the heaviest fragment shader in the package after the
+	// deferred lighting pass: it marches the depth buffer and asks every
+	// light, through the same `sample_light`, at every step.
+	volumetric: ^sdl.GPUShader,
+
+	// The depth prepass's own fragment shader is `shadow` above -- it writes
+	// nothing, which is the whole requirement -- paired with mesh.vert /
+	// mesh_skinned.vert rather than a vertex shader of its own. See
+	// pipeline_forward.odin.
+
+	// Environment probe baking -- both take the skybox's own vertex shader
+	// (Shaders.skybox), reused rather than duplicated: a per-face camera
+	// basis is a per-face camera basis whether the fragment shader that
+	// reads it draws a sky or convolves one. See ambient.odin's own top
+	// comment.
+	probe_irradiance: ^sdl.GPUShader,
+	probe_prefilter:  ^sdl.GPUShader,
+
+	/*
+		The tonemap resolve -- exposure, one of `Tonemap`'s curves, then the
+		gamma encode every colour in this package has always used. Takes the
+		shared quad vertex shader, the same as the other post shaders above,
+		but is not one of them: `Post_Effect` is a game's own choice drawn
+		over a `Render_Target` it owns, and this runs unconditionally, once
+		per 3D pass, over the internal HDR target `Renderer.lighting.targets`
+		owns instead. See tonemap.odin.
+	*/
+	tonemap: ^sdl.GPUShader,
 }
 
 /*
@@ -63,6 +238,7 @@ Pipelines :: struct {
 	// The odd one out, and the reason create_pipeline takes arguments now: it
 	// has its own vertex shader, a third vertex attribute, depth testing on,
 	// back faces culled, and a depth-stencil target the others do not have.
+	// Textured and untextured parts alike -- see `mesh_frag`'s own comment.
 	mesh:    ^sdl.GPUGraphicsPipeline,
 
 	// The same vertex shader and vertex layout as `mesh`, drawing line lists
@@ -70,15 +246,29 @@ Pipelines :: struct {
 	// and the ground grid.
 	line:    ^sdl.GPUGraphicsPipeline,
 
-	// The same again with a sampler, for a part that came out of a file with a
-	// base colour texture on it.
-	mesh_textured: ^sdl.GPUGraphicsPipeline,
+	// `mesh` again, for parts a skeleton deforms. One rather than the two
+	// this used to be (`mesh_skinned`/`mesh_skinned_textured`): both read
+	// `mesh_frag` now, so the only thing that ever distinguished them --
+	// whether a part carried a texture -- no longer picks a pipeline at all.
+	mesh_skinned: ^sdl.GPUGraphicsPipeline,
 
-	// The two above again, for parts a skeleton deforms. Two rather than one for
-	// the same reason there are two unskinned ones: a part with a texture and a
-	// part without want different fragment shaders, and that is a pipeline.
-	mesh_skinned:          ^sdl.GPUGraphicsPipeline,
-	mesh_skinned_textured: ^sdl.GPUGraphicsPipeline,
+	/*
+		DEFERRED's own three -- see pipeline_deferred.odin's own top comment.
+		`gbuffer`/`gbuffer_skinned` are `mesh`/`mesh_skinned`'s own siblings,
+		built against the four G-buffer targets (`color_formats`,
+		`create_pipeline`) and the G-buffer's own depth texture rather than
+		the HDR target and the shared main depth texture, with blending off
+		(`blend = .NONE`) -- see `Material.transparent`'s own doc
+		comment (material.odin) for why a G-buffer fill pass cannot blend at
+		all. `deferred_lighting` is the fullscreen resolve, built the same
+		shape `skybox_panorama`/`skybox_cubemap` already are
+		(`Vertex_Layout.NONE`, `depth_ignore = true`, the HDR target's own
+		colour format) so it can run in the identical final pass those two
+		and the forward-fallback mesh pipelines already share.
+	*/
+	gbuffer:           ^sdl.GPUGraphicsPipeline,
+	gbuffer_skinned:   ^sdl.GPUGraphicsPipeline,
+	deferred_lighting: ^sdl.GPUGraphicsPipeline,
 
 	// Depth-only, biased, no colour target at all -- the shadow pass. Two for
 	// the same reason mesh/mesh_skinned are two: a skinned caster needs the
@@ -96,55 +286,139 @@ Pipelines :: struct {
 	post: ^sdl.GPUGraphicsPipeline,
 	psx:  ^sdl.GPUGraphicsPipeline,
 	vhs:  ^sdl.GPUGraphicsPipeline,
+
+	// The tonemap resolve -- see Shaders.tonemap's own comment. Built against
+	// the swapchain's own format like every other 2D pipeline here: it writes
+	// into current_color_texture(), never into the HDR target itself.
+	tonemap: ^sdl.GPUGraphicsPipeline,
+
+	/*
+		The bloom chain -- all three built against the HDR target's own float
+		format, not the swapchain's, because every level of the chain holds
+		unbounded linear light the same way the scene target does (bloom.odin).
+		Depthless like every other 2D pipeline here, and on the same
+		source-alpha blend -- including the upsample, which writes its own
+		mix weight into alpha rather than needing a blend mode of its own.
+		See bloom_upsample.frag.hlsl.
+	*/
+	bloom_prefilter:  ^sdl.GPUGraphicsPipeline,
+	bloom_downsample: ^sdl.GPUGraphicsPipeline,
+	bloom_upsample:   ^sdl.GPUGraphicsPipeline,
+
+	// SSAO's own two -- built against the AO texture's own single-channel
+	// format (`Ssao_Targets.format`, ssao.odin) rather than the swapchain's
+	// or the HDR target's, since that is what they write into. Depthless,
+	// like every other fullscreen pipeline here.
+	ssao:      ^sdl.GPUGraphicsPipeline,
+	ssao_blur: ^sdl.GPUGraphicsPipeline,
+
+	// Volumetric light -- built against the HDR target's own format, because
+	// it writes straight into it, and the one `Color_Blend.ADDITIVE` pipeline
+	// in the package.
+	volumetric: ^sdl.GPUGraphicsPipeline,
+
+	/*
+		The depth prepass `FORWARD`/`CLUSTERED` need before SSAO can run --
+		`mesh`/`mesh_skinned`'s own siblings with no colour target at all and
+		the null fragment shader the shadow pass already uses. Two, for the
+		same reason `shadow`/`shadow_skinned` are two: a skinned occluder
+		needs the skeleton's own vertex shader.
+
+		Not the shadow pipelines themselves, which differ in the two ways
+		that matter: they are built against `Shadow_State.format` (a
+		different depth format, so SDL3 would reject them in this pass) and
+		they carry the constant-plus-slope depth bias that keeps a shadow map
+		from self-shadowing. A prepass wants no bias at all -- its depth has
+		to match, to the bit, what the scene pass will then write.
+	*/
+	depth_prepass:         ^sdl.GPUGraphicsPipeline,
+	depth_prepass_skinned: ^sdl.GPUGraphicsPipeline,
+
+	// Environment probe baking -- see Shaders.probe_irradiance/probe_prefilter's
+	// own comment. Built against the HDR target's own float format
+	// (ambient.odin's own top comment), not the swapchain's: these write
+	// into a probe's own textures, never onto anything a game will see
+	// directly.
+	probe_irradiance: ^sdl.GPUGraphicsPipeline,
+	probe_prefilter:  ^sdl.GPUGraphicsPipeline,
 }
 
 /*
-	Everything the shadow pass owns, grouped the way the depth texture's own
-	fields on `Renderer` are not -- those predate this and are left alone,
-	but a second, sampled depth texture with its own size, format and
-	view-projection is enough state to earn its own struct rather than four
-	more loose fields.
-
-	`textures[n]` is never nil: `init` creates a 1x1 placeholder for each
-	slot immediately, so `mesh_flat`/`mesh_textured` -- which declare both
-	slots unconditionally, for every game -- always have something valid
-	bound, whether or not that game ever calls `enable_shadows` or ever has
-	more than one light marked `casts_shadow`. See shadow.odin.
-
-	Two of everything shadow-specific rather than one: `MAX_SHADOW_CASTERS`
-	lights can each cast a real shadow at once, each into its own map. One
-	`sampler`/`format`/`resolution` still serve both -- they are the shadow
-	system's own settings, not a per-light choice.
+	Everything lighting owns: the scene's own settings, the light list on both
+	sides of the upload, and the shadow system's state -- grouped under one
+	field on `Renderer` (`lighting` below) per CLAUDE.md's "group like data
+	into structs" rather than left as loose fields the way `Lighting_Data` and
+	`Shadow` used to be side by side. See `lighting_rework.md` section 4.
 */
-Shadow :: struct {
-	enabled:  bool,
-	settings: Shadow_Settings,
+Lighting :: struct {
+	settings: Lighting_Settings, // lighting.odin -- set by set_lighting
 
-	sampler:    ^sdl.GPUSampler,
-	format:     sdl.GPUTextureFormat,
-	resolution: i32,
+	// The light list, CPU side and GPU side. `light_data` is packed and
+	// ready to upload -- see `light_uniform` (light.odin) -- and
+	// `light_buffer`/`light_transfer` are its device-side twin, grown on
+	// demand and rewritten through the transfer buffer rather than
+	// recreated every call, the same shape `Animation_Pose.joint_buffer`
+	// already has for the joint palette. `light_capacity` is how many
+	// elements `light_buffer` currently holds, which is not `len(light_data)`
+	// once the list has shrunk from a previous, longer one.
+	light_data:     [dynamic]Light_Uniform,
+	light_buffer:   ^sdl.GPUBuffer,
+	light_transfer: ^sdl.GPUTransferBuffer,
+	light_capacity: int,
 
-	textures:         [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
-	view_projections: [MAX_SHADOW_CASTERS]matrix[4, 4]f32,
-	caster_indices:   [MAX_SHADOW_CASTERS]int, // which of Lighting_Data.lights each casts, or -1
+	shadow: Shadow_State, // shadow.odin / shadow_standard.odin
 
-	// Which of the two the current shadow pass is filling -- read by
-	// draw_model_immediate to pick the matching view_projections entry.
-	active_slot: int,
+	// CLUSTERED's own per-frame assignment -- see light_cull.odin's own top
+	// comment. Rebuilt every frame that pipeline is selected, unlike
+	// light_data/light_buffer above which only rebuild when a game calls
+	// set_lights, since a cluster's own shape depends on the camera and the
+	// camera may move every frame even when the lights do not.
+	cluster: Cluster_State,
 
-	// A game's `casts_shadow` on each `Light`, kept here rather than on
-	// `Light_Uniform` because the GPU has no use for it -- only
-	// `recompute_shadow_casters` (light.odin) ever reads this, to find which
-	// lights `caster_indices` should point at.
-	light_casts_shadow: [MAX_LIGHTS]bool,
+	// The baked diffuse/specular environment maps `Ambient_Kind.ENVIRONMENT_PROBE`
+	// reads (lighting.odin, ambient.odin) -- zero value is "no probe loaded",
+	// which is what makes selecting that ambient kind before ever calling
+	// create_environment_probe degrade to no ambient light rather than a crash.
+	probe: Environment_Probe,
 
-	// Whether begin_shadow_pass has already logged its "nothing to render"
-	// warning for the current stretch of no-caster/disabled frames, so a
-	// game that leaves the call in its loop with shadows off gets one line
-	// instead of one every frame. Only slot 0 ever warns -- an empty slot 1
-	// is the ordinary shape of a game with one shadow-casting light, not a
-	// misconfiguration.
-	warned: bool,
+	// The HDR scene target the 3D pass actually draws into, and the tonemap
+	// resolve that turns it back into whatever begin_drawing_3d was called
+	// for. See tonemap.odin's own top comment for why this cannot simply be
+	// `Render_Target`'s own format.
+	targets: Lighting_Targets,
+
+	// DEFERRED's own four fill targets and their own depth texture -- see
+	// Gbuffer_Targets' own doc comment (gbuffer.odin) for why this is a
+	// texture set of its own rather than reusing targets/depth_texture.
+	// Zero value ("no textures yet") until a game actually selects
+	// DEFERRED, the same "allocated on first use" shape targets/
+	// depth_texture already have for 3D itself.
+	gbuffer: Gbuffer_Targets,
+
+	// The bloom chain's own half-resolution levels -- see Bloom_Targets
+	// (bloom.odin). Zero value until a game actually turns bloom on, and
+	// released again the first frame after it turns it off, which is the one
+	// place this differs from the two texture sets above: a game toggling
+	// bloom is an ordinary thing to do, where a game toggling DEFERRED is
+	// not.
+	bloom: Bloom_Targets,
+
+	/*
+		P7c's localized reflection probes -- every one of them baked into two
+		shared texture arrays, plus the cube a capture renders into on the way
+		there. See Reflection_Probes (reflection.odin).
+
+		Beside `probe` above rather than replacing it: that one is P4's
+		scene-wide bake and is still what a fragment falls back to wherever
+		the localized probes do not reach, which is most of a scene with a few
+		probes in it.
+	*/
+	reflection: Reflection_Probes,
+
+	// SSAO's own two single-channel targets -- see Ssao_Targets (ssao.odin).
+	// Zero value until a game turns SSAO on, released again when it turns it
+	// off, the same shape Bloom_Targets has.
+	ssao: Ssao_Targets,
 }
 
 // GPU-side state. Internal plumbing -- games should not need to touch any of
@@ -169,6 +443,65 @@ Renderer :: struct {
 	// font atlas. The old backend allocated these out of a descriptor pool with
 	// room for 32, which put a ceiling of about two dozen sprites on a program.
 	sprite_sampler: ^sdl.GPUSampler,
+
+	/*
+		1x1 white, sampled wherever a mesh part has no base colour texture of
+		its own. This is what lets `mesh.frag.hlsl` be one shader for textured
+		and untextured parts alike -- see that file's own doc comment and
+		`lighting_rework.md` section 3.4. The same trick `init` already used
+		for the shadow maps' own placeholders, applied to the other side of
+		the same sampler slot.
+	*/
+	default_texture: ^sdl.GPUTexture,
+
+	/*
+		1x1 black, sampled at both of the environment probe's own slots
+		(`irradiance_map`/`prefiltered_map`, mesh.frag.hlsl) whenever
+		`Renderer.lighting.probe` is empty -- the same "always something valid
+		bound" trick `default_texture` already plays for the material maps,
+		applied to `Ambient_Kind.ENVIRONMENT_PROBE` so selecting it with no
+		probe ever loaded reads as zero ambient light rather than sampling a
+		nil texture. Black rather than white here: `default_texture` stands
+		in for a *factor* (1.0 is "no change"), this stands in for *emitted
+		light* (0.0 is "none"), and the two would be the wrong value swapped.
+	*/
+	default_probe_texture: ^sdl.GPUTexture,
+
+	/*
+		A 1-element `Cluster_Range{0, 0}` and a 1-element `uint(0)` -- bound
+		whenever `Lighting_Settings.pipeline` is not `CLUSTERED`, or is
+		`CLUSTERED` but `Lighting.cluster`'s own buffers have not been built
+		yet (the first frame the pipeline is selected, before
+		`pipeline_clustered_begin` runs). The same "always something valid
+		bound" trick `default_texture`/`default_probe_texture` already play,
+		applied to the two storage buffers `lighting_core.hlsli` declares
+		unconditionally (`cluster_ranges`/`cluster_light_indices`) so
+		`FORWARD` never has to leave either slot empty. See
+		`pipeline_forward_cluster_buffers` (pipeline_forward.odin), the one
+		reader.
+	*/
+	default_cluster_ranges_buffer:        ^sdl.GPUBuffer,
+	default_cluster_light_indices_buffer: ^sdl.GPUBuffer,
+
+	/*
+		Linear, clamped on all three axes -- the sampler for reading an
+		internal texture whose edges are edges rather than a wrap-around.
+
+		Two things want that. The environment probe reads both its own maps
+		through it (see ambient.odin's own doc comment on why the prefiltered
+		map is read with an explicit level rather than automatic derivatives),
+		shared by both probe slots and by the 1x1 placeholder above the same
+		way `sprite_sampler` is shared by every untextured material slot. And
+		every pass of the bloom chain reads through it too (bloom.odin), where
+		the filtering *is* the effect and the clamping is what keeps a bright
+		spot on the left edge of the screen from bleeding into the right one.
+
+		Named for what it is rather than for the first thing that wanted it:
+		it was `probe_sampler` until bloom turned out to want the identical
+		state, and two identical samplers with different names would have been
+		the worse answer.
+	*/
+	linear_clamp_sampler: ^sdl.GPUSampler,
 
 	// Linear, and wrapping across the seam where a panorama's longitude comes
 	// back round to itself. Clamped in v, so the poles do not bleed into each
@@ -214,25 +547,116 @@ Renderer :: struct {
 	// game is building. See render_target.odin.
 	target: ^Render_Target,
 
-	// Lights and fog, as the game last set them. Pushed to the GPU by
-	// begin_drawing_3d rather than when they are changed, so a game may set
-	// them anywhere -- including in the middle of building a frame. See
-	// light.odin.
-	lighting: Lighting_Data,
+	/*
+		The colour `clear_background` was last given, remembered rather than
+		written straight to whatever it is clearing. begin_drawing_3d reads
+		this to clear the internal HDR scene target (tonemap.odin) -- a
+		target that has never been drawn into this frame has nothing of its
+		own to load the way the old "load, do not clear" contract relied on,
+		see that procedure's own comment. Every example in this repo calls
+		clear_background immediately before its own begin_drawing_3d with
+		nothing 2D drawn in between (checked by hand across all of them for
+		this phase), so the background a game asked for is still what shows
+		through -- it is carried across the two calls explicitly instead.
+	*/
+	background_color: [4]f32,
+
+	// Lighting settings, the light list and the shadow system -- see
+	// `Lighting`'s own doc comment. The scene half of this (`lighting.settings`,
+	// `lighting.light_data`) is set whenever a game calls `set_lighting` or
+	// `set_lights`; the per-frame half (the camera-derived `Scene_Frag_Data`)
+	// is worked out and pushed by `push_lighting`, called from
+	// `begin_drawing_3d` rather than from either setter, so a game may call
+	// them anywhere -- including before `begin_drawing`.
+	lighting: Lighting,
 
 	mode_3d:         bool, // true between begin_drawing_3d and end_drawing_3d
 	view_projection: matrix[4, 4]f32,
 	camera3d:        Camera3D,
 
-	// The shadow map's own state, and whether draw_model is currently filling
-	// it rather than drawing the scene it will be sampled by. See shadow.odin.
-	shadow:         Shadow,
+	// Whether draw_model is currently filling a shadow map rather than
+	// drawing the scene it will be sampled by. See shadow_standard.odin.
 	in_shadow_pass: bool,
+
+	// The metallic-roughness, occlusion and emissive textures
+	// draw_model_immediate last bound for the current part, in that order --
+	// a second per-part cache alongside bound_texture/bound_sampler above
+	// (which stays base-colour-only) rather than a fourth slot folded into
+	// it, because bind_quad_state's 2D draws share bound_texture/bound_sampler
+	// too and a sprite has never had three more textures to go with it. One
+	// sampler serves all three (see Material_Textures' own doc comment on
+	// why), so unlike bound_texture/bound_sampler there is no paired sampler
+	// array to also compare.
+	bound_material_textures: [3]^sdl.GPUTexture,
+
+	// What draw_model_immediate has bound for the non-shadow-pass fragment
+	// shader beyond the per-part textures above: the shadow maps for every
+	// technique group (PCF/PCSS's two, CASCADED's one layered array, CUBE's
+	// one layered array -- all three always bound regardless of which
+	// technique is actually running, see Shadow_State's own doc comment) and
+	// the light storage buffer. None of these change per part or per
+	// pipeline switch the way the per-part textures do, but they can change
+	// mid-pass if a game calls set_lighting or set_lights (growing the light
+	// buffer) between draw_model calls.
+	//
+	// bound_cascade_maps/bound_cube_maps are single pointers, not arrays,
+	// since P3b: CASCADED's up-to-eight maps and CUBE's six are each one
+	// Texture2DArray now (one sampler apiece) rather than one GPUTexture per
+	// layer -- see shadow.odin's own doc comment on Shadow_State for why.
+	bound_shadow_maps:  [MAX_SHADOW_CASTERS]^sdl.GPUTexture,
+	bound_cascade_maps: ^sdl.GPUTexture,
+	bound_cube_maps:    ^sdl.GPUTexture,
+
+	// The environment probe's own two maps -- {irradiance, prefiltered},
+	// whichever of a real probe or default_probe_texture's own placeholder is
+	// currently bound for each. See draw_model_immediate's own comment on
+	// why these two always bind together.
+	bound_ssao_map:       ^sdl.GPUTexture,
+	bound_reflect_probes: [2]^sdl.GPUTexture,
+	bound_probe_maps:   [2]^sdl.GPUTexture,
+
+	bound_light_buffer: ^sdl.GPUBuffer,
+
+	// CLUSTERED's own two storage buffers, or FORWARD's placeholders for the
+	// same slots -- see pipeline_cluster_buffers (render3d.odin), the one
+	// dispatcher that decides which.
+	bound_cluster_ranges:        ^sdl.GPUBuffer,
+	bound_cluster_light_indices: ^sdl.GPUBuffer,
 
 	// draw_model calls made with casts_shadow = true before begin_drawing_3d
 	// has a pass of any kind open yet, held until it does. See draw_model's
 	// own doc comment.
 	pending_shadow_models: [dynamic]Pending_Shadow_Model,
+
+	/*
+		DEFERRED's own queues -- see pipeline_deferred.odin's own top
+		comment for the pass shape these exist to bridge. A draw_model call
+		made while the G-buffer pass is open cannot draw a transparent or
+		LINES-topology part into it at all (see Material.transparent's own
+		doc comment, material.odin, and draw_model_immediate's own comment
+		on in_deferred_forward_pass below) -- every such call is queued here,
+		re-played once the final HDR pass is open, the same "hold until the
+		right pass exists" shape pending_shadow_models above already has for
+		a model marked casts_shadow before any pass exists yet.
+
+		draw_skybox has the identical problem for a different reason: its
+		own pipelines are built against the HDR target's single colour
+		format, incompatible with the G-buffer pass's own four -- one
+		pending slot rather than a list, since a game draws its sky at most
+		once a frame (draw_skybox's own doc comment: "call it first").
+	*/
+	pending_deferred_forward_models: [dynamic]Pending_Shadow_Model,
+	pending_skybox:                  Skybox,
+	has_pending_skybox:              bool,
+
+	// True while draw_model_immediate is replaying pending_deferred_forward_models
+	// into the final HDR pass -- see that proc's own doc comment for exactly
+	// which parts this makes it draw (transparent and/or LINES) versus skip
+	// (everything already filled into the G-buffer). Not the same axis as
+	// in_shadow_pass: a model can be replayed into the shadow pass and the
+	// deferred forward pass in the same frame, for the same reason it can be
+	// drawn into the ordinary scene pass and a shadow pass today.
+	in_deferred_forward_pass: bool,
 
 	// The shapes draw_cube and friends draw, built the first time one is asked
 	// for. Same reasoning as the depth texture: a game that draws no 3D should
@@ -241,6 +665,25 @@ Renderer :: struct {
 	unit_cube_wires: Model,
 	unit_plane:      Model,
 	unit_sphere:     Model,
+
+	/*
+		P7b's depth prepass (pipeline_forward.odin). `scene_deferred` is true
+		between begin_drawing_3d and end_drawing_3d whenever a forward-family
+		pipeline is running with SSAO on, and it is what turns draw_model and
+		draw_skybox from "draw it" into "hold it" -- see
+		`pipeline_forward_defers_scene`. `in_depth_prepass` is set only during
+		the replay into the depth-only pass, and is to that pass what
+		`in_shadow_pass` is to a shadow one: it says this draw wants geometry
+		and nothing else.
+
+		`pending_scene_models` is that queue. A separate list from
+		`pending_shadow_models`, which holds a different set for a different
+		reason -- models the game marked `casts_shadow` and never drew itself
+		-- and both are replayed into both passes, since both are in the frame.
+	*/
+	scene_deferred:       bool,
+	in_depth_prepass:     bool,
+	pending_scene_models: [dynamic]Pending_Shadow_Model,
 
 	// draw_grid's one grid, rebuilt when the numbers it was asked for change.
 	grid:         Model,
@@ -253,11 +696,21 @@ Renderer :: struct {
 @(private)
 bind_cache_reset :: proc() {
 	r := &mbi.renderer
-	r.bound_pipeline     = nil
-	r.bound_texture      = nil
-	r.bound_sampler      = nil
-	r.bound_quad         = false
-	r.bound_joint_buffer = nil
+	r.bound_pipeline          = nil
+	r.bound_texture           = nil
+	r.bound_sampler           = nil
+	r.bound_quad              = false
+	r.bound_joint_buffer      = nil
+	r.bound_material_textures = {}
+	r.bound_shadow_maps       = {}
+	r.bound_cascade_maps      = nil
+	r.bound_cube_maps         = nil
+	r.bound_probe_maps        = {}
+	r.bound_ssao_map          = nil
+	r.bound_reflect_probes    = {}
+	r.bound_light_buffer      = nil
+	r.bound_cluster_ranges        = nil
+	r.bound_cluster_light_indices = nil
 }
 
 // -----------------------------------------------------------------------
@@ -377,6 +830,9 @@ end_drawing :: proc() {
 clear_background :: proc(color: [4]f32 = {0, 0, 0, 1}) {
 	r := &mbi.renderer
 	if !r.frame_active do return
+
+	// See Renderer.background_color's own comment for who reads this back.
+	r.background_color = color
 
 	if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)

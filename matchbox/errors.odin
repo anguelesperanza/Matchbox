@@ -123,6 +123,18 @@ Argument_Error :: enum {
 	No_Frames,         // an animation with no frames to pack into a sheet
 }
 
+/*
+	A source handed to `create_environment_probe` (ambient.odin) that cannot
+	be baked. Only one way to fail: the source has to be a `Skybox` already
+	loaded as a `.CUBEMAP` (`load_skybox_cubemap`) -- see that procedure's own
+	doc comment for why a `.PANORAMA` source is out of scope rather than
+	converted on the fly.
+*/
+Environment_Probe_Error :: enum {
+	None = 0,
+	Source_Not_Cubemap,
+}
+
 Error :: union #shared_nil {
 	Gpu_Error,
 	Image_Error,
@@ -130,4 +142,5 @@ Error :: union #shared_nil {
 	File_Error,
 	Model_Error,
 	Skybox_Error,
+	Environment_Probe_Error,
 }

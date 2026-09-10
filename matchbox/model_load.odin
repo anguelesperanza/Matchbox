@@ -22,12 +22,16 @@ package matchbox
 	leaves the vendored package untouched.
 
 	**What is read, and what is ignored.** Positions, normals, texture
-	coordinates, indices, and a material's base colour texture and factor. Not
-	skins, animations, cameras, morph targets, or any of the PBR channels past
-	base colour -- see D8. A file may contain them; they are skipped rather than
-	failed on.
+	coordinates, indices, skins and animations, and a material's base colour,
+	metallic-roughness, occlusion and emissive channels -- both the factors and
+	the textures. Not cameras or morph targets, and not a tangent-space normal
+	map: there is nowhere to apply one without a tangent basis this package
+	does not have -- see `read_material`'s own doc comment and
+	`lighting_rework.md` section 7.5. A file may contain any of these; they are
+	skipped rather than failed on.
 */
 
+import "core:encoding/json"
 import "core:log"
 import "core:math/linalg"
 import "core:path/filepath"
@@ -61,8 +65,23 @@ import gltf "./gltf2"
 	missing model is a shipping mistake rather than a crash, and telling the two
 	apart is the difference between "you forgot to copy the file" and "the
 	export is wrong".
+
+	**`shading` forces one shading model onto every part of the file.** Left
+	nil -- the default -- each part gets whatever its own glTF material
+	declares, which is `PBR_METALLIC` for essentially every real file and
+	`UNLIT` for one carrying `KHR_materials_unlit`; see `read_material` for
+	why honouring the file is the right default rather than an imposition.
+	Passing a value is the one-line escape hatch for a game that wants
+	something else across the board:
+
+		model := mb.load_model("prop.glb", shading = .TOON)
+
+	Per-part control needs no parameter at all -- a `Model`'s parts are
+	writable, so `model.parts[i].material.shading = .TOON` already worked and
+	still does. This exists because "shade this whole file the old way" is a
+	common enough wish to deserve better than a loop at every call site.
 */
-load_model :: proc(path: string) -> (model: Model, err: Error) {
+load_model :: proc(path: string, shading: Maybe(Shading_Model) = nil) -> (model: Model, err: Error) {
 	bytes := read_entire_file(path, context.allocator) or_return
 	defer delete(bytes)
 
@@ -95,7 +114,24 @@ load_model :: proc(path: string) -> (model: Model, err: Error) {
 	}
 	defer gltf.unload(data)
 
-	return model_from_gltf(data), nil
+	model = model_from_gltf(data)
+
+	/*
+		Applied to the finished model rather than threaded down through
+		`model_from_gltf` and every part builder to `read_material`. The
+		parameter would have to travel four procedures deep to reach the one
+		place that sets `shading`, and every one of them would carry an
+		argument it does not itself use -- where overwriting one field on each
+		finished part says the same thing in three lines, at the one level
+		that actually knows the caller asked.
+	*/
+	if forced, ok := shading.?; ok {
+		for &part in model.parts {
+			part.material.shading = forced
+		}
+	}
+
+	return model, nil
 }
 
 // Everything after the parse: walk the scene, build the parts, measure the
@@ -319,7 +355,10 @@ primitive_part :: proc(
 		return {}, nil, false
 	}
 
-	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
+	// upload_mesh already set part.material to MATERIAL_DEFAULTS; read_material
+	// replaces it wholesale rather than filling in one field at a time, since
+	// a primitive with no material is exactly the MATERIAL_DEFAULTS case again.
+	part.material = read_material(data, primitive.material, uploaded)
 
 	return part, vertices, true
 }
@@ -456,7 +495,7 @@ skinned_primitive_part :: proc(
 	}
 	part.joint_map = order[:]
 
-	part.texture, part.sampler = material_texture(data, primitive.material, uploaded)
+	part.material = read_material(data, primitive.material, uploaded)
 
 	return part, vertices, true
 }
@@ -466,40 +505,229 @@ skinned_primitive_part :: proc(
 // -----------------------------------------------------------------------
 
 /*
-	The base colour texture of a primitive's material, uploaded once and shared.
+	A primitive's material, read in full: base colour, metallic-roughness and
+	emissive (each a factor and a texture), and occlusion (a texture, glTF
+	gives it no factor Matchbox's own Material has anywhere to put -- see
+	this proc's own note on `occlusion_texture.strength` below). A primitive
+	with no material, or a material index the file's own list does not reach,
+	comes back `MATERIAL_DEFAULTS` unchanged -- lit, white, Blinn-Phong, the
+	same as an untextured generated shape.
 
-	Everything else a glTF material can carry -- metallic, roughness, normal
-	maps, occlusion, emissive -- is ignored (D8). A primitive with no material,
-	or a material with no base colour texture, comes back nil and is drawn flat
-	in its tint.
+	**Deliberately leaves `shading` at `MATERIAL_DEFAULTS`' own Blinn-Phong**
+	rather than switching a metallic-roughness-textured material to
+	`Shading_Model.PBR_METALLIC`. `lighting_plan.md`'s own opening principle
+	is that the *game* picks a shading model, not Matchbox -- a loader that
+	silently chose one because a file happened to carry metallic-roughness
+	data would be making that choice on the game's behalf, the exact thing
+	the spec asks not to happen. A game that wants these parts PBR-shaded
+	sets `.shading = .PBR_METALLIC` on the loaded parts itself, and after
+	this proc that is the only thing left to set: the factors and textures
+	read here are what makes that flip actually change the picture rather
+	than reading zeroed fields the way it would have before this job.
 
-	The sampler is the nearest-neighbour one sprites use, which is not a
-	shortcut: every model this was written against declares `magFilter` 9728,
-	which is NEAREST, because they are pixel-art textures and smoothing them
-	would be undoing the art.
+	**Not read: `occlusion_texture.strength`.** glTF gives occlusion a
+	blend-with-1.0 factor the same shape `metallic_factor`/`roughness_factor`
+	are, but `Material`/`Surface` have no field for it -- occlusion is read
+	as a plain texture sample (`Surface.occlusion`) with no material-level
+	scalar next to it. Every asset this loader was built for leaves it at the
+	spec default of 1 (full strength) anyway, so the gap is unread rather than
+	silently wrong; a caller whose file sets it to something else does not get
+	an error, just the texture at full strength.
+
+	**Not read at all: `normal_texture`.** No tangent basis exists to apply
+	one against -- see this file's own top comment and
+	`lighting_rework.md` section 7.5.
 */
 @(private)
-material_texture :: proc(
+read_material :: proc(
 	data:     ^gltf.Data,
 	material: Maybe(gltf.Integer),
 	uploaded: ^map[gltf.Integer]^sdl.GPUTexture,
-) -> (^sdl.GPUTexture, ^sdl.GPUSampler) {
-	material_index := material.? or_else max(gltf.Integer)
-	if int(material_index) >= len(data.materials) do return nil, nil
-
-	pbr := data.materials[material_index].metallic_roughness.? or_else gltf.Material_Metallic_Roughness{}
-	info, has_texture := pbr.base_color_texture.?
-	if !has_texture do return nil, nil
-
-	if int(info.index) >= len(data.textures) do return nil, nil
-	source, has_source := data.textures[info.index].source.?
-	if !has_source do return nil, nil
-
-	if existing, found := uploaded[source]; found {
-		return existing, mbi.renderer.sprite_sampler
+) -> Material {
+	material_index, has_material := material.?
+	if !has_material || int(material_index) >= len(data.materials) {
+		return MATERIAL_DEFAULTS
 	}
 
-	if int(source) >= len(data.images) do return nil, nil
+	gltf_material := data.materials[material_index]
+
+	result := MATERIAL_DEFAULTS
+
+	/*
+		**The file's own declaration of what it is, not Matchbox's guess.**
+		A glTF material carrying a `pbrMetallicRoughness` block -- which is
+		every material that does not say otherwise, since the spec makes that
+		the default parameterization -- is stating that it is a
+		metallic-roughness surface. Loading it as Blinn-Phong would not be
+		declining to choose on the game's behalf, which is what
+		`lighting_plan.md`'s "the consumer selects" principle asks for; it
+		would be choosing Blinn-Phong *for* the game while discarding what the
+		file said, and leaving `metallic`, `roughness`, `occlusion` and
+		`emissive` populated below for a model that reads none of them. A game
+		that wants something else still overrides, per part or per file -- see
+		`load_model`'s own `shading` parameter.
+
+		`KHR_materials_unlit` is the one extension read here, and only for its
+		presence: it is a rendering hint with no parameters of its own, so a
+		key lookup is the whole of it.
+
+		**`KHR_materials_pbrSpecularGlossiness` is deliberately not detected**,
+		even though `Shading_Model.PBR_SPECGLOSS` exists and reads exactly the
+		parameters it carries. The extension is archived, its factors live in
+		an untyped `json.Value` this package has no typed parse for, and glTF
+		requires a file using it to *also* supply a `pbrMetallicRoughness`
+		block precisely so a client without the extension has something
+		correct to fall back to. Matchbox is that client, and taking the
+		documented fallback is the spec's own designed path rather than a gap
+		-- reading the extension badly would be worse than reading the
+		fallback well. A game with a spec-gloss asset it wants shaded that way
+		sets `PBR_SPECGLOSS` itself and fills the factors it knows.
+	*/
+	result.shading = .PBR_METALLIC
+	if extensions, ok := gltf_material.extensions.(json.Object); ok {
+		if _, unlit := extensions["KHR_materials_unlit"]; unlit {
+			result.shading = .UNLIT
+		}
+
+		/*
+			Said out loud rather than absorbed silently. Falling back is the
+			right behaviour -- see this proc's own comment above -- but the
+			one case where it goes wrong is invisible without this line: a
+			file that lists the extension in `extensionsRequired` is under no
+			obligation to carry a `pbrMetallicRoughness` block at all, and
+			without one the code below reads glTF's own defaults instead,
+			which are metallic 1 and roughness 1. The asset then renders as
+			rough metal, correctly by the letter of the spec and wrongly by
+			any other measure, with nothing on screen or in a log to say why.
+
+			Named per material rather than once per file, and with the
+			material's own name where it has one, so the line says which
+			surface to go and look at instead of only that something
+			somewhere used the extension.
+
+			Reaches a game only if it has set `context.logger = mb.mbi.logger`
+			-- see CLAUDE.md. That is the same deal every other diagnostic in
+			this package offers, not a special weakness of this one.
+		*/
+		if _, spec_gloss := extensions["KHR_materials_pbrSpecularGlossiness"]; spec_gloss {
+			log.warnf(
+				"material %q uses KHR_materials_pbrSpecularGlossiness, which Matchbox does not read; " +
+				"loading its pbrMetallicRoughness fallback instead. Set Shading_Model.PBR_SPECGLOSS and " +
+				"the specular/glossiness factors yourself if the fallback looks wrong.",
+				gltf_material.name.? or_else "<unnamed>",
+			)
+		}
+	}
+
+	result.emissive = {
+		f32(gltf_material.emissive_factor.x),
+		f32(gltf_material.emissive_factor.y),
+		f32(gltf_material.emissive_factor.z),
+	}
+
+	/*
+		glTF's own defaults when `pbrMetallicRoughness` is present but a
+		factor inside it is not are base colour white, metallic 1, roughness
+		1 -- not Matchbox's own `create_material_pbr_metallic` defaults
+		(metallic 0, roughness 0.5), which are a hand-authoring choice and not
+		a reading of the spec. `gltf2.pbr_metallic_roughness_parse` already
+		applies that 1/1 default *inside* a present block; what it cannot do
+		is default the block's *absence*, since `Maybe(...).? or_else
+		Material_Metallic_Roughness{}` -- what this proc's predecessor did --
+		silently substitutes Odin's own zero value (metallic 0, roughness 0,
+		base colour transparent black) for a material that never mentioned
+		`pbrMetallicRoughness` at all, which is legal glTF and means exactly
+		the same as an explicit block spelling out every default. So the
+		absent case is spelled out here instead of folded into an `or_else`.
+	*/
+	pbr, has_pbr := gltf_material.metallic_roughness.?
+	if !has_pbr {
+		pbr = gltf.Material_Metallic_Roughness{
+			base_color_factor = {1, 1, 1, 1},
+			metallic_factor   = 1,
+			roughness_factor  = 1,
+		}
+	}
+
+	result.base_color = {
+		f32(pbr.base_color_factor.x), f32(pbr.base_color_factor.y),
+		f32(pbr.base_color_factor.z), f32(pbr.base_color_factor.w),
+	}
+	result.metallic  = f32(pbr.metallic_factor)
+	result.roughness = f32(pbr.roughness_factor)
+
+	if info, ok := pbr.base_color_texture.?; ok {
+		if texture := resolve_texture(data, info.index, uploaded, .SRGB); texture != nil {
+			result.textures.base         = texture
+			result.textures.base_sampler = mbi.renderer.sprite_sampler
+		}
+	}
+
+	if info, ok := pbr.metallic_roughness_texture.?; ok {
+		result.textures.metal_rough = resolve_texture(data, info.index, uploaded, .UNORM)
+	}
+
+	/*
+		Occlusion is its own glTF block, not part of `pbrMetallicRoughness`,
+		and it may or may not name the same image as
+		`metallic_roughness_texture` just above -- the common "ORM"
+		convention packs all three (occlusion, roughness, metallic) into one
+		image's R/G/B channels, and an equally legal file keeps occlusion in
+		an image of its own. Either way this just asks `resolve_texture` for
+		whatever image `occlusion_texture` names; its cache (keyed by image,
+		not by which material field pointed at it) is what makes the
+		shared-image case free -- this call returns the same GPU texture the
+		metallic-roughness one above already uploaded rather than decoding
+		the same bytes twice.
+	*/
+	if info, ok := gltf_material.occlusion_texture.?; ok {
+		result.textures.occlusion = resolve_texture(data, info.index, uploaded, .UNORM)
+	}
+
+	if info, ok := gltf_material.emissive_texture.?; ok {
+		result.textures.emissive = resolve_texture(data, info.index, uploaded, .SRGB)
+	}
+
+	return result
+}
+
+/*
+	One glTF texture reference resolved to a GPU texture, shared with every
+	other material field across the whole model that names the same image --
+	see `read_material`'s own comment on `occlusion_texture` for why that
+	sharing matters rather than being an incidental saving.
+
+	`encoding` is the caller's to choose (`Texture_Encoding`, upload.odin):
+	base colour and emissive are photometric colour and want `SRGB`;
+	metallic-roughness and occlusion are numbers sampled back exactly and
+	want `UNORM` -- see that type's own doc comment for the rule this
+	follows. The cache below is keyed by image index alone, not by encoding,
+	on the assumption that no asset this loader was built for reuses one
+	image file as both a colour map and a data map; a file that did would get
+	whichever encoding uploaded it first, silently -- a risk accepted rather
+	than solved, since keying by (image, encoding) instead would cost a
+	second GPU upload of the same bytes for every ordinary ORM texture, which
+	is the common case, to guard against one this loader has not seen.
+
+	The sampler every caller pairs this with is the nearest-neighbour one
+	sprites use, for the same reason this loader always chose it before this
+	job existed: every model this was written against declares `magFilter`
+	9728, which is NEAREST.
+*/
+@(private)
+resolve_texture :: proc(
+	data:          ^gltf.Data,
+	texture_index: gltf.Integer,
+	uploaded:      ^map[gltf.Integer]^sdl.GPUTexture,
+	encoding:      Texture_Encoding,
+) -> ^sdl.GPUTexture {
+	if int(texture_index) >= len(data.textures) do return nil
+	source, has_source := data.textures[texture_index].source.?
+	if !has_source do return nil
+
+	if existing, found := uploaded[source]; found do return existing
+
+	if int(source) >= len(data.images) do return nil
 
 	// Embedded rather than a file beside the model, in every asset this was
 	// built for -- the parser has already turned the base64 into bytes. An
@@ -514,14 +742,14 @@ material_texture :: proc(
 	}
 	if !is_bytes {
 		log.error("model texture is not embedded, skipped")
-		return nil, nil
+		return nil
 	}
 
-	texture := decode_and_upload(encoded)
-	if texture == nil do return nil, nil
+	texture := decode_and_upload(encoded, encoding)
+	if texture == nil do return nil
 
 	uploaded[source] = texture
-	return texture, mbi.renderer.sprite_sampler
+	return texture
 }
 
 /*
@@ -551,8 +779,14 @@ image_view_bytes :: proc(data: ^gltf.Data, source: gltf.Integer) -> (bytes: []by
 
 // PNG or JPEG bytes to a GPU texture, through the same stb_image and the same
 // staging path a sprite uses.
+//
+// `encoding` is the caller's (`resolve_texture`'s) to choose -- `SRGB` for a
+// base-colour or emissive image, `UNORM` for a metallic-roughness or
+// occlusion one. See `Texture_Encoding`'s own doc comment (upload.odin) for
+// the rule and why decoding the latter through sRGB would be wrong rather
+// than merely imprecise.
 @(private)
-decode_and_upload :: proc(encoded: []byte) -> ^sdl.GPUTexture {
+decode_and_upload :: proc(encoded: []byte, encoding: Texture_Encoding) -> ^sdl.GPUTexture {
 	width, height, channels: i32
 
 	pixels := stbi.load_from_memory(raw_data(encoded), i32(len(encoded)), &width, &height, &channels, 4)
@@ -565,7 +799,7 @@ decode_and_upload :: proc(encoded: []byte) -> ^sdl.GPUTexture {
 	// A texture that will not upload leaves the part untextured rather than
 	// failing the load: the geometry is still worth having, and the caller
 	// already treats a nil texture as "draw this flat".
-	texture, err := upload_texture(pixels, width, height)
+	texture, err := upload_texture(pixels, width, height, encoding)
 	if err != nil {
 		log.errorf("could not upload a model texture: %v", err)
 		return nil

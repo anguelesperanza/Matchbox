@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 365 of them -- with its arguments
+Every public procedure in the package -- 381 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -21,14 +21,14 @@ any.
 - [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
 - [3D cameras](#3d-cameras) -- 42
-- [3D drawing](#3d-drawing) -- 27
+- [3D drawing](#3d-drawing) -- 23
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 15
+- [Other](#other) -- 35
 
 ## Getting started
 
@@ -1820,7 +1820,7 @@ Opens the 3D pass and fixes the camera for everything drawn until `end_drawing_3
 ```odin
 end_drawing_3d :: proc()
 ```
-Closes the 3D pass.
+Closes the 3D pass and resolves it.
 
 ```odin
 is_drawing_3d :: proc() -> bool
@@ -1916,7 +1916,11 @@ A grid of lines on the ground plane, centred on the origin, `slices` squares acr
 ### `light.odin`
 
 ```odin
-create_point_light :: proc(position: [3]f32, color: [4]f32 = WHITE) -> Light
+create_point_light :: proc(
+	position: [3]f32,
+	color: [4]f32 = WHITE,
+	casts_shadow := false,
+) -> Light
 ```
 A point light at `position`.
 
@@ -1942,39 +1946,31 @@ create_spot_light :: proc(
 A cone of light at `position`, pointing along `direction`.
 
 ```odin
+create_area_rect_light :: proc(
+	position: [3]f32,
+	normal: [3]f32,
+	right: [3]f32,
+	width: f32,
+	height: f32,
+	color: [4]f32 = WHITE,
+) -> Light
+```
+A flat rectangle of light at `position`, facing `normal`, `width` wide along `right` and `height` wide along the axis square to both.
+
+```odin
+create_area_disk_light :: proc(
+	position: [3]f32,
+	normal: [3]f32,
+	radius: f32,
+	color: [4]f32 = WHITE,
+) -> Light
+```
+A flat disk of light at `position`, facing `normal`, `radius` wide.
+
+```odin
 set_lights :: proc(lights: []Light)
 ```
-Sets every light at once, and turns lighting on.
-
-```odin
-set_light :: proc(index: int, light: Light)
-```
-One light, by slot, leaving the others alone.
-
-```odin
-clear_lights :: proc()
-```
-Back to the fixed shading that needs no lights.
-
-```odin
-set_ambient :: proc(color: [4]f32)
-```
-The light that reaches everything regardless of where it faces.
-
-```odin
-set_fog :: proc(color: [4]f32, start, end: f32)
-```
-Distance fade: nothing changes nearer than `start`, everything is `color` by `end`.
-
-```odin
-disable_fog :: proc()
-```
-Turns fog off, leaving its colour and range where they were.
-
-```odin
-is_lighting_active :: proc() -> bool
-```
-Whether a game has set any lights.
+Sets every light in the scene at once, replacing whatever was there.
 
 ### `skybox.odin`
 
@@ -2074,7 +2070,11 @@ A grid of lines on the ground plane, centred on the origin.
 ### `model_load.odin`
 
 ```odin
-load_model :: proc(path: string) -> (model: Model, err: Error)
+load_model :: proc(
+	path: string,
+	shading: Maybe(Shading_Model) = nil) -> (model: Model,
+	err: Error,
+)
 ```
 Loads a model from a `.gltf` or `.glb` file.
 
@@ -2504,22 +2504,180 @@ Whether the pointer is over a sprite.
 
 ## Other
 
+### `ambient.odin`
+
+```odin
+create_environment_probe :: proc(
+	source: Skybox,
+	settings: Environment_Probe_Settings = ENVIRONMENT_PROBE_DEFAULTS) -> (probe: Environment_Probe,
+	err: Error,
+)
+```
+Bakes `source`'s own cube map into a new `Environment_Probe` -- does **not** install it as the scene's own ambient; call `set_environment_probe` with the result to do that.
+
+```odin
+set_environment_probe :: proc(probe: Environment_Probe)
+```
+Installs `probe` as the scene's own environment probe, releasing whatever was bound before -- `set_lighting`'s own "replace the whole struct" shape, applied to the one piece of ambient/environment state that is a GPU resource rather than a plain value and therefore cannot live on `Lighting_Settings` itself (see that struct's own doc comment).
+
+```odin
+destroy_environment_probe :: proc(probe: ^Environment_Probe)
+```
+Releases a probe's own two textures.
+
+### `lighting.odin`
+
+```odin
+set_lighting :: proc(settings: Lighting_Settings = LIGHTING_DEFAULTS)
+```
+Applies `settings` to the scene: whether lighting runs, whether shadows do and with what parameters, ambient, fog.
+
+```odin
+is_lighting_active :: proc() -> bool
+```
+Whether the lighting model is currently running.
+
+### `material.odin`
+
+```odin
+create_material_phong :: proc(
+	base_color: [4]f32 = WHITE,
+	specular_power: f32 = 16,
+	textures: Material_Textures = {},
+) -> Material
+```
+A lit, Blinn-Phong-shaded material.
+
+```odin
+create_material_unlit :: proc(
+	base_color: [4]f32 = WHITE,
+	textures: Material_Textures = {},
+) -> Material
+```
+A material no light reaches -- `shade_surface` (lighting_core.hlsli) returns `base_color` for one of these regardless of what the scene's lights or `Lighting_Settings.enabled` say, the same as it does for every surface when lighting is off scene-wide.
+
+```odin
+create_material_pbr_metallic :: proc(
+	base_color: [4]f32 = WHITE,
+	metallic: f32 = 0,
+	roughness: f32 = 0.5,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+Cook-Torrance GGX under the metallic-roughness parameterization -- `brdf/pbr_metallic.hlsli` is the shading model this reads into.
+
+```odin
+create_material_pbr_specgloss :: proc(
+	base_color: [4]f32 = WHITE,
+	specular: [3]f32 = {0.04, 0.04, 0.04},
+	glossiness: f32 = 0.5,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+The same Cook-Torrance BRDF as `create_material_pbr_metallic`, under glTF's specular-glossiness parameterization instead -- `brdf/pbr_specgloss.hlsli` reads `specular` as the surface's reflectance at normal incidence directly (no metallic lerp) and `glossiness` as the inverse of roughness.
+
+```odin
+create_material_toon :: proc(
+	base_color: [4]f32 = WHITE,
+	bands: f32 = 4,
+	rim: f32 = 0,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+Cel shading -- `brdf/toon.hlsli` reads `bands` as how many discrete steps the diffuse response quantizes into (4, this proc's own default, is a common cel-shading choice: a dark band, two mid bands and a lit one) and `rim` as the strength of a silhouette-edge highlight, 0 by default because not every toon-shaded material wants one.
+
+```odin
+create_material_subsurface :: proc(
+	base_color: [4]f32 = WHITE,
+	subsurface: [3]f32 = {1, 1, 1},
+	thickness: f32 = 0.5,
+	emissive: [3]f32 = {0, 0, 0},
+	textures: Material_Textures = {},
+) -> Material
+```
+A wrapped-diffuse translucency approximation -- see `brdf/subsurface.hlsli`'s own doc comment for exactly what this does and does not model (it is not a real BSSRDF).
+
+### `reflection.odin`
+
+```odin
+add_reflection_probe :: proc(
+	position: [3]f32,
+	radius: f32,
+	falloff: f32 = REFLECTION_PROBE_FALLOFF,
+) -> int
+```
+Places a probe and hands back its slot, or -1 when the scene already has `MAX_REFLECTION_PROBES` of them.
+
+```odin
+clear_reflection_probes :: proc()
+```
+Forgets every placed probe.
+
+```odin
+get_reflection_probe_count :: proc() -> int
+```
+How many probes the scene currently has placed.
+
+```odin
+begin_probe_capture :: proc(index: int, face: int) -> bool
+```
+Opens a pass rendering face `face` of probe `index`'s own capture cube, from the probe's position, at a ninety-degree field of view.
+
+```odin
+end_probe_capture :: proc()
+```
+Closes the capture pass opened by `begin_probe_capture`.
+
+```odin
+bake_reflection_probe :: proc(index: int) -> bool
+```
+Convolves whatever the six capture passes left in the capture cube into probe `index`'s own slice of the two shared arrays: one irradiance face per face, and one prefiltered face per roughness level per face.
+
 ### `shadow.odin`
 
 ```odin
-enable_shadows :: proc(settings: Shadow_Settings = SHADOW_DEFAULTS)
+pcss_uv_radius :: proc(light_size, extent: f32) -> f32
 ```
-Turns shadows on: builds `MAX_SHADOW_CASTERS` real shadow maps at `settings.resolution`, one per potential caster, replacing whatever textures were bound in their place -- the 1x1 placeholders `init` made, or earlier real maps from a previous call with different settings.
+`Shadow_Settings.light_size` (world units) converted into the ortho shadow map's own UV units -- `shaders/shadow/pcss.hlsli` has no other way to learn `extent` (see that file's own top comment), so `push_lighting` (lighting.odin) does this division once, here, rather than pushing `extent` itself just for this one technique to divide by every fragment.
+
+### `shadow_cascaded.odin`
 
 ```odin
-disable_shadows :: proc()
+compute_cascade_splits :: proc(
+	near,
+	far: f32,
+	count: int,
+	lambda: f32,
+) -> [MAX_CASCADES]f32
 ```
-Back to no shadow at all -- the map itself is left alone rather than released, so a game toggling this as a debug key does not rebuild a texture every press.
+Splits `[near, far]` into up to `MAX_CASCADES` sub-ranges, each entry being that cascade's own far edge (its near edge is the previous entry's far edge, or `near` itself for cascade 0) -- the "practical split scheme" most real-time renderers use: a `lambda` blend of a uniform split (every cascade the same depth range) and a logarithmic one (every cascade closer to the same *projected* footprint, since perspective already compresses distant depth into fewer screen pixels on its own).
+
+```odin
+begin_cascade_shadow_pass :: proc(slot: int, cascade: int) -> bool
+```
+Opens the shadow pass for `slot`'s `cascade`-th map (0 up to `Shadow_Settings.cascade_count`, not inclusive).
+
+### `shadow_cube.odin`
+
+```odin
+shadow_cube_face_index :: proc(direction: [3]f32) -> int
+```
+Which of the six faces built by `shadow_cube_face_direction` a direction away from the light falls into -- the ordinary major-axis cubemap face test (whichever axis has the largest magnitude component picks the pair, that component's sign picks which of the pair), mirrored exactly in `shaders/shadow/cube.hlsli`'s own `shadow_cube_face_index`.
+
+```odin
+begin_point_shadow_pass :: proc(face: int) -> bool
+```
+Opens the shadow pass for the single point-light caster's `face`-th map (0..5, `shadow_cube_face_direction`'s own order).
+
+### `shadow_standard.odin`
 
 ```odin
 is_shadows_active :: proc() -> bool
 ```
-Whether enable_shadows has been called and disable_shadows has not undone it.
+Whether the shadow system is currently running -- set_lighting's own Lighting_Settings.shadows.enabled, as last resolved.
 
 ```odin
 begin_shadow_pass :: proc(slot: int = 0) -> bool

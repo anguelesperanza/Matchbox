@@ -71,7 +71,12 @@ load_skybox_panorama :: proc(path: string) -> (skybox: Skybox, err: Error) {
 			path, image.width, image.height, ratio)
 	}
 
-	texture := upload_texture(raw_data(image.pixels), image.width, image.height) or_return
+	// SRGB: the sky is photometric colour sampled by the 3D pass -- see
+	// Texture_Encoding. Before P1 this texture's encoded bytes went straight
+	// to the swapchain and the round trip was correct by accident; now the
+	// 3D pass is linear and resolves through the tonemap, so the decode has
+	// to happen somewhere, and the hardware doing it on sample is that place.
+	texture := upload_texture(raw_data(image.pixels), image.width, image.height, .SRGB) or_return
 
 	skybox = Skybox{
 		kind    = .PANORAMA,
@@ -125,7 +130,8 @@ load_skybox_cubemap :: proc(path: string) -> (skybox: Skybox, err: Error) {
 		{3, 1}, // -Z
 	}
 
-	texture := create_gpu_texture(i32(face), i32(face), cube = true) or_return
+	// SRGB for the same reason load_skybox_panorama is -- see its comment.
+	texture := create_gpu_texture(i32(face), i32(face), .SRGB, cube = true) or_return
 
 	// One scratch face, refilled six times, rather than six allocations.
 	pixels := make([][4]u8, face * face, context.temp_allocator)
@@ -188,10 +194,56 @@ destroy_skybox :: proc(skybox: ^Skybox) {
 */
 draw_skybox :: proc(skybox: Skybox) {
 	r := &mbi.renderer
-	if !r.frame_active || r.pass == nil do return
+	if !r.frame_active do return
 	if skybox.texture == nil do return
 
 	ensure(r.mode_3d, "draw_skybox must be called between begin_drawing_3d and end_drawing_3d")
+
+	/*
+		`FORWARD`/`CLUSTERED` with SSAO on have no pass open at this point --
+		see `pipeline_forward_defers_scene` (pipeline_forward.odin) -- so this
+		queues into exactly the same slot DEFERRED's own branch below uses,
+		and `end_drawing_3d` draws it first once the real pass opens. Held
+		before the `r.pass == nil` guard for the reason
+		`draw_model_immediate`'s own deferral is: there is genuinely no pass,
+		and a guard meant to catch a stray draw would otherwise eat the sky.
+	*/
+	if r.scene_deferred {
+		r.pending_skybox     = skybox
+		r.has_pending_skybox = true
+		return
+	}
+
+	if r.pass == nil do return
+
+	/*
+		DEFERRED queues this rather than drawing it now -- see
+		Renderer.pending_skybox's own doc comment (render.odin).
+		`r.pass` right now is the G-buffer pass (pipeline_deferred.odin's
+		own top comment): four targets in the G-buffer's own format, not the
+		one HDR-format target skybox_panorama/skybox_cubemap were built
+		against, so binding either pipeline into it here would be a
+		validation failure rather than a wrong picture. `pipeline_deferred_end`
+		calls `draw_skybox_immediate` directly, once the final HDR pass is
+		open, which is why this check excludes it
+		(`in_deferred_forward_pass`) rather than queuing forever.
+	*/
+	if r.lighting.settings.pipeline == .DEFERRED && !r.in_deferred_forward_pass {
+		r.pending_skybox     = skybox
+		r.has_pending_skybox = true
+		return
+	}
+
+	draw_skybox_immediate(skybox)
+}
+
+// The actual draw -- see draw_skybox's own doc comment for the one thing
+// that changed about calling it (DEFERRED's own queuing) and this proc's own
+// doc comment there for why in_deferred_forward_pass is the flag that lets
+// pipeline_deferred_end call straight through to here instead.
+@(private)
+draw_skybox_immediate :: proc(skybox: Skybox) {
+	r := &mbi.renderer
 
 	camera  := camera3d_defaults(r.camera3d)
 	forward := camera3d_forward(camera)
@@ -226,7 +278,7 @@ draw_skybox :: proc(skybox: Skybox) {
 		forward = {forward.x, forward.y, forward.z, 0},
 	}
 
-	frag_data := Mesh_Frag_Data{tint = skybox.tint}
+	frag_data := Tint_Frag_Data{tint = skybox.tint}
 
 	pipeline := r.pipelines.skybox_panorama
 	if skybox.kind == .CUBEMAP do pipeline = r.pipelines.skybox_cubemap

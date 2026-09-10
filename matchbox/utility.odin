@@ -6,17 +6,26 @@ package matchbox
 	Gameplay helpers that are neither rendering nor input, kept in one place
 	rather than in a file each.
 
-	**This file is a holding pen, and that is on record rather than accidental.**
-	Matchbox's scope is rendering and input; a cooldown, a position tween and an
-	angle-to-face-a-target are none of those. They were three separate files
-	(`timer.odin`, `lerp.odin`, `look_at.odin`) which made three small things
-	look like three subsystems. Collecting them says what they actually are: a
-	short list of conveniences waiting on a decision.
+	**This was a holding pen, and is not one any more.** These were three
+	separate files (`timer.odin`, `lerp.odin`, `look_at.odin`), which made
+	three small things look like three subsystems; collecting them said what
+	they actually are. But the reason they were described as "waiting on a
+	decision" was that Matchbox's scope had been narrowed to rendering and
+	input, and a cooldown, a position tween and an angle-to-face-a-target are
+	none of those.
 
-	**Marked for re-review after the current refactor.** Measured before they
-	were gathered: `Cooldown_Timer` is used by a real game, `Lerp_Move` is used
-	by nothing anywhere, and `look_at_point` only by an example. That is the
-	evidence the eventual keep-or-move decision should start from.
+	That narrowing was reversed on 2026-09-09 -- see CLAUDE.md's own "Scope"
+	section, and `refactor.md` for the history. Gameplay helpers are in scope,
+	so nothing here is pending eviction. This file is a home rather than a
+	waiting room, and the question for anything joining it is the ordinary one:
+	does a game actually need it, and is it built the way the rest of this
+	package is.
+
+	Worth keeping from the old note, because it is measurement rather than
+	opinion: `Cooldown_Timer` is used by a real game, `Lerp_Move` by nothing
+	anywhere, and `look_at_point` only by an example. That says which of the
+	three has earned its place, which is a different question from whether the
+	file should exist.
 
 	`look_at_sprite` is deliberately *not* here. Math that acts on a sprite
 	lives in `sprite.odin` with the sprite, which is also where its inverse

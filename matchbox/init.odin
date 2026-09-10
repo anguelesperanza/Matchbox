@@ -164,6 +164,58 @@ create_builtin_shader :: proc(
 	return shader
 }
 
+/*
+	How many colour targets `create_pipeline` will ever hand SDL3 at once.
+
+	4 rather than a bigger, safer-looking number: Vulkan's own spec only
+	guarantees `maxColorAttachments >= 4` (D3D12 and Metal both promise 8, but
+	this package targets Android, where Vulkan's own floor is the one that
+	matters -- the same reasoning `MESH_FRAG_SAMPLER_COUNT`'s own doc comment
+	gives for pinning against Vulkan's sampler floor rather than a desktop
+	driver's actual, higher number). P6's own G-buffer is exactly 4 targets
+	for that reason -- see `pipeline_deferred.odin`'s own top comment -- so
+	this is sized to what this package actually asks for, not rounded up.
+
+	An array size, so CLAUDE.md's "no loose constants" carves it out the same
+	way `MAX_LIGHTS`'s retired siblings (`MAX_CASCADES`, `MAX_SHADOW_CASTERS`)
+	already are.
+*/
+@(private)
+MAX_COLOR_TARGETS :: 4
+
+/*
+	How a pipeline's colour target combines what a fragment produces with what
+	is already there.
+
+	`ALPHA` is the source-alpha blend every draw in this package used before
+	there was anything else, and is what all but three pipelines want.
+
+	`NONE` writes the fragment straight through. The G-buffer fill needs it:
+	blending two unrelated materials' normals or roughness together where
+	their triangles anti-alias against each other is not a value a lighting
+	pass could make sense of.
+
+	`ADDITIVE` sums colour and overwrites alpha. Volumetric light needs it
+	(volumetric.odin) -- light scattering off the air is scene light, and it
+	is added to the HDR target the 3D pass already wrote rather than
+	composited later.
+
+	**P7a considered this enum and rejected it**, and the record is worth
+	keeping: the bloom chain's upsample looked like it needed an additive
+	mode, and turned out to want the ordinary alpha blend with its own mix
+	weight written into alpha instead -- a better answer for reasons that had
+	nothing to do with blend state (see bloom_upsample.frag.hlsl). So the bool
+	stayed a bool. P7b is the caller that could not be talked out of it: there
+	is no alpha a fullscreen additive pass could write that would make
+	source-alpha blending sum two values.
+*/
+@(private)
+Color_Blend :: enum {
+	ALPHA,
+	NONE,
+	ADDITIVE,
+}
+
 // Which geometry a pipeline reads: the shared quad, or a model's own vertices.
 @(private)
 Vertex_Layout :: enum {
@@ -221,10 +273,24 @@ create_pipeline :: proc(
 	// .INVALID means "whatever the main 3D pass's own depth buffer is",
 	// which is every caller before the shadow pass. The shadow pipelines are
 	// the one exception: their pass writes into one of
-	// `mbi.renderer.shadow.textures`, a separate, differently-sized, possibly
+	// `mbi.renderer.lighting.shadow.textures`, a separate, differently-sized, possibly
 	// differently-formatted texture, and a pipeline's depth format has to
 	// agree with the pass it runs in or SDL3 rejects it outright.
 	depth_format: sdl.GPUTextureFormat = .INVALID,
+
+	/*
+		.INVALID means "the swapchain's own format", which is every 2D
+		pipeline, including the tonemap resolve itself -- it writes into
+		current_color_texture(), never into the HDR target it reads from.
+		The five pipelines that draw inside the 3D pass (mesh, mesh_skinned,
+		line, both skyboxes) pass mbi.renderer.lighting.targets.format
+		instead: SDL3 bakes a pipeline's colour format in at creation the
+		same way it does the depth format above, so a pipeline built against
+		the swapchain's format cannot be bound in the HDR pass and vice
+		versa. See tonemap.odin's own top comment for why that pass exists
+		at all.
+	*/
+	color_format: sdl.GPUTextureFormat = .INVALID,
 
 	// Zero for every pipeline except the shadow pair, which need a push away
 	// from the surface they are rasterizing before comparing it against
@@ -233,6 +299,28 @@ create_pipeline :: proc(
 	// epsilon alone.
 	depth_bias:       f32 = 0,
 	depth_bias_slope: f32 = 0,
+
+	/*
+		P6's own addition, for the G-buffer fill pipelines
+		(`pipeline_deferred.odin`) -- a G-buffer pass writes several targets
+		at once, which `color_target`/`color_format` above have no room to
+		say (they are one bool and one format, the shape every pipeline
+		before this one needed). Non-nil overrides `color_target`/
+		`color_format` entirely: `len(color_formats)` targets are created,
+		each in its own listed format, and neither of the older two
+		parameters is read at all in that case.
+
+		Left nil, which is every caller before this phase, behaviour is
+		bit-for-bit what it always was -- this is purely additive, the same
+		"grew without disturbing an existing caller" shape `MESH_FRAG_SAMPLER_COUNT`
+		itself grew by across P3b and P4 without any caller of
+		`create_builtin_shader` needing to change.
+	*/
+	color_formats: []sdl.GPUTextureFormat = nil,
+
+	// How the colour target(s) built here combine with what is already in
+	// them -- see `Color_Blend`.
+	blend: Color_Blend = .ALPHA,
 ) -> ^sdl.GPUGraphicsPipeline {
 	vertex_shader := vertex if vertex != nil else mbi.renderer.shaders.quad
 
@@ -294,25 +382,46 @@ create_pipeline :: proc(
 		// Already filled in above.
 	}
 
-	color_targets := [1]sdl.GPUColorTargetDescription{
-		{
-			format = sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
-			blend_state = {
-				enable_blend            = true,
-				color_blend_op          = .ADD,
-				src_color_blendfactor   = .SRC_ALPHA,
-				dst_color_blendfactor   = .ONE_MINUS_SRC_ALPHA,
-				alpha_blend_op          = .ADD,
-				src_alpha_blendfactor   = .ONE,
-				dst_alpha_blendfactor   = .ZERO,
-				enable_color_write_mask = true,
-				color_write_mask        = {.R, .G, .B, .A},
-			},
-		},
+	blend_state := sdl.GPUColorTargetBlendState{
+		enable_blend            = blend != .NONE,
+		color_blend_op          = .ADD,
+
+		// ONE rather than SRC_ALPHA is the whole difference between the two
+		// enabled modes: the source contributes in full instead of being
+		// weighted by an alpha the additive callers do not write. Alpha
+		// itself is ONE/ZERO either way, so the destination's alpha becomes
+		// the source's -- and nothing downstream of either mode reads it.
+		src_color_blendfactor   = .ONE if blend == .ADDITIVE else .SRC_ALPHA,
+		dst_color_blendfactor   = .ONE if blend == .ADDITIVE else .ONE_MINUS_SRC_ALPHA,
+
+		alpha_blend_op          = .ADD,
+		src_alpha_blendfactor   = .ONE,
+		dst_alpha_blendfactor   = .ZERO,
+		enable_color_write_mask = true,
+		color_write_mask        = {.R, .G, .B, .A},
 	}
 
-	num_color_targets:         u32 = 1 if color_target else 0
-	color_target_descriptions: [^]sdl.GPUColorTargetDescription = raw_data(color_targets[:]) if color_target else nil
+	color_targets:     [MAX_COLOR_TARGETS]sdl.GPUColorTargetDescription
+	num_color_targets: u32
+
+	switch {
+	case len(color_formats) > 0:
+		ensure(len(color_formats) <= MAX_COLOR_TARGETS, "create_pipeline: more color_formats than MAX_COLOR_TARGETS")
+		for format, i in color_formats {
+			color_targets[i] = sdl.GPUColorTargetDescription{format = format, blend_state = blend_state}
+		}
+		num_color_targets = u32(len(color_formats))
+	case color_target:
+		color_targets[0] = sdl.GPUColorTargetDescription{
+			format      = color_format if color_format != .INVALID else sdl.GetGPUSwapchainTextureFormat(mbi.renderer.device, mbi.window),
+			blend_state = blend_state,
+		}
+		num_color_targets = 1
+	case:
+		num_color_targets = 0
+	}
+
+	color_target_descriptions: [^]sdl.GPUColorTargetDescription = raw_data(color_targets[:]) if num_color_targets > 0 else nil
 
 	resolved_depth_format := depth_format if depth_format != .INVALID else mbi.renderer.depth_format
 
@@ -428,12 +537,24 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Outline_Frag_Data) == 32)
 	#assert(size_of(Font_Frag_Data)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
-	#assert(size_of(Vertex3D)        == 32)
-	#assert(size_of(Mesh_Vert_Data)  == 192)
-	#assert(size_of(Mesh_Frag_Data)  == 16)
-	#assert(size_of(Light_Uniform)   == 64)
-	#assert(size_of(Lighting_Data)   == 1248)
-	#assert(size_of(Post_Frag_Data)  == 32)
+	#assert(size_of(Vertex3D)          == 32)
+	#assert(size_of(Mesh_Vert_Data)    == 192)
+	#assert(size_of(Tint_Frag_Data)    == 16)
+	#assert(size_of(Material_Frag_Data) == 112)
+	#assert(size_of(Light_Uniform)     == 112)
+	#assert(size_of(Scene_Frag_Data)   == 288)
+	#assert(size_of(Cluster_Range)     == 8)
+	#assert(size_of(Shadow_Frag_Data)  == 960)
+	#assert(size_of(Post_Frag_Data)    == 32)
+	#assert(size_of(Tonemap_Resolve_Frag_Data) == 80)
+	#assert(size_of(Probe_Prefilter_Frag_Data) == 16)
+	#assert(size_of(Bloom_Filter_Frag_Data)    == 16)
+	#assert(size_of(Bloom_Prefilter_Frag_Data) == 32)
+	#assert(size_of(Ssao_Frag_Data)            == 704)
+	#assert(size_of(Ssao_Blur_Frag_Data)       == 16)
+	#assert(size_of(Volumetric_Frag_Data)      == 96)
+	#assert(size_of(Probe_Frag_Data)           == 144)
+	#assert(size_of(Deferred_Lighting_Frag_Data) == 64)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
 	// database along -- which is what lets a game ask for `.NORTH` rather than
@@ -529,14 +650,61 @@ init :: proc(title: string, width: i32, height: i32) {
 	// 3D. One uniform buffer each: three matrices going in, a tint coming out.
 	mbi.renderer.shaders.mesh = create_builtin_shader(
 		#load("shaders/mesh.vert.spv"), #load("shaders/mesh.vert.dxil"), .VERTEX, 0)
-	// Two uniform buffers, not one: slot 0 is the per-draw tint and slot 1 is
-	// the lighting, which is pushed once for a whole pass. Two samplers even
-	// with no texture of its own: the two shadow maps lighting.hlsli
-	// declares at slots 0/1 -- see shadow.odin's MAX_SHADOW_CASTERS.
-	mbi.renderer.shaders.mesh_flat = create_builtin_shader(
-		#load("shaders/mesh_flat.frag.spv"), #load("shaders/mesh_flat.frag.dxil"), .FRAGMENT, 2, 2)
+	/*
+		One fragment shader for every solid mesh part, textured or not -- see
+		mesh.frag.hlsl's own doc comment and Shaders.mesh_frag's. Four uniform
+		buffers: slot 0 the per-part material (material.odin), slot 1 the
+		scene (lighting.odin), slot 2 CASCADED's own Cascade_Data, slot 3
+		CUBE's own Cube_Data -- the last two pushed every pass regardless of
+		which technique is running, see Cascade_Frag_Data/Cube_Frag_Data's
+		own doc comments (lighting.odin) for why they are split out of Scene
+		rather than folded into it. MESH_FRAG_SAMPLER_COUNT (render.odin)
+		sampled textures -- base colour, three material maps, PCF/PCSS's two
+		shadow maps, one Texture2DArray each for CASCADED and CUBE, and the
+		environment probe's own two maps, t0-t9 -- and three storage buffers:
+		the light list (light.odin) at t10, and CLUSTERED's own
+		cluster_ranges/cluster_light_indices (light_cull.odin) at t11/t12,
+		bound to a 1-element placeholder under FORWARD rather than left
+		unbound (pipeline_forward.odin) since mesh.frag.hlsl declares all
+		three unconditionally. See lighting_core.hlsli's own comment on
+		`lights` for why a storage buffer's register number has to track the
+		sampler count like this.
+
+		This was twenty samplers through P3 -- one flat Texture2D per
+		CASCADED/CUBE layer rather than one Texture2DArray per group -- which
+		sits above Vulkan's guaranteed floor for both
+		maxPerStageDescriptorSampledImages and maxPerStageDescriptorSamplers
+		(16 each); see lighting_rework.md section 7.7 and
+		render_test.odin for the regression this collapse is guarding
+		against.
+	*/
+	mbi.renderer.shaders.mesh_frag = create_builtin_shader(
+		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 4, 3)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
+
+	/*
+		DEFERRED's own two fragment shaders (pipeline_deferred.odin).
+		`gbuffer_frag` reads the four material textures and the identical
+		`Material` cbuffer mesh_frag does (one uniform buffer, no storage
+		buffers, four samplers) -- see gbuffer.frag.hlsl's own top comment
+		for why it needs nothing shade_surface itself needs.
+		`deferred_lighting_frag` is DEFERRED_LIGHTING_SAMPLER_COUNT samplers,
+		its own one uniform buffer (Deferred_Lighting_Frag_Data) plus the
+		three lighting_core.hlsli always pushes (Scene/Cascade/Cube, the same
+		4 total mesh_frag takes), and the same three storage buffers
+		(lights/cluster_ranges/cluster_light_indices) mesh_frag also
+		declares -- see deferred_lighting.frag.hlsl's own top comment for
+		the register renumbering that makes eleven samplers fit ahead of
+		them instead of ten.
+	*/
+	mbi.renderer.shaders.gbuffer_frag = create_builtin_shader(
+		#load("shaders/gbuffer.frag.spv"), #load("shaders/gbuffer.frag.dxil"), .FRAGMENT, 4, 1, 0)
+	mbi.renderer.shaders.fullscreen = create_builtin_shader(
+		#load("shaders/fullscreen.vert.spv"), #load("shaders/fullscreen.vert.dxil"), .VERTEX, 0, 0)
+	mbi.renderer.shaders.deferred_lighting_frag = create_builtin_shader(
+		#load("shaders/deferred_lighting.frag.spv"), #load("shaders/deferred_lighting.frag.dxil"),
+		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 4, 3)
 
 	// Post-processing. One sampler -- the render target -- and one uniform
 	// block shared by all three, so an effect that ignores a field ignores it.
@@ -546,10 +714,57 @@ init :: proc(title: string, width: i32, height: i32) {
 		#load("shaders/psx.frag.spv"), #load("shaders/psx.frag.dxil"), .FRAGMENT, 1)
 	mbi.renderer.shaders.vhs = create_builtin_shader(
 		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
-	// Three samplers: the model's base colour at slot 0, the two shadow maps
-	// lighting.hlsli declares at slots 1/2. Two uniform buffers, as above.
-	mbi.renderer.shaders.mesh_textured = create_builtin_shader(
-		#load("shaders/mesh_textured.frag.spv"), #load("shaders/mesh_textured.frag.dxil"), .FRAGMENT, 3, 2)
+
+	// The tonemap resolve -- **two** samplers since P7a (the HDR target at
+	// t0, the bloom chain's level 0 at t1, which is a 1x1 black placeholder
+	// whenever bloom is off) and one uniform block: exposure, which curve,
+	// the bloom intensity and the whole colour grade. See tonemap.odin, and
+	// post.odin for why the grade rides here rather than in a pass of its own.
+	mbi.renderer.shaders.tonemap = create_builtin_shader(
+		#load("shaders/tonemap.frag.spv"), #load("shaders/tonemap.frag.dxil"), .FRAGMENT, 2)
+
+	// The bloom chain (bloom.odin). One sampler each -- whichever level or
+	// scene target that pass is reading -- and one uniform block each, which
+	// is a texel size for two of them and a texel size plus the brightness
+	// knee for the prefilter.
+	mbi.renderer.shaders.bloom_prefilter = create_builtin_shader(
+		#load("shaders/bloom_prefilter.frag.spv"), #load("shaders/bloom_prefilter.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.bloom_downsample = create_builtin_shader(
+		#load("shaders/bloom_downsample.frag.spv"), #load("shaders/bloom_downsample.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.bloom_upsample = create_builtin_shader(
+		#load("shaders/bloom_upsample.frag.spv"), #load("shaders/bloom_upsample.frag.dxil"), .FRAGMENT, 1)
+
+	// SSAO (ssao.odin). One sampler each -- the depth buffer, then the AO
+	// texture the first pass wrote -- and one uniform block each.
+	mbi.renderer.shaders.ssao = create_builtin_shader(
+		#load("shaders/ssao.frag.spv"), #load("shaders/ssao.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.ssao_blur = create_builtin_shader(
+		#load("shaders/ssao_blur.frag.spv"), #load("shaders/ssao_blur.frag.dxil"), .FRAGMENT, 1)
+
+	// Volumetric light (volumetric.odin). Eight samplers -- the depth buffer,
+	// the four shadow textures, the two probe maps and the AO texture, the
+	// last three of which it never reads and must still declare, since
+	// lighting_core.hlsli declares them for every shader that includes it.
+	// Four uniform blocks (its own, plus Scene/Cascade/Cube) and the same
+	// three storage buffers every shader that includes that file gets.
+	mbi.renderer.shaders.volumetric = create_builtin_shader(
+		#load("shaders/volumetric.frag.spv"), #load("shaders/volumetric.frag.dxil"),
+		.FRAGMENT, VOLUMETRIC_SAMPLER_COUNT, 4, 3)
+
+	/*
+		Environment probe baking (ambient.odin). Both read one sampler -- the
+		source skybox's own cube map -- through the same `skybox.vert.hlsl`
+		vertex shader `Shaders.skybox` already loaded above, reused rather
+		than duplicated (see Shaders.probe_irradiance's own comment).
+		`probe_irradiance` needs no uniform buffer at all: which face it is
+		baking is entirely a function of the vertex data pushed for that
+		draw. `probe_prefilter` needs one -- the roughness level being baked
+		-- since one fragment shader bakes every level, not one per level.
+	*/
+	mbi.renderer.shaders.probe_irradiance = create_builtin_shader(
+		#load("shaders/probe_irradiance.frag.spv"), #load("shaders/probe_irradiance.frag.dxil"), .FRAGMENT, 1, 0)
+	mbi.renderer.shaders.probe_prefilter = create_builtin_shader(
+		#load("shaders/probe_prefilter.frag.spv"), #load("shaders/probe_prefilter.frag.dxil"), .FRAGMENT, 1, 1)
 
 	// Two uniform buffers -- the three matrices every mesh vertex shader
 	// takes, and the joint offset behind them -- plus one storage buffer: the
@@ -578,6 +793,12 @@ init :: proc(title: string, width: i32, height: i32) {
 	// that never draws 3D pays a function call for it and no memory.
 	mbi.renderer.depth_format = pick_depth_format()
 
+	// Asked for now, same reasoning: mesh/mesh_skinned/line/both skyboxes
+	// below all need it at creation, and the answer cannot change afterward.
+	// See tonemap.odin's own top comment for why these five need a format of
+	// their own at all.
+	mbi.renderer.lighting.targets.format = pick_hdr_format()
+
 	mbi.renderer.pipelines.sprite  = create_pipeline(mbi.renderer.shaders.sprite)
 	mbi.renderer.pipelines.rect    = create_pipeline(mbi.renderer.shaders.rect)
 	mbi.renderer.pipelines.outline = create_pipeline(mbi.renderer.shaders.outline)
@@ -585,39 +806,173 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.pipelines.shape   = create_pipeline(mbi.renderer.shaders.shape)
 
 	mbi.renderer.pipelines.mesh = create_pipeline(
-		mbi.renderer.shaders.mesh_flat,
-		vertex = mbi.renderer.shaders.mesh,
-		layout = .MESH,
-		depth  = true,
-		cull   = .BACK,
+		mbi.renderer.shaders.mesh_frag,
+		vertex       = mbi.renderer.shaders.mesh,
+		layout       = .MESH,
+		depth        = true,
+		cull         = .BACK,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
-	mbi.renderer.pipelines.post = create_pipeline(mbi.renderer.shaders.post)
-	mbi.renderer.pipelines.psx  = create_pipeline(mbi.renderer.shaders.psx)
-	mbi.renderer.pipelines.vhs  = create_pipeline(mbi.renderer.shaders.vhs)
+	mbi.renderer.pipelines.post    = create_pipeline(mbi.renderer.shaders.post)
+	mbi.renderer.pipelines.psx     = create_pipeline(mbi.renderer.shaders.psx)
+	mbi.renderer.pipelines.vhs     = create_pipeline(mbi.renderer.shaders.vhs)
+	mbi.renderer.pipelines.tonemap = create_pipeline(mbi.renderer.shaders.tonemap)
 
-	mbi.renderer.pipelines.mesh_textured = create_pipeline(
-		mbi.renderer.shaders.mesh_textured,
-		vertex = mbi.renderer.shaders.mesh,
-		layout = .MESH,
-		depth  = true,
-		cull   = .BACK,
+	/*
+		The bloom chain (bloom.odin). Built against the HDR target's own float
+		format rather than the swapchain's, because every level of the chain
+		holds unbounded linear light -- the same reason the five pipelines
+		that draw *inside* the 3D pass need it, arrived at from the other
+		side: these draw after that pass has closed but still never touch the
+		swapchain.
+
+		All three take the ordinary source-alpha blend, including the
+		upsample: it writes `scatter` into its own alpha and lets that blend
+		do the mixing, rather than needing a blend mode of its own. See
+		bloom_upsample.frag.hlsl for why mixing and not adding.
+	*/
+	mbi.renderer.pipelines.bloom_prefilter = create_pipeline(
+		mbi.renderer.shaders.bloom_prefilter,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+	mbi.renderer.pipelines.bloom_downsample = create_pipeline(
+		mbi.renderer.shaders.bloom_downsample,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+	mbi.renderer.pipelines.bloom_upsample = create_pipeline(
+		mbi.renderer.shaders.bloom_upsample,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+
+	/*
+		SSAO's own two. The device's answer for the AO format is settled here
+		rather than at first use, for the same reason the G-buffer's is
+		(`ensure_gbuffer_targets`): SDL3 bakes a colour format into a pipeline
+		at creation and the answer cannot change afterward, so asking now
+		means `ensure_ssao_targets` later finds it already resolved rather
+		than picking one a pipeline was not built against.
+	*/
+	mbi.renderer.lighting.ssao.format = pick_ssao_format()
+
+	/*
+		P7c's capture bookkeeping starts at -1, which is the one field in this
+		package whose zero value is actively wrong: `begin_probe_capture`
+		asserts that no capture is already open by testing `capturing_probe < 0`,
+		and a zero would read as "probe 0 is mid-capture" and fire that
+		assertion on the very first call. Set here rather than defended against
+		at the use site, so there is one answer rather than two.
+	*/
+	mbi.renderer.lighting.reflection.capturing_probe = -1
+	mbi.renderer.lighting.reflection.capturing_face  = -1
+	mbi.renderer.lighting.reflection.settings        = ENVIRONMENT_PROBE_DEFAULTS
+
+	mbi.renderer.pipelines.ssao = create_pipeline(
+		mbi.renderer.shaders.ssao,
+		color_format = mbi.renderer.lighting.ssao.format,
+	)
+	mbi.renderer.pipelines.ssao_blur = create_pipeline(
+		mbi.renderer.shaders.ssao_blur,
+		color_format = mbi.renderer.lighting.ssao.format,
+	)
+
+	// Volumetric light: the HDR target's own format, since it adds into it,
+	// and the one additive pipeline here.
+	mbi.renderer.pipelines.volumetric = create_pipeline(
+		mbi.renderer.shaders.volumetric,
+		color_format = mbi.renderer.lighting.targets.format,
+		blend        = .ADDITIVE,
+	)
+
+	/*
+		Environment probe baking -- the skybox's own vertex shader (no
+		geometry, SV_VertexID triangle, see Vertex_Layout.NONE), no depth
+		(these write into a Texture2DArray of their own, never into any pass
+		a game's draw calls share), and the HDR target's own float format --
+		see ambient.odin's own top comment for why these write float-format
+		targets that are never the swapchain.
+	*/
+	mbi.renderer.pipelines.probe_irradiance = create_pipeline(
+		mbi.renderer.shaders.probe_irradiance,
+		vertex       = mbi.renderer.shaders.skybox,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		color_format = mbi.renderer.lighting.targets.format,
+	)
+	mbi.renderer.pipelines.probe_prefilter = create_pipeline(
+		mbi.renderer.shaders.probe_prefilter,
+		vertex       = mbi.renderer.shaders.skybox,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	mbi.renderer.pipelines.mesh_skinned = create_pipeline(
-		mbi.renderer.shaders.mesh_flat,
-		vertex = mbi.renderer.shaders.mesh_skinned,
-		layout = .SKINNED,
-		depth  = true,
-		cull   = .BACK,
+		mbi.renderer.shaders.mesh_frag,
+		vertex       = mbi.renderer.shaders.mesh_skinned,
+		layout       = .SKINNED,
+		depth        = true,
+		cull         = .BACK,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
-	mbi.renderer.pipelines.mesh_skinned_textured = create_pipeline(
-		mbi.renderer.shaders.mesh_textured,
-		vertex = mbi.renderer.shaders.mesh_skinned,
-		layout = .SKINNED,
-		depth  = true,
-		cull   = .BACK,
+	/*
+		DEFERRED's own three pipelines -- see pipeline_deferred.odin's own
+		top comment and Pipelines.gbuffer's own doc comment (render.odin)
+		just above. Both formats are asked for now, same reasoning as
+		`lighting.targets.format`/`lighting.shadow.format` just above and
+		below: a depth-testing or MRT pipeline has to name its formats at
+		creation and the answer cannot change afterward, so `ensure_gbuffer_targets`
+		(gbuffer.odin) later finds both already resolved rather than picking
+		them itself.
+	*/
+	mbi.renderer.lighting.gbuffer.format       = pick_gbuffer_format()
+	mbi.renderer.lighting.gbuffer.depth_format = pick_shadow_format()
+
+	gbuffer_formats := [4]sdl.GPUTextureFormat{
+		mbi.renderer.lighting.gbuffer.format,
+		mbi.renderer.lighting.gbuffer.format,
+		mbi.renderer.lighting.gbuffer.format,
+		mbi.renderer.lighting.gbuffer.format,
+	}
+
+	mbi.renderer.pipelines.gbuffer = create_pipeline(
+		mbi.renderer.shaders.gbuffer_frag,
+		vertex         = mbi.renderer.shaders.mesh,
+		layout         = .MESH,
+		depth          = true,
+		cull           = .BACK,
+		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
+		color_formats  = gbuffer_formats[:],
+		blend          = .NONE, // a fill pass writes Surface fields, not colours to blend -- see Material.transparent's own doc comment (material.odin)
+	)
+
+	mbi.renderer.pipelines.gbuffer_skinned = create_pipeline(
+		mbi.renderer.shaders.gbuffer_frag,
+		vertex         = mbi.renderer.shaders.mesh_skinned,
+		layout         = .SKINNED,
+		depth          = true,
+		cull           = .BACK,
+		depth_format   = mbi.renderer.lighting.gbuffer.depth_format,
+		color_formats  = gbuffer_formats[:],
+		blend          = .NONE,
+	)
+
+	// Built the same shape skybox_panorama/skybox_cubemap already are (just
+	// below) -- Vertex_Layout.NONE, depth_ignore rather than depth, the HDR
+	// target's own colour format -- so it runs in the identical final pass
+	// those two and the forward-fallback mesh/line pipelines already share.
+	// See pipeline_deferred.odin's own top comment for that pass's shape.
+	mbi.renderer.pipelines.deferred_lighting = create_pipeline(
+		mbi.renderer.shaders.deferred_lighting_frag,
+		vertex       = mbi.renderer.shaders.fullscreen,
+		layout       = .NONE,
+		depth        = false,
+		cull         = .NONE,
+		depth_ignore = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	/*
@@ -626,12 +981,12 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth_bias for why a wireframe's line pipeline cannot use this same
 		mechanism and these two, being ordinary triangle lists, can.
 
-		mbi.renderer.shadow.format is asked for here rather than reused from
+		mbi.renderer.lighting.shadow.format is asked for here rather than reused from
 		mbi.renderer.depth_format: the shadow map is sampled as well as
 		written, a combination the main depth buffer never needs, and the two
 		can legitimately land on different formats.
 	*/
-	mbi.renderer.shadow.format = pick_shadow_format()
+	mbi.renderer.lighting.shadow.format = pick_shadow_format()
 
 	mbi.renderer.pipelines.shadow = create_pipeline(
 		mbi.renderer.shaders.shadow,
@@ -640,7 +995,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth            = true,
 		cull             = .BACK,
 		color_target     = false,
-		depth_format     = mbi.renderer.shadow.format,
+		depth_format     = mbi.renderer.lighting.shadow.format,
 		depth_bias       = 2.0,
 		depth_bias_slope = 2.0,
 	)
@@ -652,13 +1007,38 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth            = true,
 		cull             = .BACK,
 		color_target     = false,
-		depth_format     = mbi.renderer.shadow.format,
+		depth_format     = mbi.renderer.lighting.shadow.format,
 		depth_bias       = 2.0,
 		depth_bias_slope = 2.0,
 	)
 
 	// No geometry, no culling and no depth. Drawn first, so everything after it
 	// covers it; see draw_skybox.
+	/*
+		The depth prepass (pipeline_forward.odin) -- the shadow pipelines'
+		own shape, with the two differences that matter: the *main* depth
+		format, since this writes into the pass's own depth buffer rather
+		than a shadow map, and no bias at all, since its depth has to match
+		bit for bit what the scene pass will write over it.
+	*/
+	mbi.renderer.pipelines.depth_prepass = create_pipeline(
+		mbi.renderer.shaders.shadow,
+		vertex       = mbi.renderer.shaders.mesh,
+		layout       = .MESH,
+		depth        = true,
+		cull         = .BACK,
+		color_target = false,
+	)
+
+	mbi.renderer.pipelines.depth_prepass_skinned = create_pipeline(
+		mbi.renderer.shaders.shadow,
+		vertex       = mbi.renderer.shaders.mesh_skinned,
+		layout       = .SKINNED,
+		depth        = true,
+		cull         = .BACK,
+		color_target = false,
+	)
+
 	mbi.renderer.pipelines.skybox_panorama = create_pipeline(
 		mbi.renderer.shaders.skybox_panorama,
 		vertex       = mbi.renderer.shaders.skybox,
@@ -666,6 +1046,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth        = false,
 		cull         = .NONE,
 		depth_ignore = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	mbi.renderer.pipelines.skybox_cubemap = create_pipeline(
@@ -675,17 +1056,19 @@ init :: proc(title: string, width: i32, height: i32) {
 		depth        = false,
 		cull         = .NONE,
 		depth_ignore = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	// Lines are never culled -- an edge has no facing -- and they are biased
 	// towards the camera. See `lines` in create_pipeline for why.
 	mbi.renderer.pipelines.line = create_pipeline(
 		mbi.renderer.shaders.mesh_line,
-		vertex = mbi.renderer.shaders.mesh,
-		layout = .MESH,
-		depth  = true,
-		cull   = .NONE,
-		lines  = true,
+		vertex       = mbi.renderer.shaders.mesh,
+		layout       = .MESH,
+		depth        = true,
+		cull         = .NONE,
+		lines        = true,
+		color_format = mbi.renderer.lighting.targets.format,
 	)
 
 	// Every sprite wants the same filtering, and the font wants smoothing, so
@@ -718,6 +1101,28 @@ init :: proc(title: string, width: i32, height: i32) {
 		address_mode_w = .CLAMP_TO_EDGE,
 	})
 	/*
+		Linear, clamped on all three axes -- the environment probe's own two
+		maps and every pass of the bloom chain (bloom.odin) read through this
+		one. There is no wrap-around to be had inside one probe face's own
+		image, nor across the edge of the screen a bloom level is a shrunken
+		copy of, the same reasoning `skybox_clamp_sampler` already gives for a
+		cube map's own faces. See `Renderer.linear_clamp_sampler` for why one
+		sampler serves both. Mip filtering is irrelevant: `probe_layer_uv`
+		(lighting_core.hlsli) always reads mip 0 of whichever layer it
+		picked, since roughness selects a *layer* here rather than a real mip
+		level (ambient.odin's own top comment explains why) -- `min_lod`/
+		`max_lod` are left at their zero-value default for exactly that
+		reason, not tuned for a mip chain neither probe texture actually has.
+	*/
+	mbi.renderer.linear_clamp_sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+		min_filter     = .LINEAR,
+		mag_filter     = .LINEAR,
+		address_mode_u = .CLAMP_TO_EDGE,
+		address_mode_v = .CLAMP_TO_EDGE,
+		address_mode_w = .CLAMP_TO_EDGE,
+	})
+
+	/*
 		The shadow sampler compares rather than just filters -- SampleCmpLevelZero
 		in lighting.hlsli reads compare_op/enable_compare, not the filter mode
 		alone, to turn "how far is this texel" into "is this texel lit",
@@ -729,15 +1134,17 @@ init :: proc(title: string, width: i32, height: i32) {
 		shadow system's own choice, not a per-light one.
 
 		The 1x1 placeholders (one per MAX_SHADOW_CASTERS slot) exist so
-		mesh_flat/mesh_textured -- which declare both slots unconditionally,
-		for every game -- always have something valid bound, whether or not
-		enable_shadows is ever called or a game ever has two shadow-casting
-		lights at once. Their contents are never actually read: shadow_factor
-		only samples a slot whose caster index push_lighting actually set,
-		which it never does unless shadow.enabled is true, and enable_shadows
-		is what replaces these placeholders the moment it runs.
+		mesh.frag.hlsl -- which declares both slots unconditionally, for every
+		game -- always has something valid bound, whether or not a game ever
+		turns shadows on via set_lighting or ever has two shadow-casting
+		lights at once. Their contents are never actually read:
+		shadow_visibility (lighting_core.hlsli) only samples a slot whose
+		caster index push_lighting actually set, which it never does unless
+		Shadow_Settings.enabled is true, and set_lighting (by way of
+		apply_shadow_settings, shadow_standard.odin) is what replaces these
+		placeholders the moment shadows are turned on.
 	*/
-	mbi.renderer.shadow.sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
+	mbi.renderer.lighting.shadow.sampler = sdl.CreateGPUSampler(mbi.renderer.device, {
 		min_filter     = .LINEAR,
 		mag_filter     = .LINEAR,
 		address_mode_u = .CLAMP_TO_EDGE,
@@ -749,23 +1156,166 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	shadow_placeholders_ok := true
 	for slot in 0 ..< MAX_SHADOW_CASTERS {
-		mbi.renderer.shadow.textures[slot] = sdl.CreateGPUTexture(mbi.renderer.device, {
+		mbi.renderer.lighting.shadow.textures[slot] = sdl.CreateGPUTexture(mbi.renderer.device, {
 			type                 = .D2,
-			format               = mbi.renderer.shadow.format,
+			format               = mbi.renderer.lighting.shadow.format,
 			usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
 			width                = 1,
 			height               = 1,
 			layer_count_or_depth = 1,
 			num_levels           = 1,
 		})
-		shadow_placeholders_ok &= mbi.renderer.shadow.textures[slot] != nil
+		shadow_placeholders_ok &= mbi.renderer.lighting.shadow.textures[slot] != nil
 	}
 
-	mbi.renderer.shadow.resolution = 1
-	mbi.renderer.shadow.caster_indices = {-1, -1} // Odin's zero value is 0, a real slot -- -1 has to be said
+	/*
+		The same 1x1 placeholder shape, for CASCADED's and CUBE's own map
+		groups -- `mesh.frag.hlsl` declares `cascade_maps`/`cube_maps`
+		unconditionally (see that file's own comment), so both need something
+		valid bound from the moment a device exists, whether or not this
+		game's scene ever selects CASCADED or ever casts a cube shadow.
+		Real maps replace these the same way `apply_cascade_shadow_textures`/
+		`apply_cube_shadow_textures` (shadow_cascaded.odin, shadow_cube.odin)
+		already replace the two just above, the first time their own
+		technique is actually turned on.
+
+		One `D2_ARRAY` texture apiece, not one `D2` texture per layer, since
+		P3b -- see `shadow.odin`'s own doc comment on `Shadow_State` for why:
+		`GPUDepthStencilTargetInfo.layer` targets one layer of a larger
+		texture, so the layers a placeholder needs to cover are one texture
+		with that many layers rather than that many separate textures.
+	*/
+	mbi.renderer.lighting.shadow.cascade_texture = sdl.CreateGPUTexture(mbi.renderer.device, {
+		type                 = .D2_ARRAY,
+		format               = mbi.renderer.lighting.shadow.format,
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+		width                = 1,
+		height               = 1,
+		layer_count_or_depth = MAX_SHADOW_CASTERS * MAX_CASCADES,
+		num_levels           = 1,
+	})
+	shadow_placeholders_ok &= mbi.renderer.lighting.shadow.cascade_texture != nil
+
+	mbi.renderer.lighting.shadow.cube_texture = sdl.CreateGPUTexture(mbi.renderer.device, {
+		type                 = .D2_ARRAY,
+		format               = mbi.renderer.lighting.shadow.format,
+		usage                = {.DEPTH_STENCIL_TARGET, .SAMPLER},
+		width                = 1,
+		height               = 1,
+		layer_count_or_depth = MAX_POINT_SHADOW_CASTERS * 6,
+		num_levels           = 1,
+	})
+	shadow_placeholders_ok &= mbi.renderer.lighting.shadow.cube_texture != nil
+
+	mbi.renderer.lighting.shadow.resolution          = 1
+	mbi.renderer.lighting.shadow.cascade_resolution  = 1
+	mbi.renderer.lighting.shadow.cube_resolution     = 1
+	mbi.renderer.lighting.shadow.caster_indices      = {-1, -1} // Odin's zero value is 0, a real slot -- -1 has to be said
+	mbi.renderer.lighting.shadow.cube_caster_index   = {-1}
+
+	/*
+		1x1 white, sampled wherever a mesh part has no base colour, metallic-
+		roughness, occlusion or emissive texture of its own -- see
+		Renderer.default_texture's own doc comment (render.odin) and
+		mesh.frag.hlsl. The same reasoning as the shadow placeholders just
+		above: a slot mesh.frag.hlsl declares unconditionally must always have
+		something valid bound, whether or not this particular part was ever
+		textured on that channel.
+
+		One texture standing in for all four rather than one per channel:
+		every one of them is read as factor * texture, so the identity value
+		a missing texture needs is 1.0 in every channel, for all four --
+		see render3d.odin's own comment on this same reasoning for why that
+		is also right for emissive, not just an accident of reusing what was
+		already here for base colour.
+	*/
+	white_pixel := [4]u8{255, 255, 255, 255}
+	default_texture_ok := false
+
+	// SRGB, though it makes no numeric difference to any of the four slots
+	// this stands in for -- white is 1.0 under either encoding, since sRGB's
+	// transfer function fixes both endpoints. The reason to say SRGB anyway
+	// is consistency: two of those slots (base colour, emissive) are SRGB
+	// themselves, so this asks for the same format a textured part's own
+	// colour channel would -- see Texture_Encoding.
+	if texture, err := upload_texture(&white_pixel, 1, 1, .SRGB); err == nil {
+		mbi.renderer.default_texture = texture
+		default_texture_ok = true
+	}
+
+	/*
+		1x1 black, six layers -- bound at both of the environment probe's own
+		slots (`irradiance_map`/`prefiltered_map`, mesh.frag.hlsl) whenever
+		`Renderer.lighting.probe` is empty. Six rather than one: `probe_layer_uv`
+		picks a face (0..5) regardless of whether a real probe is bound, and a
+		`Texture2DArray` sampled at a layer past its own count is exactly the
+		undefined-read hazard `Vertex3D_Skinned`'s own doc comment already
+		warns this package away from -- six matching layers of the same black
+		pixel costs nothing and removes the question entirely. One texture
+		serves both probe slots (see this proc's own doc comment on
+		`Renderer.default_probe_texture`): with no real probe bound,
+		`ambient_ground.w` is 0 (`push_lighting`, lighting.odin), so
+		`pbr_environment_specular`'s own level math always lands on layer
+		`0 * 6 + face`, inside this texture's six layers regardless.
+	*/
+	default_probe_texture_ok := false
+	{
+		black_pixel := [4]u8{0, 0, 0, 0}
+		texture := sdl.CreateGPUTexture(mbi.renderer.device, {
+			type                 = .D2_ARRAY,
+			format               = .R8G8B8A8_UNORM,
+			usage                = {.SAMPLER},
+			width                = 1,
+			height               = 1,
+			layer_count_or_depth = 6,
+			num_levels           = 1,
+		})
+
+		if texture != nil {
+			ok := true
+			for layer in 0 ..< 6 {
+				if upload_texture_region(texture, &black_pixel, 1, 1, u32(layer)) != nil {
+					ok = false
+				}
+			}
+
+			if ok {
+				mbi.renderer.default_probe_texture = texture
+				default_probe_texture_ok = true
+			} else {
+				sdl.ReleaseGPUTexture(mbi.renderer.device, texture)
+			}
+		}
+	}
+
+	/*
+		A 1-element Cluster_Range{0, 0} and a 1-element uint(0) -- bound
+		whenever CLUSTERED is not the active pipeline, so mesh.frag.hlsl's own
+		unconditional cluster_ranges/cluster_light_indices declarations
+		(lighting_core.hlsli) always have something valid regardless. See
+		Renderer.default_cluster_ranges_buffer's own doc comment (render.odin).
+	*/
+	cluster_placeholders_ok := false
+	{
+		zero_range: Cluster_Range
+		zero_index: u32
+
+		ranges_buffer,  ranges_err  := upload_buffer(&zero_range, size_of(Cluster_Range), {.GRAPHICS_STORAGE_READ})
+		indices_buffer, indices_err := upload_buffer(&zero_index, size_of(u32), {.GRAPHICS_STORAGE_READ})
+
+		if ranges_err == nil && indices_err == nil {
+			mbi.renderer.default_cluster_ranges_buffer        = ranges_buffer
+			mbi.renderer.default_cluster_light_indices_buffer = indices_buffer
+			cluster_placeholders_ok = true
+		} else {
+			if ranges_err  == nil do sdl.ReleaseGPUBuffer(mbi.renderer.device, ranges_buffer)
+			if indices_err == nil do sdl.ReleaseGPUBuffer(mbi.renderer.device, indices_buffer)
+		}
+	}
 
 	ensure(mbi.renderer.sprite_sampler != nil && mbi.renderer.font_sampler != nil &&
-		mbi.renderer.shadow.sampler != nil && shadow_placeholders_ok,
+		mbi.renderer.lighting.shadow.sampler != nil && shadow_placeholders_ok && default_texture_ok &&
+		mbi.renderer.linear_clamp_sampler != nil && default_probe_texture_ok && cluster_placeholders_ok,
 		"could not create samplers")
 
 	// The one quad every draw uses.
@@ -841,10 +1391,21 @@ cleanup :: proc() {
 
 	if mbi.renderer.sprite_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.sprite_sampler)
 	if mbi.renderer.font_sampler   != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.font_sampler)
-	if mbi.renderer.shadow.sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.shadow.sampler)
-	for texture in mbi.renderer.shadow.textures {
+	if mbi.renderer.lighting.shadow.sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.lighting.shadow.sampler)
+	for texture in mbi.renderer.lighting.shadow.textures {
 		if texture != nil do sdl.ReleaseGPUTexture(device, texture)
 	}
+	if mbi.renderer.lighting.shadow.cascade_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.shadow.cascade_texture)
+	if mbi.renderer.lighting.shadow.cube_texture    != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.shadow.cube_texture)
+	if mbi.renderer.default_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_texture)
+	if mbi.renderer.default_probe_texture != nil do sdl.ReleaseGPUTexture(device, mbi.renderer.default_probe_texture)
+	if mbi.renderer.default_cluster_ranges_buffer        != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.default_cluster_ranges_buffer)
+	if mbi.renderer.default_cluster_light_indices_buffer != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.default_cluster_light_indices_buffer)
+	if mbi.renderer.linear_clamp_sampler != nil do sdl.ReleaseGPUSampler(device, mbi.renderer.linear_clamp_sampler)
+
+	// A game's own probe, if one was ever loaded and set -- see
+	// set_environment_probe (ambient.odin).
+	destroy_environment_probe(&mbi.renderer.lighting.probe)
 
 	if mbi.renderer.pipelines.sprite  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.sprite)
 	if mbi.renderer.pipelines.rect    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.rect)
@@ -853,9 +1414,10 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.shape   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shape)
 	if mbi.renderer.pipelines.mesh    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh)
 	if mbi.renderer.pipelines.line    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.line)
-	if mbi.renderer.pipelines.mesh_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_textured)
 	if mbi.renderer.pipelines.mesh_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned)
-	if mbi.renderer.pipelines.mesh_skinned_textured != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.mesh_skinned_textured)
+	if mbi.renderer.pipelines.gbuffer           != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.gbuffer)
+	if mbi.renderer.pipelines.gbuffer_skinned   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.gbuffer_skinned)
+	if mbi.renderer.pipelines.deferred_lighting != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.deferred_lighting)
 	if mbi.renderer.pipelines.shadow != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shadow)
 	if mbi.renderer.pipelines.shadow_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.shadow_skinned)
 	if mbi.renderer.pipelines.skybox_panorama != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.skybox_panorama)
@@ -863,6 +1425,17 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
+	if mbi.renderer.pipelines.tonemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.tonemap)
+	if mbi.renderer.pipelines.bloom_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_prefilter)
+	if mbi.renderer.pipelines.bloom_downsample != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_downsample)
+	if mbi.renderer.pipelines.bloom_upsample   != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_upsample)
+	if mbi.renderer.pipelines.ssao      != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.ssao)
+	if mbi.renderer.pipelines.ssao_blur != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.ssao_blur)
+	if mbi.renderer.pipelines.volumetric != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.volumetric)
+	if mbi.renderer.pipelines.depth_prepass         != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.depth_prepass)
+	if mbi.renderer.pipelines.depth_prepass_skinned != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.depth_prepass_skinned)
+	if mbi.renderer.pipelines.probe_irradiance != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_irradiance)
+	if mbi.renderer.pipelines.probe_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.probe_prefilter)
 
 	if mbi.renderer.shaders.quad    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.quad)
 	if mbi.renderer.shaders.sprite  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.sprite)
@@ -871,10 +1444,12 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.font    != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.font)
 	if mbi.renderer.shaders.shape   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.shape)
 	if mbi.renderer.shaders.mesh      != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh)
-	if mbi.renderer.shaders.mesh_flat != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_flat)
+	if mbi.renderer.shaders.mesh_frag != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_frag)
 	if mbi.renderer.shaders.mesh_line != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_line)
-	if mbi.renderer.shaders.mesh_textured != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_textured)
 	if mbi.renderer.shaders.mesh_skinned != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.mesh_skinned)
+	if mbi.renderer.shaders.gbuffer_frag           != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.gbuffer_frag)
+	if mbi.renderer.shaders.fullscreen             != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.fullscreen)
+	if mbi.renderer.shaders.deferred_lighting_frag != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.deferred_lighting_frag)
 	if mbi.renderer.shaders.shadow != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.shadow)
 	if mbi.renderer.shaders.skybox != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox)
 	if mbi.renderer.shaders.skybox_panorama != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.skybox_panorama)
@@ -882,6 +1457,15 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.post != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.post)
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
+	if mbi.renderer.shaders.tonemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.tonemap)
+	if mbi.renderer.shaders.bloom_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_prefilter)
+	if mbi.renderer.shaders.bloom_downsample != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_downsample)
+	if mbi.renderer.shaders.bloom_upsample   != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_upsample)
+	if mbi.renderer.shaders.ssao      != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.ssao)
+	if mbi.renderer.shaders.ssao_blur != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.ssao_blur)
+	if mbi.renderer.shaders.volumetric != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.volumetric)
+	if mbi.renderer.shaders.probe_irradiance != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_irradiance)
+	if mbi.renderer.shaders.probe_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.probe_prefilter)
 
 	// The generated shapes, if anything ever asked for one.
 	destroy_shapes3d()
@@ -892,13 +1476,61 @@ cleanup :: proc() {
 		mbi.renderer.depth_texture = nil
 	}
 
+	// The HDR scene target -- same "only ever made once 3D was asked for" as
+	// the depth texture just above. See tonemap.odin.
+	if mbi.renderer.lighting.targets.color != nil {
+		sdl.ReleaseGPUTexture(device, mbi.renderer.lighting.targets.color)
+		mbi.renderer.lighting.targets.color = nil
+	}
+
+	// The bloom chain's own levels -- only ever made once a game turns bloom
+	// on. See bloom.odin.
+	release_bloom_targets()
+
+	// SSAO's own two, the same "only once a game turned it on". See ssao.odin.
+	release_ssao_targets()
+
+	// P7c's probe arrays and its capture cube -- only ever made once a game
+	// captures a probe. See reflection.odin.
+	release_reflection_targets()
+
+	// DEFERRED's own targets -- only ever made once a game selects that
+	// pipeline. See Gbuffer_Targets' own doc comment (gbuffer.odin).
+	{
+		g := &mbi.renderer.lighting.gbuffer
+		if g.a     != nil do sdl.ReleaseGPUTexture(device, g.a)
+		if g.b     != nil do sdl.ReleaseGPUTexture(device, g.b)
+		if g.c     != nil do sdl.ReleaseGPUTexture(device, g.c)
+		if g.d     != nil do sdl.ReleaseGPUTexture(device, g.d)
+		if g.depth != nil do sdl.ReleaseGPUTexture(device, g.depth)
+		g^ = {}
+	}
+
 	// Only ever made if a skinned model was drawn with no animator.
 	if mbi.renderer.identity_joints != nil {
 		sdl.ReleaseGPUBuffer(device, mbi.renderer.identity_joints)
 		mbi.renderer.identity_joints = nil
 	}
 
+	// Only ever made once a game has called set_lights. See light.odin's
+	// upload_light_buffer.
+	if mbi.renderer.lighting.light_buffer   != nil do sdl.ReleaseGPUBuffer(device, mbi.renderer.lighting.light_buffer)
+	if mbi.renderer.lighting.light_transfer != nil do sdl.ReleaseGPUTransferBuffer(device, mbi.renderer.lighting.light_transfer)
+	delete(mbi.renderer.lighting.light_data)
+
+	// CLUSTERED's own buffers, if this game ever selected that pipeline --
+	// see light_cull.odin's own Cluster_State.
+	c := &mbi.renderer.lighting.cluster
+	if c.ranges_buffer          != nil do sdl.ReleaseGPUBuffer(device, c.ranges_buffer)
+	if c.ranges_transfer        != nil do sdl.ReleaseGPUTransferBuffer(device, c.ranges_transfer)
+	if c.light_indices_buffer   != nil do sdl.ReleaseGPUBuffer(device, c.light_indices_buffer)
+	if c.light_indices_transfer != nil do sdl.ReleaseGPUTransferBuffer(device, c.light_indices_transfer)
+	delete(c.ranges)
+	delete(c.light_indices)
+
 	delete(mbi.renderer.pending_shadow_models)
+	delete(mbi.renderer.pending_deferred_forward_models)
+	delete(mbi.renderer.pending_scene_models)
 
 	sdl.ReleaseWindowFromGPUDevice(device, mbi.window)
 	sdl.DestroyGPUDevice(device)

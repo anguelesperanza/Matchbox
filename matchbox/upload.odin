@@ -111,6 +111,50 @@ upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -
 }
 
 /*
+	Which GPU format a texture uploads as, and therefore whether the hardware
+	decodes it on sample.
+
+	This is not "is the data colour" -- it is "does something downstream
+	re-encode it exactly once, the way the tonemap resolve does for the 3D
+	pass". A sprite's pixels are colour by any definition and still upload
+	`UNORM`: the 2D pass writes straight to an SDR swapchain with no resolve
+	step, so a texture decoded to linear on sample would stay linear all the
+	way to the screen and every sprite in every 2D game would render dark.
+	`SRGB` is therefore for the handful of textures the 3D pass samples as
+	colour -- base colour, a skybox -- because that pass is linear end to end
+	and the tonemap resolve (`tonemap.odin`) re-encodes the whole scene once,
+	after lighting has run on correctly-linear values.
+
+	The glyph atlas (`font.odin`) is `UNORM` for a third reason, not just "2D":
+	its bytes are coverage expanded to RGBA, not colour, so there is nothing
+	for a decode to mean.
+
+	**Metallic-roughness and occlusion (`model_load.odin`'s `read_material`)
+	are `UNORM`, and emissive is `SRGB`.** A roughness or occlusion value is a
+	number the shader reads back exactly, and decoding it through sRGB would
+	distort every value that is not precisely 0 or 1 -- the same reason this
+	type exists rather than a `bool` that only happened to read right today.
+	Emissive is photometric colour like base colour is, sampled by the same
+	linear-end-to-end 3D pass, so it gets the same answer base colour does.
+	A normal map would be `UNORM` for the same reason as roughness -- a
+	tangent-space direction is also a number, not a colour -- but this
+	package reads no `normal` texture at all; see `Material_Textures.normal`'s
+	own doc comment (material.odin).
+*/
+@(private)
+Texture_Encoding :: enum {
+	UNORM,
+	SRGB,
+}
+
+// The SDL format `encoding` uploads as. Only the RGBA8 pair matters here --
+// nothing in this package uploads a texture in any other bit depth.
+@(private)
+texture_format :: proc(encoding: Texture_Encoding) -> sdl.GPUTextureFormat {
+	return .R8G8B8A8_UNORM_SRGB if encoding == .SRGB else .R8G8B8A8_UNORM
+}
+
+/*
 	An empty sampled RGBA8 texture. Split out because two things want one: a
 	sprite, which fills it once and never again, and a Pixel_Buffer, which is
 	created empty and rewritten every frame.
@@ -119,12 +163,16 @@ upload_buffer :: proc(data: rawptr, size: u32, usage: sdl.GPUBufferUsageFlags) -
 	that a texture the driver will not allocate is a dead program anyway --
 	which is true of the built-in font atlas and not true of the twentieth
 	image a level asked for, and only the caller knows which it is holding.
+
+	`encoding` has no default -- every caller decides `UNORM` or `SRGB` for
+	itself rather than inheriting whichever this happened to default to. See
+	`Texture_Encoding`'s own comment for what the choice actually depends on.
 */
 @(private)
-create_gpu_texture :: proc(width, height: i32, cube := false) -> (^sdl.GPUTexture, Error) {
+create_gpu_texture :: proc(width, height: i32, encoding: Texture_Encoding, cube := false) -> (^sdl.GPUTexture, Error) {
 	texture := sdl.CreateGPUTexture(mbi.renderer.device, {
 		type                 = .CUBE if cube else .D2,
-		format               = .R8G8B8A8_UNORM,
+		format               = texture_format(encoding),
 		usage                = {.SAMPLER},
 		width                = u32(width),
 		height               = u32(height),
@@ -190,9 +238,11 @@ upload_texture_region :: proc(
 // Creates a sampled RGBA8 texture and fills it from `pixels`, which must hold
 // width * height * 4 bytes. The texture is released if the fill fails, so a
 // caller that gets an error is not also holding something to free.
+//
+// `encoding` has no default -- see `Texture_Encoding` and `create_gpu_texture`.
 @(private)
-upload_texture :: proc(pixels: rawptr, width, height: i32) -> (^sdl.GPUTexture, Error) {
-	texture, err := create_gpu_texture(width, height)
+upload_texture :: proc(pixels: rawptr, width, height: i32, encoding: Texture_Encoding) -> (^sdl.GPUTexture, Error) {
+	texture, err := create_gpu_texture(width, height, encoding)
 	if err != nil do return nil, err
 
 	if fill_err := upload_texture_region(texture, pixels, width, height); fill_err != nil {

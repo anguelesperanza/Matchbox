@@ -191,11 +191,6 @@ Mesh_Vert_Data :: struct #align(16) {
 	normal_matrix: matrix[4, 4]f32,
 }
 
-// 16 bytes.
-Mesh_Frag_Data :: struct #align(16) {
-	tint: [4]f32,
-}
-
 /*
 	48 bytes: the camera's basis, ready to turn a screen position into a
 	direction.
@@ -211,6 +206,13 @@ Skybox_Vert_Data :: struct #align(16) {
 	forward: [4]f32,
 }
 
+// 16 bytes. The skybox's own fragment uniform -- a tint and nothing else, so
+// it does not share `Material_Frag_Data` (material.odin) with the meshes:
+// the sky is not a material and has no shading model to carry.
+Tint_Frag_Data :: struct #align(16) {
+	tint: [4]f32,
+}
+
 // 32 bytes. Shared by every post-processing shader, so one block serves all of
 // them and an effect that ignores a field simply ignores it.
 Post_Frag_Data :: struct #align(16) {
@@ -220,8 +222,167 @@ Post_Frag_Data :: struct #align(16) {
 	_pad:       [3]f32,
 }
 
+// 16 bytes. probe_prefilter.frag.hlsl's own fragment uniform -- which
+// roughness level of the prefiltered environment map this draw is baking.
+// See create_environment_probe (ambient.odin), the one caller.
+Probe_Prefilter_Frag_Data :: struct #align(16) {
+	roughness: f32,
+	_pad:      [3]f32,
+}
+
 /*
-	One light, as the shader reads it. 64 bytes.
+	80 bytes. The tonemap resolve's own fragment uniform -- and, since P7a, the
+	end of the post chain's own: the bloom composite and the whole colour
+	grade ride here too, because both are per-pixel functions of one texel and
+	so belong inside the resolve rather than in passes of their own. See
+	post.odin's own top comment for that rule.
+
+	Does not share Post_Frag_Data: that is a Post_Effect a game chooses for a
+	Render_Target it owns; this is the always-on step that turns the HDR scene
+	target back into a displayable one. See tonemap.odin.
+
+	16 bytes of scalars, then three float4s, then two more scalars -- the
+	float4s are float4 rather than float3 for the packing reason this package
+	repeats at every uniform block: HLSL pads a vector that would straddle a
+	16-byte boundary, invisibly from the Odin side, and float4-everywhere is
+	what makes the two sides agree by construction rather than by counting.
+*/
+Tonemap_Resolve_Frag_Data :: struct #align(16) {
+	exposure: f32,
+	tonemap:  f32, // Tonemap's ordinal -- see shading_model_index's own comment (shading.odin) for why a float and why the ordinal rather than a second switch
+
+	// How much of the bloom chain's level 0 is added back before exposure --
+	// Bloom.intensity, or 0 whenever bloom is off. See bloom.odin.
+	bloom_intensity: f32,
+
+	// 1 when Color_Grade.enabled, 0 otherwise. A float rather than a b32 for
+	// the same reason `tonemap` above is one: a uniform block of nothing but
+	// 4-byte floats cannot disagree between the two languages about a bool's
+	// own size.
+	grade_enabled: f32,
+
+	// Color_Grade's three per-channel deltas, xyz each, w unused. See
+	// Color_Grade (post.odin) for why every one of them is a delta from
+	// identity rather than a factor.
+	grade_lift:  [4]f32,
+	grade_gamma: [4]f32,
+	grade_gain:  [4]f32,
+
+	grade_contrast:   f32,
+	grade_saturation: f32,
+	_pad:             [2]f32,
+}
+
+/*
+	144 bytes. The localized reflection probes, as `lighting_core.hlsli`'s own
+	`Probes` cbuffer reads them -- fragment uniform slot 4, after the material
+	(0), the scene (1), CASCADED's cascades (2) and CUBE's faces (3).
+
+	Two parallel arrays rather than one array of a wider struct, for the
+	packing reason this package repeats at every uniform block: an HLSL array
+	element is padded up to 16 bytes whatever is in it, so a struct of
+	`position, radius, falloff` would occupy 32 bytes per probe with 12 of them
+	dead. Two float4 arrays is the same information in two thirds the space and
+	no padding rules to remember.
+
+	See `reflection_frag_data` (reflection.odin), which is the only thing that
+	fills it in.
+*/
+Probe_Frag_Data :: struct #align(16) {
+	probes: [MAX_REFLECTION_PROBES][4]f32, // xyz position, w radius
+	params: [MAX_REFLECTION_PROBES][4]f32, // x falloff fraction, yzw unused
+
+	// x how many probes are placed -- the blend loop's own bound, and what
+	// makes a slot past it unreadable rather than merely unwritten. y the
+	// prefiltered level count minus one, the scale a [0,1] roughness becomes
+	// a level index with. z that level count itself, which the layer
+	// arithmetic needs unreduced. w unused.
+	info: [4]f32,
+}
+
+/*
+	96 bytes. volumetric.frag.hlsl's own -- the matrix it reconstructs world
+	positions with, and the six numbers `Volumetric` (volumetric.odin) carries.
+
+	The matrix first, at offset 0, for the reason every struct here with one
+	in it puts it there: Odin aligns `matrix[4,4]f32` to 32 bytes and anything
+	ahead of it that is not a multiple of 32 opens a gap `init`'s own size
+	assert would then have to account for.
+*/
+Volumetric_Frag_Data :: struct #align(16) {
+	inverse_view_projection: matrix[4, 4]f32,
+
+	params:  [4]f32, // x density, y anisotropy, z step count, w max distance
+	params2: [4]f32, // x intensity, yzw unused
+}
+
+/*
+	704 bytes. ssao.frag.hlsl's own fragment uniform -- the two matrices it
+	reconstructs and reprojects world positions with, the camera those
+	matrices came from, the tuning `Ssao` carries, and the sample kernel
+	itself.
+
+	The two matrices are declared first, at offset 0, for the same reason
+	`Cascade_Frag_Data` declares its own array of them first: Odin aligns
+	`matrix[4,4]f32` to 32 bytes, and anything ahead of them that is not a
+	multiple of 32 opens a gap `init`'s size assert would then have to account
+	for. The kernel goes last because it is the only variable-length thing
+	here in spirit -- `Ssao.samples` decides how much of it is read -- and
+	putting it between the scalars would make every field after it move when
+	MAX_SSAO_SAMPLES changed.
+*/
+Ssao_Frag_Data :: struct #align(16) {
+	inverse_view_projection: matrix[4, 4]f32,
+	view_projection:         matrix[4, 4]f32,
+
+	camera:  [4]f32, // xyz eye position,    w sample count
+	forward: [4]f32, // xyz camera forward,  w radius in world units
+	params:  [4]f32, // x bias, y intensity, zw one texel of the AO target in uv
+	screen:  [4]f32, // xy AO target size in pixels, z 1 when orthographic, w unused
+
+	kernel: [MAX_SSAO_SAMPLES][4]f32,
+}
+
+// 16 bytes. ssao_blur.frag.hlsl's own -- one texel of the AO texture and how
+// many of them the box reaches. See ssao.odin.
+Ssao_Blur_Frag_Data :: struct #align(16) {
+	texel:  [2]f32,
+	radius: f32,
+	_pad:   f32,
+}
+
+// 16 bytes. bloom_downsample.frag.hlsl and bloom_upsample.frag.hlsl share
+// this one. Both need the size of a texel of whatever they are *reading* --
+// see bloom.odin's own bloom_run for why the source's and not the
+// destination's -- and only the upsample reads `scatter`, which rides along
+// unread in the other, the same shape Light_Uniform.cone already has for a
+// light that is not a spot.
+Bloom_Filter_Frag_Data :: struct #align(16) {
+	texel:   [2]f32,
+	scatter: f32,
+	_pad:    f32,
+}
+
+// 32 bytes. bloom_prefilter.frag.hlsl's own: the same texel size the two
+// filter passes take, plus the packed brightness knee -- see
+// bloom_prefilter_curve (bloom.odin) for what the four components are and
+// why the shader is handed them already worked out.
+Bloom_Prefilter_Frag_Data :: struct #align(16) {
+	texel: [2]f32,
+	_pad:  [2]f32,
+	curve: [4]f32,
+}
+
+/*
+	One light, as the shader reads it. 112 bytes since P4 -- this comment
+	said 64 for a while after `shadow_bias` (P3) actually made it 80, and
+	`area_right`/`area_size` (P4) make it 112 now; the count is worth
+	re-checking against the field list below rather than trusted, which is
+	exactly the mistake that let it drift the first time. An element of the
+	`StructuredBuffer<Light>` `lighting_core.hlsli` declares (see
+	`light.odin`'s own `Lighting.light_buffer`) rather than a fixed-size
+	cbuffer array the way it was before this rework -- see `light.odin`'s top
+	comment for why an unbounded list replaced `MAX_LIGHTS`.
 
 	Everything is a [4]f32 and nothing is a [3]f32, which is the whole trick.
 	HLSL refuses to let a vector straddle a 16-byte boundary and silently pads
@@ -233,51 +394,40 @@ Post_Frag_Data :: struct #align(16) {
 	The spare components are not spare: `position.w` is whether the light is on,
 	and `target.w` is which kind it is. `cone` only ever means anything for a
 	spotlight -- see `create_spot_light` -- and rides along unread otherwise.
+
+	**`shadow_bias` joined the other three in P3.** A shadow technique's own
+	bias -- depth-compare epsilon plus normal-offset distance, see
+	`Shadow_Bias` (shadow.odin) -- used to be one scalar shared by every light
+	in the scene (`Shadow_Settings.bias` alone). The framework this phase
+	builds is per-technique *and* per-light: a light at a grazing angle to its
+	own occluders wants more bias than one shining straight down, and P3's own
+	validation harness (`shadow_test.odin`) is what actually measures that.
+	Zero in both components means "use the scene's own `Shadow_Settings.bias`"
+	-- resolved once, at pack time in `light_uniform`, the same "normalize at
+	the point the value passes through before the GPU" shape
+	`material_frag_data` already uses for `Material`, and for the same reason:
+	a `Light` belongs to whoever built it, so there is nowhere on this struct
+	to store a normalized copy the caller would ever read back.
+
+	**`area_right`/`area_size` joined the rest in P4**, for the two new area
+	kinds (`Light_Kind.AREA_RECT`/`.AREA_DISK`, light.odin). `target.w`
+	(`kind_flag`) grew from 0..2 to 0..4: 3 is `AREA_RECT`, 4 `AREA_DISK` --
+	see `sample_light` (lighting_core.hlsli) for how those two are reduced to
+	the same shape every punctual light already has before anything
+	downstream of it ever runs.
 */
 Light_Uniform :: struct #align(16) {
-	position: [4]f32, // xyz where it is,                     w 1 when enabled
-	target:   [4]f32, // xyz direction (directional/spot), unused (point), w kind: 0/1/2
-	color:    [4]f32,
-	cone:     [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
-}
+	position:     [4]f32, // xyz where it is,                     w 1 when enabled
+	target:       [4]f32, // xyz direction (directional/spot/area facing), w kind: 0 directional, 1 point, 2 spot, 3 area rect, 4 area disk
+	color:        [4]f32,
+	cone:         [4]f32, // x outer half-angle degrees, y inner half-angle degrees -- spot only
+	shadow_bias:  [4]f32, // x depth bias, y normal-offset bias -- see Shadow_Bias.  z-w unused
 
-/*
-	1248 bytes at MAX_LIGHTS = 16, measured with a scratch offset_of program
-	each time this has grown rather than assumed -- see init.odin's own size
-	assert and this struct's history: `matrix[4,4]f32` aligns to 32 bytes in
-	Odin, not 16, whatever a struct's own `#align` says, which has forced a
-	compiler-inserted gap here before that `lighting.hlsli`'s cbuffer needed
-	an explicit `_pad0` to reproduce.
-
-	No `_pad0` is needed at this size either: `Light_Uniform` is 64 bytes, a
-	multiple of 32, so `lights` as a whole is too for any `MAX_LIGHTS` --
-	growing or shrinking that constant shifts every field after it by a
-	multiple of 32 and changes nothing about whether `light_view_projection`
-	lands on a 32-byte boundary. That stops being free the moment
-	`Light_Uniform`'s own size stops being a multiple of 32 (adding a
-	`[3]f32` instead of a `[4]f32`, say) -- measure again then rather than
-	trust this comment.
-*/
-Lighting_Data :: struct #align(16) {
-	lights:               [MAX_LIGHTS]Light_Uniform,
-	ambient:              [4]f32, // rgb
-	view_pos:             [4]f32, // xyz, filled in from the active camera
-	fog_color:            [4]f32, // rgb
-	fog_range:            [4]f32, // x near, y far
-
-	// x how many lights are set, y 1 when fog is on, z the first shadow
-	// caster's light index or -1 for none, w the shadow depth-compare bias.
-	flags:                [4]f32,
-
-	// x the second shadow caster's light index or -1 for none -- see
-	// shadow.odin's MAX_SHADOW_CASTERS. y-w unused.
-	shadow_caster1:       [4]f32,
-
-	// Each caster's own view-projection, world space to its own clip space.
-	// light_view_projection is unused (and unread by the shader) whenever
-	// flags.z is -1; light_view_projection2 whenever shadow_caster1.x is -1.
-	light_view_projection:  matrix[4, 4]f32,
-	light_view_projection2: matrix[4, 4]f32,
+	// Area rect/disk only -- see Light.area_right's own doc comment
+	// (light.odin) for what each component means and why a disk leaves most
+	// of them unread.
+	area_right: [4]f32, // xyz normalized tangent axis (rect only), w half-width (rect) / radius (disk)
+	area_size:  [4]f32, // x half-height (rect only).  y-w unused
 }
 
 // GPU handle bundle — shared by Sprite, Animation_Clip, and Font.

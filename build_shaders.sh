@@ -33,9 +33,12 @@ for f in "$SHADER_DIR"/*.hlsl; do
     esac
 
     echo "-- $(basename "$f")"
-    dxc -T "$profile" -E main -spirv -Fo "$SHADER_DIR/$base.spv" "$f"
+    # -I points -include lookups at shaders/ itself, so a module can
+    # #include "brdf/blinn_phong.hlsli" (say) by a stable path from any file
+    # rather than a relative one.
+    dxc -T "$profile" -E main -I "$SHADER_DIR" -spirv -Fo "$SHADER_DIR/$base.spv" "$f"
     if [ "$WANT_DXIL" = "1" ]; then
-        dxc -T "$profile" -E main -Fo "$SHADER_DIR/$base.dxil" "$f"
+        dxc -T "$profile" -E main -I "$SHADER_DIR" -Fo "$SHADER_DIR/$base.dxil" "$f"
     fi
 done
 

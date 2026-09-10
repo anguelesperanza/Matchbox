@@ -374,11 +374,25 @@ probe_capture_camera :: proc(position: [3]f32, face: int) -> Camera3D {
 	that differs is where the result is written: into a slot of a shared array
 	rather than into a texture of the probe's own.
 
-	Runs on its own command buffer and submits immediately, the same shape the
-	skybox bake has, because it is a load-time operation rather than part of a
-	frame -- and because a game calling this outside `begin_drawing`/
-	`end_drawing` (which is the ordinary case) has no frame command buffer to
-	record into.
+	**Records into the frame's own command buffer when there is a frame**, and
+	acquires one of its own only when there is not. That is not a
+	convenience -- it is an ordering requirement, and getting it wrong is the
+	kind of bug that shows as a probe holding last frame's room or nothing at
+	all.
+
+	A capture writes `p.capture` through the frame's command buffer, which has
+	not been submitted yet. A bake on a *separate* buffer submitted right away
+	would be free to run before that capture ever executed, and would convolve
+	whatever was in the texture beforehand. Recording both into the same
+	buffer makes the GPU see them in the order they were written, which is the
+	order they have to happen in.
+
+	Outside a frame -- a game baking at load, before its first
+	`begin_drawing` -- there is no frame buffer to use, so this acquires and
+	submits its own, which is the shape the skybox bake
+	(`create_environment_probe`) always has. Note that path can only ever be
+	reached with a capture that was itself submitted earlier, so the hazard
+	does not arise there.
 */
 bake_reflection_probe :: proc(index: int) -> bool {
 	r := &mbi.renderer
@@ -390,7 +404,19 @@ bake_reflection_probe :: proc(index: int) -> bool {
 
 	ensure(p.capturing_probe < 0, "bake_reflection_probe cannot run while a capture pass is open")
 
-	cmd := sdl.AcquireGPUCommandBuffer(r.device)
+	// A pass cannot be opened inside another, and the ones below are this
+	// procedure's own -- so whatever the frame had open belongs to something
+	// that is finished with it.
+	if r.frame_active && r.pass != nil {
+		sdl.EndGPURenderPass(r.pass)
+		r.pass = nil
+		bind_cache_reset()
+	}
+
+	own_buffer := !r.frame_active || r.cmd == nil
+
+	cmd := r.cmd
+	if own_buffer do cmd = sdl.AcquireGPUCommandBuffer(r.device)
 	if cmd == nil do return false
 
 	level_count := max(p.settings.prefilter_level_count, 1)
@@ -409,7 +435,7 @@ bake_reflection_probe :: proc(index: int) -> bool {
 
 		pass := sdl.BeginGPURenderPass(cmd, &target, 1, nil)
 		if pass == nil {
-			_ = sdl.CancelGPUCommandBuffer(cmd)
+			if own_buffer do _ = sdl.CancelGPUCommandBuffer(cmd)
 			return false
 		}
 
@@ -438,7 +464,7 @@ bake_reflection_probe :: proc(index: int) -> bool {
 
 			pass := sdl.BeginGPURenderPass(cmd, &target, 1, nil)
 			if pass == nil {
-				_ = sdl.CancelGPUCommandBuffer(cmd)
+				if own_buffer do _ = sdl.CancelGPUCommandBuffer(cmd)
 				return false
 			}
 
@@ -450,6 +476,10 @@ bake_reflection_probe :: proc(index: int) -> bool {
 			sdl.EndGPURenderPass(pass)
 		}
 	}
+
+	// The frame's own buffer is submitted by end_drawing, not here -- doing it
+	// twice is a use-after-submit rather than a duplicate.
+	if !own_buffer do return true
 
 	return sdl.SubmitGPUCommandBuffer(cmd)
 }

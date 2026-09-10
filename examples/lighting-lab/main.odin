@@ -53,11 +53,28 @@ package lighting_lab_example
 	    diffuse at its tip. CASCADED is the one to judge up close: walk right
 	    up to a shadow edge and it should stay crisp where PCF has gone blocky.
 
-	  - **press O** for SSAO. Look into the corners where the boxes meet the
+	  - **press O** for SSAO. Look into the corners where the red boxes meet the
 	    floor and each other. This is the darkening that no light source can
 	    provide, because ambient light has no direction to be blocked from --
-	    which is also why **it does nothing while ambient is off**: press A
+	    which is also why **it does nothing while ambient is off**: press K
 	    first if the scene is lit only by the sun.
+
+	  - **press R** to capture the two reflection probes, then **K** until the
+	    ambient mode reads `ENVIRONMENT_PROBE`, then walk from the red corner
+	    to the green pillar. The ambient light should carry the colour of
+	    whichever corner you are standing in, and blend across the middle where
+	    the two probes overlap. That is the whole difference between a
+	    localized probe and the one scene-wide probe P4 shipped: with one
+	    probe, both corners get the same answer.
+
+	    Re-press R after changing anything -- a probe holds whatever the room
+	    looked like at the moment it was captured, including which shading
+	    model M had selected.
+
+	  - **hold Z or X** to change exposure. Worth knowing about before
+	    anything else: "the materials are not reaching the shader" and "the
+	    scene is blown out" are the same white picture, and this is what tells
+	    them apart in one keypress.
 
 	  - **press V** for volumetric light, then look toward the window slot in
 	    the back wall. The shaft is the *shadow map* seen edge-on -- the beam
@@ -109,11 +126,13 @@ SPHERE_COUNT :: 6
 // shared `draw_cube`/`draw_sphere` shapes because those carry one material
 // between them -- and a material per object is the whole point here.
 Shapes :: struct {
-	floor:    mb.Model,
-	box:      mb.Model,
-	sphere:   mb.Model,
-	spheres:  [SPHERE_COUNT]mb.Model, // the roughness sweep, one material each
-	loaded:   bool,
+	floor:   mb.Model,
+	wall:    mb.Model, // the back wall and its lintel -- cool blue-grey
+	box:     mb.Model, // the SSAO corner -- red
+	pillar:  mb.Model, // the shadow caster -- green
+	sphere:  mb.Model, // the emissive one, for bloom
+	spheres: [SPHERE_COUNT]mb.Model, // the roughness sweep, one material each
+	loaded:  bool,
 }
 
 main :: proc() {
@@ -167,6 +186,21 @@ main :: proc() {
 	grade_index  := 0
 	many_lights  := false
 	point_shadow := false // G -- the orbiting point light's own cube shadow
+	probes_baked := false // R -- whether the reflection probes have been captured
+
+	/*
+		P7c: two probes, one in each of the two strongly-coloured corners of
+		the room, placed here and captured by R.
+
+		Placed where the colour is, because that is the entire thing a
+		localized probe does that a scene-wide one cannot: stand in the red
+		corner and the ambient light picks up red, walk to the green pillar
+		and it turns green, and the two blend where their influence spheres
+		overlap. With one scene-wide probe both corners get the same answer,
+		which is the picture P4 already had.
+	*/
+	mb.add_reflection_probe({-5.5, 1.6, 1.5}, 7)
+	mb.add_reflection_probe({ 5.0, 1.8, 1.5}, 7)
 
 	mb.set_lighting(settings)
 	mb.set_cursor_locked(true)
@@ -214,10 +248,18 @@ main :: proc() {
 		}
 
 		// --- ambient, which is what SSAO has anything to occlude -----------
-		if mb.is_key_pressed(.A) {
+		/*
+			**K, not A.** A is strafe-left, and binding a toggle to a movement
+			key means the ambient mode changes every time you sidestep -- which
+			is not a subtle bug to live with, it is the scene relighting itself
+			while you walk. Worth stating rather than quietly fixing: the
+			mistake was picking mnemonic letters before checking what
+			`first_person_walk` already reads, which is WASD and nothing else.
+		*/
+		if mb.is_key_pressed(.K) {
 			switch settings.ambient.kind {
 			case .CONSTANT:          settings.ambient.kind = .HEMISPHERE
-			case .HEMISPHERE:        settings.ambient.kind = .CONSTANT
+			case .HEMISPHERE:        settings.ambient.kind = .ENVIRONMENT_PROBE
 			case .ENVIRONMENT_PROBE: settings.ambient.kind = .CONSTANT
 			}
 			changed = true
@@ -254,8 +296,22 @@ main :: proc() {
 		}
 
 		// --- fog, and the scene-level on/off -------------------------------
+		/*
+			**The range has to fit the room, and the first version's did not.**
+			Fog from 8 to 34 units in a room whose back wall is 17 units from
+			where you start means the wall is barely a third fogged and the only
+			thing visibly affected is the far corners of the 40-unit floor --
+			which is exactly what it looked like: "I can see the corners of the
+			plane darken but that's it".
+
+			3 to 22 puts the whole room inside the ramp, so the back wall reads
+			as clearly further away than the sphere row and the fog colour is
+			somewhere on screen to be recognised. The colour is also darker and
+			bluer than the background now, so fog *on* and fog *off* differ in
+			hue and not only in contrast.
+		*/
 		if mb.is_key_pressed(.F) {
-			settings.fog = settings.fog.enabled ? mb.Fog{} : mb.Fog{enabled = true, color = {0.10, 0.12, 0.18, 1}, start = 8, end = 34}
+			settings.fog = settings.fog.enabled ? mb.Fog{} : mb.Fog{enabled = true, color = {0.05, 0.08, 0.16, 1}, start = 3, end = 22}
 			changed = true
 		}
 		if mb.is_key_pressed(.L) {
@@ -265,6 +321,30 @@ main :: proc() {
 
 		if mb.is_key_pressed(.N) do many_lights = !many_lights
 		if mb.is_key_pressed(.G) do point_shadow = !point_shadow
+
+		/*
+			Exposure, on a key, because "everything looks white" and "the
+			materials are not reaching the shader" are the same picture and
+			this is what tells them apart in one press. Held rather than
+			tapped: finding the exposure a scene wants is a slider, not a
+			cycle.
+		*/
+		if mb.is_key_held(.Z) {
+			settings.exposure = max(settings.exposure - mb.get_delta_time() * 0.8, 0.05)
+			changed = true
+		}
+		if mb.is_key_held(.X) {
+			settings.exposure = min(settings.exposure + mb.get_delta_time() * 0.8, 6)
+			changed = true
+		}
+
+		// R: capture and bake every placed reflection probe from where it
+		// stands. See capture_probes for why this is a key rather than
+		// something that happens every frame.
+		if mb.is_key_pressed(.R) {
+			capture_probes(&shapes, time)
+			probes_baked = true
+		}
 
 		if changed do mb.set_lighting(settings)
 
@@ -293,7 +373,7 @@ main :: proc() {
 			of the three, with nothing to point at. The framework already
 			knows which shape each technique wants; a game should not have to.
 		*/
-		draw_casters(&shapes, time)
+		draw_room(&shapes, time, casts_shadow = true, include_floor = false)
 
 		mb.begin_drawing_3d(rig.camera)
 
@@ -314,7 +394,7 @@ main :: proc() {
 
 		mb.end_drawing_3d()
 
-		draw_readout(settings, shading_models[shading_index], grade_index, many_lights, point_shadow)
+		draw_readout(settings, shading_models[shading_index], grade_index, many_lights, point_shadow, probes_baked)
 
 		mb.end_drawing()
 	}
@@ -338,22 +418,51 @@ main :: proc() {
 build_shapes :: proc() -> Shapes {
 	shapes: Shapes
 
-	floor_err, box_err, sphere_err: mb.Error
+	floor_err, wall_err, box_err, pillar_err, sphere_err: mb.Error
 
+	// Four cubes rather than one, because a material belongs to a *part* and
+	// these want four different ones. The geometry is identical; only what it
+	// is made of differs.
 	shapes.floor,  floor_err  = mb.create_plane_model(1)
+	shapes.wall,   wall_err   = mb.create_cube_model(1)
 	shapes.box,    box_err    = mb.create_cube_model(1)
+	shapes.pillar, pillar_err = mb.create_cube_model(1)
 	shapes.sphere, sphere_err = mb.create_sphere_model(1, 24, 32)
 
-	if floor_err != nil || box_err != nil || sphere_err != nil do return shapes
+	if floor_err != nil || wall_err != nil || box_err != nil || pillar_err != nil || sphere_err != nil {
+		return shapes
+	}
 
-	// A rough dielectric for everything structural, so the spheres are the
-	// only thing in the room with an interesting material and the eye goes
-	// where the demo wants it.
+	/*
+		**Saturated, and each thing its own colour.** The first version of this
+		room made everything a near-neutral grey on the reasoning that the
+		spheres should be the only interesting material in it -- and a
+		near-neutral grey under a full-strength sun, through ACES, is white.
+		Every surface looked like every other surface, which is the opposite of
+		what an example for a *lighting* engine wants: you cannot see what a
+		light is doing to a surface whose colour you cannot make out.
+
+		The two corner colours are doing a second job as well. They are what
+		the reflection probes standing in those corners pick up (`R`), so
+		walking from one to the other visibly changes the ambient tint -- and
+		strong colours are what makes that visible rather than a subtlety.
+	*/
 	set_material(&shapes.floor, mb.create_material_pbr_metallic(
-		base_color = {0.62, 0.60, 0.58, 1}, metallic = 0, roughness = 0.85))
+		base_color = {0.48, 0.44, 0.38, 1}, metallic = 0, roughness = 0.9))
 
+	// The back wall and its lintel: cool, so the warm sun raking across it
+	// reads as warm.
+	set_material(&shapes.wall, mb.create_material_pbr_metallic(
+		base_color = {0.30, 0.36, 0.52, 1}, metallic = 0, roughness = 0.75))
+
+	// The SSAO corner -- strongly red, both to be distinct and to give the
+	// probe standing in it something to pick up.
 	set_material(&shapes.box, mb.create_material_pbr_metallic(
-		base_color = {0.55, 0.52, 0.50, 1}, metallic = 0, roughness = 0.7))
+		base_color = {0.72, 0.16, 0.10, 1}, metallic = 0, roughness = 0.6))
+
+	// The pillar, and the other probe's colour: strongly green.
+	set_material(&shapes.pillar, mb.create_material_pbr_metallic(
+		base_color = {0.14, 0.55, 0.22, 1}, metallic = 0, roughness = 0.55))
 
 	/*
 		The emissive sphere bloom is for. Emissive is *added* after the light
@@ -381,7 +490,9 @@ build_shapes :: proc() -> Shapes {
 
 destroy_shapes :: proc(shapes: ^Shapes) {
 	mb.destroy_model(&shapes.floor)
+	mb.destroy_model(&shapes.wall)
 	mb.destroy_model(&shapes.box)
+	mb.destroy_model(&shapes.pillar)
 	mb.destroy_model(&shapes.sphere)
 	for i in 0 ..< SPHERE_COUNT do mb.destroy_model(&shapes.spheres[i])
 }
@@ -422,14 +533,29 @@ apply_shading_model :: proc(shapes: ^Shapes, model: mb.Shading_Model) {
 				specular_power = 128 * (1 - t) + 4 * t)
 
 		case .PBR_METALLIC:
-			// Metallic on the whole row, so the sweep reads as one material
-			// getting rougher rather than as six unrelated ones. A metal is
-			// also the case where roughness is most legible: its highlight is
-			// its only diffuse-looking feature.
+			/*
+				**Dielectric, not metal, and that is a deliberate choice about
+				what a default view should show.**
+
+				A fully metallic material has no diffuse term at all -- that is
+				what metalness *means* -- so everything it shows you is
+				reflected. With no environment probe bound there is nothing to
+				reflect but the handful of lights, and a metal sweep renders
+				very nearly black with a few bright highlights on it. Correct,
+				and a terrible first impression.
+
+				At metallic 0 the sweep reads immediately: the same coloured
+				surface with its specular lobe tightening from left to right.
+				To see the metal case, press R to capture the probes and K
+				until ambient reads ENVIRONMENT_PROBE -- then a metal has a
+				room to reflect and looks like metal. That dependency is worth
+				meeting once; it is the single most common reason PBR "looks
+				wrong" in a renderer that is working correctly.
+			*/
 			material = mb.create_material_pbr_metallic(
-				base_color = {0.95, 0.80, 0.45, 1},
-				metallic   = 1,
-				roughness  = max(t, 0.04)) // 0 is a perfect mirror and reads as black without a probe
+				base_color = {0.85, 0.72, 0.40, 1},
+				metallic   = 0,
+				roughness  = clamp(t, 0.05, 1))
 
 		case .PBR_SPECGLOSS:
 			// The same surface in the other parameterization -- glossiness is
@@ -465,43 +591,85 @@ apply_shading_model :: proc(shapes: ^Shapes, model: mb.Shading_Model) {
 }
 
 /*
-	Everything in the room except the floor, submitted once with
-	`casts_shadow` set -- so each of these is drawn into every shadow map that
-	wants it and then into the scene, from one list of calls.
+	Everything in the room, drawn once -- with the two flags its two callers
+	disagree about.
 
-	Called before `begin_drawing_3d`, which is what `casts_shadow` requires:
-	the call is held rather than drawn, and the framework replays it into the
-	passes it opens. See the call site for what went wrong when this example
-	opened those passes itself.
+	`casts_shadow` submits the call *before* the 3D pass and lets the framework
+	replay it into every shadow map that wants it and then into the scene, from
+	one list of calls. That is what the ordinary frame does. A probe capture
+	cannot: it is already inside a pass of its own, so it passes false and every
+	call draws where it stands.
+
+	`include_floor` differs for the same reason from the other end. The ordinary
+	frame draws the floor separately, inside the 3D pass, to keep it out of
+	every shadow map -- a ground plane has nothing for its own shadow to fall on
+	and is where depth bias is hardest. A probe standing in the room very much
+	needs to see the floor, since a floor is most of what bounces onto a wall.
 */
-draw_casters :: proc(shapes: ^Shapes, time: f32) {
+draw_room :: proc(shapes: ^Shapes, time: f32, casts_shadow: bool, include_floor: bool) {
+	if include_floor {
+		mb.draw_model(shapes.floor, mb.Transform{position = {0, 0, 0}, rotation = 1, scale = {40, 1, 40}})
+	}
+
 	// The back wall, in three pieces with a slot between them -- the shape the
 	// volumetric shafts come through. Left panel, right panel, lintel.
-	mb.draw_model(shapes.box, mb.Transform{position = {-5.5, 3, -8}, rotation = 1, scale = {7, 6, 0.6}}, casts_shadow = true)
-	mb.draw_model(shapes.box, mb.Transform{position = { 5.5, 3, -8}, rotation = 1, scale = {7, 6, 0.6}}, casts_shadow = true)
-	mb.draw_model(shapes.box, mb.Transform{position = { 0.0, 5, -8}, rotation = 1, scale = {4, 2, 0.6}}, casts_shadow = true)
+	mb.draw_model(shapes.wall, mb.Transform{position = {-5.5, 3, -8}, rotation = 1, scale = {7, 6, 0.6}}, casts_shadow = casts_shadow)
+	mb.draw_model(shapes.wall, mb.Transform{position = { 5.5, 3, -8}, rotation = 1, scale = {7, 6, 0.6}}, casts_shadow = casts_shadow)
+	mb.draw_model(shapes.wall, mb.Transform{position = { 0.0, 5, -8}, rotation = 1, scale = {4, 2, 0.6}}, casts_shadow = casts_shadow)
 
-	// The SSAO corner: boxes stacked into each other and into the floor, which
-	// is nothing but concave right angles -- the one thing ambient occlusion
-	// has to get right, and the one thing no light source can produce.
-	mb.draw_model(shapes.box, mb.Transform{position = {-6.0, 0.6, 1.0}, rotation = 1, scale = {2.4, 1.2, 2.4}}, casts_shadow = true)
-	mb.draw_model(shapes.box, mb.Transform{position = {-4.6, 0.4, 2.2}, rotation = 1, scale = {1.6, 0.8, 1.6}}, casts_shadow = true)
-	mb.draw_model(shapes.box, mb.Transform{position = {-6.6, 1.8, 1.8}, rotation = 1, scale = {1.2, 1.2, 1.2}}, casts_shadow = true)
-	mb.draw_model(shapes.box, mb.Transform{position = {-3.6, 0.25, 0.6}, rotation = 1, scale = {1.0, 0.5, 1.0}}, casts_shadow = true)
+	// The SSAO corner: red boxes stacked into each other and into the floor,
+	// which is nothing but concave right angles -- the one thing ambient
+	// occlusion has to get right, and the one thing no light source can
+	// produce. Also what the left-hand reflection probe picks up.
+	mb.draw_model(shapes.box, mb.Transform{position = {-6.0, 0.6, 1.0}, rotation = 1, scale = {2.4, 1.2, 2.4}}, casts_shadow = casts_shadow)
+	mb.draw_model(shapes.box, mb.Transform{position = {-4.6, 0.4, 2.2}, rotation = 1, scale = {1.6, 0.8, 1.6}}, casts_shadow = casts_shadow)
+	mb.draw_model(shapes.box, mb.Transform{position = {-6.6, 1.8, 1.8}, rotation = 1, scale = {1.2, 1.2, 1.2}}, casts_shadow = casts_shadow)
+	mb.draw_model(shapes.box, mb.Transform{position = {-3.6, 0.25, 0.6}, rotation = 1, scale = {1.0, 0.5, 1.0}}, casts_shadow = casts_shadow)
 
-	// The pillar, for the shadow-technique switch: tall enough that its tip's
-	// shadow is far from its base, which is the whole difference PCSS shows.
-	mb.draw_model(shapes.box, mb.Transform{position = {5.5, 2.5, 1.5}, rotation = 1, scale = {0.8, 5, 0.8}}, casts_shadow = true)
+	// The green pillar, for the shadow-technique switch: tall enough that its
+	// tip's shadow is far from its base, which is the whole difference PCSS
+	// shows. Also what the right-hand reflection probe picks up.
+	mb.draw_model(shapes.pillar, mb.Transform{position = {5.5, 2.5, 1.5}, rotation = 1, scale = {0.8, 5, 0.8}}, casts_shadow = casts_shadow)
+	mb.draw_model(shapes.pillar, mb.Transform{position = {4.2, 0.5, 2.6}, rotation = 1, scale = {1.6, 1.0, 1.6}}, casts_shadow = casts_shadow)
 
 	// The material sweep, left to right in front of the wall.
 	for i in 0 ..< SPHERE_COUNT {
 		x := -4.5 + f32(i) * 1.8
-		mb.draw_model_at(shapes.spheres[i], {x, 0.9, -3.0}, 0.9, casts_shadow = true)
+		mb.draw_model_at(shapes.spheres[i], {x, 0.9, -3.0}, 0.9, casts_shadow = casts_shadow)
 	}
 
 	// The emissive sphere bloom is for, bobbing so it is obviously not part of
 	// the wall behind it.
-	mb.draw_model_at(shapes.sphere, {0, 2.6 + math.sin(time * 0.8) * 0.35, 2.5}, 0.45, casts_shadow = true)
+	mb.draw_model_at(shapes.sphere, {0, 2.6 + math.sin(time * 0.8) * 0.35, 2.5}, 0.45, casts_shadow = casts_shadow)
+}
+
+/*
+	Captures and bakes every placed reflection probe: six faces each, then the
+	convolution.
+
+	**A key rather than something that happens every frame**, and the cost is
+	the reason: two probes is twelve extra renders of the whole room, plus
+	sixty-odd convolution draws. A probe is a load-time thing, or a when-a-door-
+	opens thing. Bound to R here so it can be re-run after walking around --
+	which is worth doing at least once, because a probe captures whatever the
+	scene looked like at that moment, including whichever shading model the M
+	key had selected.
+
+	Note the probes do not see each other: the first is captured before the
+	second exists in any baked form, so neither picks up the other's bounce.
+	That is the standard limitation and the standard fix is to capture twice.
+*/
+capture_probes :: proc(shapes: ^Shapes, time: f32) {
+	for index in 0 ..< mb.get_reflection_probe_count() {
+		for face in 0 ..< 6 {
+			if mb.begin_probe_capture(index, face) {
+				draw_room(shapes, time, casts_shadow = false, include_floor = true)
+				mb.end_probe_capture()
+			}
+		}
+
+		mb.bake_reflection_probe(index)
+	}
 }
 
 /*
@@ -518,8 +686,16 @@ set_scene_lights :: proc(time: f32, many: bool, point_shadow: bool) {
 
 	// The sun, and the only light with a shadow map by default -- the shafts
 	// through the wall slot are its shadow map seen edge-on.
+	/*
+		Dimmer than the first version, which had this at full white. A sun at
+		1.0 plus a spot plus a point light drives every surface in the room past
+		the top of the ACES curve, and a surface past the top of the curve is
+		white whatever colour it started -- which is what "everything is white"
+		was. 0.7 leaves headroom for the other two and for the emissive sphere,
+		which is the one thing here that *should* clip.
+	*/
 	lights[count] = mb.create_directional_light(
-		{-0.35, -0.85, -0.4}, {1.0, 0.95, 0.85, 1}, casts_shadow = true)
+		{-0.35, -0.85, -0.4}, {0.70, 0.66, 0.58, 1}, casts_shadow = true)
 	count += 1
 
 	// A spot swinging across the room, so the cone moves over the boxes and
@@ -528,7 +704,7 @@ set_scene_lights :: proc(time: f32, many: bool, point_shadow: bool) {
 	lights[count] = mb.create_spot_light(
 		position     = {6, 7, 6},
 		direction    = {math.sin(angle) - 0.5, -1, math.cos(angle) - 1.4},
-		color        = {0.6, 0.75, 1.0, 1},
+		color        = {0.35, 0.45, 0.65, 1},
 		inner_angle  = 14,
 		outer_angle  = 26,
 		casts_shadow = true,
@@ -548,7 +724,7 @@ set_scene_lights :: proc(time: f32, many: bool, point_shadow: bool) {
 	*/
 	lights[count] = mb.create_point_light(
 		{math.cos(orbit) * 3.5, 1.6, -3.0 + math.sin(orbit) * 1.5},
-		{1.0, 0.55, 0.25, 1},
+		{0.9, 0.45, 0.18, 1},
 		casts_shadow = point_shadow)
 	count += 1
 
@@ -620,11 +796,11 @@ on_off :: proc(v: bool) -> string {
 	return "on" if v else "off"
 }
 
-draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, grade_index: int, many: bool, point_shadow: bool) {
+draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, grade_index: int, many: bool, point_shadow: bool, probes_baked: bool) {
 	font := &mb.mbi.font
 
-	mb.draw_text(font, "P pipeline   M shading model   H shadows   Y technique   G point shadow   A ambient   N light count", 20, 30, mb.WHITE)
-	mb.draw_text(font, "O ssao   V volumetric   B bloom   C grade   T tonemap   F fog   L lighting   WASD walk   ESC pointer", 20, 55, mb.WHITE)
+	mb.draw_text(font, "P pipeline   M shading model   H shadows   Y technique   G point shadow   K ambient   N light count", 20, 30, mb.WHITE)
+	mb.draw_text(font, "O ssao   V volumetric   B bloom   C grade   T tonemap   F fog   L lighting   R bake probes   Z/X exposure", 20, 55, mb.WHITE)
 
 	grades := [3]string{"off", "warm", "cold"}
 
@@ -641,18 +817,37 @@ draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, gr
 		settings.ambient.kind,
 		on_off(settings.fog.enabled)), 20, 120, mb.WHITE)
 
-	mb.draw_text(font, fmt.tprintf("ssao %v      volumetric %v      bloom %v      grade %v      tonemap %v",
+	mb.draw_text(font, fmt.tprintf("ssao %v      volumetric %v      bloom %v      grade %v      tonemap %v      exposure %.2f",
 		on_off(settings.ssao.enabled),
 		on_off(settings.volumetric.enabled),
 		on_off(settings.post.bloom.enabled),
 		grades[grade_index],
-		settings.tonemap), 20, 145, mb.WHITE)
+		settings.tonemap,
+		settings.exposure), 20, 145, mb.WHITE)
 
-	// The one line that is a hint rather than a state: occlusion multiplies
-	// the ambient term, so SSAO with no ambient light has nothing to occlude
-	// and looks broken rather than off.
+	mb.draw_text(font, fmt.tprintf("reflection probes %v, %v",
+		mb.get_reflection_probe_count(),
+		"captured (R to re-bake)" if probes_baked else "not captured yet -- press R"), 20, 170, mb.WHITE)
+
+	/*
+		Two lines that are hints rather than state, both for the same class of
+		confusion: a module that is on, doing exactly what it should, and
+		looking like it is broken because what it modifies is not there.
+
+		Occlusion multiplies the ambient term, so SSAO with no ambient light
+		has nothing to occlude. And a localized probe that was never captured
+		holds nothing, so selecting ENVIRONMENT_PROBE before pressing R reads
+		as "the ambient went out" rather than as "there is no probe".
+	*/
+	hint_y := f32(205)
+
 	if settings.ssao.enabled && settings.ambient.kind == .CONSTANT && settings.ambient.color.r == 0 {
-		mb.draw_text(font, "ssao is on but ambient is black -- there is nothing for it to occlude (press A)", 20, 180, {1, 0.7, 0.3, 1})
+		mb.draw_text(font, "ssao is on but ambient is black -- there is nothing for it to occlude (press K)", 20, hint_y, {1, 0.7, 0.3, 1})
+		hint_y += 25
+	}
+
+	if settings.ambient.kind == .ENVIRONMENT_PROBE && !probes_baked {
+		mb.draw_text(font, "ambient is ENVIRONMENT_PROBE but no probe has been captured -- press R", 20, hint_y, {1, 0.7, 0.3, 1})
 	}
 
 	cx := f32(mb.mbi.width) * 0.5

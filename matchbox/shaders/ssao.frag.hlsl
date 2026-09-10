@@ -217,7 +217,17 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
             Occluded when whatever the scene actually holds at that pixel is
             nearer the camera than the point we asked about -- something is in
             the way. `bias` is what stops a flat surface from occluding itself
-            through the reconstruction's own floating-point error.
+            through the reconstruction's own error.
+
+            **Scaled by distance**, because that error is not constant: one
+            texel of the depth buffer covers more world space the further away
+            it is, so a position reconstructed from it is proportionally less
+            exact -- and a flat surface seen at a grazing angle is the case
+            where neighbouring texels are furthest apart and the reconstruction
+            is worst. A fixed bias tuned to look right up close leaves that
+            surface self-occluding in a pattern further away. Linear in view
+            depth, floored at 1 so a surface right against the camera is not
+            handed a bias smaller than the one that was asked for.
 
             The range check is what keeps a wall two metres behind a railing
             from being reported as occluding it: the further apart the two
@@ -225,7 +235,9 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
             gap exceeds the sampling radius. Without it a foreground object
             draws a dark halo on everything behind it.
         */
-        if (scene_depth < sample_depth - bias)
+        float scaled_bias = bias * max(center_depth, 1.0);
+
+        if (scene_depth < sample_depth - scaled_bias)
         {
             float range = saturate(radius / max(abs(center_depth - scene_depth), 1e-4));
             occlusion += range;

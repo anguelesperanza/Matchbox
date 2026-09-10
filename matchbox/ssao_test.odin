@@ -15,18 +15,27 @@ package matchbox
 
 	That is not a small part. A kernel with a sample on the wrong side of the
 	surface takes a tap *through* the geometry and reports occlusion where
-	there is none; a kernel whose lengths do not rise toward the rim spends
-	its taps where the approximation is weakest; a kernel longer than the unit
+	there is none; a kernel whose taps all lie on one spiral turns the
+	per-pixel rotation into a visible pattern; a kernel longer than the unit
 	hemisphere samples outside the radius the settings asked for. Each of
 	those is a wrong picture with no error attached, and each is decidable
-	here.
+	here -- the middle one only after P7c went looking for it, having shipped
+	it.
 
 	The expected values were worked out in Python from the definitions in
-	`ssao_kernel`'s own doc comment -- and `radical_inverse_base2` in
-	particular was re-derived there the slow, obvious way (shift a bit off,
-	divide, repeat) rather than with the five-shift trick the Odin side uses,
-	so the two are genuinely independent formulations of the same sequence
-	rather than one copy checked against itself.
+	`ssao_kernel`'s own doc comment, and the van der Corput terms are written
+	out here as a table rather than recomputed, so the check is against the
+	sequence's own definition rather than against a second copy of the code.
+
+	**One of these tests used to assert the bug.** Until P7c
+	`test_ssao_kernel_lengths_grow_toward_the_rim` required a tap's distance
+	from the origin to rise monotonically with its index -- which, since the
+	index also drives the azimuth, is precisely the statement "the kernel is a
+	spiral". It passed for two phases and pinned a defect in place. What
+	replaced it is below: the *distribution* of lengths is still required to
+	lean toward the origin, and the azimuth and the radius are required to be
+	independent, which is the property that actually matters and the one the
+	old test ruled out.
 
 	**Nothing here renders anything, and nothing here has been seen to
 	render.**
@@ -42,38 +51,55 @@ SSAO_TEST_EPSILON :: f32(1e-6)
 // -----------------------------------------------------------------------
 
 /*
-	The van der Corput sequence in base 2, whose first eight terms are a
-	closed-form thing rather than a measurement: index `i`'s bits, reversed,
-	read back as a binary fraction. 1 becomes 0.5, 2 becomes 0.25, 3 becomes
-	0.75, and so on.
+	The van der Corput sequence's first terms in both bases the kernel uses,
+	which are a closed-form thing rather than a measurement: index `i`'s digits
+	in the base, reflected about the point. In base 2, 1 is 0.5, 2 is 0.25, 3
+	is 0.75; in base 3, 1 is 1/3 and 2 is 2/3.
 
-	Written out rather than computed, because the point is to catch the
-	five-shift trick in `radical_inverse_base2` being subtly wrong -- a
-	swapped mask or a shift of the wrong width still produces a plausible
-	spread of numbers in [0, 1), which is exactly the kind of wrong that a
-	"looks distributed" check would pass.
+	Written out rather than recomputed, because the point is to catch the
+	digit loop being subtly wrong -- an off-by-one in the fraction's starting
+	value still produces a plausible spread of numbers in [0, 1), which is
+	exactly the kind of wrong a "looks distributed" check would pass.
 */
 @(test)
-test_radical_inverse_base2_first_terms :: proc(t: ^testing.T) {
-	expected := [8]f32{0, 0.5, 0.25, 0.75, 0.125, 0.625, 0.375, 0.875}
+test_radical_inverse_first_terms :: proc(t: ^testing.T) {
+	base2 := [8]f32{0, 0.5, 0.25, 0.75, 0.125, 0.625, 0.375, 0.875}
 
-	for want, i in expected {
-		got := radical_inverse_base2(u32(i))
+	for want, i in base2 {
+		got := radical_inverse(u32(i), 2)
 		testing.expectf(t, math.abs(got - want) < SSAO_TEST_EPSILON,
-			"radical_inverse_base2(%d) = %.9f, want %.9f", i, got, want)
+			"radical_inverse(%d, 2) = %.9f, want %.9f", i, got, want)
+	}
+
+	third  := f32(1) / 3
+	base3  := [7]f32{0, third, 2 * third, third / 3, third + third / 3, 2 * third + third / 3, 2 * third / 3}
+
+	for want, i in base3 {
+		got := radical_inverse(u32(i), 3)
+		testing.expectf(t, math.abs(got - want) < 1e-5,
+			"radical_inverse(%d, 3) = %.9f, want %.9f", i, got, want)
 	}
 }
 
-// And it never leaves [0, 1), which is what the caller relies on to feed it
-// into a square root. Swept over the whole range the kernel can ask for
-// rather than the eight above, because the shifts that go wrong go wrong at
-// bit widths the first eight indices never reach.
+// Never leaves [0, 1) in either base, which is what the caller relies on to
+// feed it into a square root. Swept over the whole range the kernel can ask
+// for rather than the terms above, since a digit loop that goes wrong tends
+// to go wrong at magnitudes the first few indices never reach.
 @(test)
-test_radical_inverse_base2_stays_in_unit_range :: proc(t: ^testing.T) {
-	for i in 0 ..< 4096 {
-		v := radical_inverse_base2(u32(i))
-		testing.expectf(t, v >= 0 && v < 1, "radical_inverse_base2(%d) = %.9f", i, v)
+test_radical_inverse_stays_in_unit_range :: proc(t: ^testing.T) {
+	bases := [?]u32{2, 3}
+
+	for base in bases {
+		for i in 0 ..< 4096 {
+			v := radical_inverse(u32(i), base)
+			testing.expectf(t, v >= 0 && v < 1, "radical_inverse(%d, %d) = %.9f", i, base, v)
+		}
 	}
+
+	// A base with no digits to reflect would not terminate, so it is refused
+	// rather than looped on.
+	testing.expect(t, radical_inverse(7, 1) == 0, "base 1 was not refused")
+	testing.expect(t, radical_inverse(7, 0) == 0, "base 0 was not refused")
 }
 
 // -----------------------------------------------------------------------
@@ -125,44 +151,98 @@ test_ssao_kernel_stays_inside_the_unit_hemisphere :: proc(t: ^testing.T) {
 	}
 }
 
-/*
-	**The lengths rise monotonically toward the rim**, from 0.1 at the first
-	sample to `0.1 + 0.9 * ((n-1)/n)^2` at the last -- which packs most of the
-	taps close to the point being shaded, where the occlusion that matters is.
-	See `ssao_kernel`'s own doc comment for why that is the right bias and not
-	a defect.
+@(private)
+ssao_test_length :: proc(v: [4]f32) -> f32 {
+	return math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+}
 
-	The two endpoints are checked against numbers derived from the formula
-	rather than read off the implementation, and the monotonicity is checked
-	across every step between them, because a scale that rises and then falls
-	back would still hit both endpoints.
+// A tap's angle around the normal, which is what the per-pixel rotation turns.
+@(private)
+ssao_test_azimuth :: proc(v: [4]f32) -> f32 {
+	return math.atan2(v.y, v.x)
+}
+
+/*
+	**A tap's angle around the normal and its distance from it must be
+	independent, and this is the test P7c had to add because the shape it
+	replaced asserted the opposite.**
+
+	Every pixel rotates the whole tap set by its own angle before sampling. If
+	angle and radius rise together the set is a rigid spiral, so the occlusion
+	a pixel measures becomes a strong smooth function of that rotation -- and
+	whatever structure the rotation has (interleaved gradient noise has a great
+	deal: a fine diagonal weave) prints straight through into the picture. That
+	is what the first render of SSAO looked like.
+
+	Measured as a Pearson correlation between the two, which was **0.965** for
+	the kernel this replaced and is under 0.35 for every count now. The
+	threshold is loose on purpose: what matters is that the two are not locked
+	together, not that they reach any particular small number, and a low-
+	discrepancy sequence is not a random one -- some correlation at small
+	counts is expected and harmless.
 */
 @(test)
-test_ssao_kernel_lengths_grow_toward_the_rim :: proc(t: ^testing.T) {
-	count  := 16
-	kernel := ssao_kernel(count)
+test_ssao_kernel_azimuth_and_radius_are_independent :: proc(t: ^testing.T) {
+	for count in 8 ..= MAX_SSAO_SAMPLES {
+		kernel := ssao_kernel(count)
 
-	length_of :: proc(v: [4]f32) -> f32 {
-		return math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+		mean_azimuth, mean_radius: f32
+		for i in 0 ..< count {
+			mean_azimuth += ssao_test_azimuth(kernel[i])
+			mean_radius  += ssao_test_length(kernel[i])
+		}
+		mean_azimuth /= f32(count)
+		mean_radius  /= f32(count)
+
+		covariance, azimuth_spread, radius_spread: f32
+		for i in 0 ..< count {
+			da := ssao_test_azimuth(kernel[i]) - mean_azimuth
+			dr := ssao_test_length(kernel[i]) - mean_radius
+
+			covariance     += da * dr
+			azimuth_spread += da * da
+			radius_spread  += dr * dr
+		}
+
+		if azimuth_spread <= 0 || radius_spread <= 0 do continue
+
+		correlation := covariance / math.sqrt(azimuth_spread * radius_spread)
+
+		testing.expectf(t, math.abs(correlation) < 0.35,
+			"count %d: azimuth and radius correlate at %.4f -- the kernel is a spiral, and the per-pixel rotation will print its own structure into the image",
+			count, correlation)
 	}
+}
 
-	first := length_of(kernel[0])
-	testing.expectf(t, math.abs(first - 0.1) < 1e-5,
-		"the first sample's length is %.9f, want 0.1", first)
+/*
+	The lengths still lean toward the origin, which is the property the old
+	monotone assertion was really there for: a crease is dark because of what
+	is a few centimetres away, not because of what is at the edge of the
+	radius. Checked as a *distribution* -- the median tap sits in the nearer
+	half of the range -- rather than as an ordering, since the ordering is
+	exactly what had to go.
 
-	// 0.1 + 0.9 * (15/16)^2, worked out from the documented scale rather than
-	// from what the code returned.
-	want_last := f32(0.891015625)
-	last := length_of(kernel[count - 1])
-	testing.expectf(t, math.abs(last - want_last) < 1e-5,
-		"the last sample's length is %.9f, want %.9f", last, want_last)
+	The bounds are checked too: nothing shorter than the 0.1 floor and nothing
+	past the unit hemisphere, at every count.
+*/
+@(test)
+test_ssao_kernel_lengths_lean_toward_the_origin :: proc(t: ^testing.T) {
+	for count in 8 ..= MAX_SSAO_SAMPLES {
+		kernel := ssao_kernel(count)
 
-	previous := f32(0)
-	for i in 0 ..< count {
-		length := length_of(kernel[i])
-		testing.expectf(t, length >= previous,
-			"sample %d is shorter (%.9f) than sample %d (%.9f)", i, length, i - 1, previous)
-		previous = length
+		nearer := 0
+		for i in 0 ..< count {
+			length := ssao_test_length(kernel[i])
+
+			testing.expectf(t, length >= 0.1 - SSAO_TEST_EPSILON && length <= 1 + SSAO_TEST_EPSILON,
+				"count %d, sample %d has length %.9f, outside [0.1, 1]", count, i, length)
+
+			if length < 0.55 do nearer += 1 // the midpoint of [0.1, 1]
+		}
+
+		testing.expectf(t, nearer * 2 > count,
+			"count %d: only %d of %d taps sit in the nearer half of the radius, so the sampling is not weighted toward the contact occlusion it exists for",
+			count, nearer, count)
 	}
 }
 

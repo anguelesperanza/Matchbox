@@ -76,6 +76,14 @@ package lighting_lab_example
 	    scene is blown out" are the same white picture, and this is what tells
 	    them apart in one keypress.
 
+	  - **hold 1/2 and 3/4** to tune SSAO's radius and bias while it is on.
+	    These are the two numbers that cannot be chosen without looking:
+	    `radius` is in world units, so it depends on the scale a scene is
+	    built at, and `bias` depends on the depth format the device actually
+	    handed back. Neither is knowable from a machine with no GPU, which is
+	    what built this -- so they are sliders with the numbers on screen
+	    rather than constants somebody guessed.
+
 	  - **press V** for volumetric light, then look toward the window slot in
 	    the back wall. The shaft is the *shadow map* seen edge-on -- the beam
 	    takes the shape of the gap because every step of the raymarch asks the
@@ -344,6 +352,42 @@ main :: proc() {
 		if mb.is_key_pressed(.R) {
 			capture_probes(&shapes, time)
 			probes_baked = true
+		}
+
+		/*
+			**SSAO's two numbers, live, because they are the two that cannot be
+			chosen without looking.**
+
+			`radius` is in world units, so the right value depends entirely on
+			the scale a scene is built at -- half a metre is the default and
+			means nothing to a scene built in centimetres. `bias` trades
+			self-occlusion grain against the contact shadow the effect exists
+			for, and where it wants to sit depends on the depth format the
+			device handed back (`pick_depth_format`, render3d.odin), which is
+			not known until it runs.
+
+			Neither can be tuned from a machine with no GPU, which is what
+			built this. So: sliders, and the numbers on screen beside them.
+		*/
+		if settings.ssao.enabled {
+			step := mb.get_delta_time()
+
+			if mb.is_key_held(._1) {
+				settings.ssao.radius = max(settings.ssao.radius - step * 0.6, 0.02)
+				changed = true
+			}
+			if mb.is_key_held(._2) {
+				settings.ssao.radius = min(settings.ssao.radius + step * 0.6, 4)
+				changed = true
+			}
+			if mb.is_key_held(._3) {
+				settings.ssao.bias = max(settings.ssao.bias - step * 0.05, 0.001)
+				changed = true
+			}
+			if mb.is_key_held(._4) {
+				settings.ssao.bias = min(settings.ssao.bias + step * 0.05, 0.5)
+				changed = true
+			}
 		}
 
 		if changed do mb.set_lighting(settings)
@@ -800,7 +844,8 @@ draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, gr
 	font := &mb.mbi.font
 
 	mb.draw_text(font, "P pipeline   M shading model   H shadows   Y technique   G point shadow   K ambient   N light count", 20, 30, mb.WHITE)
-	mb.draw_text(font, "O ssao   V volumetric   B bloom   C grade   T tonemap   F fog   L lighting   R bake probes   Z/X exposure", 20, 55, mb.WHITE)
+	mb.draw_text(font, "O ssao   V volumetric   B bloom   C grade   T tonemap   F fog   L lighting   R bake probes", 20, 55, mb.WHITE)
+	mb.draw_text(font, "Z/X exposure   1/2 ssao radius   3/4 ssao bias   WASD walk   ESC pointer", 20, 80, mb.WHITE)
 
 	grades := [3]string{"off", "warm", "cold"}
 
@@ -808,14 +853,14 @@ draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, gr
 		settings.pipeline,
 		model,
 		"on" if settings.enabled else "off (everything unlit)",
-		"many" if many else "few"), 20, 95, mb.WHITE)
+		"many" if many else "few"), 20, 120, mb.WHITE)
 
 	mb.draw_text(font, fmt.tprintf("shadows %v (%v)      point shadow %v      ambient %v      fog %v",
 		on_off(settings.shadows.enabled),
 		settings.shadows.technique,
 		on_off(point_shadow),
 		settings.ambient.kind,
-		on_off(settings.fog.enabled)), 20, 120, mb.WHITE)
+		on_off(settings.fog.enabled)), 20, 145, mb.WHITE)
 
 	mb.draw_text(font, fmt.tprintf("ssao %v      volumetric %v      bloom %v      grade %v      tonemap %v      exposure %.2f",
 		on_off(settings.ssao.enabled),
@@ -823,11 +868,19 @@ draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, gr
 		on_off(settings.post.bloom.enabled),
 		grades[grade_index],
 		settings.tonemap,
-		settings.exposure), 20, 145, mb.WHITE)
+		settings.exposure), 20, 170, mb.WHITE)
+
+	if settings.ssao.enabled {
+		mb.draw_text(font, fmt.tprintf("ssao radius %.2f (1/2)      bias %.3f (3/4)      samples %v      blur %v",
+			settings.ssao.radius,
+			settings.ssao.bias,
+			settings.ssao.samples,
+			settings.ssao.blur), 20, 220, {0.75, 0.9, 1, 1})
+	}
 
 	mb.draw_text(font, fmt.tprintf("reflection probes %v, %v",
 		mb.get_reflection_probe_count(),
-		"captured (R to re-bake)" if probes_baked else "not captured yet -- press R"), 20, 170, mb.WHITE)
+		"captured (R to re-bake)" if probes_baked else "not captured yet -- press R"), 20, 195, mb.WHITE)
 
 	/*
 		Two lines that are hints rather than state, both for the same class of
@@ -839,7 +892,7 @@ draw_readout :: proc(settings: mb.Lighting_Settings, model: mb.Shading_Model, gr
 		holds nothing, so selecting ENVIRONMENT_PROBE before pressing R reads
 		as "the ambient went out" rather than as "there is no probe".
 	*/
-	hint_y := f32(205)
+	hint_y := f32(250)
 
 	if settings.ssao.enabled && settings.ambient.kind == .CONSTANT && settings.ambient.color.r == 0 {
 		mb.draw_text(font, "ssao is on but ambient is black -- there is nothing for it to occlude (press K)", 20, hint_y, {1, 0.7, 0.3, 1})

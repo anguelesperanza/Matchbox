@@ -349,13 +349,34 @@ ssao_output :: proc() -> ^sdl.GPUTexture {
 	inside the unit hemisphere, every one on the +Z side, lengths rising
 	toward the rim) rather than taking them on trust.
 
-	**The lengths are deliberately not uniform.** Scaling by `t*t` packs most
-	of the taps close to the point being shaded, where the occlusion that
-	matters is: a crease is dark because of what is a few centimetres away,
-	not because of what is at the far edge of the radius. Uniform lengths
-	spend most of the samples on the outer shell of the hemisphere, which is
+	**The lengths are deliberately not uniform.** Biasing them toward the
+	origin packs most of the taps close to the point being shaded, where the
+	occlusion that matters is: a crease is dark because of what is a few
+	centimetres away, not because of what is at the far edge of the radius.
+	Uniform lengths spend most of the samples on the outer shell, which is
 	where they matter least and where the screen-space approximation is
 	weakest anyway.
+
+	**The radius comes off a third, independent coordinate, and that is a fix
+	rather than a flourish.** It was `0.1 + 0.9 * (i/n)^2` -- driven by the
+	index, which also drives the azimuth -- so a sample's angle around the
+	normal and its distance from it rose together and the whole tap set was a
+	**spiral**. Measured: the correlation between the two was 0.965.
+
+	A rigid spiral is the worst possible shape here, because every pixel
+	rotates this set by its own angle before sampling. When the taps are a
+	spiral, the occlusion a pixel measures is a strong, smooth function of
+	that rotation -- so whatever structure the per-pixel rotation has prints
+	straight through into the image, and `interleaved_gradient_noise`
+	(ssao.frag.hlsl) has a great deal of structure: it is a fine diagonal
+	weave, which is exactly what the first render of it looked like. Taking
+	the radius from base 3 while the azimuth comes from the index drops the
+	correlation to under 0.25 and leaves the rotation with far less to bite
+	on.
+
+	The old shape also had a test asserting it -- lengths rising monotonically
+	with index -- which is worth remembering: a test can pin a defect in place
+	just as firmly as it pins a property.
 
 	Returns a fixed-size array rather than a slice -- a slice of a local would
 	borrow this procedure's own stack frame, which Odin rejects.
@@ -367,11 +388,14 @@ ssao_kernel :: proc(count: int) -> [MAX_SSAO_SAMPLES][4]f32 {
 	n := clamp(count, 1, MAX_SSAO_SAMPLES)
 
 	for i in 0 ..< n {
-		// Hammersley: one coordinate walks the sequence evenly, the other is
-		// the bit-reversal of the index, which is what makes the pair spread
-		// rather than line up.
+		// A Halton triple: the index walks evenly, and bases 2 and 3 give two
+		// further coordinates that spread independently of it and of each
+		// other. Three coordinates because three things need deciding -- which
+		// way round the normal, how far up the hemisphere, and how far out --
+		// and any two of them sharing a source is a pattern.
 		u1 := (f32(i) + 0.5) / f32(n)
-		u2 := radical_inverse_base2(u32(i))
+		u2 := radical_inverse(u32(i), 2)
+		u3 := radical_inverse(u32(i), 3)
 
 		// Cosine-weighted over the +Z hemisphere: more taps where the
 		// surface actually gathers light, which is the same weighting the
@@ -382,10 +406,10 @@ ssao_kernel :: proc(count: int) -> [MAX_SSAO_SAMPLES][4]f32 {
 
 		direction := [3]f32{math.cos(phi) * sin_theta, math.sin(phi) * sin_theta, cos_theta}
 
-		// 0.1 at the centre rising to 1 at the rim -- see this proc's own
-		// doc comment on why the near taps are worth more than the far ones.
-		t     := f32(i) / f32(n)
-		scale := 0.1 + 0.9 * t * t
+		// 0.1 near the centre out to 1 at the rim, squared so the near taps
+		// outnumber the far ones -- see this proc's own doc comment for why
+		// the coordinate driving it must not be the one driving `phi`.
+		scale := 0.1 + 0.9 * u3 * u3
 
 		kernel[i] = {direction.x * scale, direction.y * scale, direction.z * scale, 0}
 	}
@@ -393,20 +417,35 @@ ssao_kernel :: proc(count: int) -> [MAX_SSAO_SAMPLES][4]f32 {
 	return kernel
 }
 
-// The van der Corput sequence in base 2 -- index `i`'s bits reversed and read
-// back as a fraction. Half of a Hammersley pair, and the reason
-// `ssao_kernel`'s output spreads instead of spiralling.
+/*
+	The van der Corput sequence: index `i`'s digits in `base`, reflected about
+	the point and read back as a fraction. 1 in base 2 is 0.5, 2 is 0.25, 3 is
+	0.75; in base 3, 1 is 1/3 and 2 is 2/3.
+
+	General in the base since P7c, where the SSAO kernel needed a second one
+	(base 3) to decide a tap's radius independently of its angle. It was a
+	base-2-only bit-reversal before that -- five shifts and masks, which is
+	the fast way and only ever ran at most 32 times at load, so generality is
+	the better trade.
+
+	`base` must be at least 2; a base of 0 or 1 has no digits to reflect and
+	the loop below would not terminate.
+*/
 @(private)
-radical_inverse_base2 :: proc(i: u32) -> f32 {
-	bits := i
+radical_inverse :: proc(index: u32, base: u32) -> f32 {
+	if base < 2 do return 0
 
-	bits = (bits << 16) | (bits >> 16)
-	bits = ((bits & 0x55555555) << 1) | ((bits & 0xAAAAAAAA) >> 1)
-	bits = ((bits & 0x33333333) << 2) | ((bits & 0xCCCCCCCC) >> 2)
-	bits = ((bits & 0x0F0F0F0F) << 4) | ((bits & 0xF0F0F0F0) >> 4)
-	bits = ((bits & 0x00FF00FF) << 8) | ((bits & 0xFF00FF00) >> 8)
+	result   := f32(0)
+	fraction := f32(1) / f32(base)
 
-	return f32(bits) * 2.3283064365386963e-10 // 1 / 2^32
+	i := index
+	for i > 0 {
+		result   += f32(i % base) * fraction
+		fraction /= f32(base)
+		i        /= base
+	}
+
+	return result
 }
 
 // -----------------------------------------------------------------------

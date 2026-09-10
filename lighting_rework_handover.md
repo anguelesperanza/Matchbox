@@ -22,8 +22,8 @@ and it is current.
 
 | Branch | What |
 | --- | --- |
-| `lighting-rework` | **The checkpoint.** Pushed to `origin`, 58 commits, P0 through P6 plus the scope change. This is the restore point. |
-| `lighting-rework-p6` | Where HEAD currently sits. Same commit as the checkpoint. |
+| `lighting-rework` | **The checkpoint.** Pushed to `origin`, P0 through P7b plus the scope change and `examples/lighting-lab`. This is the restore point. |
+| `lighting-rework-p6` | Where HEAD currently sits -- the branch name is P6's but the work on it runs through P7b. Same commit as the checkpoint. |
 | `lighting-rework-p0` … `-p5` | Each phase's own branch, stacked. Kept for history; nothing needs them. |
 
 `main` is untouched and has none of this. Nothing has been merged and no pull
@@ -42,10 +42,10 @@ From the repository root. These are the numbers as of this handover:
 
 ```
 odin check matchbox -no-entry-point          # must produce no output
-odin test matchbox -define:ODIN_TEST_THREADS=1   # 184 tests, ~3.9s
+odin test matchbox -define:ODIN_TEST_THREADS=1   # 229 tests, ~3.6s
 ```
 
-Every example must build -- **26 of them have a `main.odin`**;
+Every example must build -- **27 of them have a `main.odin`**;
 `examples/random-walk` is a pre-existing empty directory and the only skip:
 
 ```

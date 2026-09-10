@@ -840,6 +840,11 @@ piece verifiable. Proposed shape:
   architecture is what P7b and anything later reuses, which is why it goes
   first.
 - **P7b -- screen-space effects needing scene data: SSAO and volumetrics.**
+  *Built. `ssao.odin`, `volumetric.odin`, `shaders/ssao*.hlsl`,
+  `shaders/volumetric.frag.hlsl`, and the depth prepass in
+  `pipeline_forward.odin`; `ssao_test.odin` and `volumetric_test.odin`. See
+  section 7.9 for what the asymmetry turned out to be worth.*
+
   Both want depth, and SSAO wants normals too. Note the asymmetry worth
   planning around: under `DEFERRED` the G-buffer already has both, while
   `FORWARD` and `CLUSTERED` would need a depth prepass or a normal target to
@@ -1141,6 +1146,139 @@ different tunings rather than toggling one.
 **Deliberately not built**, each needing a frame to tune against: the Karis
 luminance average inside the downsample (so a lone bright pixel can still
 flicker as it moves), a lens dirt mask, and per-level weighting.
+
+---
+
+## 7.9 P7b, and the question the brief asked
+
+**The asymmetry was real, and it was only half the phase.** Section 5 warned
+that `DEFERRED` has depth and normals before it shades while `FORWARD` and
+`CLUSTERED` do not, and asked that the phase confront it rather than discover
+it. What building it settled is that the warning applied to *one* of the two
+effects, and the two are otherwise not alike at all:
+
+- **SSAO needs depth before shading**, because what it produces is a value for
+  `Surface.occlusion` and occlusion multiplies the ambient term. Under
+  `DEFERRED` the AO pass slots between the G-buffer fill and the lighting pass
+  and costs one fullscreen pass. Under the forward family it costs a **depth
+  prepass** -- the geometry drawn a second time with a fragment shader that
+  writes nothing.
+- **Volumetric light needs depth after shading**, because it *adds* light
+  rather than modulating it. All three pipelines write depth by then, so it is
+  pipeline-agnostic with nothing to design around, and `FORWARD` pays nothing
+  extra for it.
+
+So the answer to "depth prepass or normal target" is *neither, for half of
+it*. A normal target was never built: SSAO reconstructs normals from depth
+(`reconstruct_normal`, ssao.frag.hlsl), which costs accuracy at silhouettes
+and buys one code path across three pipelines rather than a branch on which
+pipeline drew the frame -- the property `lighting_plan.md` asks of every
+module.
+
+**What the prepass costs an immediate-mode API, which is the part worth
+carrying forward.** A prepass has to draw every model in the frame before the
+frame has said what its models are. So under the forward family with SSAO on,
+`draw_model` and `draw_skybox` stop drawing and start queueing
+(`Renderer.scene_deferred`), and `end_drawing_3d` replays the queue twice.
+That is not a new mechanism -- P6 already queued the skybox and every
+transparent part for a replay into a later pass -- but it is the first time
+the *whole* frame goes through it, and it forced both procedures to grow a
+branch **ahead of** their own "no pass is open" guards. With the scene
+deferred there genuinely is no pass, and a guard written to catch a stray draw
+would otherwise have silently eaten every model in the scene.
+
+It is worth knowing that every 3D draw in this package funnels through those
+two procedures -- `draw_cube`, `draw_sphere`, `draw_grid`, `draw_bounds_wires`
+and the rest all call `draw_model` -- which is what made this tractable at
+all. A single drawing path that bypassed them would have gone missing from
+every AO frame with nothing to point at.
+
+**`Surface` held a third time.** Both pipelines apply occlusion in one place:
+`shade_surface` (lighting_core.hlsli) multiplies the AO sample into
+`surface.occlusion` before the model dispatch. One line, one file, three
+pipelines, every shading model. P4 tested that seam with a light kind it was
+not designed for; P6 tested it with a pipeline; this tests it with a screen-
+space input that is neither.
+
+**And the light contract held a third time too, further out than P4 went.**
+`volumetric.frag.hlsl` calls `sample_light` for a point in *mid-air* -- no
+surface, no BRDF, nothing to shade -- and gets back a light's kind, its
+attenuation, a spot's cone and its `shadow_visibility` lookup already folded
+into one radiance. Shafts through a window are shadow maps seen edge-on, and
+they cost one function call because that function was written for somebody
+else. The `Surface` handed over is a stand-in with two load-bearing fields:
+`position`, and a **zero** `normal` -- there is no surface, so there is no
+normal to offset the shadow lookup along, and `Shadow_Bias.normal_offset`
+multiplies by exactly that vector.
+
+**Register renumbering, again, and this is the third phase it has bitten.**
+The AO texture is declared in `lighting_core.hlsli` at a parametrized register
+so that the one place which reads it serves both including shaders -- which
+pushes all three storage buffers behind it up by one in each.
+`MESH_FRAG_SAMPLER_COUNT` 10 -> 11, `DEFERRED_LIGHTING_SAMPLER_COUNT` 11 -> 12,
+and `VOLUMETRIC_SAMPLER_COUNT` is 8. Both existing pins failed and were
+consciously updated, which is what they are for.
+
+**Those three counts were verified against the compiler rather than against
+arithmetic**, which is a check this rework had not run before and should run
+again whenever a sampler moves. Preprocessing each shader (`dxc -P`) and
+counting the `register(tN, space2)` declarations that survive macro expansion
+gives 11 samplers + 3 storage buffers for `mesh.frag`, 12 + 3 for
+`deferred_lighting.frag`, 8 + 3 for `volumetric.frag`, and 4 + 0 for
+`gbuffer.frag` -- each matching its constant, and each showing the storage
+buffers landing exactly where the `LIGHTS_T` defines say. That is the actual
+invariant; the pins only catch a *change*.
+
+**One change to a resource every 3D game already had.** `pick_depth_format`
+now requires `{.DEPTH_STENCIL_TARGET, .SAMPLER}` and the depth texture carries
+the extra usage flag. P6 deliberately gave `DEFERRED` its own sampled depth
+rather than widening this one, on the grounds that no forward game should pay
+for a deferred-only feature; that reasoning does not survive a feature every
+pipeline offers, and the alternative would have had to replace this texture
+anyway, since SDL3 bakes a pipeline's depth format in at creation. The pass
+still stores depth only when something is going to read it
+(`scene_depth_is_read`), which keeps the tiler cost off a game using neither
+effect.
+
+**One bug found by reading rather than by running.** When the depth prepass
+failed to open its pass, the scene pass still loaded depth -- handing it the
+previous frame's contents, so every fragment would test against stale
+geometry. A scene with holes punched through it, not an obvious failure.
+`load_depth` follows whether the prepass actually ran now.
+
+**Recorded, not fixed: `cluster_camera.xy` has been wrong since P5** for a
+game that draws 3D into a differently-sized `Render_Target` -- it carries the
+window's size where the pass's is wanted. P7b needed the correct value and
+added it as `Scene_Frag_Data.screen_size` rather than repointing the old
+field, because fixing that one means also checking `cluster_build`'s own
+CPU-side use of the same two numbers (light_cull.odin), and that is P5's
+territory rather than this phase's.
+
+**What was verified and what was not.** The SSAO sample kernel is checked in
+full -- every tap on the lit side of the surface, none longer than the unit
+hemisphere, lengths rising toward the rim, directions spreading rather than
+lining up -- across every sample count the settings allow, against a Python
+derivation whose bit-reversal is re-derived the slow way rather than with the
+same five-shift trick the implementation uses. Henyey-Greenstein is checked by
+numerically integrating it over the sphere at seven anisotropies, which is the
+property that *fixes* its `1/(4*pi)` rather than merely being consistent with
+it, plus the sign of the anisotropy as an ordering, since a flipped sense
+would pass every other test and put every shaft in the wrong half of the
+screen. Beer-Lambert is checked at `1/e` and by its multiplicative property,
+which a linear falloff would fail while passing the endpoints.
+
+**Everything else is in the shaders and needs a GPU.** No frame was rendered.
+Nothing confirms that the AO reads as contact shadow rather than as grime,
+that the normal reconstruction holds up at silhouettes, that the raymarch's
+step count is enough to hide its banding under the dither, or that either
+effect's default numbers suit a scene at the scale `examples/lighting` is
+built at.
+
+**Deliberately not built**, each wanting a frame to tune against: a bilateral
+(depth-aware) SSAO blur, half-resolution AO and volumetrics with a
+depth-aware upsample, a G-buffer normal path for `DEFERRED`, and the second
+half of the volumetric absorption -- light is attenuated on its way to the eye
+but not on its way in, which needs a second march per light per step.
 
 ---
 

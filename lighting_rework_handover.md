@@ -1,7 +1,8 @@
 # Lighting Rework -- Session Handover
 
-Written 2026-09-09, at the end of P6 and before P7 is dispatched, because the
-session doing this work outgrew its context. This is what a fresh session needs
+Written 2026-09-09 at the end of P6, and updated 2026-09-10 at the end of P7b
+-- see "Phase status" and "What is next", which are the two sections that go
+stale. Written because the session doing this work outgrew its context. This is what a fresh session needs
 to pick it up. It is not a summary of the work -- `lighting_rework.md` is that,
 and it is current.
 
@@ -142,18 +143,35 @@ in one line, with the detail in `lighting_rework.md`:
   `Surface` held, with exactly one hole: `blinn_phong` read the specular
   exponent off the bound material cbuffer, which is fine for forward and
   impossible for a deferred lighting pass. Fixed by widening `Surface`.
+- **P7a** -- the post chain: bloom and colour grading, and the rule that
+  decides what belongs in it (*a stage that needs a pass gets one; a stage
+  that is a per-pixel function of one texel does not*). Its own tests found
+  four bugs, three of them "an identity that is only nearly an identity".
+  Section 7.8.
+- **P7b** -- SSAO and volumetric light. The asymmetry the brief flagged was
+  real and covered only half the phase: SSAO needs depth *before* shading and
+  costs the forward family a depth prepass plus a deferred scene queue;
+  volumetrics needs it *after* and is pipeline-agnostic for free. Section 7.9.
+- **`examples/lighting-lab`** -- a room built to make every module visible one
+  key at a time, depending on no asset files at all. This is the thing to run
+  first if a GPU is ever available.
 
 ## What is next
 
-**P7**, and `lighting_rework.md` §5 now carries a recommended split -- the
-heading bundles three different jobs, and P2 and P3 both went better once
-split. Briefly: P7a is the post chain (bloom, colour grading) and its real
-deliverable is the multi-pass chain architecture, since `draw_post` applies one
-effect and bloom is inherently several passes; P7b is SSAO and volumetrics,
-whose interesting problem is that `DEFERRED` already has depth and normals in
-the G-buffer while `FORWARD`/`CLUSTERED` would need a prepass; P7c is localized
-reflection probes. Baked lightmaps and real-time GI are recommended out of P7
-entirely, on the same grounds normal mapping left P2.
+**P7c** -- localized reflection probes, extending P4's one scene-wide
+`Environment_Probe` to several with blending between them. The only piece of
+the P7 split not built. Baked lightmaps and real-time GI stay recommended out
+of P7 entirely, on the same grounds normal mapping left P2.
+
+**P8** is 2D, and is the larger remaining job -- see below.
+
+**Before either, if a GPU is ever available: run `examples/lighting-lab`.**
+Nothing in this rework has been rendered. That example exists to make each
+module visible one key at a time, and the first hour spent in it will be worth
+more than the next phase. Its own top comment says what to look at and in what
+order; the highest-value check is pressing **P**, since a picture that changes
+between FORWARD, CLUSTERED and DEFERRED means the `Surface` seam is wrong
+somewhere, and that is the gate P5 and P6 both had to leave unrun.
 
 **P8** is 2D, and §7.3 settles what it means: normal-mapped sprites filling the
 same `Surface` and running the same BRDFs, *and* 2D light volumes for the
@@ -179,6 +197,13 @@ Each is recorded where it belongs; none is forgotten.
   Left alone because the fix is either a seam violation or a fifth touch point,
   for a cost nothing here can measure.
 - **The scaling half of P5's gate** was never measured, and cannot be here.
+  `examples/lighting-lab`'s N key is the pair of pictures it needs -- three
+  lights against twenty-odd, switchable against the pipeline.
+- **P7a and P7b's own deferred list** is in `lighting_rework.md` §7.8/§7.9:
+  no Karis average in the bloom downsample, no bilateral SSAO blur, no
+  half-resolution AO or volumetrics, no G-buffer normal path for `DEFERRED`,
+  and only half of the volumetric absorption. Every one of them wants a frame
+  to tune against.
 - **Nothing has been seen to render.** The owner has checked
   `examples/lighting` by hand once, after P0. That is the only visual
   confirmation this rework has.
@@ -207,3 +232,18 @@ Each is recorded where it belongs; none is forgotten.
   benign -- the tests never call `cleanup`, which is what frees it.
 - Stale background-task notifications arrive for agents that finished long ago,
   sometimes marked "killed". Check the actual git state rather than reacting.
+- **A sampler count can be checked against the compiler rather than against
+  arithmetic**, and should be whenever one moves: preprocess the shader
+  (`dxc -T ps_6_0 -E main -I matchbox/shaders -P -Fi out.pp in.hlsl`) and count
+  the `register(tN, space2)` declarations that survive macro expansion. The
+  sampled textures come first and the storage buffers follow, so this confirms
+  both the `*_SAMPLER_COUNT` constant and that the `LIGHTS_T` defines land
+  where they were meant to. The pins in `render_test.odin`/`gbuffer_test.odin`
+  only catch a *change*; this checks the invariant.
+- **A composite literal cannot go straight into a `for ... in` clause or an
+  `if` condition** -- `for x in [?]f32{...}` and `if v != [3]f32{0,0,0}` are
+  both syntax errors, since the `{` is read as the start of the block. Assign
+  to a local first. Cost twenty minutes across P7a.
+- **`core:fmt` reads `{` as a format directive**, so a test message written as
+  `"got {%.2f, %.2f}"` comes back as `%!(MISSING CLOSE BRACE)` rather than the
+  numbers you wanted to read. Use parentheses in failure messages.

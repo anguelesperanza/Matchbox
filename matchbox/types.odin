@@ -274,6 +274,33 @@ Tonemap_Resolve_Frag_Data :: struct #align(16) {
 }
 
 /*
+	144 bytes. The localized reflection probes, as `lighting_core.hlsli`'s own
+	`Probes` cbuffer reads them -- fragment uniform slot 4, after the material
+	(0), the scene (1), CASCADED's cascades (2) and CUBE's faces (3).
+
+	Two parallel arrays rather than one array of a wider struct, for the
+	packing reason this package repeats at every uniform block: an HLSL array
+	element is padded up to 16 bytes whatever is in it, so a struct of
+	`position, radius, falloff` would occupy 32 bytes per probe with 12 of them
+	dead. Two float4 arrays is the same information in two thirds the space and
+	no padding rules to remember.
+
+	See `reflection_frag_data` (reflection.odin), which is the only thing that
+	fills it in.
+*/
+Probe_Frag_Data :: struct #align(16) {
+	probes: [MAX_REFLECTION_PROBES][4]f32, // xyz position, w radius
+	params: [MAX_REFLECTION_PROBES][4]f32, // x falloff fraction, yzw unused
+
+	// x how many probes are placed -- the blend loop's own bound, and what
+	// makes a slot past it unreadable rather than merely unwritten. y the
+	// prefiltered level count minus one, the scale a [0,1] roughness becomes
+	// a level index with. z that level count itself, which the layer
+	// arithmetic needs unreduced. w unused.
+	info: [4]f32,
+}
+
+/*
 	96 bytes. volumetric.frag.hlsl's own -- the matrix it reconstructs world
 	positions with, and the six numbers `Volumetric` (volumetric.odin) carries.
 

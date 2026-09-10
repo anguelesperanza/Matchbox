@@ -33,9 +33,11 @@
 */
 
 #define SSAO_T 11
-#define LIGHTS_T 12
-#define CLUSTER_RANGES_T 13
-#define CLUSTER_LIGHT_INDICES_T 14
+#define REFLECT_IRRADIANCE_T 12
+#define REFLECT_PREFILTERED_T 13
+#define LIGHTS_T 14
+#define CLUSTER_RANGES_T 15
+#define CLUSTER_LIGHT_INDICES_T 16
 
 // See mesh.vert.hlsl's own doc comment on this pragma: this is the one
 // fragment shader in the package carrying a matrix of its own

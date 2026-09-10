@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 375 of them -- with its arguments
+Every public procedure in the package -- 381 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -28,7 +28,7 @@ any.
 - [Render targets](#render-targets) -- 5
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 29
+- [Other](#other) -- 35
 
 ## Getting started
 
@@ -2599,6 +2599,42 @@ create_material_subsurface :: proc(
 ) -> Material
 ```
 A wrapped-diffuse translucency approximation -- see `brdf/subsurface.hlsli`'s own doc comment for exactly what this does and does not model (it is not a real BSSRDF).
+
+### `reflection.odin`
+
+```odin
+add_reflection_probe :: proc(
+	position: [3]f32,
+	radius: f32,
+	falloff: f32 = REFLECTION_PROBE_FALLOFF,
+) -> int
+```
+Places a probe and hands back its slot, or -1 when the scene already has `MAX_REFLECTION_PROBES` of them.
+
+```odin
+clear_reflection_probes :: proc()
+```
+Forgets every placed probe.
+
+```odin
+get_reflection_probe_count :: proc() -> int
+```
+How many probes the scene currently has placed.
+
+```odin
+begin_probe_capture :: proc(index: int, face: int) -> bool
+```
+Opens a pass rendering face `face` of probe `index`'s own capture cube, from the probe's position, at a ninety-degree field of view.
+
+```odin
+end_probe_capture :: proc()
+```
+Closes the capture pass opened by `begin_probe_capture`.
+
+```odin
+bake_reflection_probe :: proc(index: int) -> bool
+```
+Convolves whatever the six capture passes left in the capture cube into probe `index`'s own slice of the two shared arrays: one irradiance face per face, and one prefiltered face per roughness level per face.
 
 ### `shadow.odin`
 

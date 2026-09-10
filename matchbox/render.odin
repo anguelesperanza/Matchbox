@@ -14,6 +14,19 @@ import sdl "vendor:sdl3"
 	`maxPerStageDescriptorSamplers`) rather than merely asserting on source
 	text.
 
+	**Grew to 13 in P7c**, for the two arrays every localized reflection probe
+	is baked into (`reflection.odin`) -- also declared in
+	`lighting_core.hlsli` rather than here, since the deferred lighting pass
+	blends the identical probes in the identical place.
+
+	**Three under the floor now, and the deferred shader is two under**, which
+	is worth stating plainly rather than leaving to be discovered: this is the
+	first phase where the headroom is small enough to matter. The next feature
+	wanting a per-fragment texture should look first at whether it can share
+	an array with something already bound -- which is exactly what these two
+	do, and why four probes cost two slots rather than eight. Section 7.7's
+	rule stands: past 16 is a stop-and-ask, not a pin to raise.
+
 	**Grew to 11 in P7b**, for the ambient-occlusion texture `shade_surface`
 	multiplies into `Surface.occlusion` -- declared in `lighting_core.hlsli`
 	rather than in `mesh.frag.hlsl` itself, since the deferred lighting pass
@@ -39,7 +52,7 @@ import sdl "vendor:sdl3"
 	`MAX_CASCADES`/`MAX_CASCADES_HLSL` (shadow.odin,
 	shaders/shadow/cascaded.hlsli) already has.
 */
-MESH_FRAG_SAMPLER_COUNT :: 11
+MESH_FRAG_SAMPLER_COUNT :: 13
 
 /*
 	How many sampled textures/samplers `deferred_lighting.frag.hlsl`
@@ -50,8 +63,10 @@ MESH_FRAG_SAMPLER_COUNT :: 11
 	textures `mesh.frag.hlsl` reads (base colour, metallic-roughness,
 	occlusion, emissive arrive through the G-buffer instead): four G-buffer
 	targets, one depth target, two PCF/PCSS shadow maps, one CASCADED array,
-	one CUBE array, two environment-probe maps, and since P7b the AO texture
-	`lighting_core.hlsli` declares for both shaders alike -- t0-t11.
+	one CUBE array, two environment-probe maps, the AO texture P7b added and
+	the two localized-probe arrays P7c added -- t0-t13. Two under Vulkan's
+	floor of 16, which is the least headroom this package has ever had; see
+	`MESH_FRAG_SAMPLER_COUNT`'s own note on what to do about it.
 
 	Five under Vulkan's guaranteed per-stage floor of 16
 	(`gbuffer_test.odin` pins the actual value the same way
@@ -59,7 +74,7 @@ MESH_FRAG_SAMPLER_COUNT :: 11
 	the "stop and report" the phase brief asked for if it had come out
 	otherwise.
 */
-DEFERRED_LIGHTING_SAMPLER_COUNT :: 12
+DEFERRED_LIGHTING_SAMPLER_COUNT :: 14
 
 /*
 	How many sampled textures/samplers `volumetric.frag.hlsl` declares: this
@@ -76,7 +91,7 @@ DEFERRED_LIGHTING_SAMPLER_COUNT :: 12
 	the same reason: the number has to equal what the compiled binary actually
 	declares, and only a comment keeps it in step.
 */
-VOLUMETRIC_SAMPLER_COUNT :: 8
+VOLUMETRIC_SAMPLER_COUNT :: 10
 
 // The built-in shader set, compiled from matchbox/shaders and loaded by init.
 //
@@ -379,6 +394,18 @@ Lighting :: struct {
 	// not.
 	bloom: Bloom_Targets,
 
+	/*
+		P7c's localized reflection probes -- every one of them baked into two
+		shared texture arrays, plus the cube a capture renders into on the way
+		there. See Reflection_Probes (reflection.odin).
+
+		Beside `probe` above rather than replacing it: that one is P4's
+		scene-wide bake and is still what a fragment falls back to wherever
+		the localized probes do not reach, which is most of a scene with a few
+		probes in it.
+	*/
+	reflection: Reflection_Probes,
+
 	// SSAO's own two single-channel targets -- see Ssao_Targets (ssao.odin).
 	// Zero value until a game turns SSAO on, released again when it turns it
 	// off, the same shape Bloom_Targets has.
@@ -575,7 +602,8 @@ Renderer :: struct {
 	// whichever of a real probe or default_probe_texture's own placeholder is
 	// currently bound for each. See draw_model_immediate's own comment on
 	// why these two always bind together.
-	bound_ssao_map:   ^sdl.GPUTexture,
+	bound_ssao_map:       ^sdl.GPUTexture,
+	bound_reflect_probes: [2]^sdl.GPUTexture,
 	bound_probe_maps:   [2]^sdl.GPUTexture,
 
 	bound_light_buffer: ^sdl.GPUBuffer,
@@ -670,6 +698,7 @@ bind_cache_reset :: proc() {
 	r.bound_cube_maps         = nil
 	r.bound_probe_maps        = {}
 	r.bound_ssao_map          = nil
+	r.bound_reflect_probes    = {}
 	r.bound_light_buffer      = nil
 	r.bound_cluster_ranges        = nil
 	r.bound_cluster_light_indices = nil

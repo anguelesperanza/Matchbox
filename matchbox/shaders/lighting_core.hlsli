@@ -71,14 +71,20 @@
 #ifndef SSAO_T
 #define SSAO_T 10
 #endif
+#ifndef REFLECT_IRRADIANCE_T
+#define REFLECT_IRRADIANCE_T 11
+#endif
+#ifndef REFLECT_PREFILTERED_T
+#define REFLECT_PREFILTERED_T 12
+#endif
 #ifndef LIGHTS_T
-#define LIGHTS_T 11
+#define LIGHTS_T 13
 #endif
 #ifndef CLUSTER_RANGES_T
-#define CLUSTER_RANGES_T 12
+#define CLUSTER_RANGES_T 14
 #endif
 #ifndef CLUSTER_LIGHT_INDICES_T
-#define CLUSTER_LIGHT_INDICES_T 13
+#define CLUSTER_LIGHT_INDICES_T 15
 #endif
 
 #define CONCAT_(a, b) a##b
@@ -102,6 +108,48 @@
 */
 Texture2D<float> ssao_map : register(CONCAT(t, SSAO_T), space2);
 SamplerState     ssao_smp : register(CONCAT(s, SSAO_T), space2);
+
+/*
+    P7c's localized reflection probes (`reflection.odin`), declared here for
+    the same reason the AO texture above is: every shader that shades a
+    `Surface` reads them, in one shared place, so declaring them beside that
+    place is what keeps it one place.
+
+    Both are `Texture2DArray`s holding *every* probe rather than one apiece --
+    `probe * 6 + face` for the irradiance, `probe * 6 * levels + level * 6 +
+    face` for the prefiltered. That is what keeps the sampler count flat as
+    probes are added: four probes cost these same two slots, where a texture
+    pair per probe would have hit Vulkan's per-stage floor of 16 at the third.
+
+    Bound to the 1x1 black placeholder whenever nothing has been baked, so a
+    scene that never places a probe reads zero rather than sampling a layer
+    nobody wrote -- and `probe_info.x` is zero there too, so the blend below
+    never even looks. Two guards for one condition, neither load-bearing
+    alone.
+*/
+Texture2DArray<float4> reflect_irradiance  : register(CONCAT(t, REFLECT_IRRADIANCE_T), space2);
+SamplerState           reflect_irr_smp     : register(CONCAT(s, REFLECT_IRRADIANCE_T), space2);
+Texture2DArray<float4> reflect_prefiltered : register(CONCAT(t, REFLECT_PREFILTERED_T), space2);
+SamplerState           reflect_pre_smp     : register(CONCAT(s, REFLECT_PREFILTERED_T), space2);
+
+// Must equal matchbox.MAX_REFLECTION_PROBES -- a fixed compile-time number
+// only this comment keeps in step, the same arrangement
+// MAX_CASCADES/MAX_CASCADES_HLSL already has.
+#define MAX_REFLECTION_PROBES_HLSL 4
+
+/*
+    Where every placed probe is and how far it reaches. Slot 4 in the fragment
+    stage's own uniform sequence, after the material (b0), the scene (b1),
+    CASCADED's cascades (b2) and CUBE's faces (b3).
+
+    Must match matchbox.Probe_Frag_Data.
+*/
+cbuffer Probes : register(b4, space3)
+{
+    float4 probe_sphere[MAX_REFLECTION_PROBES_HLSL]; // xyz position, w radius
+    float4 probe_params[MAX_REFLECTION_PROBES_HLSL]; // x falloff fraction, yzw unused
+    float4 probe_info;                               // x count, y levels-1, z levels, w unused
+};
 
 
 /*
@@ -574,6 +622,108 @@ float2 probe_layer_uv(float3 direction, int face)
     scene that wants a tilted split is exactly what `ENVIRONMENT_PROBE`
     is for.
 */
+/*
+    How much of probe `i` reaches `world`: 1 well inside its influence sphere,
+    falling to 0 at its radius.
+
+    `falloff` is the fraction of the radius spent fading, so the plateau ends
+    at `radius * (1 - falloff)`. smoothstep rather than a linear ramp because
+    a linear one has a visible crease where it meets the plateau -- the
+    derivative jumps, and a derivative jump in a lighting term reads as a ring
+    on a flat wall.
+
+    A radius of zero returns zero rather than dividing by it, which is also
+    the right answer: a probe that reaches nowhere influences nothing.
+*/
+float reflection_probe_weight(int i, float3 world)
+{
+    float radius = probe_sphere[i].w;
+    if (radius <= 0.0) return 0.0;
+
+    float distance = length(world - probe_sphere[i].xyz);
+    if (distance >= radius) return 0.0;
+
+    float falloff = clamp(probe_params[i].x, 0.0, 1.0);
+    float inner   = radius * (1.0 - falloff);
+
+    // A hard-edged probe (falloff 0) has inner == radius, and smoothstep with
+    // equal edges is undefined -- returned early rather than nudged, so a
+    // caller asking for a hard edge gets one.
+    if (distance <= inner) return 1.0;
+    if (inner >= radius)   return 1.0;
+
+    return 1.0 - smoothstep(inner, radius, distance);
+}
+
+/*
+    Every localized probe's irradiance in direction `normal`, weighted and
+    summed -- and `total` comes back saying how much of the answer they
+    between them accounted for.
+
+    **`total` is the whole interface.** It is what lets the caller mix the
+    remainder with the scene-wide probe instead of this function having to
+    know about that probe at all: inside one probe it is 1 and the fallback
+    contributes nothing; in the fade at a probe's edge it is a half, and half
+    the sky comes back. Two probes overlapping sum past 1 and the result is
+    normalized, which is what makes the seam between them invisible rather
+    than merely soft.
+*/
+float3 reflection_probe_irradiance(float3 world, float3 normal, out float total)
+{
+    total = 0.0;
+    float3 sum = float3(0, 0, 0);
+
+    int count = int(probe_info.x);
+    int face  = shadow_cube_face_index(normal);
+    float2 uv = probe_layer_uv(normal, face);
+
+    for (int i = 0; i < count; i++)
+    {
+        float weight = reflection_probe_weight(i, world);
+        if (weight <= 0.0) continue;
+
+        sum   += reflect_irradiance.Sample(reflect_irr_smp, float3(uv, float(i * 6 + face))).rgb * weight;
+        total += weight;
+    }
+
+    // Normalized only when the probes over-account, never when they
+    // under-account: scaling a half-covered fragment up to full strength
+    // would erase the fade the falloff exists to provide.
+    if (total > 1.0) sum /= total;
+
+    return sum;
+}
+
+// The same blend for the specular half, at the roughness level
+// `pbr_environment_specular` (brdf/pbr_common.hlsli) picked. `level` is an
+// index rather than a roughness because that function owns the mapping
+// between them and this one should not have a second opinion about it.
+float3 reflection_probe_specular(float3 world, float3 r, int level, out float total)
+{
+    total = 0.0;
+    float3 sum = float3(0, 0, 0);
+
+    int count  = int(probe_info.x);
+    int levels = max(int(probe_info.z), 1);
+
+    int    face = shadow_cube_face_index(r);
+    float2 uv   = probe_layer_uv(r, face);
+
+    for (int i = 0; i < count; i++)
+    {
+        float weight = reflection_probe_weight(i, world);
+        if (weight <= 0.0) continue;
+
+        int layer = i * 6 * levels + level * 6 + face;
+        sum   += reflect_prefiltered.Sample(reflect_pre_smp, float3(uv, float(layer))).rgb * weight;
+        total += weight;
+    }
+
+    if (total > 1.0) sum /= total;
+
+    return sum;
+}
+
 float3 ambient_light(Surface surface)
 {
     int kind = int(ambient.w);
@@ -586,9 +736,20 @@ float3 ambient_light(Surface surface)
 
     if (kind == AMBIENT_ENVIRONMENT_PROBE)
     {
+        /*
+            P7c: the localized probes first, then the scene-wide one for
+            whatever they did not account for. A scene that placed no probes
+            gets `local_weight == 0` and this collapses to exactly what P4
+            shipped, which is why no example had to change.
+        */
+        float  local_weight = 0.0;
+        float3 local        = reflection_probe_irradiance(surface.position, surface.normal, local_weight);
+
         int    face = shadow_cube_face_index(surface.normal);
         float2 uv   = probe_layer_uv(surface.normal, face);
-        return irradiance_map.Sample(probe_sampler0, float3(uv, float(face))).rgb;
+        float3 global = irradiance_map.Sample(probe_sampler0, float3(uv, float(face))).rgb;
+
+        return local + global * saturate(1.0 - local_weight);
     }
 
     return ambient.rgb; // AMBIENT_CONSTANT

@@ -284,6 +284,16 @@ volumetric_run :: proc() {
 	ssao_binding := sdl.GPUTextureSamplerBinding{texture = ssao_texture, sampler = r.linear_clamp_sampler}
 	sdl.BindGPUFragmentSamplers(pass, 7, &ssao_binding, 1)
 
+	// And P7c's two probe arrays at 8 and 9 -- unread here for the same
+	// reason the probe pair above is, and bound for the same reason: a
+	// declared sampler has to have something in it.
+	reflect_irradiance, reflect_prefiltered := reflection_probe_textures()
+	reflect_bindings := [2]sdl.GPUTextureSamplerBinding{
+		{texture = reflect_irradiance,  sampler = r.linear_clamp_sampler},
+		{texture = reflect_prefiltered, sampler = r.linear_clamp_sampler},
+	}
+	sdl.BindGPUFragmentSamplers(pass, 8, &reflect_bindings[0], 2)
+
 	light_buffer := r.lighting.light_buffer
 	sdl.BindGPUFragmentStorageBuffers(pass, 0, &light_buffer, 1)
 

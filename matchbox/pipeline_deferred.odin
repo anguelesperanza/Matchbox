@@ -308,6 +308,16 @@ draw_deferred_lighting_quad :: proc() {
 	ssao_binding := sdl.GPUTextureSamplerBinding{texture = ssao_texture, sampler = r.linear_clamp_sampler}
 	sdl.BindGPUFragmentSamplers(r.pass, 11, &ssao_binding, 1)
 
+	// P7c's localized probes, slots 12 and 13 -- the same pair the forward
+	// mesh shader binds, read by the same `reflection_probe_irradiance` in
+	// the same one place.
+	reflect_irradiance, reflect_prefiltered := reflection_probe_textures()
+	reflect_bindings := [2]sdl.GPUTextureSamplerBinding{
+		{texture = reflect_irradiance,  sampler = r.linear_clamp_sampler},
+		{texture = reflect_prefiltered, sampler = r.linear_clamp_sampler},
+	}
+	sdl.BindGPUFragmentSamplers(r.pass, 12, &reflect_bindings[0], 2)
+
 	light_buffer := r.lighting.light_buffer
 	sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)
 

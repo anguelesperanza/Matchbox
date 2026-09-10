@@ -956,6 +956,27 @@ draw_model_immediate :: proc(
 					r.bound_ssao_map = ssao_texture
 				}
 
+				/*
+					P7c's localized probes, slots 11 and 12 -- one pair of
+					arrays holding every probe, so this binds the same two
+					textures whether the scene placed one probe or four. The
+					1x1 black placeholder stands in whenever nothing has been
+					baked, the same shape the scene-wide probe pair above uses
+					and for the same reason: black is the identity of emitted
+					light.
+				*/
+				reflect_irradiance, reflect_prefiltered := reflection_probe_textures()
+				reflect_maps := [2]^sdl.GPUTexture{reflect_irradiance, reflect_prefiltered}
+
+				if r.bound_reflect_probes != reflect_maps {
+					reflect_bindings := [2]sdl.GPUTextureSamplerBinding{
+						{texture = reflect_maps[0], sampler = r.linear_clamp_sampler},
+						{texture = reflect_maps[1], sampler = r.linear_clamp_sampler},
+					}
+					sdl.BindGPUFragmentSamplers(r.pass, 11, &reflect_bindings[0], 2)
+					r.bound_reflect_probes = reflect_maps
+				}
+
 				if r.bound_light_buffer != r.lighting.light_buffer {
 					light_buffer := r.lighting.light_buffer
 					sdl.BindGPUFragmentStorageBuffers(r.pass, 0, &light_buffer, 1)

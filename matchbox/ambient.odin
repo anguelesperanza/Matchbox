@@ -242,7 +242,11 @@ create_environment_probe :: proc(
 	does not provide, since every existing caller of that one only ever
 	samples what it makes, never renders into it.
 */
-@(private = "file")
+// Package-private rather than file-private since P7c: `reflection.odin`
+// makes the identical thing for its own shared probe arrays, and the two
+// agreeing on the type, the usage flags and the layer layout is the whole
+// reason the same sampling helpers read both.
+@(private)
 create_cube_array_render_target :: proc(size, layer_count: int, format: sdl.GPUTextureFormat) -> (^sdl.GPUTexture, Error) {
 	texture := sdl.CreateGPUTexture(mbi.renderer.device, {
 		type                 = .D2_ARRAY,

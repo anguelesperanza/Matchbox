@@ -554,6 +554,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Ssao_Frag_Data)            == 704)
 	#assert(size_of(Ssao_Blur_Frag_Data)       == 16)
 	#assert(size_of(Volumetric_Frag_Data)      == 96)
+	#assert(size_of(Probe_Frag_Data)           == 144)
 	#assert(size_of(Deferred_Lighting_Frag_Data) == 64)
 
 	// GAMEPAD pulls JOYSTICK in with it, and brings SDL's controller mapping
@@ -679,7 +680,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		against.
 	*/
 	mbi.renderer.shaders.mesh_frag = create_builtin_shader(
-		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 4, 3)
+		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 5, 3)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -704,7 +705,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		#load("shaders/fullscreen.vert.spv"), #load("shaders/fullscreen.vert.dxil"), .VERTEX, 0, 0)
 	mbi.renderer.shaders.deferred_lighting_frag = create_builtin_shader(
 		#load("shaders/deferred_lighting.frag.spv"), #load("shaders/deferred_lighting.frag.dxil"),
-		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 4, 3)
+		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 5, 3)
 
 	// Post-processing. One sampler -- the render target -- and one uniform
 	// block shared by all three, so an effect that ignores a field ignores it.
@@ -749,7 +750,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	// three storage buffers every shader that includes that file gets.
 	mbi.renderer.shaders.volumetric = create_builtin_shader(
 		#load("shaders/volumetric.frag.spv"), #load("shaders/volumetric.frag.dxil"),
-		.FRAGMENT, VOLUMETRIC_SAMPLER_COUNT, 4, 3)
+		.FRAGMENT, VOLUMETRIC_SAMPLER_COUNT, 5, 3)
 
 	/*
 		Environment probe baking (ambient.odin). Both read one sampler -- the
@@ -854,6 +855,18 @@ init :: proc(title: string, width: i32, height: i32) {
 		than picking one a pipeline was not built against.
 	*/
 	mbi.renderer.lighting.ssao.format = pick_ssao_format()
+
+	/*
+		P7c's capture bookkeeping starts at -1, which is the one field in this
+		package whose zero value is actively wrong: `begin_probe_capture`
+		asserts that no capture is already open by testing `capturing_probe < 0`,
+		and a zero would read as "probe 0 is mid-capture" and fire that
+		assertion on the very first call. Set here rather than defended against
+		at the use site, so there is one answer rather than two.
+	*/
+	mbi.renderer.lighting.reflection.capturing_probe = -1
+	mbi.renderer.lighting.reflection.capturing_face  = -1
+	mbi.renderer.lighting.reflection.settings        = ENVIRONMENT_PROBE_DEFAULTS
 
 	mbi.renderer.pipelines.ssao = create_pipeline(
 		mbi.renderer.shaders.ssao,
@@ -1477,6 +1490,10 @@ cleanup :: proc() {
 
 	// SSAO's own two, the same "only once a game turned it on". See ssao.odin.
 	release_ssao_targets()
+
+	// P7c's probe arrays and its capture cube -- only ever made once a game
+	// captures a probe. See reflection.odin.
+	release_reflection_targets()
 
 	// DEFERRED's own targets -- only ever made once a game selects that
 	// pipeline. See Gbuffer_Targets' own doc comment (gbuffer.odin).

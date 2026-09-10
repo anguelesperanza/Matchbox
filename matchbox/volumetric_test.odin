@@ -243,7 +243,12 @@ test_scene_depth_is_read_covers_volumetric :: proc(t: ^testing.T) {
 // keeps it in step, and Vulkan's guaranteed per-stage floor is 16.
 @(test)
 test_volumetric_sampler_count_is_pinned_under_vulkan_floor :: proc(t: ^testing.T) {
-	testing.expect_value(t, VOLUMETRIC_SAMPLER_COUNT, 8)
+	// 8 through P7b, 10 since P7c added the two localized-probe arrays -- which
+	// this shader declares and never reads, for the same reason it declares
+	// the scene-wide probe pair it never reads: lighting_core.hlsli declares
+	// them for everything that includes it, and a declared sampler has to have
+	// something bound in it.
+	testing.expect_value(t, VOLUMETRIC_SAMPLER_COUNT, 10)
 
 	testing.expect(
 		t, VOLUMETRIC_SAMPLER_COUNT < 16,

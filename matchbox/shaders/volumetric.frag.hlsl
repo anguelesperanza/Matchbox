@@ -71,9 +71,11 @@ SamplerState           probe_sampler1  : register(s6, space2);
 // lighting_core.hlsli's own comment on why every one of these moves whenever
 // a texture is added anywhere in front of it.
 #define SSAO_T 7
-#define LIGHTS_T 8
-#define CLUSTER_RANGES_T 9
-#define CLUSTER_LIGHT_INDICES_T 10
+#define REFLECT_IRRADIANCE_T 8
+#define REFLECT_PREFILTERED_T 9
+#define LIGHTS_T 10
+#define CLUSTER_RANGES_T 11
+#define CLUSTER_LIGHT_INDICES_T 12
 
 #include "lighting_core.hlsli"
 

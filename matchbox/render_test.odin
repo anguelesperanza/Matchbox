@@ -45,7 +45,16 @@ test_mesh_frag_sampler_count_is_pinned_under_vulkan_floor :: proc(t: ^testing.T)
 	// under the floor the second assertion below checks, and the sampler
 	// carries with it the renumbering of every storage buffer behind it,
 	// which is the part worth having a test insist somebody notices.
-	testing.expect_value(t, MESH_FRAG_SAMPLER_COUNT, 11)
+	//
+	// And P7c a third time -- "expected 11, got 13", for the two arrays every
+	// localized reflection probe is baked into (reflection.odin). Looked at
+	// and accepted, with less comfort than the last two: 13 leaves three
+	// slots under the floor, and the deferred lighting shader is at 14. The
+	// note on MESH_FRAG_SAMPLER_COUNT itself (render.odin) says what a
+	// feature wanting the next one should do instead, which is what those two
+	// arrays already did -- four probes share two slots rather than taking
+	// eight.
+	testing.expect_value(t, MESH_FRAG_SAMPLER_COUNT, 13)
 
 	// The actual invariant: Vulkan's spec-guaranteed minimum for both
 	// maxPerStageDescriptorSampledImages and maxPerStageDescriptorSamplers is

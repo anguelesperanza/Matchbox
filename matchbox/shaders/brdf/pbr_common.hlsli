@@ -204,8 +204,27 @@ float3 pbr_environment_specular(Surface surface, float3 f0)
     int    face = shadow_cube_face_index(r);
     float2 uv   = probe_layer_uv(r, face);
 
-    float3 prefiltered = prefiltered_map.Sample(probe_sampler1, float3(uv, float(level * 6 + face))).rgb;
-    float2 env_brdf    = pbr_env_brdf_approx(surface.roughness, n_dot_v);
+    /*
+        P7c: the localized probes first, then the scene-wide one for the
+        remainder -- the identical split `ambient_light` makes for the diffuse
+        half, and it has to be identical or a surface would take its diffuse
+        from one probe and its reflection from another.
+
+        **No parallax correction**, which shows up here rather than in the
+        diffuse half: a reflection is addressed by direction alone, as though
+        the room the probe captured were infinitely far away. A mirror-flat
+        floor will therefore not show the wall where the wall actually is. The
+        fix is to intersect the reflection ray with a box or sphere standing
+        in for the room and re-address from there, which needs a shape per
+        probe and a frame to judge it against.
+    */
+    float  local_weight = 0.0;
+    float3 local        = reflection_probe_specular(surface.position, r, level, local_weight);
+
+    float3 global      = prefiltered_map.Sample(probe_sampler1, float3(uv, float(level * 6 + face))).rgb;
+    float3 prefiltered = local + global * saturate(1.0 - local_weight);
+
+    float2 env_brdf = pbr_env_brdf_approx(surface.roughness, n_dot_v);
 
     return prefiltered * (f0 * env_brdf.x + env_brdf.y);
 }

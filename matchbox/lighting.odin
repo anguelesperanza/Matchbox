@@ -569,9 +569,10 @@ Cube_Frag_Data :: struct #align(16) {
 	game may therefore set lights or lighting settings whenever it likes,
 	including before `begin_drawing`.
 
-	Fragment slot 1 is `Scene`, slot 2 `Cascade_Data`, slot 3 `Cube_Data`.
-	Slot 0 is the per-part material (material.odin). The last two are pushed
-	on every draw regardless of `settings.technique`, the same "always
+	Fragment slot 1 is `Scene`, slot 2 `Cascade_Data`, slot 3 `Cube_Data`,
+	slot 4 `Probes` (P7c, reflection.odin). Slot 0 is the per-part material
+	(material.odin). The last three are pushed on every draw regardless of
+	`settings.technique` or whether any probe is placed, the same "always
 	something valid bound, whether or not this game uses it" shape the shadow
 	map placeholders already have -- see `Shadow_State`'s own doc comment.
 */
@@ -669,4 +670,11 @@ push_lighting :: proc(camera: Camera3D) {
 		caster          = {f32(sh.cube_caster_index[0]) if sh.settings.enabled else -1, 0, 0, 0},
 	}
 	sdl.PushGPUFragmentUniformData(r.cmd, 3, &cube_data, size_of(cube_data))
+
+	// Slot 4: P7c's localized probes. Pushed every frame regardless of
+	// whether any are placed, the same "always something valid bound" shape
+	// slots 2 and 3 already have -- a scene with none gets a count of zero
+	// and the blend loop never runs.
+	probe_data := reflection_frag_data()
+	sdl.PushGPUFragmentUniformData(r.cmd, 4, &probe_data, size_of(probe_data))
 }

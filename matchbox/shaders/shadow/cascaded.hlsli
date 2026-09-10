@@ -34,11 +34,37 @@
 #define MAX_CASCADES_HLSL     4
 #define CASCADE_MATRIX_COUNT  8 // MAX_SHADOW_CASTERS (2) * MAX_CASCADES_HLSL (4)
 
-cbuffer Cascade_Data : register(b2, space3)
+/*
+    **Both map-array techniques' data, in one block.** CASCADED's cascades and
+    CUBE's six faces used to be two cbuffers at b2 and b3, and they are one at
+    b2 now -- see `Shadow_Frag_Data` (lighting.odin) for why. Nothing about the
+    cost changed: `push_lighting` pushed both every frame regardless of which
+    technique was running, so this is the same bytes in one push rather than
+    two. What it bought is a uniform slot, which SDL_GPU allows only four of
+    per stage and P7c had run out of.
+
+    Declared here rather than in `cube.hlsli` because `lighting_core.hlsli`
+    includes this file first, and a cbuffer has to be declared before the
+    file that reads it is compiled. `cube.hlsli` reads `cube_view_projection`
+    and `cube_caster` out of this block by name and declares nothing of its
+    own.
+
+    **Every matrix comes first, and that is load-bearing.** Odin aligns
+    `matrix[4,4]f32` to 32 bytes, so anything ahead of them whose size is not
+    a multiple of 32 opens a gap on the Odin side that HLSL does not have --
+    and a gap in the middle of a uniform block shifts every field after it.
+    Fourteen matrices is 896 bytes, then four float4s: 960 exactly, with no
+    padding on either side.
+*/
+cbuffer Shadow_Data : register(b2, space3)
 {
-    // [caster][cascade], caster-major and flattened -- Cascade_Frag_Data's
+    // [caster][cascade], caster-major and flattened -- Shadow_Frag_Data's
     // own layout (lighting.odin), read here the same way it was written.
     float4x4 cascade_view_projection[CASCADE_MATRIX_COUNT];
+
+    // The one point-light caster's own six faces, in shadow_cube_face_index's
+    // own order. Read by cube.hlsli, which declares nothing itself.
+    float4x4 cube_view_projection[6];
 
     // View-space depth of each cascade's far edge, shared by both caster
     // slots since both are directional lights inside the one camera frustum.
@@ -48,13 +74,22 @@ cbuffer Cascade_Data : register(b2, space3)
     float4 cascade_count;
 
     /*
-        The camera's own forward direction, xyz -- needed to turn `world`
-        into a view-space depth for cascade selection below. Carried in this
-        technique's own cbuffer rather than the shared `Scene` block for the
-        same reason the rest of this data is: PCF/PCSS/CUBE never read it,
-        so a scene running any of those never pays to have it pushed.
+        The camera's own forward direction, xyz -- needed to turn `world` into
+        a view-space depth for cascade selection below.
+
+        **This field existed here from P3 and had no counterpart on the Odin
+        side until the merge that made this block**, which meant it was read
+        from sixteen bytes past the end of what was actually pushed. Cascade
+        selection has been running on undefined memory since P3, and nothing
+        caught it: the Odin struct and this cbuffer were only ever checked
+        against each other by a size assert on the Odin struct alone, which
+        cannot see a field the shader has and the struct does not. Whatever
+        replaces that check has to compare the two, not one of them.
     */
     float4 camera_forward;
+
+    // x the uploaded point light index the cube caster is, or -1. y-w unused.
+    float4 cube_caster;
 };
 
 /*

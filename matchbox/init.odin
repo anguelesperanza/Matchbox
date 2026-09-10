@@ -544,8 +544,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Light_Uniform)     == 112)
 	#assert(size_of(Scene_Frag_Data)   == 288)
 	#assert(size_of(Cluster_Range)     == 8)
-	#assert(size_of(Cascade_Frag_Data) == 544)
-	#assert(size_of(Cube_Frag_Data)    == 400)
+	#assert(size_of(Shadow_Frag_Data)  == 960)
 	#assert(size_of(Post_Frag_Data)    == 32)
 	#assert(size_of(Tonemap_Resolve_Frag_Data) == 80)
 	#assert(size_of(Probe_Prefilter_Frag_Data) == 16)
@@ -680,7 +679,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		against.
 	*/
 	mbi.renderer.shaders.mesh_frag = create_builtin_shader(
-		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 5, 3)
+		#load("shaders/mesh.frag.spv"), #load("shaders/mesh.frag.dxil"), .FRAGMENT, MESH_FRAG_SAMPLER_COUNT, 4, 3)
 	mbi.renderer.shaders.mesh_line = create_builtin_shader(
 		#load("shaders/mesh_line.frag.spv"), #load("shaders/mesh_line.frag.dxil"), .FRAGMENT, 0)
 
@@ -705,7 +704,7 @@ init :: proc(title: string, width: i32, height: i32) {
 		#load("shaders/fullscreen.vert.spv"), #load("shaders/fullscreen.vert.dxil"), .VERTEX, 0, 0)
 	mbi.renderer.shaders.deferred_lighting_frag = create_builtin_shader(
 		#load("shaders/deferred_lighting.frag.spv"), #load("shaders/deferred_lighting.frag.dxil"),
-		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 5, 3)
+		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 4, 3)
 
 	// Post-processing. One sampler -- the render target -- and one uniform
 	// block shared by all three, so an effect that ignores a field ignores it.
@@ -750,7 +749,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	// three storage buffers every shader that includes that file gets.
 	mbi.renderer.shaders.volumetric = create_builtin_shader(
 		#load("shaders/volumetric.frag.spv"), #load("shaders/volumetric.frag.dxil"),
-		.FRAGMENT, VOLUMETRIC_SAMPLER_COUNT, 5, 3)
+		.FRAGMENT, VOLUMETRIC_SAMPLER_COUNT, 4, 3)
 
 	/*
 		Environment probe baking (ambient.odin). Both read one sampler -- the

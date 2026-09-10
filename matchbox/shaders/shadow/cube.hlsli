@@ -28,15 +28,10 @@
 
 #define CUBE_FACE_COUNT 6
 
-cbuffer Cube_Data : register(b3, space3)
-{
-    // The one point-light caster's own six faces, in shadow_cube_face_index's
-    // own order -- Cube_Frag_Data's own layout (lighting.odin).
-    float4x4 cube_view_projection[CUBE_FACE_COUNT];
-
-    // x the uploaded point light index this caster is, or -1. y-w unused.
-    float4 cube_caster;
-};
+// `cube_view_projection` and `cube_caster` live in `shadow/cascaded.hlsli`'s
+// own `Shadow_Data` block now, which lighting_core.hlsli includes first --
+// see that declaration for why the two techniques share one cbuffer. Nothing
+// is declared here; the names simply resolve.
 
 /*
     Which of the six faces a direction away from the light falls into --

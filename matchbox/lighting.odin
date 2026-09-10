@@ -515,50 +515,68 @@ Scene_Frag_Data :: struct #align(16) {
 }
 
 /*
-	544 bytes -- `CASCADED`'s own per-cascade data, pushed alongside `Scene`
-	rather than folded into it: `Scene_Frag_Data` is 224 bytes and shared by
-	every technique, and most of them (`PCF`, `PCSS`, `CUBE`) never read a
-	single byte of this. Splitting it out means a scene running `PCF` still
-	pushes the same 224 bytes it always has, not 768.
+	960 bytes -- everything the two map-array shadow techniques need, in one
+	block. `CASCADED`'s eight per-caster-per-cascade matrices and `CUBE`'s six
+	faces, plus the four scalars-in-float4s between them.
 
-	`view_projection` is `[MAX_SHADOW_CASTERS][MAX_CASCADES]matrix[4,4]f32`,
-	caster-major and flattened -- HLSL's own array-of-matrices inside a cbuffer
-	reads the same flattening, see `shaders/lighting_core.hlsli`'s own comment
-	on `Cascade_Data`. Declared first, at offset 0, so its own 32-byte
-	alignment (the same requirement `Scene_Frag_Data`'s own two matrices
-	already have to satisfy, see that struct's doc comment) opens no gap
-	`init`'s size assert would otherwise have to account for -- `splits` and
-	`count` come after it rather than before for exactly that reason, not
-	because of any relationship between the three.
+	**Two structs until P7c, and merged because SDL_GPU allows four uniform
+	buffers per shader stage and P7c needed a fifth.** The merge costs
+	nothing it was not already paying: `push_lighting` pushed both of these
+	every frame regardless of which technique was running, so this is the same
+	bytes in one push rather than two, and it frees the slot the reflection
+	probes now use. Splitting them out of `Scene` in the first place was about
+	*size* -- a scene running PCF should not push 768 bytes of cascade
+	matrices -- and that argument is untouched, since neither half of this was
+	ever in `Scene`.
+
+	**`camera_forward` is new here and was not new in the shader.**
+	`shadow/cascaded.hlsli` has declared it since P3 and read it for cascade
+	selection ever since, and no field on this side ever backed it -- so the
+	shader was reading sixteen bytes past the end of what was pushed, and
+	CASCADED has been choosing cascades from undefined memory for four phases.
+
+	Nothing caught it because nothing could: `init`'s size assert checks this
+	struct against a number, which cannot notice a field the *shader* has and
+	the struct does not. The only check that would have is one that compares
+	the two declarations, and there is no such check in this package -- the
+	nearest thing is `lighting_rework.md` section 7.9's preprocessor sweep,
+	which counts registers rather than cbuffer members. Worth extending.
+
+	Every matrix comes first, which is load-bearing: Odin aligns
+	`matrix[4,4]f32` to 32 bytes, so anything ahead of them whose size is not a
+	multiple of 32 opens a gap HLSL does not have, and a gap in the middle of a
+	uniform block shifts every field after it. Fourteen matrices is 896, then
+	four float4s: 960 exactly, no padding on either side.
 */
-Cascade_Frag_Data :: struct #align(16) {
-	view_projection: [MAX_SHADOW_CASTERS * MAX_CASCADES]matrix[4, 4]f32,
+Shadow_Frag_Data :: struct #align(16) {
+	// [caster][cascade], caster-major and flattened -- HLSL's own
+	// array-of-matrices inside a cbuffer reads the same flattening.
+	cascade_view_projection: [MAX_SHADOW_CASTERS * MAX_CASCADES]matrix[4, 4]f32,
+
+	// The one point-light caster's own six faces, in the same +-X +-Y +-Z
+	// order shadow_cube.odin builds and renders them in -- shadow_visibility_
+	// cube (shaders/shadow/cube.hlsli) has to pick the same face index this
+	// package picked when it rendered into it, or it will sample the wrong
+	// depth entirely rather than merely the wrong bias.
+	cube_view_projection: [6]matrix[4, 4]f32,
 
 	// View-space depth of each cascade's far edge, shared by both caster
 	// slots since both are directional lights sharing the one camera
-	// frustum. Unused entries (past `count`) are left at whatever
-	// shadow_cascaded.odin last computed and are never read past `count`.
-	splits: [MAX_CASCADES]f32,
+	// frustum. Unused entries (past `cascade_count`) are left at whatever
+	// shadow_cascaded.odin last computed and are never read past it.
+	cascade_splits: [MAX_CASCADES]f32,
 
 	// x how many cascades are actually configured (<= MAX_CASCADES), y-w unused.
-	count: [4]f32,
-}
+	cascade_count: [4]f32,
 
-/*
-	400 bytes -- `CUBE`'s own per-face data, split out from `Scene` for the
-	same reason `Cascade_Frag_Data` is: most techniques never read it.
+	// xyz the camera's own forward direction -- what `cascade_for_world`
+	// (shaders/shadow/cascaded.hlsli) turns a world position into a
+	// view-space depth with. See this struct's own doc comment for how long
+	// this was missing.
+	camera_forward: [4]f32,
 
-	`view_projection` is the one caster's own six faces, in the same ±X ±Y ±Z
-	order `shadow_cube.odin` builds and renders them in -- `shadow_visibility_
-	cube` (shaders/shadow/cube.hlsli) has to pick the same face index this
-	package picked when it rendered into it, or it will sample the wrong
-	depth entirely rather than merely the wrong bias.
-*/
-Cube_Frag_Data :: struct #align(16) {
-	view_projection: [6]matrix[4, 4]f32,
-
-	// x the uploaded point light index this caster is, or -1 -- y-w unused.
-	caster: [4]f32,
+	// x the uploaded point light index the cube caster is, or -1 -- y-w unused.
+	cube_caster: [4]f32,
 }
 
 /*
@@ -569,12 +587,17 @@ Cube_Frag_Data :: struct #align(16) {
 	game may therefore set lights or lighting settings whenever it likes,
 	including before `begin_drawing`.
 
-	Fragment slot 1 is `Scene`, slot 2 `Cascade_Data`, slot 3 `Cube_Data`,
-	slot 4 `Probes` (P7c, reflection.odin). Slot 0 is the per-part material
-	(material.odin). The last three are pushed on every draw regardless of
-	`settings.technique` or whether any probe is placed, the same "always
-	something valid bound, whether or not this game uses it" shape the shadow
-	map placeholders already have -- see `Shadow_State`'s own doc comment.
+	Fragment slot 1 is `Scene`, slot 2 `Shadow_Data` (CASCADED's cascades and
+	CUBE's faces together -- see `Shadow_Frag_Data`), slot 3 `Probes` (P7c,
+	reflection.odin). Slot 0 is the per-part material (material.odin). **Four
+	is all there is**: SDL_GPU allows four uniform buffers per shader stage,
+	and reaching for a fifth is what made every shader that includes
+	`lighting_core.hlsli` fail to create.
+
+	The last two are pushed on every draw regardless of `settings.technique`
+	or whether any probe is placed, the same "always something valid bound,
+	whether or not this game uses it" shape the shadow map placeholders
+	already have -- see `Shadow_State`'s own doc comment.
 */
 @(private)
 push_lighting :: proc(camera: Camera3D) {
@@ -655,26 +678,35 @@ push_lighting :: proc(camera: Camera3D) {
 
 	sdl.PushGPUFragmentUniformData(r.cmd, 1, &data, size_of(data))
 
-	cascade_data: Cascade_Frag_Data
+	forward := camera3d_forward(camera)
+
+	shadow_data := Shadow_Frag_Data{
+		cube_view_projection = sh.cube_view_projections[0],
+		cascade_splits       = sh.cascade_splits,
+		cascade_count        = {f32(clamp(sh.settings.cascade_count, 1, MAX_CASCADES)), 0, 0, 0},
+
+		// Filled in for the first time in P7c -- see Shadow_Frag_Data's own
+		// doc comment for how long shaders/shadow/cascaded.hlsli read this
+		// without anything writing it.
+		camera_forward = {forward.x, forward.y, forward.z, 0},
+
+		cube_caster = {f32(sh.cube_caster_index[0]) if sh.settings.enabled else -1, 0, 0, 0},
+	}
+
 	for caster in 0 ..< MAX_SHADOW_CASTERS {
 		for cascade in 0 ..< MAX_CASCADES {
-			cascade_data.view_projection[caster * MAX_CASCADES + cascade] = sh.cascade_view_projections[caster][cascade]
+			shadow_data.cascade_view_projection[caster * MAX_CASCADES + cascade] = sh.cascade_view_projections[caster][cascade]
 		}
 	}
-	cascade_data.splits = sh.cascade_splits
-	cascade_data.count  = {f32(clamp(sh.settings.cascade_count, 1, MAX_CASCADES)), 0, 0, 0}
-	sdl.PushGPUFragmentUniformData(r.cmd, 2, &cascade_data, size_of(cascade_data))
 
-	cube_data := Cube_Frag_Data{
-		view_projection = sh.cube_view_projections[0],
-		caster          = {f32(sh.cube_caster_index[0]) if sh.settings.enabled else -1, 0, 0, 0},
-	}
-	sdl.PushGPUFragmentUniformData(r.cmd, 3, &cube_data, size_of(cube_data))
+	sdl.PushGPUFragmentUniformData(r.cmd, 2, &shadow_data, size_of(shadow_data))
 
-	// Slot 4: P7c's localized probes. Pushed every frame regardless of
+	// Slot 3: P7c's localized probes. Pushed every frame regardless of
 	// whether any are placed, the same "always something valid bound" shape
-	// slots 2 and 3 already have -- a scene with none gets a count of zero
-	// and the blend loop never runs.
+	// slot 2 already has -- a scene with none gets a count of zero and the
+	// blend loop never runs. **There is no slot 4**: SDL_GPU allows four
+	// uniform buffers per stage, which is why the two shadow blocks above are
+	// one block now.
 	probe_data := reflection_frag_data()
-	sdl.PushGPUFragmentUniformData(r.cmd, 4, &probe_data, size_of(probe_data))
+	sdl.PushGPUFragmentUniformData(r.cmd, 3, &probe_data, size_of(probe_data))
 }

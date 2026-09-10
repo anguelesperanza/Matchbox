@@ -138,13 +138,21 @@ SamplerState           reflect_pre_smp     : register(CONCAT(s, REFLECT_PREFILTE
 #define MAX_REFLECTION_PROBES_HLSL 4
 
 /*
-    Where every placed probe is and how far it reaches. Slot 4 in the fragment
-    stage's own uniform sequence, after the material (b0), the scene (b1),
-    CASCADED's cascades (b2) and CUBE's faces (b3).
+    Where every placed probe is and how far it reaches. Slot 3 in the fragment
+    stage's own uniform sequence, after the material (b0), the scene (b1) and
+    both map-array shadow techniques' shared block (b2).
+
+    **Slot 3 and not 4, and that is not cosmetic.** SDL_GPU allows four
+    uniform buffers per shader stage. P7c originally put this at b4, which is
+    the fifth -- every shader that includes this file failed to create and the
+    program panicked in `init` before drawing anything. Merging CASCADED's and
+    CUBE's two blocks into one (shadow/cascaded.hlsli) is what freed this one.
+    There is no fifth slot to reach for; anything further wants a storage
+    buffer, the way the light list already does.
 
     Must match matchbox.Probe_Frag_Data.
 */
-cbuffer Probes : register(b4, space3)
+cbuffer Probes : register(b3, space3)
 {
     float4 probe_sphere[MAX_REFLECTION_PROBES_HLSL]; // xyz position, w radius
     float4 probe_params[MAX_REFLECTION_PROBES_HLSL]; // x falloff fraction, yzw unused

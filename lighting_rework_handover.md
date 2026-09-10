@@ -42,7 +42,7 @@ From the repository root. These are the numbers as of this handover:
 
 ```
 odin check matchbox -no-entry-point          # must produce no output
-odin test matchbox -define:ODIN_TEST_THREADS=1   # 229 tests, ~3.6s
+odin test matchbox -define:ODIN_TEST_THREADS=1   # 240 tests, ~3.8s
 ```
 
 Every example must build -- **27 of them have a `main.odin`**;
@@ -152,23 +152,25 @@ in one line, with the detail in `lighting_rework.md`:
   real and covered only half the phase: SSAO needs depth *before* shading and
   costs the forward family a depth prepass plus a deferred scene queue;
   volumetrics needs it *after* and is pipeline-agnostic for free. Section 7.9.
+- **P7c** -- localized reflection probes, captured from the scene rather than
+  from a sky, blended per fragment, all of them in one pair of texture arrays
+  so four probes cost the sampler slots one does. Section 7.10.
 - **`examples/lighting-lab`** -- a room built to make every module visible one
-  key at a time, depending on no asset files at all. This is the thing to run
-  first if a GPU is ever available.
+  key at a time, depending on no asset files at all. **The owner has run
+  this**, which is the only frame this rework has ever produced; the three
+  things that came back were all real and all are recorded in section 7.10.
 
 ## What is next
 
-**P7c** -- localized reflection probes, extending P4's one scene-wide
-`Environment_Probe` to several with blending between them. The only piece of
-the P7 split not built. Baked lightmaps and real-time GI stay recommended out
-of P7 entirely, on the same grounds normal mapping left P2.
+**P8** is 2D, and is now the whole of what remains of the plan -- see below.
+P7 is finished: P7a the post chain, P7b SSAO and volumetrics, P7c the
+reflection probes. Baked lightmaps and real-time GI stay recommended out of it
+entirely, on the same grounds normal mapping left P2.
 
-**P8** is 2D, and is the larger remaining job -- see below.
-
-**Before either, if a GPU is ever available: run `examples/lighting-lab`.**
-Nothing in this rework has been rendered. That example exists to make each
-module visible one key at a time, and the first hour spent in it will be worth
-more than the next phase. Its own top comment says what to look at and in what
+**Before it, run `examples/lighting-lab` again.** One session in it has
+already produced three real findings (section 7.10) and it is the only frame
+this rework has ever had rendered. Everything else here is CPU-side
+arithmetic. An hour in that example is still worth more than the next phase. Its own top comment says what to look at and in what
 order; the highest-value check is pressing **P**, since a picture that changes
 between FORWARD, CLUSTERED and DEFERRED means the `Surface` seam is wrong
 somewhere, and that is the gate P5 and P6 both had to leave unrun.

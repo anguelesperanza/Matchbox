@@ -851,7 +851,9 @@ piece verifiable. Proposed shape:
   supply them. That is the interesting design question of the phase and should
   be stated in its brief rather than discovered.
 - **P7c -- reflection probes**, extending P4's `Environment_Probe` from one
-  scene-wide bake to localized probes with blending between them.
+  scene-wide bake to localized probes with blending between them. *Built.
+  `reflection.odin`, `reflection_test.odin`, and the blend in
+  `lighting_core.hlsli`/`brdf/pbr_common.hlsli`. See section 7.10.*
 
 **Baked lightmaps and real-time GI are recommended out of P7 entirely**, on
 the same grounds normal mapping left P2 (§7.5): a lightmap baker is an offline
@@ -1279,6 +1281,102 @@ built at.
 depth-aware upsample, a G-buffer normal path for `DEFERRED`, and the second
 half of the volumetric absorption -- light is attenuated on its way to the eye
 but not on its way in, which needs a second march per light per step.
+
+---
+
+## 7.10 P7c, and the first frame anybody looked at
+
+**Localized probes, captured from the scene.** P4 baked one probe from a
+skybox and every surface everywhere sampled it. P7c places up to four, each
+with a position and a radius, blended per fragment by how far inside each
+one's influence it sits -- and where the weights do not add to 1, the
+remainder falls back to P4's scene-wide probe. So "probes where you placed
+them, sky everywhere else" is the default rather than something a game has to
+arrange, and a scene that places none gets exactly the picture P4 shipped,
+which is why no existing example changed.
+
+**Captured rather than baked from a sky, which is the part that makes them
+worth having.** Probes baked from the same skybox are identical, and blending
+identical probes is a no-op. So a probe renders the room from its own position
+-- six faces at ninety degrees -- and the existing convolution shaders turn
+that into the same irradiance/prefiltered pair. The game drives it, because
+CLAUDE.md rules out handing a game's procedure back to it:
+`begin_probe_capture`/`end_probe_capture` per face, then
+`bake_reflection_probe`. That is `begin_shadow_pass`/`end_shadow_pass`'s exact
+shape -- the framework owns the pass, the target and the camera; the game owns
+what goes in it.
+
+**One pair of arrays for every probe, not a pair each.** `probe * 6 + face`,
+and `probe * 6 * levels + level * 6 + face`. Four probes cost the same two
+samplers one does, where a texture pair per probe would have hit Vulkan's
+floor of 16 at the third. The cost of that is arithmetic existing twice -- once
+in Odin at bake time, once in HLSL at read time -- so it is named once on the
+Odin side (`reflection_probe_layer`) and swept for uniqueness and range across
+every probe, level and face rather than trusted. A collision there does not
+fail; probe 2 quietly reflects probe 1.
+
+**The sampler budget is now the thing to watch.** mesh 13, deferred **14**,
+volumetric 10, against a floor of 16. That is the least headroom this package
+has ever had, and it is said out loud beside `MESH_FRAG_SAMPLER_COUNT` rather
+than left to be discovered. What a feature wanting the next slot should do is
+what these two arrays already did: share one array with something already
+bound rather than taking a slot of its own. Section 7.7's rule stands -- past
+16 is a stop-and-ask.
+
+All four shaders' counts and register layouts were verified against the
+preprocessor, the check §7.9 introduced: 13+3, 14+3, 10+3, 4+0, with every
+storage buffer landing where its `LIGHTS_T` define says.
+
+**One bug, found writing the example rather than running it.**
+`bake_reflection_probe` acquired its own command buffer and submitted it
+immediately, while the capture it reads had been recorded into the *frame's*
+buffer and not yet submitted -- so the bake was free to run first and convolve
+whatever was in the texture beforehand. It records into the frame's buffer
+when there is a frame now. This is the class of hazard that has no CPU-side
+test: both orderings compile, and only one of them is a probe.
+
+### The first frame anybody looked at
+
+**The owner ran `examples/lighting-lab`.** Nothing in this rework had been
+rendered before that, across P0 to P7c. Three things came back, and all three
+were real:
+
+1. **`A` was strafe-left.** Ambient cycled every time you sidestepped -- the
+   scene relighting itself while you walked. The mistake was picking mnemonic
+   letters before checking what `first_person_walk` reads. Moved to `K`.
+2. **"Everything is white."** Two causes at once, and worth separating.
+   Every structural surface was a near-neutral grey, deliberately, so the
+   sphere row would be the only interesting material in the room -- and a
+   near-neutral grey under a full-strength sun through ACES is white. The sun
+   was also at 1.0 with a spot and a point light on top, which drives
+   everything past the top of the curve, where every colour is the same
+   colour. Fixed with saturated materials and a dimmer rig, and **exposure put
+   on a key**, because "the materials are not reaching the shader" and "the
+   scene is blown out" produce the same white picture and there was no way to
+   tell them apart from inside the example.
+3. **Fog looked broken and was not.** Its range (8 to 34) was wider than the
+   room -- the back wall sits 17 units from the start position, so it was
+   barely a third fogged, and the only thing visibly affected was the far
+   corners of the 40-unit floor. Which is exactly what was reported. 3 to 22
+   puts the whole room inside the ramp.
+
+None of the three is a bug in the lighting engine. All three are the example
+failing to *show* the engine, which is the only job it has -- and none of them
+was findable without a screen. That is the strongest argument in this document
+for the note now at the top of the handover: **run the lab before starting
+anything else.**
+
+A fourth, found while fixing those: the PBR sweep was fully metallic, and a
+metal has no diffuse term at all. With no environment probe bound it reflects
+the handful of lights and nothing else, and renders nearly black -- correct,
+and a terrible default view. It is dielectric now, with the metal case one
+keypress away behind the probes. That dependency is worth meeting once: it is
+the most common reason PBR "looks wrong" in a renderer that is working.
+
+**Still not verified.** No probe has been seen to capture anything, nothing
+confirms a backend honours `layer_or_depth_plane` for a cube face (the one
+unverifiable assumption here), and there is no parallax correction, so a
+reflection is addressed as though the captured room were infinitely far away.
 
 ---
 

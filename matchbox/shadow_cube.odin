@@ -170,13 +170,13 @@ begin_point_shadow_pass :: proc(face: int) -> bool {
 	caster_index := s.cube_caster_index[0]
 
 	if !s.settings.enabled || caster_index < 0 {
-		if face == 0 && !s.warned {
+		if face == 0 && !s.warned_cube {
 			log.warn("begin_point_shadow_pass: shadows are not enabled, or no point light is marked casts_shadow -- skipped")
-			s.warned = true
+			s.warned_cube = true
 		}
 		return false
 	}
-	if face == 0 do s.warned = false
+	if face == 0 do s.warned_cube = false
 
 	light_position := r.lighting.light_data[caster_index].position.xyz
 

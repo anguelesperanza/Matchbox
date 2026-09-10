@@ -262,13 +262,13 @@ begin_cascade_shadow_pass :: proc(slot: int, cascade: int) -> bool {
 	if cascade >= count do return false
 
 	if !s.settings.enabled || s.caster_indices[slot] < 0 {
-		if slot == 0 && cascade == 0 && !s.warned {
+		if slot == 0 && cascade == 0 && !s.warned_cascade {
 			log.warn("begin_cascade_shadow_pass: shadows are not enabled, or no light is marked casts_shadow -- skipped")
-			s.warned = true
+			s.warned_cascade = true
 		}
 		return false
 	}
-	if slot == 0 && cascade == 0 do s.warned = false
+	if slot == 0 && cascade == 0 do s.warned_cascade = false
 
 	caster := r.lighting.light_data[s.caster_indices[slot]]
 

@@ -438,11 +438,32 @@ Shadow_State :: struct {
 	active_face:    int,
 	active_kind:    Shadow_Pass_Kind,
 
-	// Whether begin_shadow_pass has already logged its "nothing to render"
-	// warning for the current stretch of no-caster/disabled frames, so a game
-	// that leaves the call in its loop with shadows off gets one line instead
-	// of one every frame. Only slot 0 ever warns -- an empty slot 1 is the
-	// ordinary shape of a game with one shadow-casting light, not a
-	// misconfiguration.
-	warned: bool,
+	/*
+		Whether each `begin_*_shadow_pass` has already logged its "nothing to
+		render" warning for the current stretch of no-caster/disabled frames,
+		so a game that leaves the call in its loop with shadows off gets one
+		line instead of one every frame. Only slot 0 (and cascade 0, and face
+		0) ever warns -- an empty slot 1 is the ordinary shape of a game with
+		one shadow-casting light, not a misconfiguration.
+
+		**One latch per pass kind, and it was one shared latch until P7c**,
+		which made the whole mechanism do the opposite of its job. Every frame,
+		`begin_drawing_3d` runs the map-based passes *and* the six cube faces.
+		With a directional caster and no point caster -- the ordinary shape of
+		an outdoor scene, and exactly what `examples/lighting-lab` is --
+		`begin_shadow_pass` succeeded and cleared the flag, then
+		`begin_point_shadow_pass` found no caster, saw a clear flag, and
+		warned. Every frame, forever, at six lines a frame until the latch
+		caught the other five.
+
+		The lesson is not about shadows: a latch shared by several independent
+		conditions is re-armed by whichever of them is doing fine, so the one
+		that is not reports continuously. It only surfaced when a scene first
+		exercised two of these paths in the same frame, which is what
+		`casts_shadow` on a directional light in a scene with an unlit point
+		light does.
+	*/
+	warned_standard: bool,
+	warned_cascade:  bool,
+	warned_cube:     bool,
 }

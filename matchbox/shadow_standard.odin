@@ -176,7 +176,7 @@ is_shadows_active :: proc() -> bool {
 		}
 
 	Logged once per change of state rather than every frame a game leaves
-	shadows off -- see `Shadow_State.warned`. Only slot 0 ever logs it: an
+	shadows off -- see `Shadow_State.warned_standard`. Only slot 0 ever logs it: an
 	empty slot 1 is the ordinary shape of a game with one shadow-casting
 	light, not something to warn about every frame.
 
@@ -199,13 +199,13 @@ begin_shadow_pass :: proc(slot: int = 0) -> bool {
 	if slot < 0 || slot >= MAX_SHADOW_CASTERS do return false
 
 	if !s.settings.enabled || s.caster_indices[slot] < 0 {
-		if slot == 0 && !s.warned {
+		if slot == 0 && !s.warned_standard {
 			log.warn("begin_shadow_pass: shadows are not enabled, or no light is marked casts_shadow -- skipped")
-			s.warned = true
+			s.warned_standard = true
 		}
 		return false
 	}
-	if slot == 0 do s.warned = false
+	if slot == 0 do s.warned_standard = false
 
 	caster  := r.lighting.light_data[s.caster_indices[slot]]
 	is_spot := caster.target.w > 1.5

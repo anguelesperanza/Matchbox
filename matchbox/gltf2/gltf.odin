@@ -436,35 +436,32 @@ accessors_parse :: proc(object: json.Object) -> (res: []Accessor, err: Error) {
 }
 
 accessors_free :: proc(accessors: []Accessor) {
-    if len(accessors) == 0 {
-        return
-    }
-    for accessor in accessors {
-        if accessor.sparse == nil {
-            continue
-        }
-        if len(accessor.sparse.?.indices) > 0 {
-            delete(accessor.sparse.?.indices)
-        }
-        if len(accessor.sparse.?.values) > 0 {
-            delete(accessor.sparse.?.values)
-        }
-    }
+    // MATCHBOX PATCH: used to also free accessor.sparse.?.indices/.values,
+    // back when those were slices (`[]Accessor_Sparse_Indices` /
+    // `[]Accessor_Sparse_Values`) allocated by sparse_indices_parse /
+    // sparse_values_parse. Both are a single struct now, per the glTF spec --
+    // see Accessor_Sparse's own comment -- so there is nothing left to free
+    // but the accessors slice itself.
     delete(accessors)
 }
 
 @(require_results)
 accessor_sparse_parse :: proc(object: json.Object) -> (res: Accessor_Sparse, err: Error) {
+    indices_set, values_set: bool
+
     for k, v in object {
         switch k {
         case "count": // Not used by this implementation
         case "indices":
-            // Required
-            res.indices = sparse_indices_parse(v.(json.Array)) or_return
+            // Required. A single object, not an array -- see Accessor_Sparse's
+            // own MATCHBOX PATCH comment in types.odin.
+            res.indices = sparse_indices_parse(v.(json.Object)) or_return
+            indices_set = true
 
         case "values":
-            // Required
-            res.values = sparse_values_parse(v.(json.Array)) or_return
+            // Required, same shape as "indices" above.
+            res.values = sparse_values_parse(v.(json.Object)) or_return
+            values_set = true
 
         case EXTENSIONS_KEY:
             res.extensions = v
@@ -477,10 +474,10 @@ accessor_sparse_parse :: proc(object: json.Object) -> (res: Accessor_Sparse, err
         }
     }
 
-    if len(res.indices) == 0 {
+    if !indices_set {
         return res, GLTF_Error{type = .Missing_Required_Parameter, proc_name = #procedure, param = {name = "indices"}}
     }
-    if len(res.values) == 0 {
+    if !values_set {
         return res, GLTF_Error{type = .Missing_Required_Parameter, proc_name = #procedure, param = {name = "values"}}
     }
 
@@ -488,97 +485,75 @@ accessor_sparse_parse :: proc(object: json.Object) -> (res: Accessor_Sparse, err
 }
 
 @(require_results)
-sparse_indices_parse :: proc(array: json.Array) -> (res: []Accessor_Sparse_Indices, err: Error) {
-    res = make([]Accessor_Sparse_Indices, len(array))
+sparse_indices_parse :: proc(object: json.Object) -> (res: Accessor_Sparse_Indices, err: Error) {
+    buffer_view_set, component_type_set: bool
 
-    for index, idx in array {
-        buffer_view_set, component_type_set: bool
+    for k, v in object {
+        switch k {
+        case "bufferView":
+            // Required
+            res.buffer_view = Integer(v.(f64))
+            buffer_view_set = true
 
-        for k, v in index.(json.Object) {
-            switch k {
-            case "bufferView":
-                // Required
-                res[idx].buffer_view = Integer(v.(f64))
-                buffer_view_set = true
+        case "byteOffset":
+            // Default 0
+            res.byte_offset = Integer(v.(f64))
 
-            case "byteOffset":
-                // Default 0
-                res[idx].byte_offset = Integer(v.(f64))
+        case "componentType":
+            // Required
+            res.component_type = Component_Type(v.(f64))
+            component_type_set = true
 
-            case "componentType":
-                // Required
-                res[idx].component_type = Component_Type(v.(f64))
-                component_type_set = true
+        case EXTENSIONS_KEY:
+            res.extensions = v
 
-            case EXTENSIONS_KEY:
-                res[idx].extensions = v
+        case EXTRAS_KEY:
+            res.extras = v
 
-            case EXTRAS_KEY:
-                res[idx].extras = v
-
-            case:
-                warning_unexpected_data(#procedure, k, v, idx)
-            }
+        case:
+            warning_unexpected_data(#procedure, k, v)
         }
+    }
 
-        if !buffer_view_set {
-            return res,
-                GLTF_Error {
-                    type = .Missing_Required_Parameter,
-                    proc_name = #procedure,
-                    param = {name = "bufferView", index = idx},
-                }
-        }
-        if !component_type_set {
-            return res,
-                GLTF_Error {
-                    type = .Missing_Required_Parameter,
-                    proc_name = #procedure,
-                    param = {name = "componentType", index = idx},
-                }
-        }
+    if !buffer_view_set {
+        return res, GLTF_Error{type = .Missing_Required_Parameter, proc_name = #procedure, param = {name = "bufferView"}}
+    }
+    if !component_type_set {
+        return res,
+            GLTF_Error{type = .Missing_Required_Parameter, proc_name = #procedure, param = {name = "componentType"}}
     }
 
     return res, nil
 }
 
 @(require_results)
-sparse_values_parse :: proc(array: json.Array) -> (res: []Accessor_Sparse_Values, err: Error) {
-    res = make([]Accessor_Sparse_Values, len(array))
+sparse_values_parse :: proc(object: json.Object) -> (res: Accessor_Sparse_Values, err: Error) {
+    buffer_view_set: bool
 
-    for value, idx in array {
-        buffer_view_set: bool
+    for k, v in object {
+        switch k {
+        case "bufferView":
+            // Required
+            res.buffer_view = Integer(v.(f64))
+            buffer_view_set = true
 
-        for k, v in value.(json.Object) {
-            switch k {
-            case "bufferView":
-                // Required
-                res[idx].buffer_view = Integer(v.(f64))
-                buffer_view_set = true
+        case "byteOffset":
+            // Defalt 0
+            res.byte_offset = Integer(v.(f64))
 
-            case "byteOffset":
-                // Defalt 0
-                res[idx].byte_offset = Integer(v.(f64))
+        case EXTENSIONS_KEY:
+            res.extensions = v
 
-            case EXTENSIONS_KEY:
-                res[idx].extensions = v
+        case EXTRAS_KEY:
+            res.extras = v
 
-            case EXTRAS_KEY:
-                res[idx].extras = v
-
-            case:
-                warning_unexpected_data(#procedure, k, v, idx)
-            }
+        case:
+            warning_unexpected_data(#procedure, k, v)
         }
+    }
 
-        if !buffer_view_set {
-            return res,
-                GLTF_Error {
-                    type = .Missing_Required_Parameter,
-                    proc_name = #procedure,
-                    param = {name = "bufferView", index = idx},
-                }
-        }
+    if !buffer_view_set {
+        return res, GLTF_Error{type = .Missing_Required_Parameter, proc_name = #procedure, param = {name = "bufferView"}}
     }
 
     return res, nil

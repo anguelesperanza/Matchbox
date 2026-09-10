@@ -170,10 +170,19 @@ Accessor_Type :: enum {
     Matrix4,
 }
 
+/*
+    MATCHBOX PATCH: `indices` and `values` were `[]Accessor_Sparse_Indices` /
+    `[]Accessor_Sparse_Values` -- arrays -- which crashes on every spec-legal
+    file, since the glTF 2.0 schema has each as a single object
+    (`{bufferView, componentType}` and `{bufferView}` respectively), never an
+    array of them. Blender's own exporter writes sparse accessors this way for
+    a morph target's position deltas, so this was not a corner case reachable
+    only by a hand-crafted file -- see improvements.md.
+*/
 Accessor_Sparse :: struct {
     //count: Integer, // Required
-    indices:    []Accessor_Sparse_Indices, // Required
-    values:     []Accessor_Sparse_Values, // Required
+    indices:    Accessor_Sparse_Indices, // Required
+    values:     Accessor_Sparse_Values, // Required
     extensions: Extensions,
     extras:     Extras,
 }

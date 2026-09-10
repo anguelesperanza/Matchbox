@@ -1505,6 +1505,60 @@ two genuinely cannot be chosen from here: `radius` is in world units so it
 depends on the scale a scene is built at, and `bias` depends on the depth
 format the device handed back.
 
+### The third frame, and the bug the other two were standing on
+
+The weave was gone and the picture was worse: every surface pale, a red box
+rendered pink, a floor rendered lavender, and SSAO doing something that read
+as a grey smudge rather than as contact shading.
+
+**Both PBR models were adding ambient light instead of reflecting it.**
+
+	// brdf_resolve_pbr_metallic, through P7c
+	return total.diffuse + total.specular + surface.emissive +
+	    (ambient_light(surface) + ambient_specular) * surface.occlusion;
+
+`ambient_light` is irradiance *arriving*. What a surface sends back is that
+times its own albedo. Added raw, it lays the ambient colour over every pixel
+whatever the pixel is made of -- so with `HEMISPHERE` and a pale blue sky,
+every material washes toward pale blue and **a black surface comes out pale
+blue**, which is the form of it that admits no argument.
+
+**And it is why SSAO looked broken twice.** Occlusion multiplies the ambient
+term. With ambient a large flat addition rather than a modulation of the
+surface, AO darkened a uniform wash laid over the picture instead of shading
+anything -- and it gave the spiral kernel (above) maximum contrast to print
+itself into, which is why that artifact was as stark as it was. Two rounds of
+looking at SSAO were looking at the wrong module.
+
+**Why it survived two phases, which is worth more than the bug.** Three of the
+five models did it correctly: `blinn_phong`, `toon` and `subsurface` all
+multiply by `base_color`. The two that did not are exactly the two with no CPU
+mirror. `pbr_test.odin` sweeps a white furnace through
+`brdf_light_pbr_metallic` -- the per-light half, which was right --
+and `brdf_test.odin` mirrors `brdf_resolve_blinn_phong`, a different model's
+resolve. **No test ever reached either PBR resolve.**
+
+So the rule this adds to §8 is not "test the resolve". It is: **where there is
+no mirror there is no check, and the phases that build a mirror for one half
+of a contract should say which half is left.** P2's split contract
+(`brdf_light` / `brdf_resolve`) was tested thoroughly on one side and not at
+all on the other, and nothing in the plan noticed that the gate it named
+covered half of what it had built.
+
+`brdf_test.odin` now checks a *property* across every model rather than one
+model's arithmetic: a black surface reflects no ambient, the response is
+proportional to albedo, and a metal has no diffuse ambient at all.
+
+**Also reverted this round: P7c's depth-scaled SSAO bias.** The reasoning was
+sound -- a depth texel covers more world space further away, so the
+reconstruction is proportionally less exact -- and the constant was not: at the
+default radius and a scene ten units deep it made the effective bias
+comparable to the whole sampling hemisphere, and almost no tap could clear it.
+It removed the effect rather than cleaning it up. That was a fix aimed at an
+artifact nobody could see from the machine it was written on, which is exactly
+what §8 exists to rule out, and it is recorded here rather than quietly
+dropped.
+
 ---
 
 ## 8. Verification standard

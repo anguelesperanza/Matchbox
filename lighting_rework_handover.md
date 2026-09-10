@@ -129,6 +129,13 @@ every brief:
   ("lengths rise monotonically with index") and passed for two phases. Ask
   what a test would *rule out*, not only what it requires: a passing suite is
   not evidence the shape is right.
+- **Where there is no mirror there is no check.** Both PBR models added
+  ambient light instead of reflecting it -- irradiance laid flat over every
+  surface whatever it was made of -- for two phases. `pbr_test.odin`'s furnace
+  sweep covers `brdf_light_pbr_metallic`, the per-light half; `brdf_test.odin`
+  mirrors `brdf_resolve_blinn_phong`, a different model. Neither PBR *resolve*
+  had a mirror, and those were the two that were wrong. When a phase builds a
+  CPU mirror for one half of a contract, say which half it did not.
 
 **Tell every agent to commit early and often.** P4's first attempt was killed
 by a rate limit having written ~520 lines with zero commits, and a second agent

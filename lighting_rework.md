@@ -1378,6 +1378,47 @@ confirms a backend honours `layer_or_depth_plane` for a cube face (the one
 unverifiable assumption here), and there is no parallax correction, so a
 reflection is addressed as though the captured room were infinitely far away.
 
+### The crash, and the four-phase-old bug under it
+
+**P7c as first written did not start.** It put the probe block at `b4` -- the
+fifth fragment uniform buffer -- and SDL_GPU allows four per stage. Every
+shader that includes `lighting_core.hlsli` failed to create, and
+`create_builtin_shader` panics on that, so the program died in `init` before
+drawing anything. Nothing in the package had ever exceeded four, and the three
+shaders that sat at exactly four sat there for a reason nobody had written
+down.
+
+The fix freed a slot rather than finding one: `CASCADED`'s cascades and
+`CUBE`'s six faces were a cbuffer each at b2 and b3, and `push_lighting`
+pushed **both every frame regardless of which technique was running**. They
+are one block now, which is the same bytes in one push rather than two, and
+probes moved to b3. The `Scene`-splitting argument that produced two blocks in
+P3 is untouched: it was about not making a PCF scene push cascade matrices,
+and neither half of this was ever in `Scene`.
+
+**And merging them turned up something worse.**
+`shaders/shadow/cascaded.hlsli` has declared `camera_forward` in that cbuffer
+**since P3** and read it for cascade selection ever since. No field on the
+Odin side ever backed it. The shader was reading sixteen bytes past the end of
+what was pushed, so `CASCADED` has been choosing its cascade from undefined
+memory for four phases -- which looks like cascades selected at random
+distances rather than like a failure, and so was never noticed.
+
+Nothing in this package could have caught it, and that is the part worth
+carrying forward. `init` asserts `size_of(Cascade_Frag_Data) == 544` against a
+literal, and **a literal cannot notice a field the shader has and the struct
+does not.** Every check here was one-sided: the Odin struct against a number,
+the sampler count against a pin. The two declarations were only ever compared
+by eye, across a language boundary, in files that are read separately.
+
+`tools/check_shader_layout.py` is the answer to that. It preprocesses every
+shader, computes each cbuffer's size from the expanded declaration under HLSL's
+own packing rules, and requires that size to match one of `init.odin`'s
+asserts -- so a member on one side and not the other moves the number and is
+reported. It also enforces the four-uniform-buffer limit, the sampler floor,
+and the storage-buffer register sequence. Both of this phase's bugs would have
+been caught by it before the program ran; run it after touching any shader.
+
 ---
 
 ## 8. Verification standard

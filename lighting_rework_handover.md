@@ -62,6 +62,16 @@ touched; CLAUDE.md calls one without the other a broken build for somebody.
 `cheatsheet.md` is generated: `python tools/gen_cheatsheet.py`. Regenerate it
 whenever a public procedure or its first doc-comment sentence changes.
 
+**`python tools/check_shader_layout.py` after touching any shader.** It
+preprocesses every one, computes each cbuffer's HLSL size from the expanded
+declaration, and checks it against the `#assert(size_of(...))` lines in
+`init.odin` -- plus the uniform-buffer limit, the sampler floor, and the
+storage-buffer register sequence. It exists because two layout bugs got
+through everything else: a cbuffer member the shader had and the Odin struct
+did not (four phases old, CASCADED reading undefined memory), and a fifth
+uniform buffer where SDL_GPU allows four (a startup crash). Neither is
+visible to `odin check`, to `dxc`, or to a size assert on one side alone.
+
 **Two things in the tree are not yours.** `improvements.md` has uncommitted
 edits belonging to the owner, and `matchbox/stb/` is untracked but needed by
 the build. Never `git add -A` from the repository root or inside `matchbox/` --
@@ -235,13 +245,16 @@ Each is recorded where it belongs; none is forgotten.
 - Stale background-task notifications arrive for agents that finished long ago,
   sometimes marked "killed". Check the actual git state rather than reacting.
 - **A sampler count can be checked against the compiler rather than against
-  arithmetic**, and should be whenever one moves: preprocess the shader
-  (`dxc -T ps_6_0 -E main -I matchbox/shaders -P -Fi out.pp in.hlsl`) and count
-  the `register(tN, space2)` declarations that survive macro expansion. The
-  sampled textures come first and the storage buffers follow, so this confirms
-  both the `*_SAMPLER_COUNT` constant and that the `LIGHTS_T` defines land
-  where they were meant to. The pins in `render_test.odin`/`gbuffer_test.odin`
-  only catch a *change*; this checks the invariant.
+  arithmetic**, and `tools/check_shader_layout.py` now does it (plus the
+  cbuffer sizes and the uniform-slot limit) -- run it after touching a shader.
+  The pins in `render_test.odin`/`gbuffer_test.odin` only catch a *change*;
+  that tool checks the invariant.
+- **SDL_GPU allows four uniform buffers per shader stage.** A fifth is not a
+  warning: `CreateGPUShader` fails and `create_builtin_shader` panics, so the
+  program dies in `init` before drawing anything. Fragment slots here are
+  material (b0), scene (b1), the two map-array shadow techniques' shared block
+  (b2) and the reflection probes (b3), and that is all of them. Anything
+  further wants a storage buffer, the way the light list already does.
 - **A composite literal cannot go straight into a `for ... in` clause or an
   `if` condition** -- `for x in [?]f32{...}` and `if v != [3]f32{0,0,0}` are
   both syntax errors, since the `{` is read as the start of the block. Assign

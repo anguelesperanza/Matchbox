@@ -38,8 +38,11 @@ This is that program.
      are computed from the preprocessed declaration with HLSL's own packing
      rules, so a member added on one side and not the other moves the number
      and is reported. This is the `camera_forward` check.
-  3. **Sampled textures stay under Vulkan's guaranteed per-stage floor of 16**,
-     which `lighting_rework.md` section 7.7 makes a stop-and-ask.
+  3. **Sampled textures and storage buffers stay within SDL's caps** (16 and
+     8). Both are asserted inside `SDL_CreateGPUShader`, so crossing either is
+     an abort rather than an error -- see the constants below. Sampler counts
+     within two of the cap are reported as well, since that is where this
+     package now sits.
   4. **Storage buffers continue the `t` register sequence with no gap after
      the last sampled texture**, which is the numbering rule
      `lighting_core.hlsli` documents and which every added sampler quietly
@@ -61,14 +64,29 @@ import tempfile
 SHADER_DIR = os.path.join("matchbox", "shaders")
 INIT_FILE  = os.path.join("matchbox", "init.odin")
 
-# SDL_GPU's own per-stage limit. Crossing it does not warn -- CreateGPUShader
-# fails, and matchbox panics on that.
+# SDL_GPU's own per-stage limits, from SDL_sysgpu.h -- and every one of them is
+# enforced in SDL_CreateGPUShader by SDL_assert_release, which aborts rather
+# than returning an error a caller could report. So crossing one is not a
+# warning and not even matchbox's own "could not create shader" log: it is the
+# process dying inside SDL with a message like
+#
+#     Shader uniform buffer count cannot be higher than 4!
+#
+# Worth knowing before reading a crash: the panic in create_builtin_shader may
+# never be reached.
 MAX_UNIFORM_BUFFERS_PER_STAGE = 4
+MAX_STORAGE_BUFFERS_PER_STAGE = 8
 
-# Vulkan's spec-guaranteed minimum for maxPerStageDescriptorSampledImages and
-# maxPerStageDescriptorSamplers. Desktop drivers report far more; Android is
-# where the floor is an ordinary number.
-VULKAN_SAMPLER_FLOOR = 16
+# **SDL's own hard cap, not only Vulkan's guaranteed floor.** Both numbers are
+# 16, which is why this package has always described it as the Vulkan floor and
+# a portability concern for Android -- true, and an understatement. SDL asserts
+# on 17 regardless of backend or device, so a desktop GPU reporting a million
+# sampler slots does not help.
+MAX_TEXTURE_SAMPLERS_PER_STAGE = 16
+
+# How close to that cap is close enough to say so on every run. The deferred
+# lighting shader sits at 14 as of P7c, which is two from an abort.
+SAMPLER_HEADROOM_WARNING = 14
 
 
 def preprocess(path, stage):
@@ -243,16 +261,25 @@ def main():
         # 1. SDL_GPU's four-per-stage uniform buffer limit.
         if slots and max(slots) >= MAX_UNIFORM_BUFFERS_PER_STAGE:
             problems.append(
-                f"{name}: uniform buffer at b{max(slots)}, but SDL_GPU allows "
+                f"{name}: uniform buffer at b{max(slots)}, but SDL allows "
                 f"{MAX_UNIFORM_BUFFERS_PER_STAGE} per stage (b0..b{MAX_UNIFORM_BUFFERS_PER_STAGE - 1}) "
-                f"-- CreateGPUShader will fail and init will panic"
+                f"-- SDL_CreateGPUShader aborts on this"
             )
 
-        # 2. Sampled textures against Vulkan's floor.
-        if sampler_count >= VULKAN_SAMPLER_FLOOR:
+        # 2. Sampled textures and storage buffers against SDL's own caps.
+        if sampler_count > MAX_TEXTURE_SAMPLERS_PER_STAGE:
             problems.append(
-                f"{name}: {sampler_count} sampled textures, at or past Vulkan's guaranteed "
-                f"floor of {VULKAN_SAMPLER_FLOOR} -- lighting_rework.md 7.7 makes this a stop-and-ask"
+                f"{name}: {sampler_count} sampled textures, past SDL's cap of "
+                f"{MAX_TEXTURE_SAMPLERS_PER_STAGE} -- SDL_CreateGPUShader aborts on this"
+            )
+        elif sampler_count >= SAMPLER_HEADROOM_WARNING:
+            print(f"    NOTE {sampler_count} sampled textures, "
+                  f"{MAX_TEXTURE_SAMPLERS_PER_STAGE - sampler_count} under SDL's cap")
+
+        if len(storage) > MAX_STORAGE_BUFFERS_PER_STAGE:
+            problems.append(
+                f"{name}: {len(storage)} storage buffers, past SDL's cap of "
+                f"{MAX_STORAGE_BUFFERS_PER_STAGE} -- SDL_CreateGPUShader aborts on this"
             )
 
         # 3. Storage buffers continue the t sequence with no gap.

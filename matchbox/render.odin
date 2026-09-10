@@ -19,13 +19,22 @@ import sdl "vendor:sdl3"
 	`lighting_core.hlsli` rather than here, since the deferred lighting pass
 	blends the identical probes in the identical place.
 
-	**Three under the floor now, and the deferred shader is two under**, which
-	is worth stating plainly rather than leaving to be discovered: this is the
-	first phase where the headroom is small enough to matter. The next feature
-	wanting a per-fragment texture should look first at whether it can share
-	an array with something already bound -- which is exactly what these two
-	do, and why four probes cost two slots rather than eight. Section 7.7's
-	rule stands: past 16 is a stop-and-ask, not a pin to raise.
+	**Three under the cap now, and the deferred lighting shader is two under.**
+	That is worth stating plainly rather than leaving to be discovered: this is
+	the first phase where the headroom is small enough to matter. The next
+	feature wanting a per-fragment texture should look first at whether it can
+	share an array with something already bound -- which is exactly what these
+	two do, and why four probes cost two slots rather than eight.
+
+	**And 16 is SDL's own hard cap, not only Vulkan's guaranteed floor**, which
+	is a correction to what this comment said before P7c. `SDL_CreateGPUShader`
+	checks `num_samplers > MAX_TEXTURE_SAMPLERS_PER_STAGE` (SDL_sysgpu.h, 16)
+	and fires `SDL_assert_release` -- an abort, not an error a caller can
+	report, so `create_builtin_shader`'s own panic is never even reached. Both
+	numbers being 16 is why the Vulkan framing survived this long; it is an
+	understatement rather than a mistake. A desktop GPU reporting a million
+	sampler slots does not help. Section 7.7's rule stands and is firmer than
+	it read: past 16 is a stop-and-ask, not a pin to raise.
 
 	**Grew to 11 in P7b**, for the ambient-occlusion texture `shade_surface`
 	multiplies into `Surface.occlusion` -- declared in `lighting_core.hlsli`

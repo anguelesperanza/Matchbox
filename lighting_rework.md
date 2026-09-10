@@ -997,6 +997,23 @@ Answered once, and not re-litigated per phase.
 
 ## 7.7 P3's sampler count, and the wrong premise under it
 
+**Correction, P7c: 16 is SDL's own hard cap and not only Vulkan's floor.**
+Everything below -- and every sampler-count comment in the package -- frames
+the number as `maxPerStageDescriptorSampledImages`, a Vulkan guarantee that
+desktop drivers exceed and Android sits at. That is true and it is an
+understatement. `SDL_CreateGPUShader` checks
+`num_samplers > MAX_TEXTURE_SAMPLERS_PER_STAGE` (SDL_sysgpu.h: **16**) and
+fires `SDL_assert_release`, which aborts rather than returning an error a
+caller can report -- so `create_builtin_shader`'s own panic is never reached,
+and a desktop GPU reporting a million sampler slots does not help. Both
+numbers being 16 is why the Vulkan framing survived four phases. The rule this
+section states is unchanged and firmer than it read.
+
+SDL's siblings, from the same header and asserted the same way: **4** uniform
+buffers per stage (which is what crashed P7c -- section 7.10), **8** storage
+buffers, **8** storage textures. `tools/check_shader_layout.py` enforces all
+four.
+
 **Resolved by P3b.** `cascade_maps[8]`/`cube_maps[6]` are now one
 `Texture2DArray` apiece (`mesh.frag.hlsl`, `t6`/`t7`), each layer rendered
 into via `GPUDepthStencilTargetInfo.layer` rather than via a texture of its
@@ -1381,12 +1398,26 @@ reflection is addressed as though the captured room were infinitely far away.
 ### The crash, and the four-phase-old bug under it
 
 **P7c as first written did not start.** It put the probe block at `b4` -- the
-fifth fragment uniform buffer -- and SDL_GPU allows four per stage. Every
-shader that includes `lighting_core.hlsli` failed to create, and
-`create_builtin_shader` panics on that, so the program died in `init` before
-drawing anything. Nothing in the package had ever exceeded four, and the three
-shaders that sat at exactly four sat there for a reason nobody had written
-down.
+fifth fragment uniform buffer -- and SDL allows four per stage. Nothing in the
+package had ever exceeded four, and the three shaders that sat at exactly four
+sat there for a reason nobody had written down.
+
+**Confirmed against SDL's own source rather than inferred**, which is worth
+the sentence because the first diagnosis was inference (the crash appeared
+exactly when the fifth arrived) and inference is what section 8 exists to
+distrust. `SDL_CreateGPUShader` (SDL_gpu.c) reads:
+
+	if (createinfo->num_uniform_buffers > MAX_UNIFORM_BUFFERS_PER_STAGE) {
+	    SDL_assert_release(!"Shader uniform buffer count cannot be higher than 4!");
+	    return NULL;
+	}
+
+`SDL_assert_release` aborts. So this never reached `create_builtin_shader`'s
+own panic or its log line, which is why the report was "crashes on startup"
+with nothing to quote -- and is worth remembering when reading the next one.
+The same function asserts the sampler cap, the storage-buffer cap and the
+storage-texture cap identically; section 7.7 now carries the correction that
+follows from it.
 
 The fix freed a slot rather than finding one: `CASCADED`'s cascades and
 `CUBE`'s six faces were a cbuffer each at b2 and b3, and `push_lighting`

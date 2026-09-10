@@ -453,34 +453,39 @@ end_drawing_3d :: proc() {
 	if !r.mode_3d do return
 
 	/*
-		The other half of what the shadow pass drew, into the scene itself --
-		held until now rather than drawn the moment the pass opened, because
-		draw_skybox's own pipeline writes no depth at all and relies on being
-		first: see its "drawn first, so everything after it covers it" comment
-		in init.odin. Drawing these where begin_drawing_3d used to would put
-		them before a skybox the game draws afterward, and the skybox would
-		paint over them with nothing to stop it. Last is always safe, since
-		everything else here does write depth.
-	*/
-	/*
 		P7b's deferred-scene path, for a forward-family pipeline with SSAO on
 		-- see `pipeline_forward_defers_scene` (pipeline_forward.odin) for why
 		the whole frame was held back rather than drawn as it arrived.
 
 		Three steps, and the order is the entire point: depth first, then the
 		AO pass that reads it, then the scene pass that reads the AO. The sky
-		goes in first once that pass is open, for the reason the pending
-		shadow models are drawn last -- `draw_skybox`'s own pipeline writes no
-		depth and relies on being first (see init.odin).
+		goes in first once that pass is open, for the same reason the pending
+		shadow models go in last -- see the comment on that loop below.
+
+		**`load_depth` follows whether the prepass actually ran.** If it could
+		not open its pass there is no depth from this frame to keep, and
+		loading anyway would hand the scene pass whatever the previous frame
+		left in that buffer -- every fragment tested against stale geometry,
+		which is a scene with holes punched through it rather than an obvious
+		failure. Clearing is the correct degrade: no AO that frame, and a
+		correct picture.
 	*/
 	if r.scene_deferred {
 		r.scene_deferred = false
 
-		if pipeline_forward_depth_prepass() {
-			ssao_run(r.camera3d)
-		}
+		prepass_ok := pipeline_forward_depth_prepass()
+		if prepass_ok do ssao_run(r.camera3d)
 
-		if !open_forward_scene_pass(load_depth = true) do return
+		if !open_forward_scene_pass(load_depth = prepass_ok) {
+			// Nothing can be drawn this frame, but the queues must not
+			// survive into the next one -- a replay of last frame's models
+			// against this frame's camera is worse than the blank frame.
+			clear(&r.pending_scene_models)
+			clear(&r.pending_shadow_models)
+			r.has_pending_skybox = false
+			r.mode_3d = false
+			return
+		}
 
 		if r.has_pending_skybox {
 			draw_skybox_immediate(r.pending_skybox)
@@ -497,6 +502,16 @@ end_drawing_3d :: proc() {
 	}
 	clear(&r.pending_scene_models)
 
+	/*
+		The other half of what the shadow pass drew, into the scene itself --
+		held until now rather than drawn the moment the pass opened, because
+		draw_skybox's own pipeline writes no depth at all and relies on being
+		first: see its "drawn first, so everything after it covers it" comment
+		in init.odin. Drawing these where begin_drawing_3d used to would put
+		them before a skybox the game draws afterward, and the skybox would
+		paint over them with nothing to stop it. Last is always safe, since
+		everything else here does write depth.
+	*/
 	for pending in r.pending_shadow_models {
 		draw_model_immediate(pending.model, pending.transform, pending.tint, pending.animator)
 	}

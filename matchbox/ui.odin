@@ -19,6 +19,8 @@ package matchbox
 	  Status_Line             a short message with a severity colour
 	  Modal                   a full-screen dim with something centred on top
 	  draw_progress           a bar from 0 to 1
+	  Number_Field            a number dragged sideways, or clicked and typed
+	  toggle                  a box ticked or not, with its label
 
 	Three of these come in two halves -- Scroll_View, Dropdown and Modal -- and
 	the reason is the same each time. Drawing is immediate, so what opens out
@@ -39,6 +41,7 @@ package matchbox
 */
 
 import "core:math"
+import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -1805,6 +1808,307 @@ modal_overlay :: proc(modal: ^Modal, size: [2]f32, dim: [4]f32 = MODAL_DIM) -> (
 */
 is_modal_dismissed :: proc(content: Rectangle) -> bool {
 	return is_mouse_pressed(.LEFT) && !is_mouse_over_rect(content) && !is_mouse_captured()
+}
+
+// -----------------------------------------------------------------------
+// Number field -- drag across it, or click and type
+// -----------------------------------------------------------------------
+
+Number_Field_Style :: struct {
+	speed:          f32, // how far the value moves per pixel dragged
+	step:           f32, // what the value snaps to; zero leaves it continuous
+	drag_threshold: f32, // pixels the pointer moves before a press is a drag rather than a click
+	decimals:       int, // how many are shown
+
+	fill:       [4]f32,
+	hover:      [4]f32,
+	active:     [4]f32, // while dragging or typing
+	text_color: [4]f32,
+}
+
+NUMBER_FIELD_STYLE :: Number_Field_Style{
+	speed          = 0.01,
+	drag_threshold = 3,
+	decimals       = 2,
+	fill           = {0.16, 0.16, 0.20, 1},
+	hover          = {0.22, 0.22, 0.28, 1},
+	active         = {0.26, 0.34, 0.52, 1},
+	text_color     = {0.92, 0.92, 0.95, 1},
+}
+
+/*
+	Held by the caller, one per field. The zero value is a field nobody is
+	touching.
+
+	The number itself is not in here: it belongs to whatever is being edited,
+	and is passed by pointer, the way `Slider` takes its value.
+*/
+Number_Field :: struct {
+	// The button went down on the field and has not come up. Whether that
+	// becomes a drag or a click is decided by how far the pointer goes first.
+	pressed:     bool,
+	dragging:    bool,
+	press_x:     f32,
+	press_value: f32,
+
+	typing: bool,
+	text:   Text_Field,
+
+	// What the box shows as its placeholder while typing: the number it had.
+	// Kept here because the placeholder is a string the field only points at.
+	shown: [32]u8,
+}
+
+/*
+	A number changed by dragging sideways across it, or by clicking and typing.
+	True on any frame the value changes.
+
+		if matchbox.number_field(&x_field, rect, &position.x) do moved()
+
+	The slider's sibling for a number with no ends -- a position, an angle, a
+	scale -- where there is no track to sweep along.
+
+	**A drag is measured from where it started**, not added up a frame at a
+	time, so the value does not drift, and `style.step` snaps the result rather
+	than each frame's change: five small movements still reach a step.
+
+	**A click that does not drag opens the field for typing**, empty, with the
+	number as the placeholder -- typing replaces it, which is what clicking a
+	number to type a new one means. Enter, or a click anywhere else, keeps what
+	was typed when it reads as a number. Escape, or text that is not a number,
+	leaves the value as it was.
+
+	`is_number_field_active` says whether a drag or typing is under way: what an
+	editor watches for the start and the end of an edit, which is when it takes
+	an undo step.
+*/
+number_field :: proc(
+	state:     ^Number_Field,
+	rectangle: Rectangle,
+	value:     ^f32,
+	style:     Number_Field_Style = NUMBER_FIELD_STYLE,
+	font:      ^Font = nil,
+) -> (changed: bool) {
+	changed = number_field_input(state, rectangle, value, style)
+	draw_number_field(state, rectangle, value^, style, font)
+	return changed
+}
+
+// Whether the field is being dragged or typed into.
+is_number_field_active :: proc(state: ^Number_Field) -> bool {
+	return state.dragging || state.typing
+}
+
+// Frees the text the field types into.
+destroy_number_field :: proc(state: ^Number_Field) {
+	destroy_text_field(&state.text)
+}
+
+@(private)
+number_field_input :: proc(state: ^Number_Field, rectangle: Rectangle, value: ^f32, style: Number_Field_Style) -> (changed: bool) {
+	before := value^
+
+	if state.typing {
+		state.text.rectangle = rectangle
+		update_text_field(&state.text)
+
+		switch {
+		case is_key_pressed(.ESCAPE):
+			number_field_stop_typing(state)
+
+		case is_key_pressed(.RETURN) || is_key_pressed(.KP_ENTER) || !state.text.focused:
+			typed := strings.trim_space(get_text_field_string(&state.text))
+			if parsed, ok := strconv.parse_f32(typed); ok && len(typed) > 0 {
+				value^ = number_snap(parsed, style.step)
+			}
+			number_field_stop_typing(state)
+		}
+
+		return value^ != before
+	}
+
+	mouse := get_mouse_position()
+
+	switch {
+	case state.pressed && !is_mouse_held(.LEFT):
+		// Let go. Without having dragged, that was a click.
+		if !state.dragging do number_field_start_typing(state, rectangle, value^, style)
+		state.pressed  = false
+		state.dragging = false
+
+	case state.pressed:
+		// Held is what keeps it going, so the pointer may leave the field.
+		if !state.dragging && math.abs(mouse.x - state.press_x) >= style.drag_threshold {
+			state.dragging = true
+		}
+		if state.dragging {
+			value^ = number_snap(state.press_value + (mouse.x - state.press_x) * style.speed, style.step)
+		}
+		capture_mouse()
+
+	case is_mouse_pressed(.LEFT) && !is_mouse_captured() && is_mouse_over_rect(rectangle):
+		state.pressed     = true
+		state.dragging    = false
+		state.press_x     = mouse.x
+		state.press_value = value^
+		capture_mouse()
+	}
+
+	return value^ != before
+}
+
+@(private)
+number_field_start_typing :: proc(state: ^Number_Field, rectangle: Rectangle, value: f32, style: Number_Field_Style) {
+	state.typing = true
+
+	text_field_set(&state.text, "")
+	state.text.placeholder = number_text(state.shown[:], value, style.decimals)
+	state.text.rectangle   = rectangle
+	state.text.focused     = true
+	state.text.blink_from  = mbi.now_ts
+
+	begin_text_input()
+}
+
+@(private)
+number_field_stop_typing :: proc(state: ^Number_Field) {
+	state.typing       = false
+	state.text.focused = false
+
+	// Text input is the screen's to turn off, update_text_field says. A field
+	// that turned it on for itself is the exception, and turns it off again.
+	end_text_input()
+}
+
+// A number as the field shows it, written into `buffer`. strconv.write_float
+// always writes a sign, and "+1.00" in every field is noise.
+@(private)
+number_text :: proc(buffer: []u8, value: f32, decimals: int) -> string {
+	return strings.trim_prefix(strconv.write_float(buffer, f64(value), 'f', decimals, 32), "+")
+}
+
+@(private)
+number_snap :: proc(value, step: f32) -> f32 {
+	if step <= 0 do return value
+	return math.round(value / step) * step
+}
+
+@(private)
+draw_number_field :: proc(state: ^Number_Field, rectangle: Rectangle, value: f32, style: Number_Field_Style, font: ^Font) {
+	font := font if font != nil else &mbi.font
+	box  := rectangle
+
+	switch {
+	case state.dragging || state.typing:
+		box.color = style.active
+	case is_mouse_over_rect(rectangle) && !is_mouse_captured():
+		box.color = style.hover
+	case:
+		box.color = style.fill
+	}
+
+	if state.typing {
+		state.text.rectangle = box
+		draw_text_field(&state.text, font)
+		return
+	}
+
+	draw_rect(box)
+
+	buffer: [32]u8
+	text     := number_text(buffer[:], value, style.decimals)
+	top_left := rect_top_left(box)
+	size     := measure_text(font, text)
+
+	begin_clip(box)
+	draw_text(font, text, top_left.x + 8, top_left.y + (box.size.y - size.y) * 0.5 + font.ascent, style.text_color)
+	end_clip()
+}
+
+// -----------------------------------------------------------------------
+// Toggle -- a box ticked or not
+// -----------------------------------------------------------------------
+
+Toggle_Style :: struct {
+	box:        [4]f32,
+	box_hover:  [4]f32,
+	tick:       [4]f32,
+	text_color: [4]f32,
+
+	// Drawn dimmed, and never flips -- the same rule as Button_Style.disabled.
+	disabled:     bool,
+	disabled_dim: f32,
+}
+
+TOGGLE_STYLE :: Toggle_Style{
+	box          = {0.16, 0.16, 0.20, 1},
+	box_hover    = {0.22, 0.22, 0.28, 1},
+	tick         = {0.55, 0.72, 1.00, 1},
+	text_color   = {0.92, 0.92, 0.95, 1},
+	disabled_dim = 0.45,
+}
+
+/*
+	A box that is ticked or not, with its label beside it. True on the frame it
+	is clicked, `value` already flipped.
+
+		matchbox.toggle(rect, &settings.vsync, "Wait for vsync")
+
+	The square is as tall as `rectangle`, at its left; the label follows it
+	inside the same rectangle, and **the whole rectangle is the click target**.
+	A label that has to be missed and the tiny box hit instead is the thing
+	every settings menu gets wrong.
+*/
+toggle :: proc(
+	rectangle: Rectangle,
+	value:     ^bool,
+	label:     string = "",
+	style:     Toggle_Style = TOGGLE_STYLE,
+	font:      ^Font = nil,
+) -> (changed: bool) {
+	changed = toggle_input(rectangle, value, style)
+	draw_toggle(rectangle, value^, label, style, font)
+	return changed
+}
+
+@(private)
+toggle_input :: proc(rectangle: Rectangle, value: ^bool, style: Toggle_Style) -> bool {
+	if style.disabled do return false
+	if !is_mouse_pressed(.LEFT) || is_mouse_captured() || !is_mouse_over_rect(rectangle) do return false
+
+	value^ = !value^
+	return true
+}
+
+@(private)
+draw_toggle :: proc(rectangle: Rectangle, value: bool, label: string, style: Toggle_Style, font: ^Font) {
+	font     := font if font != nil else &mbi.font
+	top_left := rect_top_left(rectangle)
+	side     := rectangle.size.y
+
+	dim := style.disabled_dim if style.disabled_dim > 0 else TOGGLE_STYLE.disabled_dim
+	hot := !style.disabled && is_mouse_over_rect(rectangle) && !is_mouse_captured()
+
+	box_color  := style.box_hover if hot else style.box
+	tick_color := style.tick
+	text_color := style.text_color
+	if style.disabled {
+		box_color  = dimmed(box_color, dim)
+		tick_color = dimmed(tick_color, dim)
+		text_color = dimmed(text_color, dim)
+	}
+
+	draw_rect({position = top_left, size = {side, side}, color = box_color, pivot = {0.5, 0.5}})
+
+	if value {
+		inset := side * 0.25
+		draw_rect({position = top_left + inset, size = {side - inset * 2, side - inset * 2}, color = tick_color, pivot = {0.5, 0.5}})
+	}
+
+	if len(label) > 0 {
+		size := measure_text(font, label)
+		draw_text(font, label, top_left.x + side + 10, top_left.y + (side - size.y) * 0.5 + font.ascent, text_color)
+	}
 }
 
 // -----------------------------------------------------------------------

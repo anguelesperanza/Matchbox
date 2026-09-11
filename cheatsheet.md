@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 390 of them -- with its arguments
+Every public procedure in the package -- 403 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -19,7 +19,7 @@ any.
 - [2D drawing](#2d-drawing) -- 60
 - [Text and fonts](#text-and-fonts) -- 21
 - [2D cameras](#2d-cameras) -- 4
-- [UI](#ui) -- 66
+- [UI](#ui) -- 70
 - [3D cameras](#3d-cameras) -- 46
 - [3D movement](#3d-movement) -- 4
 - [3D drawing](#3d-drawing) -- 23
@@ -29,7 +29,7 @@ any.
 - [Render targets](#render-targets) -- 6
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 35
+- [Other](#other) -- 44
 
 ## Getting started
 
@@ -1369,6 +1369,38 @@ is_modal_dismissed :: proc(content: Rectangle) -> bool
 Whether the click landed on the dim rather than on `content`, which is the usual way a modal is dismissed.
 
 ```odin
+number_field :: proc(
+	state: ^Number_Field,
+	rectangle: Rectangle,
+	value: ^f32,
+	style: Number_Field_Style = NUMBER_FIELD_STYLE,
+	font: ^Font = nil) -> (changed: bool,
+)
+```
+A number changed by dragging sideways across it, or by clicking and typing.
+
+```odin
+is_number_field_active :: proc(state: ^Number_Field) -> bool
+```
+Whether the field is being dragged or typed into.
+
+```odin
+destroy_number_field :: proc(state: ^Number_Field)
+```
+Frees the text the field types into.
+
+```odin
+toggle :: proc(
+	rectangle: Rectangle,
+	value: ^bool,
+	label: string = "",
+	style: Toggle_Style = TOGGLE_STYLE,
+	font: ^Font = nil) -> (changed: bool,
+)
+```
+A box that is ticked or not, with its label beside it.
+
+```odin
 slider :: proc(
 	state: ^Slider,
 	rectangle: Rectangle,
@@ -2676,6 +2708,83 @@ create_material_subsurface :: proc(
 ) -> Material
 ```
 A wrapped-diffuse translucency approximation -- see `brdf/subsurface.hlsli`'s own doc comment for exactly what this does and does not model (it is not a real BSSRDF).
+
+### `ray.odin`
+
+```odin
+ray_point :: proc(ray: Ray, distance: f32) -> [3]f32
+```
+The point `distance` along a ray.
+
+```odin
+ray_from_screen :: proc(
+	camera: Camera3D,
+	point: [2]f32,
+	viewport: Rectangle = {},
+) -> Ray
+```
+The ray from the camera through a point on the screen.
+
+```odin
+get_mouse_ray :: proc(camera: Camera3D, viewport: Rectangle = {}) -> Ray
+```
+The ray under the pointer.
+
+```odin
+world_to_screen :: proc(
+	camera: Camera3D,
+	point: [3]f32,
+	viewport: Rectangle = {}) -> (screen: [2]f32,
+	in_front: bool,
+)
+```
+Where a point in the world lands on the screen, and whether it is in front of the camera at all.
+
+```odin
+ray_plane :: proc(
+	ray: Ray,
+	point,
+	normal: [3]f32) -> (distance: f32,
+	hit: bool,
+)
+```
+Where a ray meets the plane through `point` facing `normal`, as a distance along the ray.
+
+```odin
+ray_sphere :: proc(
+	ray: Ray,
+	center: [3]f32,
+	radius: f32) -> (distance: f32,
+	hit: bool,
+)
+```
+Where a ray first meets a sphere, as a distance along the ray.
+
+```odin
+ray_box :: proc(ray: Ray, lower, upper: [3]f32) -> (distance: f32, hit: bool)
+```
+Where a ray first enters a box whose sides run along the axes, as a distance along the ray; 0 when it starts inside.
+
+```odin
+ray_oriented_box :: proc(
+	ray: Ray,
+	lower,
+	upper: [3]f32,
+	transform: matrix[4, 4]f32) -> (distance: f32,
+	hit: bool,
+)
+```
+`ray_box` for a box placed by `transform`: `lower` and `upper` are in the box's own space, and the distance comes back in the world's.
+
+```odin
+ray_model :: proc(
+	ray: Ray,
+	model: Model,
+	transform: Transform) -> (distance: f32,
+	hit: bool,
+)
+```
+Where a ray meets a model drawn at `transform`, against the model's bounding box: what clicking on a model wants.
 
 ### `reflection.odin`
 

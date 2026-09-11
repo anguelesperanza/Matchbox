@@ -254,11 +254,7 @@ draw_skybox_immediate :: proc(skybox: Skybox) {
 	// forward, and using that directly would shear the sky.
 	up := cross3(right, forward)
 
-	width  := f32(mbi.window_width)
-	height := f32(mbi.window_height)
-
-	aspect: f32 = 1
-	if height > 0 do aspect = width / height
+	aspect := current_aspect()
 
 	/*
 		Half the height of the view plane at unit distance, which is what turns

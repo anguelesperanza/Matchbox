@@ -198,6 +198,27 @@ get_current_target_size :: proc() -> [2]f32 {
 	return {f32(mbi.window_width), f32(mbi.window_height)}
 }
 
+/*
+	Width over height of wherever 3D is being drawn right now -- the bound
+	render target, or the window -- and 1 for a minimised window, which reports
+	a height of zero.
+
+	Every projection-shaped calculation reads this: `camera3d_projection`, the
+	cluster frustum, the cascade fit and the skybox. **They all used to read the
+	window's size**, which was right for every target until one was not the
+	window's shape. `examples/viewport` found it: a 740x560 target projected
+	with the window's 1280x720 aspect squeezed the scene horizontally by a
+	quarter. They have to agree with each other as well as with the target, or
+	the light clusters, the shadow cascades and the sky each cover a different
+	frustum from the picture.
+*/
+@(private)
+current_aspect :: proc() -> f32 {
+	size := get_current_target_size()
+	if size.y <= 0 do return 1
+	return size.x / size.y
+}
+
 // -----------------------------------------------------------------------
 // Post-processing
 // -----------------------------------------------------------------------
@@ -277,4 +298,59 @@ draw_post :: proc(target: Render_Target, effect: Post_Effect = .NONE, grid: [2]f
 	}
 
 	push_quad(&vert_data, &frag_data, size_of(frag_data))
+}
+
+/*
+	Draws a render target into `dest`, stretched to fill it: the part of the
+	window a split-screen player, an in-game monitor or an editor's viewport
+	takes up.
+
+	`draw_post` with `.NONE` is the same picture over the whole window; this is
+	it for part of one. `dest` is in the coordinates everything 2D is drawn in,
+	so it lines up with a `draw_rect` of the same rectangle, and `dest.color` is
+	ignored the way `draw_pixel_buffer` ignores it.
+
+	**Through `post`'s pipeline, not `sprite`'s**, although a target is a
+	texture and `draw_pixel_buffer` draws its texture through `sprite`.
+	`post.frag` is the shader `draw_post` has always shown a target with, so
+	this is that path onto a smaller rectangle rather than a second path to
+	verify -- and it writes alpha 1, so a target cleared to a translucent colour
+	does not let what is underneath show through.
+
+	**The target does not follow `dest`.** One made at the window's size and
+	drawn into a rectangle a third as wide is filtered down, and one smaller
+	than its rectangle is blurred up. For a sharp picture make the target the
+	size of `dest` in pixels (`screen_size`), and remake it when that changes
+	-- `examples/viewport` does.
+
+	Can be called while another target is bound, since composing one target
+	into another is legitimate, but not while `target` itself is.
+*/
+draw_render_target :: proc(target: Render_Target, dest: Rectangle) {
+	r := &mbi.renderer
+	if !r.frame_active || target.texture == nil do return
+
+	// Sampling a texture that is also the pass's colour attachment is
+	// undefined on every backend, and a validation failure on some.
+	ensure(r.target == nil || r.target.texture != target.texture, "a render target cannot be drawn into itself")
+
+	vert_data := Vert_Data{
+		position = screen_pos(rect_center(dest)),
+		size     = screen_size(dest.size),
+		screen   = get_screen_dims(),
+		rotation = dest.rotation,
+		uv_min   = {0, 0},
+		uv_max   = {1, 1},
+	}
+
+	// post.frag reads none of this for a plain draw, but it declares the
+	// block, so the block is pushed.
+	frag_data := Post_Frag_Data{
+		resolution = {f32(target.width), f32(target.height)},
+	}
+
+	// Linear, as draw_post's own plain case uses: at a matching size on whole
+	// pixels it gives the same picture as nearest, and at any other size it
+	// is the less wrong of the two.
+	draw_quad(r.pipelines.post, &vert_data, &frag_data, size_of(frag_data), target.texture, r.font_sampler)
 }

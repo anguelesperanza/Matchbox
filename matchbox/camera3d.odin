@@ -79,26 +79,22 @@ camera3d_view :: proc(camera: Camera3D) -> matrix[4, 4]f32 {
 }
 
 /*
-	The matrix that turns view space into clip space, for the window as it is
-	now.
+	The matrix that turns view space into clip space, for wherever 3D is being
+	drawn now: the bound render target, or the window when none is bound.
 
-	Aspect comes from the window rather than from the logical size, because the
-	3D pass draws into the swapchain at its real pixel dimensions -- a 3D scene
-	is not letterboxed the way `set_logical_size` letterboxes 2D.
+	Aspect comes from that destination's real pixel dimensions rather than from
+	the logical size, because a 3D scene is not letterboxed the way
+	`set_logical_size` letterboxes 2D. It came from the window even with a
+	target bound until a target that was not the window's shape showed the
+	difference -- see `current_aspect`.
 
 	An orthographic camera reads `fov` as the height of the visible box in world
 	units rather than as an angle, which is what raylib does with the same
 	field.
 */
 camera3d_projection :: proc(camera: Camera3D) -> matrix[4, 4]f32 {
-	c := camera3d_defaults(camera)
-
-	width  := f32(mbi.window_width)
-	height := f32(mbi.window_height)
-
-	// A minimised window reports zero and would divide by it.
-	aspect: f32 = 1
-	if height > 0 do aspect = width / height
+	c      := camera3d_defaults(camera)
+	aspect := current_aspect()
 
 	switch c.projection {
 	case .ORTHOGRAPHIC:

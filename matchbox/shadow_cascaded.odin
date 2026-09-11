@@ -123,10 +123,7 @@ compute_cascade_view_projection :: proc(
 	view     := camera3d_view(c)
 	inv_view := linalg.matrix4_inverse(view)
 
-	width  := f32(mbi.window_width)
-	height := f32(mbi.window_height)
-	aspect: f32 = 1
-	if height > 0 do aspect = width / height
+	aspect := current_aspect()
 
 	tan_half := math.tan(math.to_radians(c.fov) * 0.5)
 

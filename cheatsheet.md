@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 381 of them -- with its arguments
+Every public procedure in the package -- 389 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -20,7 +20,8 @@ any.
 - [Text and fonts](#text-and-fonts) -- 21
 - [2D cameras](#2d-cameras) -- 4
 - [UI](#ui) -- 66
-- [3D cameras](#3d-cameras) -- 42
+- [3D cameras](#3d-cameras) -- 46
+- [3D movement](#3d-movement) -- 4
 - [3D drawing](#3d-drawing) -- 23
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
@@ -1762,6 +1763,33 @@ third_person_walk :: proc(
 ```
 Input, the move, and the follow -- the whole frame, for a character nothing else is driving.
 
+### `camera3d_fixed.odin`
+
+```odin
+create_fixed_camera :: proc(
+	focus_offset: [3]f32 = CAMERA3D_DEFAULTS.focus_offset,
+	near: f32 = 0.1,
+	far: f32 = 1000,
+	allocator := context.allocator,
+) -> Fixed_Camera
+```
+An empty fixed camera, waiting for shots.
+
+```odin
+fixed_camera_add_shot :: proc(rig: ^Fixed_Camera, shot: Camera_Shot) -> int
+```
+Adds a shot, and answers its index in `shots`.
+
+```odin
+fixed_camera_follow :: proc(rig: ^Fixed_Camera, position: [3]f32)
+```
+Puts the camera at the shot covering `position`, and aims it.
+
+```odin
+destroy_fixed_camera :: proc(rig: ^Fixed_Camera)
+```
+Releases the shots.
+
 ### `math3d.odin`
 
 ```odin
@@ -1807,6 +1835,50 @@ An orthographic projection, also [0, 1] in depth.
 look_at_matrix :: proc(eye, target, up: [3]f32) -> matrix[4, 4]f32
 ```
 A view matrix for an eye looking at a point.
+
+## 3D movement
+
+### `movement3d.odin`
+
+```odin
+create_character_controls :: proc(
+	facing: f32 = 0,
+	scheme: Control_Scheme = .TANK,
+	tank_turn_speed: f32 = MOVEMENT_DEFAULTS.tank_turn_speed,
+	backward_speed: f32 = MOVEMENT_DEFAULTS.backward_speed,
+	turn_speed: f32 = CAMERA3D_DEFAULTS.turn_speed,
+	hold_basis: bool = true,
+	hold_tolerance: f32 = MOVEMENT_DEFAULTS.hold_tolerance,
+) -> Character_Controls
+```
+Character controls, facing `facing`, with everything else defaulted.
+
+```odin
+get_movement_input :: proc(pad: int = 0) -> [2]f32
+```
+The movement the player is asking for this frame, from the keys and a pad.
+
+```odin
+character_steer :: proc(
+	controls: ^Character_Controls,
+	input: [2]f32,
+	camera: Camera3D,
+	delta_time: f32,
+)
+```
+Turns the character and works out `move` from `input`, under `camera`.
+
+```odin
+character_walk :: proc(
+	controls: ^Character_Controls,
+	position: ^[3]f32,
+	speed: f32,
+	camera: Camera3D,
+	delta_time: f32,
+	pad: int = 0,
+)
+```
+`character_steer` with this frame's `get_movement_input`, and the move added to `position` -- the whole frame, for a character nothing else is driving.
 
 ## 3D drawing
 

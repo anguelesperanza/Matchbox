@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 403 of them -- with its arguments
+Every public procedure in the package -- 405 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -22,7 +22,7 @@ any.
 - [UI](#ui) -- 70
 - [3D cameras](#3d-cameras) -- 46
 - [3D movement](#3d-movement) -- 4
-- [3D drawing](#3d-drawing) -- 23
+- [3D drawing](#3d-drawing) -- 25
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
@@ -2075,6 +2075,16 @@ A flat disk of light at `position`, facing `normal`, `radius` wide.
 set_lights :: proc(lights: []Light)
 ```
 Sets every light in the scene at once, replacing whatever was there.
+
+```odin
+pick_shadow_casters :: proc(lights: []Light) -> (casters: Shadow_Casters)
+```
+Which lights in a list `set_lights` would give a shadow to: `slots` for directional and spot lights, `cube` for point lights, each an index into `lights`, or -1 for a slot nobody took.
+
+```odin
+is_shadow_caster :: proc(casters: Shadow_Casters, index: int) -> bool
+```
+Whether the light at `index` in the list `casters` was picked from gets a shadow slot.
 
 ### `skybox.odin`
 

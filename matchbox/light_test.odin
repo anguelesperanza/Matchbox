@@ -127,3 +127,54 @@ test_caster_index_follows_disabled_lights_being_dropped :: proc(t: ^testing.T) {
 	testing.expect(t, mbi.renderer.lighting.shadow.caster_indices[0] == 0,
 		"the caster's index should follow the dropped light shifting it to slot 0")
 }
+
+/*
+	`pick_shadow_casters` on its own, with no GPU list involved. The lights, and
+	what each should get:
+
+		0 point, casts        the cube slot
+		1 directional, casts  slot 0
+		2 area rect, casts    nothing: area lights are never routed
+		3 spot, casts         slot 1
+		4 directional, casts  nothing: both slots taken
+		5 point, casts        nothing: the one cube slot taken
+		6 spot, does not ask  nothing
+*/
+@(test)
+test_pick_shadow_casters_routes_by_kind_first_come :: proc(t: ^testing.T) {
+	lights := []Light{
+		create_point_light({0, 1, 0}, casts_shadow = true),
+		create_directional_light({0, -1, 0}, casts_shadow = true),
+		create_area_rect_light({0, 3, 0}, {0, -1, 0}, {1, 0, 0}, 1, 1),
+		create_spot_light({0, 5, 0}, {0, -1, 0}, casts_shadow = true),
+		create_directional_light({1, -1, 0}, casts_shadow = true),
+		create_point_light({2, 1, 0}, casts_shadow = true),
+		create_spot_light({0, 5, 2}, {0, -1, 0}),
+	}
+	lights[2].casts_shadow = true
+
+	casters := pick_shadow_casters(lights)
+
+	testing.expect_value(t, casters.slots, [MAX_SHADOW_CASTERS]int{1, 3})
+	testing.expect_value(t, casters.cube, [MAX_POINT_SHADOW_CASTERS]int{0})
+
+	want := [7]bool{true, true, false, true, false, false, false}
+	for w, i in want {
+		testing.expectf(t, is_shadow_caster(casters, i) == w, "light %d: is_shadow_caster should be %v", i, w)
+	}
+}
+
+// A disabled light takes no slot, and a free slot's -1 is not a light.
+@(test)
+test_pick_shadow_casters_skips_disabled_lights :: proc(t: ^testing.T) {
+	off := create_directional_light({0, -1, 0}, casts_shadow = true)
+	off.enabled = false
+	on := create_spot_light({0, 5, 0}, {0, -1, 0}, casts_shadow = true)
+
+	casters := pick_shadow_casters({off, on})
+
+	testing.expect_value(t, casters.slots, [MAX_SHADOW_CASTERS]int{1, -1})
+	testing.expect_value(t, casters.cube, [MAX_POINT_SHADOW_CASTERS]int{-1})
+	testing.expect(t, !is_shadow_caster(casters, 0), "the disabled light should not be a caster")
+	testing.expect(t, !is_shadow_caster(casters, -1), "-1 marks a free slot, not a light")
+}

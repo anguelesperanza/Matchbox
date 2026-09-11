@@ -265,10 +265,41 @@ button_enabled_if :: proc(enabled: bool, style := BUTTON_STYLE) -> Button_Style 
 	return style
 }
 
-// Whether the pointer is inside a rectangle. is_point_in_rect with the mouse
-// already filled in, which is what almost every caller wants.
+/*
+	Whether the pointer is inside a rectangle and inside the clip in force.
+
+	The clip is part of the question because a row scrolled out of a panel is
+	cut out of the picture by the scissor and used to answer the mouse anyway:
+	the scissor is drawing state and the hit test never looked at it. A button
+	in a panel's foot then also pressed whatever list row had scrolled
+	underneath it, invisibly. Every widget comes through here, so checking once
+	makes `button`, `hover_dwell`, `Text_Field` and the slider right inside
+	`begin_scroll` without any of them being told.
+
+	`is_point_in_rect(get_mouse_position(), rectangle)` is still the plain
+	geometric test, for anything that wants to ignore the clip -- an open
+	dropdown list, which is drawn later and outside it, is one.
+*/
 is_mouse_over_rect :: proc(rectangle: Rectangle) -> bool {
-	return is_point_in_rect(get_mouse_position(), rectangle)
+	return is_point_in_rect(get_mouse_position(), rectangle) && is_mouse_inside_clip()
+}
+
+// Whether the pointer is inside the innermost clip, or true when there is none.
+// The clip stack is in window pixels and the pointer in logical ones, so the
+// pointer is taken back through the letterbox transform first.
+@(private)
+is_mouse_inside_clip :: proc() -> bool {
+	r := &mbi.renderer
+	if r.clip_depth == 0 do return true
+
+	clip  := r.clip_stack[r.clip_depth - 1]
+	scale := mbi.draw_scale if mbi.draw_scale > 0 else 1
+
+	x := mbi.input.mouse.x * scale + mbi.draw_offset[0]
+	y := mbi.input.mouse.y * scale + mbi.draw_offset[1]
+
+	return x >= f32(clip.x) && x < f32(clip.x + clip.w) &&
+	       y >= f32(clip.y) && y < f32(clip.y + clip.h)
 }
 
 // -----------------------------------------------------------------------
@@ -1288,7 +1319,11 @@ context_menu :: proc(
 */
 @(private)
 dropdown_take_input :: proc(state: ^Dropdown, count: int, over_anchor: bool) -> (changed: bool) {
-	if over_anchor || is_mouse_over_rect(dropdown_list_rect(state, count)) do capture_mouse()
+	// The plain geometric test, not is_mouse_over_rect: the open list is drawn
+	// by dropdown_overlay, late and outside any clip, so a dropdown inside a
+	// scrolling panel opens a list that reaches past the panel -- and has to
+	// take the pointer there too.
+	if over_anchor || is_point_in_rect(get_mouse_position(), dropdown_list_rect(state, count)) do capture_mouse()
 
 	// Either button puts a menu away. Right-clicking somewhere else with a menu
 	// open means "open one there instead", and leaving the first one up would

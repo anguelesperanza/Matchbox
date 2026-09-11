@@ -1042,7 +1042,7 @@ A style with `disabled` set the way the caller says, which is the shape this is 
 ```odin
 is_mouse_over_rect :: proc(rectangle: Rectangle) -> bool
 ```
-Whether the pointer is inside a rectangle.
+Whether the pointer is inside a rectangle and inside the clip in force.
 
 ```odin
 button_confirm :: proc(
@@ -1506,7 +1506,7 @@ The matrix that moves the world in front of the camera.
 ```odin
 camera3d_projection :: proc(camera: Camera3D) -> matrix[4, 4]f32
 ```
-The matrix that turns view space into clip space, for the window as it is now.
+The matrix that turns view space into clip space, for wherever 3D is being drawn now: the bound render target, or the window when none is bound.
 
 ```odin
 camera3d_view_projection :: proc(camera: Camera3D) -> matrix[4, 4]f32

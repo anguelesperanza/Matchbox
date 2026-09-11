@@ -8,6 +8,25 @@ areas of improvement while trying to create them.
 
 # Not Started
 
+# Frame Rate Independent
+Matchbox is currenlty framerate depended; need to look into making it frame rate independed if possible
+as game slows down at lower framerates -- not ideal if as affects gameplay is framerate is locked at lower
+fps for perfamnce reasons
+
+# create_first_person_camera argument change
+facing should be an enum `Facing_Direction` that has either `FORWARD`, `BACKWARD`.
+The match should be calcuated inside the function based on whether `.FORWARD` or `.BACKWARD` is called
+
+
+# the escape to regain mouse control + escape to leave
+Make that it's own proc to prevent typing it over and over
+
+## Light Range Values
+Add a way to teak the range of the light
+
+## Model Forward Procedure(s)
+Add procedure to get the forward facing direction of a model
+
 ## A Hit Test That Knows About The Clip
 
 Found converting the card game's deck builder from paging to Scroll_View, which
@@ -321,6 +340,30 @@ window and gets a tall one. Nothing is broken; it simply has no idea what shape
 it is on. That is a display-model question rather than an Android one, and it has
 its own entry below.
 
+## Vendor Our Own Copy Of stb, Instead Of Patching Odin's Install
+
+The layer-1 workaround documented above, under "Android -- It Runs," is three
+one-line edits inside the *Odin installation itself* --
+`vendor/stb/{image,truetype,rect_pack}`'s `LIB` constant, gated so Android falls
+through to the `system:` form instead of emitting an unresolvable `-l:<absolute
+path>`. That fix lives outside this repository, in a tree matchbox does not
+control and does not version. A fresh machine has to be told to go make those
+edits by hand, and an Odin upgrade overwrites the vendor tree wholesale and
+silently undoes them -- the build goes back to `unable to find library
+-l:C:/...` with nothing in this repo's history explaining why, until someone
+remembers to redo the patch.
+
+The real fix is upstream -- pass `.a` files as ordinary input files on Linux,
+the way the Darwin branch of `linker.cpp` already does -- but matchbox does not
+have to keep depending on a hand-patched toolchain until that lands.
+`vendor:stb`'s three packages are plain Odin source; copying them into
+matchbox's own tree and carrying the `LIB` gate there instead makes it an
+ordinary vendored dependency, checked into this repository the way everything
+else matchbox needs is, rather than a step a fresh machine has to be walked
+through separately. A game that drops in the matchbox folder would build for
+Android without anyone touching their own Odin install, and an Odin upgrade
+would stop being able to regress it.
+
 ## The Window Is Either A Shape The Game Chose Or One It Was Handed
 
 Undecided, and worth deciding once rather than per platform. Android forced the
@@ -580,6 +623,49 @@ to free. Fixed, and worth writing down mostly for the method -- a tracking
 allocator around `init` / `cleanup` is a two minute test and it now comes back
 clean, which makes the next leak easy to see. 53mb is not made of that sort of
 thing, though; the atlases and textures are where to look.
+
+## Lighting And Shadows Need A Ground-Up Rework
+
+Found in the horror game: a scene with a ceiling light (directional,
+`casts_shadow = true`, always on) and a flashlight (spot, `casts_shadow =
+true`, toggled by a key). Take the ceiling light out -- no windows, no need
+for a sun -- and leave just the flashlight, and two things that are supposed
+to be independent switches turn out not to be.
+
+`set_lights` with zero lights is what puts the fixed fallback shading back
+(`Light.odin`'s own `flags.x` doc comment), not a dark scene -- that is
+deliberate, and correct on its own. But with no always-on light to fall back
+to, whether the *real* lighting model runs at all now depends entirely on
+whether the flashlight happens to be on this frame: off, the light list is
+empty and the scene is flat-lit; on, it is not. And separately, whether
+`begin_shadow_pass` opens a real pass depends on `recompute_shadow_casters`
+finding *something* marked `casts_shadow` in whatever the current light list
+is -- so with the flashlight as the only candidate, turning it off does not
+just remove its own light, it also happens to be the thing that turns the
+whole shadow system's practical effect off, even though `enable_shadows` was
+never touched and thinks it is still on.
+
+Neither of these is a bug in the sense of doing the wrong thing -- every
+piece is behaving exactly as documented in isolation. What is missing is a
+scene-level story for what "the lighting is on" and "shadows are on" mean
+when the only light around is one a player can toggle, rather than always
+being true of some fixed light the game can rely on.
+
+That is one symptom of a bigger shape problem, not the whole of it. Lighting
+and shadows grew the way most things here start -- one light, then a second
+kind, then shadows for one caster, then two -- and each step was the right
+size change for what it was solving at the time. What is missing is a design
+that was ever asked to hold all of it at once: what "on" means when the light
+list can be empty, how a caster is chosen, how many can cast real shadows
+together, are all answers a `Lighting_Data` cbuffer and a couple of Odin procs
+ended up giving by accident rather than ones a scene actually gets to state.
+And none of it exists for 2D at all right now -- `draw_sprite` has no opinion
+on any of this, so a 2D game that wants a lit scene, or even just a shadow
+under a sprite, has nothing here to reach for. Worth rebuilding lighting and
+shadows from the ground up rather than continuing to patch the 3D-only,
+grown-by-accretion version: one cohesive model that states plainly what "lit"
+and "shadowed" mean regardless of which lights happen to be in the list this
+frame, and that 2D can opt into the same way 3D does now.
 
 ---
 

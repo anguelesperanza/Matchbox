@@ -25,3 +25,7 @@ matchbox/android/debug.keystore
 # else's art rather than this repository's -- see that example's own doc
 # comment for what to put at each path to run it locally.
 examples/animation-layers/assets/
+
+# What pressing F5 in examples/walk-level writes, to compare against the level
+# it loaded. A local experiment, not part of the example.
+examples/walk-level/levels/yard_saved.level

@@ -24,9 +24,17 @@ package level
 	  paths to Matchbox are two packages: two `mbi` globals, and an `mb.Model`
 	  from one is not an `mb.Model` to the other.
 
-	**So far this is the data and its JSON, nothing more.** Loading models,
-	resolving parents, drawing and lights come next. `level_test.odin` holds
-	what is here to the claims the plan makes about it.
+	**Where things are:**
+
+	- `level.odin` -- the data, its JSON, and the repairs a hand-edited file
+	  can need
+	- `world.odin` -- handles, and world transforms through parents
+	- `draw.odin` -- lights and drawing
+	- `load.odin` -- loading a level with its models, and saving one
+
+	A game's frame, once loaded: `update_level`, `level_lights` into
+	`mb.set_lights`, `draw_level_shadow_casters` before the 3D pass, and
+	`draw_level` inside it. `examples/walk-level` is that, whole.
 
 	**The file is whatever `core:encoding/json` writes for these structs**,
 	with no hand-written reader or writer beside it. A component gains a field
@@ -37,6 +45,7 @@ package level
 
 import "core:encoding/json"
 import "core:fmt"
+import "core:math"
 import "core:reflect"
 import "core:strings"
 
@@ -59,6 +68,28 @@ Level :: struct {
 	version:  int,
 	settings: Level_Settings,
 	entities: [dynamic]Entity,
+
+	runtime: Level_Runtime `json:"-"`,
+}
+
+/*
+	What a level holds while it is in use and never writes to a file.
+
+	One struct under one `json:"-"` rather than a tag on each field, so that a
+	field added here cannot forget its tag and end up in every saved level.
+*/
+Level_Runtime :: struct {
+	// The asset table: one load per path, however many entities share it. A
+	// path that failed to load maps to nil, so it is not tried again and not
+	// logged again.
+	models: map[string]^mb.Model,
+
+	// Rebuilt by `update_level` each frame: where each id is in `entities`,
+	// and the scratch space resolving parents needs, kept rather than
+	// allocated every frame.
+	index_of:      map[u64]int,
+	resolve_state: [dynamic]Resolve_State,
+	resolve_chain: [dynamic]int,
 }
 
 Level_Settings :: struct {
@@ -141,17 +172,31 @@ create_level :: proc(allocator := context.allocator) -> Level {
 	}
 }
 
-// Frees the entity list and every entity's name and model path, with the
-// allocator the entity list was made with.
+// Frees everything the level holds -- each entity's name and model path, the
+// entity list, every model it loaded, and what `update_level` keeps between
+// frames -- with the allocator the level was made with.
 destroy_level :: proc(level: ^Level) {
-	allocator := level.entities.allocator
+	allocator := level_allocator(level)
 
 	for &entity in level.entities {
 		delete(entity.name, allocator)
 		if model, ok := entity.model.?; ok do delete(model.path, allocator)
 	}
-
 	delete(level.entities)
+
+	rt := &level.runtime
+	for path, model in rt.models {
+		if model != nil {
+			mb.destroy_model(model)
+			free(model, allocator)
+		}
+		delete(path, allocator)
+	}
+	delete(rt.models)
+	delete(rt.index_of)
+	delete(rt.resolve_state)
+	delete(rt.resolve_chain)
+
 	level^ = {}
 }
 
@@ -175,13 +220,15 @@ marshal_level :: proc(level: Level, allocator := context.allocator) -> (data: []
 	regardless -- a lost field is a loss rather than a failure, the same rule
 	unknown keys follow.
 
-	Two kinds of problem today:
+	What gets reported:
 
 	- **an enum name this build does not have.** json.unmarshal leaves such a
 	  field at its zero value without an error (`unmarshal_string_token`, the
 	  `TODO(bill)` there), so a renamed `Light_Kind` value would otherwise turn
 	  a spot light into a directional one and say nothing
 	- **a newer format version**, whose new fields were skipped
+	- **every repair `repair_level` made** -- a missing or repeated id, a
+	  parent that is not there, is the entity itself, or makes a loop
 
 	On an error nothing is returned and nothing is left allocated.
 */
@@ -220,8 +267,134 @@ unmarshal_level :: proc(
 	}
 
 	check_enum_names(value, type_info_of(Level), "level", &problems, allocator)
+	repair_level(&level, &problems, allocator)
 
 	return level, problems, nil
+}
+
+/*
+	Makes a level read from a file safe to use, and says what it changed. Each
+	repair is the smallest that lets the rest load: a problem costs the field
+	it is in, never the file.
+
+	- **An id of 0, or one an earlier entity already has**, gets a new id past
+	  the largest in the file. A parent naming a repeated id keeps the first
+	  entity that had it.
+	- **A parent id that names no entity, names the entity itself, or makes a
+	  loop** is cleared, so the entity sits at the root. In a loop, the entity
+	  listed first is the one moved.
+	- **A zero with no sensible meaning gets its default, silently**, the way
+	  `set_lighting` treats a zero exposure: a key left out of a hand-written
+	  file reads as zero, and a zero-length quaternion, a zero scale or a black,
+	  invisible tint is never what was meant. A rotation that is not unit
+	  length is normalised, but only when it is visibly off, so a value that
+	  went through a save comes back bit for bit.
+	- **A light component exists to light something**, so a black colour or a
+	  zero intensity is a key left out -- and so are zero spot angles on a spot
+	  light and a zero size on an area light. Other kinds keep their unused
+	  zeros, or a point light would save differently from how it loaded.
+*/
+@(private)
+repair_level :: proc(level: ^Level, problems: ^[dynamic]string, allocator := context.allocator) {
+	// Ids first, since parents are checked against them. New ids start past
+	// the largest in the file, so no repair can collide with a later entity.
+	largest: u64
+	for entity in level.entities do largest = max(largest, entity.id)
+
+	seen := make(map[u64]bool, len(level.entities), allocator)
+	defer delete(seen)
+
+	for &entity, i in level.entities {
+		if entity.id != 0 && !seen[entity.id] {
+			seen[entity.id] = true
+			continue
+		}
+
+		largest += 1
+		append(problems, fmt.aprintf("entities[%d] %q: id %d is %s; given id %d",
+			i, entity.name, entity.id, "missing" if entity.id == 0 else "already taken", largest,
+			allocator = allocator))
+		entity.id = largest
+	}
+
+	index_of := make(map[u64]int, len(level.entities), allocator)
+	defer delete(index_of)
+	for entity, i in level.entities do index_of[entity.id] = i
+
+	for &entity, i in level.entities {
+		if entity.parent == 0 do continue
+
+		if entity.parent == entity.id {
+			append(problems, fmt.aprintf("entities[%d] %q: is its own parent; moved to the root",
+				i, entity.name, allocator = allocator))
+			entity.parent = 0
+		} else if _, found := index_of[entity.parent]; !found {
+			append(problems, fmt.aprintf("entities[%d] %q: parent %d is not in the level; moved to the root",
+				i, entity.name, entity.parent, allocator = allocator))
+			entity.parent = 0
+		}
+	}
+
+	// Loops, now that every parent names a real entity. Walking up from each
+	// entity reaches the root or comes back round to it; the walk is bounded by
+	// the entity count, so one that runs into a loop elsewhere still ends --
+	// that loop is broken when its own first member is walked from.
+	for &entity, i in level.entities {
+		current := i
+		for _ in 0 ..< len(level.entities) {
+			parent_id := level.entities[current].parent
+			if parent_id == 0 do break
+
+			current = index_of[parent_id]
+			if current == i {
+				append(problems, fmt.aprintf("entities[%d] %q: parent %d leads back round to it; moved to the root",
+					i, entity.name, entity.parent, allocator = allocator))
+				entity.parent = 0
+				break
+			}
+		}
+	}
+
+	default_spot := mb.create_spot_light({}, {})
+
+	for &entity in level.entities {
+		repair_transform(&entity.transform)
+
+		if model, ok := &entity.model.?; ok {
+			if model.tint == {} do model.tint = mb.WHITE
+		}
+
+		if light, ok := &entity.light.?; ok {
+			if light.color == {} do light.color = mb.WHITE
+			if light.intensity == 0 do light.intensity = 1
+
+			if light.kind == .SPOT && light.inner_angle == 0 && light.outer_angle == 0 {
+				light.inner_angle = default_spot.inner_angle
+				light.outer_angle = default_spot.outer_angle
+			}
+
+			// Matchbox has no default area size; a metre square, as half-extents.
+			if (light.kind == .AREA_RECT || light.kind == .AREA_DISK) && light.area_size == {} {
+				light.area_size = {0.5, 0.5}
+			}
+		}
+	}
+}
+
+@(private)
+repair_transform :: proc(t: ^Level_Transform) {
+	q := t.rotation
+	length_squared := q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w
+
+	if length_squared == 0 {
+		t.rotation = {0, 0, 0, 1}
+	} else if abs(length_squared - 1) > 1e-4 {
+		t.rotation = q / math.sqrt(length_squared)
+	}
+
+	for &axis in t.scale {
+		if axis == 0 do axis = 1
+	}
 }
 
 // Frees what `unmarshal_level` returned as `problems`.

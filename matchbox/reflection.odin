@@ -153,12 +153,26 @@ Reflection_Probes :: struct {
 
 	settings: Environment_Probe_Settings,
 
-	// Which slot the open capture pass belongs to, and -1 when none is open.
-	// Two fields rather than one so that a mismatched
-	// begin_probe_capture/end_probe_capture pair is a caught mistake rather
-	// than a silently wrong bake.
-	capturing_probe: int,
-	capturing_face:  int,
+	/*
+		The slot and face the open capture pass belongs to, and nil when none
+		is open. Both rather than the slot alone, so that a mismatched
+		begin_probe_capture/end_probe_capture pair is a caught mistake rather
+		than a silently wrong bake.
+
+		A `Maybe` so that "no capture open" is the zero value. It was two ints
+		that `init` set to -1 -- the one field in the package whose zero value
+		was wrong -- and the first code to read it without `init` having run
+		was the test suite: `get_current_target_size` asks whether a capture
+		is open, a zeroed struct answered "probe 0, face 0", and every
+		projection in every test became a 1x1 square.
+	*/
+	capturing: Maybe(Probe_Capture),
+}
+
+@(private)
+Probe_Capture :: struct {
+	probe: int,
+	face:  int,
 }
 
 /*
@@ -254,7 +268,7 @@ begin_probe_capture :: proc(index: int, face: int) -> bool {
 	if index < 0 || index >= p.count do return false
 	if face < 0 || face >= 6 do return false
 
-	ensure(p.capturing_probe < 0, "probe captures do not nest -- end_probe_capture first")
+	ensure(p.capturing == nil, "probe captures do not nest -- end_probe_capture first")
 	ensure(!r.mode_3d, "begin_probe_capture cannot be called inside begin_drawing_3d")
 
 	if !ensure_reflection_targets() do return false
@@ -292,12 +306,13 @@ begin_probe_capture :: proc(index: int, face: int) -> bool {
 
 	camera := probe_capture_camera(p.probes[index].position, face)
 
+	// Marked as capturing *before* the projection is built: that is what makes
+	// `current_aspect` answer with the square face rather than the window.
+	p.capturing = Probe_Capture{probe = index, face = face}
+
 	r.mode_3d         = true
 	r.view_projection = camera3d_view_projection(camera)
 	r.camera3d        = camera
-
-	p.capturing_probe = index
-	p.capturing_face  = face
 
 	// The scene block, for this camera rather than the game's -- so a
 	// capture's own specular highlights and fog are computed from where the
@@ -313,7 +328,7 @@ end_probe_capture :: proc() {
 	r := &mbi.renderer
 	p := &r.lighting.reflection
 
-	if p.capturing_probe < 0 do return
+	if p.capturing == nil do return
 
 	if r.pass != nil {
 		sdl.EndGPURenderPass(r.pass)
@@ -322,8 +337,7 @@ end_probe_capture :: proc() {
 
 	r.mode_3d = false
 
-	p.capturing_probe = -1
-	p.capturing_face  = -1
+	p.capturing = nil
 }
 
 /*
@@ -402,7 +416,7 @@ bake_reflection_probe :: proc(index: int) -> bool {
 	if index < 0 || index >= p.count do return false
 	if p.capture == nil || p.irradiance == nil || p.prefiltered == nil do return false
 
-	ensure(p.capturing_probe < 0, "bake_reflection_probe cannot run while a capture pass is open")
+	ensure(p.capturing == nil, "bake_reflection_probe cannot run while a capture pass is open")
 
 	// A pass cannot be opened inside another, and the ones below are this
 	// procedure's own -- so whatever the frame had open belongs to something
@@ -687,9 +701,7 @@ release_reflection_targets :: proc() {
 
 	settings := p.settings
 	p^ = {}
-	p.settings        = settings
-	p.capturing_probe = -1
-	p.capturing_face  = -1
+	p.settings = settings
 }
 
 /*

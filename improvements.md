@@ -29,6 +29,11 @@ Add procedure to get the forward facing direction of a model
 
 ## A Hit Test That Knows About The Clip
 
+**Done 2026-09-11**, the first of the two shapes below: `is_mouse_over_rect`
+answers only inside the clip in force (`hit_test_test.odin`). Wanted by
+Stargate's editor, whose hierarchy and assets panels scroll. An open dropdown's
+list, drawn later and outside the clip, uses `is_point_in_rect` instead.
+
 Found converting the card game's deck builder from paging to Scroll_View, which
 is the first thing to use a clip for what it was added for.
 

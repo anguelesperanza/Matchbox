@@ -194,14 +194,27 @@ current_depth_texture :: proc() -> ^sdl.GPUTexture {
 get_current_target_size :: proc() -> [2]f32 {
 	r := &mbi.renderer
 
+	/*
+		A reflection probe capture draws into one face of its capture cube,
+		which is square and its own size -- whatever target is bound and
+		whatever shape the window is. Checked first because a capture can be
+		opened while a target is bound. Before this, a capture's 90-degree faces
+		were projected with the window's shape, squeezed sideways, and the six
+		did not meet at their edges.
+	*/
+	if p := &r.lighting.reflection; p.capturing != nil {
+		size := f32(max(p.settings.prefilter_resolution, 1))
+		return {size, size}
+	}
+
 	if r.target != nil do return {f32(r.target.width), f32(r.target.height)}
 	return {f32(mbi.window_width), f32(mbi.window_height)}
 }
 
 /*
-	Width over height of wherever 3D is being drawn right now -- the bound
-	render target, or the window -- and 1 for a minimised window, which reports
-	a height of zero.
+	Width over height of wherever 3D is being drawn right now -- an open probe
+	capture's face, the bound render target, or the window -- and 1 for a
+	minimised window, which reports a height of zero.
 
 	Every projection-shaped calculation reads this: `camera3d_projection`, the
 	cluster frustum, the cascade fit and the skybox. **They all used to read the

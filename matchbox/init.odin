@@ -855,17 +855,9 @@ init :: proc(title: string, width: i32, height: i32) {
 	*/
 	mbi.renderer.lighting.ssao.format = pick_ssao_format()
 
-	/*
-		P7c's capture bookkeeping starts at -1, which is the one field in this
-		package whose zero value is actively wrong: `begin_probe_capture`
-		asserts that no capture is already open by testing `capturing_probe < 0`,
-		and a zero would read as "probe 0 is mid-capture" and fire that
-		assertion on the very first call. Set here rather than defended against
-		at the use site, so there is one answer rather than two.
-	*/
-	mbi.renderer.lighting.reflection.capturing_probe = -1
-	mbi.renderer.lighting.reflection.capturing_face  = -1
-	mbi.renderer.lighting.reflection.settings        = ENVIRONMENT_PROBE_DEFAULTS
+	// The capture bookkeeping needs nothing here any more: "no capture open"
+	// is its zero value now. See `Reflection_Probes.capturing`.
+	mbi.renderer.lighting.reflection.settings = ENVIRONMENT_PROBE_DEFAULTS
 
 	mbi.renderer.pipelines.ssao = create_pipeline(
 		mbi.renderer.shaders.ssao,

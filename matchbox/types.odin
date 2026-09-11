@@ -535,7 +535,29 @@ Matchbox_Info :: struct {
 //
 // Consequence worth knowing: one global means one window. Matchbox cannot run
 // two independent instances in a process.
-mbi: Matchbox_Info
+when ODIN_TEST {
+	/*
+		One per thread under `odin test`, and only there.
+
+		Tests write to `mbi` -- a window size, a key held down, where the 2D
+		camera is -- and Odin's test runner runs them on several threads at
+		once, so one test could read a field another had just set on its own
+		thread. On `main` that failed a different handful of tests on most
+		runs, and every run passed on one thread.
+
+		Thread-local gives each test thread a Matchbox of its own. A game's
+		build never takes this branch: it has the one ordinary global it always
+		had, and SDL's own threads see the same state the game does.
+
+		*Alternative:* a lock every test touching `mbi` takes for its whole
+		body. That is a second package-level variable in every build, and a
+		rule each new test has to remember -- the one that was missed here.
+	*/
+	@(thread_local)
+	mbi: Matchbox_Info
+} else {
+	mbi: Matchbox_Info
+}
 
 // -----------------------------------------------------------------------
 // Constants

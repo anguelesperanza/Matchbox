@@ -223,6 +223,12 @@ is a useful sentence.
 - **Vendored code.** Patches to `matchbox/gltf2` are marked `MATCHBOX PATCH` so a
   package refresh can find them
 - **Check everything.** `odin check matchbox -no-entry-point`, then the examples
+- **Tests run in parallel, each with its own `mbi`.** Under `odin test`, and only
+  there, `mbi` is thread-local (types.odin), so a test may set whatever fields
+  it needs without another test seeing them. It starts zeroed, not initialised:
+  `init` never runs in a test, so anything `init` sets to a non-zero default is
+  still zero there. Prefer state whose zero value is already right, so that
+  neither a test nor anything else has to know
 - **`cheatsheet.md` is generated**, by `python tools/gen_cheatsheet.py` from the
   repository root. Regenerate it after adding or changing a public procedure
   rather than editing it. Each entry's description is the first sentence of that

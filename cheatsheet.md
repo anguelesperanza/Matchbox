@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 405 of them -- with its arguments
+Every public procedure in the package -- 410 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -14,8 +14,8 @@ any.
 
 ## Contents
 
-- [Getting started](#getting-started) -- 21
-- [Input](#input) -- 42
+- [Getting started](#getting-started) -- 24
+- [Input](#input) -- 44
 - [2D drawing](#2d-drawing) -- 60
 - [Text and fonts](#text-and-fonts) -- 21
 - [2D cameras](#2d-cameras) -- 4
@@ -124,6 +124,21 @@ set_logical_size :: proc(width: i32, height: i32)
 Pins the resolution games draw against.
 
 ```odin
+set_ui_scale :: proc(scale: f32)
+```
+Draws everything bigger without letterboxing it: the logical size becomes the window's pixels divided by `scale`, and every 2D draw, hit test and pointer position follows.
+
+```odin
+get_ui_scale :: proc() -> f32
+```
+The UI scale set by set_ui_scale, 1 until one is.
+
+```odin
+get_display_scale :: proc() -> f32
+```
+The scale the operating system draws other programs at on the window's display: 1.5 for Windows set to 150 percent, 2 on a Retina Mac.
+
+```odin
 screen_pos :: proc(pos: [2]f32) -> [2]f32
 ```
 A world position as the shader wants it, with the camera and the letterbox applied.
@@ -196,6 +211,16 @@ Hides the pointer and keeps it in the window, reporting only how far it moved.
 is_cursor_locked :: proc() -> bool
 ```
 Whether the pointer is currently locked to the window.
+
+```odin
+set_cursor_shape :: proc(shape: Cursor_Shape)
+```
+The pointer's shape until the next frame, when it goes back to the arrow unless this is called again.
+
+```odin
+get_cursor_shape :: proc() -> Cursor_Shape
+```
+The shape the pointer is showing.
 
 ```odin
 set_escape_key :: proc(key:sdl.Scancode)

@@ -34,6 +34,10 @@ Display :: struct {
 	fixed_res:     bool,     // true = letterbox the logical size into the window
 	draw_scale:    f32,      // logical -> window multiplier
 	draw_offset:   [2]f32,   // letterbox margin, in window pixels
+
+	// How much bigger than one window pixel a logical pixel is drawn when no
+	// logical size is pinned. See set_ui_scale; zero reads as 1.
+	ui_scale:      f32,
 }
 
 // -----------------------------------------------------------------------
@@ -162,6 +166,80 @@ set_logical_size :: proc(width: i32, height: i32) {
     mbi.width     = width
     mbi.height    = height
     mbi.fixed_res = true
+}
+
+/*
+	Draws everything bigger without letterboxing it: the logical size becomes
+	the window's pixels divided by `scale`, and every 2D draw, hit test and
+	pointer position follows. At 2 a 1600x900 window lays out as 800x450 and
+	each logical pixel covers four window pixels.
+
+	What an accessibility setting wants, or anything read from across a room.
+	The window is made at the display's full pixel density, so on a display the
+	operating system scales -- a 4K TV at 200 percent, a laptop at 150 --
+	a scale of 1 draws everything at a fraction of the size other programs
+	there use. `get_display_scale` is the scale they use.
+
+	Text in the default face is drawn from a face baked at the scaled size, so
+	it stays sharp rather than stretched; see `draw_glyphs`. A size set by
+	`set_logical_size` takes precedence, since it already says how big things
+	are. Zero or less is taken as 1.
+*/
+set_ui_scale :: proc(scale: f32) {
+	mbi.ui_scale = scale if scale > 0 else 1
+}
+
+// The UI scale set by set_ui_scale, 1 until one is.
+get_ui_scale :: proc() -> f32 {
+	return mbi.ui_scale if mbi.ui_scale > 0 else 1
+}
+
+/*
+	The scale the operating system draws other programs at on the window's
+	display: 1.5 for Windows set to 150 percent, 2 on a Retina Mac. SDL's own
+	`GetWindowDisplayScale`, which counts pixel density and the user's scaling
+	setting together -- the multiplier from a design in pixels to the window's
+	pixels, which is what `set_ui_scale` takes. 1 before `init` or when the
+	display will not say.
+*/
+get_display_scale :: proc() -> f32 {
+	if mbi.window == nil do return 1
+	scale := sdl.GetWindowDisplayScale(mbi.window)
+	return scale if scale > 0 else 1
+}
+
+/*
+	This frame's logical size and logical-to-window transform, from the window's
+	size in pixels. `begin_drawing` calls it; it is apart from it so that it is
+	tested without a window.
+
+	- A pinned size (`set_logical_size`) is scaled to fit and centred, with
+	  the margin left over as a letterbox. The UI scale does not apply.
+	- Otherwise the logical size is the window divided by the UI scale, from
+	  the top-left, with no margin -- at a scale of 1, the window itself, as it
+	  always was. A window a pixel or two wider than a whole number of logical
+	  pixels leaves them uncovered at the right and bottom, under the clear.
+*/
+@(private)
+update_display_transform :: proc() {
+	if mbi.fixed_res {
+		scale_x := f32(mbi.window_width)  / f32(mbi.width)
+		scale_y := f32(mbi.window_height) / f32(mbi.height)
+		mbi.draw_scale = min(scale_x, scale_y)
+		scaled_w := f32(mbi.width)  * mbi.draw_scale
+		scaled_h := f32(mbi.height) * mbi.draw_scale
+		mbi.draw_offset = {
+			(f32(mbi.window_width)  - scaled_w) * 0.5,
+			(f32(mbi.window_height) - scaled_h) * 0.5,
+		}
+		return
+	}
+
+	scale := get_ui_scale()
+	mbi.width       = i32(f32(mbi.window_width)  / scale)
+	mbi.height      = i32(f32(mbi.window_height) / scale)
+	mbi.draw_scale  = scale
+	mbi.draw_offset = {0, 0}
 }
 
 // A world position as the shader wants it, with the camera and the letterbox

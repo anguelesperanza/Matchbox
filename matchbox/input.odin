@@ -89,6 +89,31 @@ Input :: struct {
 	gamepads:                  [MAX_GAMEPADS]Gamepad,
 	gamepad_deadzone:          f32,
 	gamepad_trigger_threshold: f32,
+
+	// The pointer's shape: what was asked for since the last poll, what the
+	// system is showing, and the system cursors made so far. See
+	// set_cursor_shape.
+	cursor_wanted: Cursor_Shape,
+	cursor_shown:  Cursor_Shape,
+	cursors:       [Cursor_Shape]^sdl.Cursor,
+}
+
+/*
+	The shapes the pointer can take, as the operating system draws them.
+
+	Named for what they say rather than after SDL's list, which has twenty
+	including every corner of a window border; these are the ones a UI puts
+	under the pointer on purpose.
+*/
+Cursor_Shape :: enum {
+	ARROW,
+	TEXT,        // an I-beam, over something that takes typing
+	HAND,        // a link, or anything clicked that does not look like a button
+	RESIZE_EW,   // an edge dragged left and right
+	RESIZE_NS,   // an edge dragged up and down
+	MOVE,
+	NOT_ALLOWED,
+	WAIT,
 }
 
 // Processes SDL events, updates input state, and calculates delta_time.
@@ -114,6 +139,7 @@ poll_events :: proc() {
 	mbi.input.mouse.captured = false
 	gamepads_begin_frame()
 	touches_begin_frame()
+	cursor_begin_frame()
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
 	{
@@ -317,6 +343,68 @@ set_cursor_locked :: proc(locked: bool) {
 // Whether the pointer is currently locked to the window.
 is_cursor_locked :: proc() -> bool {
 	return sdl.GetWindowRelativeMouseMode(mbi.window)
+}
+
+/*
+	The pointer's shape until the next frame, when it goes back to the arrow
+	unless this is called again. Call it every frame the pointer is over
+	whatever wants the shape:
+
+		if matchbox.is_mouse_over_rect(edge) do matchbox.set_cursor_shape(.RESIZE_EW)
+
+	Asked for rather than switched on and off, like everything else in an
+	immediate-mode frame: nothing has to remember to put the arrow back when
+	the pointer leaves, or when whatever asked is not drawn any more. The last
+	call in a frame wins. It shows from the next `poll_events`, a frame late,
+	which nobody sees.
+*/
+set_cursor_shape :: proc(shape: Cursor_Shape) {
+	mbi.input.cursor_wanted = shape
+}
+
+// The shape the pointer is showing.
+get_cursor_shape :: proc() -> Cursor_Shape {
+	return mbi.input.cursor_shown
+}
+
+// Shows the shape asked for during the last frame and starts this one back at
+// the arrow. A system cursor is made the first time its shape is shown and
+// kept until cleanup.
+@(private)
+cursor_begin_frame :: proc() {
+	input  := &mbi.input
+	wanted := input.cursor_wanted
+	input.cursor_wanted = .ARROW
+
+	if wanted == input.cursor_shown do return
+	input.cursor_shown = wanted
+
+	// No window under a test: the bookkeeping above is all there is to do.
+	if mbi.window == nil do return
+
+	system := [Cursor_Shape]sdl.SystemCursor{
+		.ARROW       = .DEFAULT,
+		.TEXT        = .TEXT,
+		.HAND        = .POINTER,
+		.RESIZE_EW   = .EW_RESIZE,
+		.RESIZE_NS   = .NS_RESIZE,
+		.MOVE        = .MOVE,
+		.NOT_ALLOWED = .NOT_ALLOWED,
+		.WAIT        = .WAIT,
+	}
+
+	if input.cursors[wanted] == nil do input.cursors[wanted] = sdl.CreateSystemCursor(system[wanted])
+	if cursor := input.cursors[wanted]; cursor == nil || !sdl.SetCursor(cursor) {
+		log.errorf("could not show the %v pointer: %s", wanted, sdl.GetError())
+	}
+}
+
+@(private)
+cursors_cleanup :: proc() {
+	for &cursor in mbi.input.cursors {
+		if cursor != nil do sdl.DestroyCursor(cursor)
+		cursor = nil
+	}
 }
 
 /*

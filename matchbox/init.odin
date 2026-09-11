@@ -614,6 +614,7 @@ init :: proc(title: string, width: i32, height: i32) {
 
 	mbi.draw_scale    = 1
 	mbi.draw_offset   = {0, 0}
+	mbi.ui_scale      = 1
 
 	// Both shader formats are declared so SDL can fall back to D3D12 where
 	// Vulkan is unavailable.
@@ -1368,6 +1369,7 @@ is_running :: proc() -> bool {
 // Tears down everything init brought up. Call once, after the game loop ends.
 cleanup :: proc() {
 	gamepads_cleanup()
+	cursors_cleanup()
 
 	device := mbi.renderer.device
 	if device == nil do return

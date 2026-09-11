@@ -1984,7 +1984,15 @@ number_field_stop_typing :: proc(state: ^Number_Field) {
 // always writes a sign, and "+1.00" in every field is noise.
 @(private)
 number_text :: proc(buffer: []u8, value: f32, decimals: int) -> string {
-	return strings.trim_prefix(strconv.write_float(buffer, f64(value), 'f', decimals, 32), "+")
+	text := strings.trim_prefix(strconv.write_float(buffer, f64(value), 'f', decimals, 32), "+")
+
+	// Nor does a number that shows as zero get a minus. Turning a rotation back
+	// into angles gives -0 for an unturned axis -- seen in Stargate's inspector
+	// as "-0.0" -- and -0.001 shown to two places would read "-0.00".
+	if len(text) > 1 && text[0] == '-' && strings.trim_left(text[1:], "0.") == "" {
+		text = text[1:]
+	}
+	return text
 }
 
 @(private)

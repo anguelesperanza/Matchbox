@@ -156,6 +156,23 @@ test_a_captured_pointer_does_not_start_a_drag :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_a_number_that_shows_as_zero_has_no_sign :: proc(t: ^testing.T) {
+	buffer: [32]u8
+
+	// A variable, not a literal: a constant -0.0 is folded to plain zero.
+	zero: f32 = 0
+	testing.expect_value(t, number_text(buffer[:], -zero, 1), "0.0")
+	testing.expect_value(t, number_text(buffer[:], -0.001, 2), "0.00")
+	testing.expect_value(t, number_text(buffer[:], -0.4, 0), "0")
+
+	// Anything that shows as more than zero keeps its sign, and a positive one
+	// never had one.
+	testing.expect_value(t, number_text(buffer[:], -0.05, 2), "-0.05")
+	testing.expect_value(t, number_text(buffer[:], -10, 0), "-10")
+	testing.expect_value(t, number_text(buffer[:], 1, 2), "1.00")
+}
+
+@(test)
 test_toggle_flips_on_a_click_anywhere_on_it :: proc(t: ^testing.T) {
 	rect  := Rectangle{position = {10, 10}, size = {200, 24}, pivot = {0.5, 0.5}}
 	value := false

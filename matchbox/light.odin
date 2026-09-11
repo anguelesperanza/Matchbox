@@ -276,50 +276,94 @@ set_lights :: proc(lights: []Light) {
 	s := &l.shadow
 
 	clear(&l.light_data)
-	s.caster_indices     = {-1, -1}
-	s.cube_caster_index  = {-1}
-	found      := 0
-	found_cube := 0
+	s.caster_indices    = {-1, -1}
+	s.cube_caster_index = {-1}
 
+	// The shadow maps look a caster up in the uploaded list, which leaves out
+	// disabled lights, so each index into `lights` is turned into one into
+	// `light_data` as the light is uploaded.
+	casters := pick_shadow_casters(lights)
 	default_bias := s.settings.bias
 
-	for light in lights {
+	for light, i in lights {
 		if !light.enabled do continue
 
-		index := len(l.light_data)
+		uploaded := len(l.light_data)
 		append(&l.light_data, light_uniform(light, default_bias))
 
-		if !light.casts_shadow do continue
-
-		/*
-			Routed by kind, not by arrival order: a point light was never
-			eligible for the two `PCF`/`PCSS`/`CASCADED` slots below (see
-			shadow.odin's own top comment), so it goes into the single cube
-			slot instead. A third directional/spot caster beyond
-			MAX_SHADOW_CASTERS, or a second point-light caster beyond
-			MAX_POINT_SHADOW_CASTERS, each degrade silently -- the same shape
-			an unsupported combination already gets elsewhere in this package.
-		*/
-		switch light.kind {
-		case .POINT:
-			if found_cube < MAX_POINT_SHADOW_CASTERS {
-				s.cube_caster_index[found_cube] = index
-				found_cube += 1
-			}
-		case .DIRECTIONAL, .SPOT:
-			if found < MAX_SHADOW_CASTERS {
-				s.caster_indices[found] = index
-				found += 1
-			}
-		case .AREA_RECT, .AREA_DISK:
-			// Never routed anywhere -- see Light's own doc comment on
-			// area_right for why an area light does not cast a shadow this
-			// phase. A caller that set casts_shadow anyway is not wrong, it
-			// is just asking for something this phase does not build.
+		for index, slot in casters.slots {
+			if index == i do s.caster_indices[slot] = uploaded
+		}
+		for index, slot in casters.cube {
+			if index == i do s.cube_caster_index[slot] = uploaded
 		}
 	}
 
 	upload_light_buffer()
+}
+
+/*
+	Which lights in a list `set_lights` would give a shadow to: `slots` for
+	directional and spot lights, `cube` for point lights, each an index into
+	`lights`, or -1 for a slot nobody took.
+
+	The same rule `set_lights` itself follows -- it calls this -- so a program
+	can say which lights asked for a shadow and will not get one, rather than
+	copying the rule and drifting from it. Stargate's editor puts the reason
+	beside the light.
+
+	- **Routed by kind, not by arrival order**: a point light was never
+	  eligible for the two `PCF`/`PCSS`/`CASCADED` slots (shadow.odin's top
+	  comment), so it takes the one cube slot instead.
+	- **First come, first served**: a third directional or spot caster past
+	  `MAX_SHADOW_CASTERS`, or a second point caster past
+	  `MAX_POINT_SHADOW_CASTERS`, gets nothing, rather than bumping an earlier
+	  one out.
+	- **An area light is never routed** -- see `Light`'s doc comment on
+	  `area_right`. Asking is not wrong, it is asking for something not built.
+	- **A disabled light is skipped**, since it is never uploaded.
+
+	Whether shadows are on at all is `Lighting_Settings.shadows.enabled`, and
+	not this procedure's to know: a caster picked here casts nothing while they
+	are off.
+*/
+pick_shadow_casters :: proc(lights: []Light) -> (casters: Shadow_Casters) {
+	casters.slots = -1
+	casters.cube  = -1
+	found, found_cube := 0, 0
+
+	for light, i in lights {
+		if !light.enabled || !light.casts_shadow do continue
+
+		switch light.kind {
+		case .POINT:
+			if found_cube < MAX_POINT_SHADOW_CASTERS {
+				casters.cube[found_cube] = i
+				found_cube += 1
+			}
+		case .DIRECTIONAL, .SPOT:
+			if found < MAX_SHADOW_CASTERS {
+				casters.slots[found] = i
+				found += 1
+			}
+		case .AREA_RECT, .AREA_DISK:
+		}
+	}
+	return
+}
+
+// What `pick_shadow_casters` answers: indices into the list it was given.
+Shadow_Casters :: struct {
+	slots: [MAX_SHADOW_CASTERS]int,       // directional and spot, -1 when free
+	cube:  [MAX_POINT_SHADOW_CASTERS]int, // point, -1 when free
+}
+
+// Whether the light at `index` in the list `casters` was picked from gets a
+// shadow slot.
+is_shadow_caster :: proc(casters: Shadow_Casters, index: int) -> bool {
+	for i in casters.slots do if i == index && index >= 0 do return true
+	for i in casters.cube  do if i == index && index >= 0 do return true
+	return false
 }
 
 // -----------------------------------------------------------------------

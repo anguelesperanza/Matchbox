@@ -42,6 +42,7 @@ destroy :: proc {
 	destroy_render_target,
 	destroy_image,
 	destroy_text_field,
+	destroy_number_field,
 	destroy_sprite_cache,
 	destroy_animation_source,
 	destroy_fixed_camera,

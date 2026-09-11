@@ -93,8 +93,17 @@ camera3d_view :: proc(camera: Camera3D) -> matrix[4, 4]f32 {
 	field.
 */
 camera3d_projection :: proc(camera: Camera3D) -> matrix[4, 4]f32 {
+	return camera3d_projection_for_aspect(camera, current_aspect())
+}
+
+// The same projection for a given width over height, rather than the shape of
+// wherever is being drawn now. What a ray cast into a viewport between frames
+// needs, when nothing is bound and the window's shape is the wrong one -- see
+// ray.odin.
+@(private)
+camera3d_projection_for_aspect :: proc(camera: Camera3D, aspect: f32) -> matrix[4, 4]f32 {
 	c      := camera3d_defaults(camera)
-	aspect := current_aspect()
+	aspect := aspect if aspect > 0 else 1
 
 	switch c.projection {
 	case .ORTHOGRAPHIC:

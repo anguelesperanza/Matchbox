@@ -752,25 +752,7 @@ begin_drawing :: proc() {
 		mbi.pixel_density = density
 	}
 
-	if !mbi.fixed_res {
-		mbi.width  = mbi.window_width
-		mbi.height = mbi.window_height
-	}
-
-	if mbi.fixed_res {
-		scale_x := f32(mbi.window_width)  / f32(mbi.width)
-		scale_y := f32(mbi.window_height) / f32(mbi.height)
-		mbi.draw_scale = min(scale_x, scale_y)
-		scaled_w := f32(mbi.width)  * mbi.draw_scale
-		scaled_h := f32(mbi.height) * mbi.draw_scale
-		mbi.draw_offset = {
-			(f32(mbi.window_width)  - scaled_w) * 0.5,
-			(f32(mbi.window_height) - scaled_h) * 0.5,
-		}
-	} else {
-		mbi.draw_scale  = 1
-		mbi.draw_offset = {0, 0}
-	}
+	update_display_transform()
 
 	if .MINIMIZED in sdl.GetWindowFlags(mbi.window) ||
 	   mbi.window_width <= 0 || mbi.window_height <= 0 {

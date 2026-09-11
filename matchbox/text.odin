@@ -26,6 +26,7 @@ package matchbox
 	overflowing is the one outcome a caller asking for a width did not want.
 */
 
+import "core:math"
 import "core:strconv"
 import "core:strings"
 
@@ -122,6 +123,17 @@ draw_text_float :: proc(font: ^Font, float: $T, x: f32, y: f32, color: [4]f32) w
 */
 @(private)
 draw_glyphs :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32, world_space: bool) {
+	// Under a UI scale, the same text from a face baked at the scaled size,
+	// placed in window pixels -- sharp, where stretching this font's atlas
+	// would blur it. See sharp_face for when that is possible.
+	if world_space {
+		if sharp := sharp_face(font); sharp != nil {
+			origin := screen_pos({x, y})
+			draw_glyphs(sharp, text, origin.x, origin.y, color, world_space = false)
+			return
+		}
+	}
+
 	// Bound once for the whole string. The pipeline, the shared quad and the
 	// atlas are the same for every character in it -- only the uniforms differ.
 	if !bind_quad_state(mbi.renderer.pipelines.font, font.texture, font.sampler) do return
@@ -157,6 +169,48 @@ draw_glyphs :: proc(font: ^Font, text: string, x: f32, y: f32, color: [4]f32, wo
 
 		push_quad(&vert_data, nil, 0)
 	}
+}
+
+/*
+	The face to draw world-space text from instead of `font`, or nil to stretch
+	`font` itself as before.
+
+	- **Only under a UI scale** (`set_ui_scale`). That scale changes when
+	  someone picks a new one; a letterbox's changes with every pixel a window
+	  is dragged, and a 2D camera's with every frame of a zoom, and each would
+	  bake a new face per frame.
+	- **Only for the default face**, the one `get_font` can bake at another
+	  size. A font loaded from a game's own file keeps no copy of the file.
+	- **Not when the bake fails.** `get_font` then answers with the default
+	  size, which drawn in window pixels would be the wrong size; stretched is
+	  the better picture.
+
+	`measure_text` measures the font it is given, so layouts do not move:
+	stb_truetype's advances scale linearly with the size a face is baked at.
+*/
+@(private)
+sharp_face :: proc(font: ^Font) -> ^Font {
+	scale := text_bake_scale()
+	if scale == 1 || !is_default_face(font) do return nil
+
+	wanted := math.round(font.size * scale)
+	sharp  := get_font(wanted)
+	return sharp if sharp.size == wanted else nil
+}
+
+// How much bigger than its own size text is drawn this frame, when that is a
+// scale worth baking a face for: the UI scale, or 1.
+@(private)
+text_bake_scale :: proc() -> f32 {
+	if mbi.fixed_res || mbi.camera.active do return 1
+	return mbi.draw_scale if mbi.draw_scale > 0 else 1
+}
+
+// Whether `font` is one `get_font` made -- the default face at some size.
+@(private)
+is_default_face :: proc(font: ^Font) -> bool {
+	if font == &mbi.font do return true
+	return lru_get(&mbi.font_cache, i32(font.size)) == font
 }
 
 // A string at a position, in world coordinates -- so it moves with the camera

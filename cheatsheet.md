@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 389 of them -- with its arguments
+Every public procedure in the package -- 390 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -26,7 +26,7 @@ any.
 - [Models](#models) -- 11
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
-- [Render targets](#render-targets) -- 5
+- [Render targets](#render-targets) -- 6
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
 - [Other](#other) -- 35
@@ -2535,6 +2535,11 @@ draw_post :: proc(
 )
 ```
 Draws a render target over the whole window, through `effect`.
+
+```odin
+draw_render_target :: proc(target: Render_Target, dest: Rectangle)
+```
+Draws a render target into `dest`, stretched to fill it: the part of the window a split-screen player, an in-game monitor or an editor's viewport takes up.
 
 ## Sound
 

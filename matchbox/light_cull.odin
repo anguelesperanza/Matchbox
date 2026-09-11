@@ -203,7 +203,8 @@ cluster_settings_normalized :: proc(settings: Cluster_Settings) -> Cluster_Setti
 
 /*
 	The view frustum's own shape, worked out once per frame from the camera
-	and the window rather than per cluster -- `cluster_test` below reads this
+	and the shape of wherever it is drawn (`current_aspect`) rather than per
+	cluster -- `cluster_test` below reads this
 	for every one of a grid's clusters, and none of it changes between them.
 
 	`tan_x`/`tan_y` are PERSPECTIVE's own half-angle tangents at view-space
@@ -228,10 +229,9 @@ Cluster_Frustum :: struct {
 cluster_frustum_from_camera :: proc(camera: Camera3D, grid: Cluster_Grid) -> Cluster_Frustum {
 	c := camera3d_defaults(camera)
 
-	width  := f32(mbi.window_width)
-	height := f32(mbi.window_height)
-	aspect: f32 = 1
-	if height > 0 do aspect = width / height
+	// camera3d_projection's own number, or the clusters cover a different
+	// frustum from the picture they light.
+	aspect := current_aspect()
 
 	f: Cluster_Frustum
 	f.projection = c.projection

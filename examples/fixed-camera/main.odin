@@ -19,6 +19,24 @@ package fixed_camera_example
 	example has walls, so it shows the halves, the same way the third-person
 	example shows the solver version of `third_person_walk`.
 
+	Every key has a pad button:
+
+		                     keyboard          pad
+		walk                 WASD or arrows    left stick or d-pad
+		run                  hold shift        hold A
+		tank / camera-rel.   TAB               Y
+		hold through cuts    H                 X
+		show zones           Z                 Back
+		PSX filter           P                 Start
+		quit                 ESC               --
+
+	The pad buttons are named the way an Xbox pad prints them, and the HUD says
+	the same. SDL reads face buttons by *position* rather than by the letter on
+	them -- `.SOUTH` is whichever button sits at the bottom -- so on any other
+	pad it is the button in the same place. On a PlayStation pad A, X and Y are
+	Cross, Square and Triangle, and Back and Start are Share and Options. On a
+	Switch Pro controller they are B, Y and X, and minus and plus.
+
 	Things to try:
 
 	  - **walk from the hall into the corridor, holding up.** The hall's camera
@@ -27,31 +45,30 @@ package fixed_camera_example
 	    tank controls never asked the camera. Under camera-relative controls the
 	    character keeps walking, because the direction is held from the camera
 	    the stick was pushed under
-	  - **press H, and do it again.** With the hold off, the same walk reaches
-	    the doorway, cuts, and turns the character straight back into the hall,
-	    because up now means away from the corridor's camera. The hall's camera
-	    cuts back in and up changes meaning again, so the character never gets
-	    down the corridor however long up is held -- here they end up sliding
-	    off along the hall's wall. That is the bug every fixed-camera game with
-	    camera-relative controls has to solve, and seeing it is the fastest way
-	    to see why the hold is on by default
+	  - **press H (pad X), and do it again.** With the hold off, the same walk
+	    reaches the doorway, cuts, and turns the character straight back into
+	    the hall, because up now means away from the corridor's camera. The
+	    hall's camera cuts back in and up changes meaning again, so the
+	    character never gets down the corridor however long up is held -- here
+	    they end up sliding off along the hall's wall. That is the bug every
+	    fixed-camera game with camera-relative controls has to solve, and seeing
+	    it is the fastest way to see why the hold is on by default
 	  - **let go in the corridor and push up again.** Now up means away from the
 	    corridor's camera, toward the hall. Letting go is what hands the stick to
 	    the camera on screen
 	  - **walk the corridor.** Its camera is a `.TRACK` shot: it stays at the far
 	    end and turns to keep you in frame. The hold also stops that turning from
 	    bending a straight walk into a curve round the lens
-	  - **press TAB.** Tank controls, then camera-relative. Tank: up walks the
-	    way the character faces, down backs away more slowly, left and right
-	    turn on the spot -- and a diagonal is full walking speed *and* full
+	  - **press TAB (pad Y).** Tank controls, then camera-relative. Tank: up
+	    walks the way the character faces, down backs away more slowly, left and
+	    right turn on the spot -- and a diagonal is full walking speed *and* full
 	    turning speed at once
-	  - **press Z.** Draws every shot's zone and where its camera stands. The
-	    zones overlap at each doorway, which is what stops a character standing
-	    on the seam from strobing between two shots
-	  - **press P.** The PSX filter off and on. The HUD is drawn after it either
-	    way, so the text stays sharp
-	  - **hold shift** to run. A pad works too: left stick or d-pad to walk,
-	    south to run, north for TAB, west for H
+	  - **press Z (pad Back).** Draws every shot's zone and where its camera
+	    stands. The zones overlap at each doorway, which is what stops a
+	    character standing on the seam from strobing between two shots
+	  - **press P (pad Start).** The PSX filter off and on. The HUD is drawn
+	    after it either way, so the text stays sharp
+	  - **hold shift (pad A)** to run
 
 	The rooms are `draw_plane` and `draw_cube`, and the character is the same
 	three boxes the third-person example uses.
@@ -222,14 +239,16 @@ main :: proc() {
 		mb.poll_events()
 		dt := mb.get_delta_time()
 
+		// Pad 0's buttons beside each key. Named by position -- see the table
+		// at the top of this file for what they are called on each kind of pad.
 		if mb.is_key_pressed(.TAB) || mb.is_gamepad_button_pressed(0, .NORTH) {
 			controls.scheme = .CAMERA_RELATIVE if controls.scheme == .TANK else .TANK
 		}
 		if mb.is_key_pressed(.H) || mb.is_gamepad_button_pressed(0, .WEST) {
 			controls.hold_basis = !controls.hold_basis
 		}
-		if mb.is_key_pressed(.Z) do show_zones = !show_zones
-		if mb.is_key_pressed(.P) do psx = !psx
+		if mb.is_key_pressed(.Z) || mb.is_gamepad_button_pressed(0, .BACK)  do show_zones = !show_zones
+		if mb.is_key_pressed(.P) || mb.is_gamepad_button_pressed(0, .START) do psx = !psx
 
 		run := mb.is_key_held(.LSHIFT) || mb.is_gamepad_button_held(0, .SOUTH)
 		speed: f32 = RUN_SPEED if run else WALK_SPEED
@@ -315,23 +334,25 @@ draw_hud :: proc(rig: ^mb.Fixed_Camera, controls: ^mb.Character_Controls, psx, s
 	line := [2]f32{12, 12}
 	gap  := f32(32)
 
-	mb.draw_text_plate(font, "WASD, arrows or left stick to walk, shift to run, ESC quits", line)
+	// Each line names the key and then pad 0's button for the same thing, so
+	// nobody holding a pad has to find the table at the top of this file.
+	mb.draw_text_plate(font, "walk: WASD, arrows, left stick or d-pad    run: shift or pad A    quit: ESC", line)
 	line.y += gap
 
 	switch controls.scheme {
 	case .TANK:
-		mb.draw_text_plate(font, "TAB  TANK -- up walks where you face, left and right turn", line)
+		mb.draw_text_plate(font, "TAB / pad Y   TANK -- up walks where you face, left and right turn", line)
 	case .CAMERA_RELATIVE:
-		mb.draw_text_plate(font, "TAB  CAMERA_RELATIVE -- up walks away from the camera", line)
+		mb.draw_text_plate(font, "TAB / pad Y   CAMERA_RELATIVE -- up walks away from the camera", line)
 	}
 	line.y += gap
 
 	hold := "on" if controls.hold_basis else "OFF -- walk through a doorway holding up"
 	if controls.scheme == .TANK do hold = fmt.tprintf("%s (camera-relative only)", "on" if controls.hold_basis else "off")
-	mb.draw_text_plate(font, fmt.tprintf("H    hold direction through cuts: %s", hold), line)
+	mb.draw_text_plate(font, fmt.tprintf("H / pad X     hold through cuts: %s", hold), line)
 	line.y += gap
 
-	mb.draw_text_plate(font, fmt.tprintf("Z    zones %s    P  PSX filter %s",
+	mb.draw_text_plate(font, fmt.tprintf("Z / pad Back  zones %s    P / pad Start  PSX filter %s",
 		"shown" if show_zones else "hidden", "on" if psx else "off"), line)
 	line.y += gap * 1.5
 
@@ -348,6 +369,13 @@ draw_hud :: proc(rig: ^mb.Fixed_Camera, controls: ^mb.Character_Controls, psx, s
 			mb.draw_text_plate(font, "walking by an earlier camera's up -- let go to take this one", line)
 		}
 	}
+
+	// At the bottom, out of the way of the controls above: what the Xbox
+	// names become on the other common pad. The font has no PlayStation
+	// symbols, so they are spelled out.
+	dims := mb.get_screen_dims()
+	mb.draw_text_plate(font, "pad buttons use Xbox names -- on PlayStation, A X Y are Cross, Square, Triangle",
+		{12, dims.y - 44})
 }
 
 // How far apart two headings are, the short way round.

@@ -198,6 +198,13 @@ level_transform_from_transform :: proc(t: mb.Transform) -> Level_Transform {
 	}
 }
 
+/*Gets the transform information of an entity in a provided level, by the entity name*/
+get_level_entity_transform :: proc(level_instance: ^Level, name:string) -> [3]f32 {
+	entity := find_entity(level_instance, name) or_else Entity_Handle{}
+	if t, ok := get_world_transform(level_instance, entity); ok do return t.position
+	return {0, 0, 0}
+}
+
 @(private)
 Resolve_State :: enum u8 {
 	UNRESOLVED,

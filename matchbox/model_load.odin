@@ -513,17 +513,25 @@ skinned_primitive_part :: proc(
 	comes back `MATERIAL_DEFAULTS` unchanged -- lit, white, Blinn-Phong, the
 	same as an untextured generated shape.
 
-	**Deliberately leaves `shading` at `MATERIAL_DEFAULTS`' own Blinn-Phong**
-	rather than switching a metallic-roughness-textured material to
-	`Shading_Model.PBR_METALLIC`. `lighting_plan.md`'s own opening principle
-	is that the *game* picks a shading model, not Matchbox -- a loader that
-	silently chose one because a file happened to carry metallic-roughness
-	data would be making that choice on the game's behalf, the exact thing
-	the spec asks not to happen. A game that wants these parts PBR-shaded
-	sets `.shading = .PBR_METALLIC` on the loaded parts itself, and after
-	this proc that is the only thing left to set: the factors and textures
-	read here are what makes that flip actually change the picture rather
-	than reading zeroed fields the way it would have before this job.
+	**`shading` follows what the file declares.** A material carrying a
+	`pbrMetallicRoughness` block -- which is every material that does not say
+	otherwise, since the spec makes that the default parameterization --
+	comes back `Shading_Model.PBR_METALLIC`, and one carrying
+	`KHR_materials_unlit` comes back `UNLIT`. Reading the file's own
+	declaration is not the same as choosing on the game's behalf, and
+	`KHR_materials_pbrSpecularGlossiness` is deliberately not detected: the
+	body comment on the line that sets this has both arguments in full.
+
+	A game that wants something else still overrides, per part through
+	`model.parts[i].material.shading` or for a whole file through
+	`load_model`'s own `shading` argument.
+
+	This paragraph said the opposite until now -- that the loader left every
+	material at `MATERIAL_DEFAULTS`' Blinn-Phong for the game to flip -- and
+	was missed when "A loaded glTF gets the shading model its own file
+	declares" changed the behaviour underneath it. A material-less primitive
+	really is still Blinn-Phong, which is what kept the stale half looking
+	plausible.
 
 	**Not read: `occlusion_texture.strength`.** glTF gives occlusion a
 	blend-with-1.0 factor the same shape `metallic_factor`/`roughness_factor`

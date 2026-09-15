@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 410 of them -- with its arguments
+Every public procedure in the package -- 414 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -14,8 +14,8 @@ any.
 
 ## Contents
 
-- [Getting started](#getting-started) -- 24
-- [Input](#input) -- 44
+- [Getting started](#getting-started) -- 27
+- [Input](#input) -- 45
 - [2D drawing](#2d-drawing) -- 60
 - [Text and fonts](#text-and-fonts) -- 21
 - [2D cameras](#2d-cameras) -- 4
@@ -44,6 +44,21 @@ Brings up SDL, the GPU backend and the window, and fills in the global `mbi`.
 is_running :: proc() -> bool
 ```
 True until the window is closed or the escape key is pressed.
+
+```odin
+stop_running :: proc()
+```
+Ends the loop: `is_running` answers false from here on.
+
+```odin
+set_quit_on_close :: proc(quit: bool)
+```
+Whether the window's close button stops the program by itself.
+
+```odin
+is_close_requested :: proc() -> bool
+```
+Whether the window manager asked for the window to close during the last `poll_events`.
 
 ```odin
 cleanup :: proc()
@@ -301,6 +316,11 @@ Hands the pointer back, for a widget that claimed it and has now drawn the thing
 is_mouse_captured :: proc() -> bool
 ```
 Whether something above has already claimed the pointer this frame.
+
+```odin
+get_dropped_files :: proc() -> []Dropped_File
+```
+The files dropped on the window during the last `poll_events`, in the order they arrived.
 
 ### `gamepad.odin`
 

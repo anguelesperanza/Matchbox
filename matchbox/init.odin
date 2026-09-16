@@ -1366,10 +1366,50 @@ is_running :: proc() -> bool {
 	return mbi.running
 }
 
+// Ends the loop: `is_running` answers false from here on. What a program calls
+// when it has finished with a close request of its own -- see set_quit_on_close.
+stop_running :: proc() {
+	mbi.running = false
+}
+
+/*
+	Whether the window's close button stops the program by itself.
+
+	True by default, which is what a game wants: the X button closes the window.
+	False hands the decision over. A close request then only shows up in
+	`is_close_requested`, and the program asks about unsaved work, saves, and
+	calls `stop_running` when it is ready -- or does not, since refusing to close
+	is a program's decision to make as well.
+
+	The escape key, where one is set (`set_escape_key`), and the system's own quit
+	-- a log out, a shutdown -- still end the loop whatever this says: neither is
+	a request the program is being asked about.
+*/
+set_quit_on_close :: proc(quit: bool) {
+	mbi.close_handled = !quit
+
+	// SDL sends a quit of its own when the last window is asked to close, and
+	// a quit ends the loop whatever this says -- measured: without this the
+	// editor closed on the X button with its prompt never drawn.
+	sdl.SetHint(sdl.HINT_QUIT_ON_LAST_WINDOW_CLOSE, "1" if quit else "0")
+}
+
+/*
+	Whether the window manager asked for the window to close during the last
+	`poll_events`. True for that one frame.
+
+	Only worth asking after `set_quit_on_close(false)`; otherwise the loop has
+	already ended by the time a program could read it.
+*/
+is_close_requested :: proc() -> bool {
+	return mbi.close_requested
+}
+
 // Tears down everything init brought up. Call once, after the game loop ends.
 cleanup :: proc() {
 	gamepads_cleanup()
 	cursors_cleanup()
+	drops_cleanup()
 
 	device := mbi.renderer.device
 	if device == nil do return

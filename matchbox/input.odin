@@ -96,6 +96,10 @@ Input :: struct {
 	cursor_wanted: Cursor_Shape,
 	cursor_shown:  Cursor_Shape,
 	cursors:       [Cursor_Shape]^sdl.Cursor,
+
+	// Files dropped on the window during the last poll_events. Per-frame like
+	// `text`, and empty again on the next one. See get_dropped_files.
+	dropped: [dynamic]Dropped_File,
 }
 
 /*
@@ -140,6 +144,8 @@ poll_events :: proc() {
 	gamepads_begin_frame()
 	touches_begin_frame()
 	cursor_begin_frame()
+	drops_begin_frame()
+	mbi.close_requested = false
 
 	// Update absolute mouse position in logical screen space (matches where you draw).
 	{
@@ -151,13 +157,8 @@ poll_events :: proc() {
 		// pointer sits short of where it looks by a quarter on a 125% display --
 		// and gets further out the further right and down it goes, which is the
 		// kind of wrongness that reads as "the hitboxes are off".
-		density := mbi.pixel_density if mbi.pixel_density > 0 else 1
-		raw_x *= density
-		raw_y *= density
-
-		scale := mbi.draw_scale if mbi.draw_scale > 0 else 1
-		x := (raw_x - mbi.draw_offset[0]) / scale
-		y := (raw_y - mbi.draw_offset[1]) / scale
+		point := window_point_to_logical({raw_x, raw_y})
+		x, y := point.x, point.y
 
 		// A device may have both a touch screen and a mouse, so which is in use
 		// follows whichever moved last rather than being decided at startup.
@@ -184,7 +185,15 @@ poll_events :: proc() {
 		case .WINDOW_CLOSE_REQUESTED:
 			{
 				if event.window.windowID == sdl.GetWindowID(mbi.window) {
-					mbi.running = false
+					request_close()
+				}
+			}
+		case .DROP_FILE:
+			{
+				// `data` is SDL's to free, and it is gone by the next event, so
+				// the path is copied here rather than pointed at.
+				if event.drop.data != nil {
+					record_dropped_file(string(event.drop.data), {event.drop.x, event.drop.y})
 				}
 			}
 		// Input events
@@ -571,3 +580,76 @@ is_mouse_captured :: proc() -> bool {
 	return mbi.input.mouse.captured
 }
 
+
+// -----------------------------------------------------------------------
+// Dropped files, and the close button
+// -----------------------------------------------------------------------
+
+// One file dropped on the window: its path as the system gives it, and where
+// it was let go, in the coordinates everything is drawn in.
+Dropped_File :: struct {
+	path:     string,
+	position: [2]f32,
+}
+
+/*
+	The files dropped on the window during the last `poll_events`, in the order
+	they arrived. Empty on every frame nothing was dropped, and polled like text
+	input rather than delivered to a callback.
+
+	The paths are Matchbox's until the next `poll_events`: copy anything worth
+	keeping. They are whole paths from the system, which is not where a game's
+	working directory is -- what to accept, and what to make of a file from
+	outside a project, is the program's to decide.
+
+		for dropped in matchbox.get_dropped_files() {
+			if strings.has_suffix(dropped.path, ".gltf") do place_model(dropped.path, dropped.position)
+		}
+*/
+get_dropped_files :: proc() -> []Dropped_File {
+	return mbi.input.dropped[:]
+}
+
+@(private)
+drops_begin_frame :: proc() {
+	for dropped in mbi.input.dropped do delete(dropped.path)
+	clear(&mbi.input.dropped)
+}
+
+@(private)
+record_dropped_file :: proc(path: string, window_point: [2]f32) {
+	append(&mbi.input.dropped, Dropped_File{
+		path     = strings.clone(path),
+		position = window_point_to_logical(window_point),
+	})
+}
+
+@(private)
+drops_cleanup :: proc() {
+	drops_begin_frame()
+	delete(mbi.input.dropped)
+	mbi.input.dropped = nil
+}
+
+// The window manager's close request: noted for the frame, and acted on unless
+// the program said it would answer it itself (`set_quit_on_close`).
+@(private)
+request_close :: proc() {
+	mbi.close_requested = true
+	if !mbi.close_handled do mbi.running = false
+}
+
+/*
+	A point SDL reports against the window -- the pointer, a dropped file -- in
+	the coordinates everything is drawn in.
+
+	SDL reports in window *points* while everything drawn is in window *pixels*,
+	which differ on a scaled display; then the letterbox margin comes off and the
+	draw scale divides out (display.odin).
+*/
+@(private)
+window_point_to_logical :: proc(point: [2]f32) -> [2]f32 {
+	density := mbi.pixel_density if mbi.pixel_density > 0 else 1
+	scale   := mbi.draw_scale if mbi.draw_scale > 0 else 1
+	return (point * density - mbi.draw_offset) / scale
+}

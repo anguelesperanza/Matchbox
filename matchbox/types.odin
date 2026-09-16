@@ -510,6 +510,14 @@ Matchbox_Info :: struct {
 	font:          Font,     // default font, loaded by init
 	font_cache:    Font_Cache, // the default font baked at other sizes
 	running:       bool,     // false once the window is closed or escape is hit
+
+	// The window manager asked for the window to close this frame -- the X
+	// button. See is_close_requested.
+	close_requested: bool,
+
+	// A close request leaves `running` alone, because the program answers it
+	// itself. False, the default, closes straight away. See set_quit_on_close.
+	close_handled:   bool,
 	initialized:   bool,     // set by init; guards against using a zeroed mbi
 
 	// Installed by init only when the caller had not set one, so the gpu

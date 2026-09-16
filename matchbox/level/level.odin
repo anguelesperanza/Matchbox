@@ -113,6 +113,11 @@ Entity :: struct {
 	model: Maybe(Model_Component),
 	light: Maybe(Light_Component),
 
+	// A box or a sphere: a spawn point, an area that triggers something, the
+	// zone a fixed camera shot is framed in. See shape.odin -- the editor draws
+	// these, and a game reads `shape_bounds` or `shape_contains`.
+	shape: Maybe(Shape_Component),
+
 	// Resolved once a frame and never saved -- nor could it be, since
 	// json.marshal rejects every matrix type outright.
 	world: matrix[4, 4]f32 `json:"-"`,
@@ -377,6 +382,16 @@ repair_level :: proc(level: ^Level, problems: ^[dynamic]string, allocator := con
 			if (light.kind == .AREA_RECT || light.kind == .AREA_DISK) && light.area_size == {} {
 				light.area_size = {0.5, 0.5}
 			}
+		}
+
+		// A shape with no size is a shape nobody can see or click, and a black one
+		// is invisible against the viewport -- both are a key left out rather than
+		// something anyone meant.
+		if shape, ok := &entity.shape.?; ok {
+			if shape.color == {} do shape.color = SHAPE_DEFAULTS.color
+
+			if shape.kind == .BOX && shape.size == {} do shape.size = SHAPE_DEFAULTS.size
+			if shape.kind == .SPHERE && shape.size.x == 0 do shape.size.x = SHAPE_DEFAULTS.size
 		}
 	}
 }

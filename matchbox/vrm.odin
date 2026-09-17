@@ -40,6 +40,7 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 
 import gltf "./gltf2"
@@ -720,6 +721,155 @@ skeleton_node_named :: proc(skeleton: Skeleton, name: string) -> (node: u32, fou
 }
 
 /*
+	How faithfully a retarget reproduces the source's pose on a rig built to
+	different proportions.
+
+	`.PROPORTIONS` is the zero value, and so the default: it is the one that
+	survives a character picking something up with both hands, and it costs
+	nothing anywhere else, because it declines to touch a limb that is not
+	holding onto anything. See `Retarget_Options`.
+*/
+Retarget_Fit :: enum {
+	/*
+		Joint angles, then a second pass over the hands, restoring the distance
+		between them where the source holds them together. Costs a hierarchy
+		walk per keyframe at load and nothing per frame afterwards; leaves
+		every pose that is not a contact exactly as the angles made it.
+
+		Feet are deliberately not corrected -- see `HUMANOID_PAIRS` for the
+		measurement that took them out, and `vrm.md` for what a foot actually
+		needs instead.
+	*/
+	PROPORTIONS,
+
+	/*
+		Joint angles alone -- the conjugation and nothing else. Exact, in the
+		sense that one source keyframe becomes one destination keyframe with
+		its interpolation mode intact, and wrong wherever the pose depends on
+		two limbs meeting: a narrower pair of shoulders brings both hands in
+		with them and the grip between them opens up.
+	*/
+	ROTATION_ONLY,
+}
+
+/*
+	What `retarget_animations` should do, for the callers who need to say.
+
+	Both fields are meaningful at their zero value -- an empty `names` means
+	the built-in table, and `.PROPORTIONS` is the fit worth having -- so
+	`retarget_animations(&model, clips)` is the whole API for the common case
+	and this struct only appears when something unusual is wanted.
+*/
+Retarget_Options :: struct {
+	// The source rig's bone names. Empty means `UNREAL_BONE_NAMES`, which is
+	// what Mesh2Motion and Quaternius's library both emit.
+	names: []Vrm_Bone_Name,
+
+	fit: Retarget_Fit,
+}
+
+// One humanoid role, resolved on both rigs at once. Built while the mapping
+// is walked, because both numbers are already in hand there.
+@(private)
+Retarget_Nodes :: struct {
+	src: u32,
+	dst: u32,
+}
+
+// One two-bone limb, named by the role each joint plays rather than by node
+// index, so the same table serves any rig the humanoid map can describe.
+@(private)
+Retarget_Limb :: struct {
+	root: Vrm_Bone,
+	mid:  Vrm_Bone,
+	tip:  Vrm_Bone,
+}
+
+/*
+	The two limbs of a pair, corrected together because what needs correcting
+	is the relationship *between* them.
+
+	**This is the whole of the design, and it took three attempts to find.**
+	A rotation retarget reproduces each limb's pose relative to its own root
+	exactly. What it cannot reproduce is where the two roots sit relative to
+	each other, because that is proportions: measured, this VRM's shoulders
+	are 9cm narrower than the source's, so both hands come inward with their
+	own shoulder and the gap between them -- which is what a two-handed grip
+	*is* -- comes out 5.6cm wrong, on the wrong side.
+
+	So correct the gap, and nothing else. Each tip moves half the error, the
+	pair ends up in the source's own relationship at the source's scale, and
+	every pose that was not about contact is left as the angles had it.
+
+	**The two anchors tried before this, and what each one broke.** Both
+	measured the tip's offset from a point on the body and scaled it, which
+	corrects the gap as a side effect -- and drags a great deal else along
+	with it:
+
+	  - **from the chest**: a bone's placement inside a torso is the rigger's
+	    arbitrary choice and the two rigs disagree by 6cm vertically, so an
+	    idle arm that should hang reached up and back for its target, bent,
+	    hand behind the character
+	  - **from the midpoint of the two limb roots**: fixes that, and still
+	    carries the clavicle difference -- the source pulls its shoulder 5.4cm
+	    back where this VRM's half-length clavicle manages 1cm, so the arm
+	    reaches back to make up the distance the shoulder did not travel
+
+	Neither error is visible in the numbers the pass was checked against,
+	because both put the hand exactly where they were asked to. They are
+	visible immediately on a running character, which is the argument for
+	watching one.
+*/
+@(private)
+Retarget_Pair :: struct {
+	left:  Retarget_Limb,
+	right: Retarget_Limb,
+}
+
+/*
+	The one pair a humanoid has that this correction can name.
+
+	**The legs were here and were wrong, and the reason is worth keeping.**
+	They were included on the argument that the correction would be nearly
+	nothing: the two rigs' hip spans agree to 4mm where their shoulder spans
+	are 9cm apart, so there looked to be no error to correct. That checked the
+	wrong joint. The pass is gated on the gap between the *feet*, not between
+	the hips, and measured across every clip in the Mesh2Motion export that
+	gap is off by a steady 0.27-0.39m -- because `scale` is the ratio of hip
+	*heights*, and where the feet land is driven by leg length and stance
+	angle, whose ratio is a different number. So `want` asked for a stance the
+	angles never produced, all the time, in every clip.
+
+	What that cost, measured: a foot moved up to 16.6cm (`Walk_Carry`), and up
+	to 14.9cm *between two adjacent keyframes* (`Run_Stealth`). A 0.27-0.39m
+	foot gap also lands in the middle of `contact_weight`'s leg band --
+	0.231m to 0.576m on this rig -- so the weight was partial and swung as the
+	stride opened and closed, which is what put a snap in every locomotion
+	clip.
+
+	**The deeper reason it cannot be rescued by fixing `scale`:** two hands on
+	one weapon are a constraint the source actually holds, and reproducing it
+	is the whole point. Two feet hold no constraint with *each other*. What a
+	foot needs to meet is the ground, which is a different reference and a
+	different subsystem -- see `vrm.md`'s "No ground contact pass".
+
+	Fingers are not here. They are three-bone chains, and the pair that would
+	matter is a finger against the *other hand's* prop, which is not a
+	relationship this table can name.
+
+	Correcting the clavicle itself was considered and left out: it is the bone
+	most responsible for the error, and asking one at 0.48x the length to
+	travel the whole difference reads as a shrug.
+*/
+@(private)
+HUMANOID_PAIRS :: []Retarget_Pair{
+	{
+		{.LEFT_UPPER_ARM, .LEFT_LOWER_ARM, .LEFT_HAND},
+		{.RIGHT_UPPER_ARM, .RIGHT_LOWER_ARM, .RIGHT_HAND},
+	},
+}
+
+/*
 	Copies every clip in `src` onto `dst`, rewriting each track to drive the
 	bone playing the same humanoid role, and returns how many clips landed at
 	least one track.
@@ -764,13 +914,29 @@ skeleton_node_named :: proc(skeleton: Skeleton, name: string) -> (node: u32, fou
 	every bone in every clip where the Mesh2Motion export this was first built
 	against had none, which is why the drop counts are summed and logged once
 	per call below rather than once per track -- see `vrm.md`.
+
+	**Angles are the whole of a limb's pose and not the whole of a
+	character's**, which is why `options.fit` defaults to `.PROPORTIONS` and a
+	second pass follows the conjugation. Each limb comes out right relative to
+	its own shoulder or hip; what the angles cannot carry is where those sit
+	relative to *each other*, because that is proportions. Measured on
+	`character.vrm`, whose shoulders are 9cm narrower than the source's: the
+	pistol reload's supporting hand lands 5.6cm past the hand it is meant to
+	sit under, on the wrong side of it. `correct_paired_limbs` puts it back,
+	and touches nothing that is not a pair in contact. See `vrm.md`.
 */
 retarget_animations :: proc(
-	dst:   ^Model,
-	src:   Animation_Source,
-	names: []Vrm_Bone_Name = UNREAL_BONE_NAMES,
+	dst:     ^Model,
+	src:     Animation_Source,
+	options: Retarget_Options = {},
 ) -> (added: int) {
 	if !is_model_skinned(dst^) || len(src.skeleton.rest) == 0 do return 0
+
+	// Nil rather than `UNREAL_BONE_NAMES` as the field's default, because a
+	// struct's zero value is what a caller writing `{fit = .ROTATION_ONLY}`
+	// gets for every field they did not mention -- so the table has to be
+	// chosen here, where an empty one still means "the built-in".
+	names := options.names if len(options.names) > 0 else UNREAL_BONE_NAMES
 
 	dst_globals := skeleton_rest_globals(dst.skeleton, context.temp_allocator)
 	src_globals := skeleton_rest_globals(src.skeleton, context.temp_allocator)
@@ -784,6 +950,13 @@ retarget_animations :: proc(
 	defer delete(pre)
 	defer delete(post)
 
+	// Which node plays each humanoid role, on each side. `src_to_dst` above
+	// answers "where does this track go"; the proportion pass asks the other
+	// question -- "which node is the left elbow" -- and a role-keyed map is
+	// the direct way to ask it rather than a scan of `names` per limb.
+	roles := make(map[Vrm_Bone]Retarget_Nodes, len(names), context.temp_allocator)
+	defer delete(roles)
+
 	hips_src_node: u32
 	has_hips: bool
 	hips_scale: f32 = 1
@@ -796,6 +969,7 @@ retarget_animations :: proc(
 		if !found_dst do continue
 
 		src_to_dst[src_node] = dst_node
+		roles[entry.bone] = Retarget_Nodes{src = src_node, dst = dst_node}
 
 		src_parent_rotation := linalg.QUATERNIONF32_IDENTITY
 		if p := src.skeleton.parents[src_node]; p >= 0 {
@@ -885,6 +1059,10 @@ retarget_animations :: proc(
 			continue
 		}
 
+		if options.fit == .PROPORTIONS {
+			correct_paired_limbs(dst^, src, clip, &tracks, roles, hips_scale)
+		}
+
 		duration: f32 = 0
 		for t in tracks do duration = max(duration, t.times[len(t.times) - 1])
 
@@ -918,4 +1096,625 @@ clone_track_times :: proc(times: []f32) -> []f32 {
 	out := make([]f32, len(times))
 	copy(out, times)
 	return out
+}
+
+// -----------------------------------------------------------------------
+// Step 4 -- proportions
+// -----------------------------------------------------------------------
+
+/*
+	Rewrites one retargeted clip's limb tracks so that where the source holds
+	a pair of limbs in contact -- two hands on a weapon, hands clasped -- the
+	destination holds them the same way at its own scale.
+
+	**Why the conjugation is not enough**, as the measurement rather than the
+	principle: a rotation track carries a joint angle, and each limb does come
+	out right relative to its own root. What no angle carries is where the two
+	roots sit relative to each other. Between `character.vrm` and a
+	Mesh2Motion export the shoulders are 9cm apart in that sense -- and
+	unevenly, clavicle 0.48x against upper arm 1.21x, so no single scale on
+	the skeleton absorbs it. Both hands come inward with their own shoulder
+	and the gap between them, which is what a two-handed grip *is*, ends up
+	5.6cm wrong and on the wrong side.
+
+	**So the gap is what gets corrected, and only the gap.** Each tip moves
+	half the error, both limbs re-solved onto the result:
+
+		error = scale * (tip_left_src - tip_right_src) - (tip_left_dst - tip_right_dst)
+
+	That it can be written in world space at all, with no basis change between
+	the rigs, is a property the conjugation already bought: the two rigs come
+	out of the retarget with the same world orientation, `post` and its
+	inverse cancelling, so a world-space offset means the same thing on both
+	sides.
+
+	**`scale` is the whole rig's** -- the ratio of hip rest heights, the same
+	number the hips translation uses. A gap is a distance across the body
+	rather than along a limb, so it belongs to the body's scale; and measured,
+	the arm's own ratio is 1.118 against the body's 1.113, a millimetre over
+	the length of an arm.
+
+	**Two designs were tried before this one and both were wrong on screen
+	while being right in the numbers**, which is the thing worth remembering.
+	Each measured a tip's offset from some point on the body and scaled it --
+	from the chest, then from the midpoint of the two limb roots -- and each
+	put the hand exactly where it was told. Both reproduce a pose the
+	destination's *skeleton* cannot hold honestly: the source pulls its
+	shoulder back on a clavicle twice the length of this VRM's, so matching
+	the hand makes the arm travel the distance the shoulder did not, and an
+	idle that should hang reaches backwards, bent, with the hand behind the
+	character. Correcting a relationship *between* limbs asks nothing of
+	either limb's own shape.
+
+	See `contact_weight` for why a pair with its hands apart is left alone
+	entirely, and `bend_plane` for why the joint does not swing when a limb
+	passes through straight. A target beyond a limb's reach clamps to the
+	straight-limb pose, which after the contact fade is a case this has not
+	been observed to reach: the correction is half a gap error, and a gap
+	error large enough to outreach an arm belongs to two limbs that are not
+	touching.
+*/
+@(private)
+correct_paired_limbs :: proc(
+	dst:       Model,
+	src:       Animation_Source,
+	src_clip:  Model_Animation,
+	tracks:    ^[dynamic]Animation_Track,
+	roles:     map[Vrm_Bone]Retarget_Nodes,
+	scale:     f32,
+) -> (corrected: int) {
+	limb_mapped :: proc(roles: map[Vrm_Bone]Retarget_Nodes, limb: Retarget_Limb) -> bool {
+		if _, has := roles[limb.root]; !has do return false
+		if _, has := roles[limb.mid];  !has do return false
+		if _, has := roles[limb.tip];  !has do return false
+		return true
+	}
+
+	/*
+		A limb this clip never animates is left entirely alone, rather than
+		corrected into the source's rest pose. Both are defensible as "the
+		pose the source has", and this one keeps a promise the other breaks: a
+		clip that drives nothing below the chest still drives nothing below
+		the chest after retargeting, so a caller layering it over a walk with
+		`animation_mask_below` gets the same tracks it would have got before
+		this pass existed.
+
+		Both limbs of a pair have to be animated, not either: correcting a
+		gap by moving a limb the clip is deliberately leaving alone is the
+		same broken promise wearing the other shoe.
+	*/
+	limb_animated :: proc(roles: map[Vrm_Bone]Retarget_Nodes, clip: Model_Animation, limb: Retarget_Limb) -> bool {
+		root := roles[limb.root]
+		mid  := roles[limb.mid]
+
+		for track in clip.tracks {
+			if track.path != .ROTATION do continue
+			if track.node == root.src || track.node == mid.src do return true
+		}
+		return false
+	}
+
+	pairs := make([dynamic]Retarget_Pair, 0, len(HUMANOID_PAIRS), context.temp_allocator)
+	defer delete(pairs)
+
+	for pair in HUMANOID_PAIRS {
+		if !limb_mapped(roles, pair.left) || !limb_mapped(roles, pair.right) do continue
+		if !limb_animated(roles, src_clip, pair.left) || !limb_animated(roles, src_clip, pair.right) do continue
+		append(&pairs, pair)
+	}
+
+	if len(pairs) == 0 do return 0
+
+	limbs := make([dynamic]Retarget_Limb, 0, 2 * len(pairs), context.temp_allocator)
+	defer delete(limbs)
+
+	for pair in pairs {
+		append(&limbs, pair.left)
+		append(&limbs, pair.right)
+	}
+
+	times := union_track_times(tracks[:], context.temp_allocator)
+	defer delete(times, context.temp_allocator)
+	if len(times) == 0 do return 0
+
+	dst_locals  := make([]Transform, len(dst.skeleton.rest), context.temp_allocator)
+	src_locals  := make([]Transform, len(src.skeleton.rest), context.temp_allocator)
+	dst_globals := make([]matrix[4, 4]f32, len(dst.skeleton.rest), context.temp_allocator)
+	src_globals := make([]matrix[4, 4]f32, len(src.skeleton.rest), context.temp_allocator)
+	defer delete(dst_locals,  context.temp_allocator)
+	defer delete(src_locals,  context.temp_allocator)
+	defer delete(dst_globals, context.temp_allocator)
+	defer delete(src_globals, context.temp_allocator)
+
+	// Two keys per limb, root and mid, each the length of the sample times.
+	// Filled in the time loop and handed to the tracks after it, because a
+	// track cannot be rewritten while the pose it is being read from is still
+	// being sampled.
+	root_keys := make([][]quaternion128, len(limbs), context.temp_allocator)
+	mid_keys  := make([][]quaternion128, len(limbs), context.temp_allocator)
+	defer delete(root_keys, context.temp_allocator)
+	defer delete(mid_keys,  context.temp_allocator)
+
+	for i in 0 ..< len(limbs) {
+		root_keys[i] = make([]quaternion128, len(times))
+		mid_keys[i]  = make([]quaternion128, len(times))
+	}
+
+	// Last keyframe's shift per pair, so `rate_limit_shift` can see how fast
+	// the correction is being asked to move. One per pair rather than per
+	// limb: both limbs of a pair are moved by the same vector, opposite signs,
+	// so limiting it once limits both consistently -- clamping each side
+	// separately could let them disagree about how much of the gap was closed.
+	prev_shift := make([][3]f32, len(pairs), context.temp_allocator)
+	defer delete(prev_shift, context.temp_allocator)
+
+	// Last keyframe's bend plane per limb, carried forward so a limb passing
+	// through straight keeps its joint on the side it was already on. See
+	// `bend_plane`.
+	planes := make([][3]f32, len(limbs), context.temp_allocator)
+	defer delete(planes, context.temp_allocator)
+
+	// Whether any keyframe asked this pair for anything. A clip whose hands
+	// are never near each other leaves with the tracks it arrived with --
+	// same keys, same interpolation, same values -- rather than a re-baked
+	// copy of itself on a denser time line.
+	touched := make([]bool, len(pairs), context.temp_allocator)
+	defer delete(touched, context.temp_allocator)
+
+	for time, key in times {
+		sample_clip_pose(src.skeleton, src_clip.tracks, time, src_locals)
+		sample_clip_pose(dst.skeleton, tracks[:], time, dst_locals)
+		pose_globals(src.skeleton, src_locals, src_globals)
+		pose_globals(dst.skeleton, dst_locals, dst_globals)
+
+		for pair, p in pairs {
+			left_tip  := roles[pair.left.tip]
+			right_tip := roles[pair.right.tip]
+
+			/*
+				Half the error each, faded out as the two tips separate. The
+				gap the source holds between them, at this rig's scale,
+				against the gap the angles produced -- and the two limbs split
+				the difference, so neither is singled out as the one that was
+				wrong. Nothing else about either limb's pose is touched.
+			*/
+			want := scale * (matrix_position(src_globals[left_tip.src]) - matrix_position(src_globals[right_tip.src]))
+			have := matrix_position(dst_globals[left_tip.dst]) - matrix_position(dst_globals[right_tip.dst])
+
+			reach := limb_reach(dst_globals, roles, pair.left)
+			shift := 0.5 * contact_weight(linalg.length(want), reach) * (want - have)
+
+			// The correction is not allowed to move faster than a hand
+			// plausibly does. See `rate_limit_shift`.
+			if key > 0 {
+				shift = rate_limit_shift(prev_shift[p], shift, time - times[key - 1], reach)
+			}
+			prev_shift[p] = shift
+
+			for limb, side in ([]Retarget_Limb{pair.left, pair.right}) {
+				i := 2 * p + side
+
+				root := roles[limb.root]
+				mid  := roles[limb.mid]
+				tip  := roles[limb.tip]
+
+				/*
+					Nothing to correct at this keyframe: keep what the angles
+					said, to the bit. Re-solving a chain onto the place it
+					already is looks like it should be free and is not -- a
+					straight limb has no bend plane to read, so the solve
+					would place its joint in whatever plane the fallback
+					picked and move it by a fraction of a millimetre. Small,
+					and still a pose nobody asked to change.
+				*/
+				if linalg.length(shift) <= 1e-7 {
+					root_keys[i][key] = dst_locals[root.dst].rotation
+					mid_keys[i][key]  = dst_locals[mid.dst].rotation
+
+					/*
+						The hint still has to keep up. Leaving `planes[i]` alone
+						here lets it go stale across every uncorrected keyframe,
+						so when a pair comes back into contact the solve is
+						handed a plane from before the limb moved -- and if the
+						chain happens to be straight at that moment,
+						`bend_plane` has nothing of its own to read and uses
+						that stale answer, putting the joint on the wrong side.
+						That is the knee-swing this pass already fixed once; it
+						came back through the door marked "nothing to do here".
+					*/
+					planes[i] = bend_plane(
+						matrix_position(dst_globals[root.dst]),
+						matrix_position(dst_globals[mid.dst]),
+						matrix_position(dst_globals[tip.dst]),
+						planes[i])
+					continue
+				}
+				touched[p] = true
+
+				target := matrix_position(dst_globals[tip.dst]) + (side == 0 ? shift : -shift)
+
+				root_turn, mid_turn, plane := solve_two_bone(
+					matrix_position(dst_globals[root.dst]),
+					matrix_position(dst_globals[mid.dst]),
+					matrix_position(dst_globals[tip.dst]),
+					target,
+					planes[i],
+				)
+				planes[i] = plane
+
+				root_world := root_turn * transform_from_matrix(dst_globals[root.dst]).rotation
+				mid_world  := mid_turn  * transform_from_matrix(dst_globals[mid.dst]).rotation
+
+				/*
+					Back to locals, and the mid bone's is taken against the
+					root's *new* world rotation rather than the one just
+					sampled. Turning the root has already carried the mid bone
+					with it -- that is what a hierarchy does -- so measuring
+					against the old parent applies the root's correction a
+					second time. Off by exactly that much is not obviously
+					wrong on screen, which is how it survives: the limb still
+					reaches roughly where it should and misses by centimetres.
+				*/
+				parent_rotation := linalg.QUATERNIONF32_IDENTITY
+				if parent := dst.skeleton.parents[root.dst]; parent >= 0 {
+					parent_rotation = transform_from_matrix(dst_globals[parent]).rotation
+				}
+
+				root_keys[i][key] = linalg.quaternion_inverse(parent_rotation) * root_world
+				mid_keys[i][key]  = linalg.quaternion_inverse(root_world) * mid_world
+			}
+		}
+	}
+
+	for pair, p in pairs {
+		if !touched[p] {
+			delete(root_keys[2 * p]);     delete(mid_keys[2 * p])
+			delete(root_keys[2 * p + 1]); delete(mid_keys[2 * p + 1])
+			continue
+		}
+
+		for limb, side in ([]Retarget_Limb{pair.left, pair.right}) {
+			i := 2 * p + side
+			write_rotation_track(tracks, roles[limb.root].dst, times, root_keys[i])
+			write_rotation_track(tracks, roles[limb.mid].dst,  times, mid_keys[i])
+		}
+		corrected += 1
+	}
+
+	return corrected
+}
+
+/*
+	Global-space turns for a two-bone chain that put `tip` on `target`,
+	keeping the plane the chain is already bent in. The second turn includes
+	the first, so each is applied to its bone's own world rotation and neither
+	caller has to know the order.
+
+	**Built by placing the joints and reading the rotations back off**, rather
+	than by accumulating law-of-cosines angle deltas. The delta form needs a
+	signed bend axis, which has to come from a cross product of the current
+	pose -- and that flips sign between a left limb and a right one, or when a
+	limb passes through straight mid-clip. Placing two points has no sign in
+	it to get wrong. Measured against the arithmetic form on `Pistol_Reload`:
+	0.00cm from the target on every frame, where the delta form sat 3.25cm out
+	on average with the target well inside reach.
+
+	Only swings are produced -- each bone is turned onto a new direction and
+	not about its own length -- so the twist the conjugation put into the
+	forearm and the hand survives this pass untouched.
+
+	`hint` is the previous keyframe's bend plane, and `normal` hands this
+	one's back for the next call. See `bend_plane` for what goes wrong
+	without it.
+*/
+@(private)
+solve_two_bone :: proc(root, mid, tip, target: [3]f32, hint: [3]f32 = {}) -> (root_turn, mid_turn: quaternion128, normal: [3]f32) {
+	upper := linalg.length(mid - root)
+	lower := linalg.length(tip - mid)
+	if upper <= 0 || lower <= 0 do return linalg.QUATERNIONF32_IDENTITY, linalg.QUATERNIONF32_IDENTITY, hint
+
+	reach := linalg.length(target - root)
+	if reach <= 1e-6 do return linalg.QUATERNIONF32_IDENTITY, linalg.QUATERNIONF32_IDENTITY, hint
+
+	// Outside these two bounds the triangle has no solution at all: further
+	// than both bones laid end to end is out of reach, nearer than their
+	// difference is inside the fold. Both clamp to the nearest pose the chain
+	// can actually hold.
+	span := clamp(reach, abs(upper - lower) + 1e-6, upper + lower - 1e-6)
+
+	direction := (target - root) / reach
+
+	normal = bend_plane(root, mid, tip, hint)
+	if linalg.length(normal) <= 0 do return linalg.QUATERNIONF32_IDENTITY, linalg.QUATERNIONF32_IDENTITY, hint
+
+	// In the bend plane, square to the target direction, pointing the way the
+	// joint already sticks out.
+	pole := linalg.cross(direction, normal)
+	if linalg.length(pole) < 1e-6 do return linalg.QUATERNIONF32_IDENTITY, linalg.QUATERNIONF32_IDENTITY, normal
+	pole = linalg.normalize(pole)
+
+	cosine := clamp((upper * upper + span * span - lower * lower) / (2 * upper * span), -1, 1)
+	sine   := math.sqrt(max(0, 1 - cosine * cosine))
+
+	new_mid := root + upper * (cosine * direction + sine * pole)
+	new_tip := root + span * direction
+
+	root_turn = rotation_between(mid - root, new_mid - root)
+	mid_turn  = rotation_between(
+		linalg.quaternion_mul_vector3(root_turn, tip - mid),
+		new_tip - new_mid,
+	) * root_turn
+
+	return root_turn, mid_turn, normal
+}
+
+/*
+	How much of a pair's gap error to correct, given how far apart the source
+	holds the two tips and how long the limb is.
+
+	**This is the difference between fixing a grip and wrecking an idle.**
+	What a rotation retarget gets wrong about a pair of limbs is their
+	relationship, and that only *matters* where the relationship is contact --
+	two hands on one weapon, hands clasped, a hand steadying the other wrist.
+	Correcting it everywhere else does visible damage, because the arm is made
+	to travel distance the shoulder should have: measured on this VRM's idle,
+	whose source pulls its right shoulder 9cm back on a clavicle twice the
+	length of the VRM's, forcing the hands to match reaches the arm 10cm
+	backwards and reads exactly as "the right hand is behind the character".
+
+	Contact is not a thing a glTF file records, so it is inferred from the one
+	signal there is: how close the source holds them. Both thresholds are in
+	units of the limb's own length, so they mean the same thing on a child
+	model and on an ogre. Measured on the clips in hand, with a 0.435m arm:
+	the pistol's two-handed hold sits at 0.07m and corrects fully; the same
+	clip's reach for a magazine at 0.38m and the idle's hanging arms at 0.45m
+	are left exactly as the angles made them.
+
+	Smooth rather than a threshold, because the weight is evaluated per
+	keyframe and a step in it is a step in the pose -- the hands would jump
+	as they came together. `smoothstep`'s flat ends matter as much as its
+	middle: a pose hovering near the boundary does not shimmer.
+*/
+@(private)
+contact_weight :: proc(gap, limb_length: f32) -> f32 {
+	if limb_length <= 0 do return 1
+
+	near := 0.30 * limb_length
+	far  := 0.75 * limb_length
+
+	if gap <= near do return 1
+	if gap >= far  do return 0
+
+	t := (gap - near) / (far - near)
+	return 1 - t * t * (3 - 2 * t)
+}
+
+/*
+	How fast the pair correction may change, in limb lengths per second.
+
+	**Picked from the gap in the measurements, not tuned.** `contact_weight`
+	fades on how far apart the source holds the two tips, which is the right
+	signal and says nothing about how fast that distance is allowed to change.
+	Where a clip separates the hands quickly -- a reload, taking the support
+	hand off the grip to reach for a magazine -- the weight falls most of the
+	way inside one keyframe interval, and the correction that was holding the
+	grip together lets go all at once. Measured on the arm pair, as the peak
+	rate the correction was asked to move at:
+
+		Pistol_Idle    0.02      Pistol_Shoot   0.50
+		Walk_Carry     0.04      Pistol_Reload  5.69   <- 10.3cm in one interval
+
+	Everything that is not spiking sits at or under 0.50; the one that is
+	sits an order of magnitude above it. 1.0 has a factor of two of headroom
+	over the highest honest clip and a factor of five under the spike, so it
+	is a threshold with real space on both sides rather than a number fitted
+	to one animation.
+
+	In limb lengths rather than metres for `contact_weight`'s own reason: so
+	it means the same thing on a child model and on an ogre.
+*/
+@(private)
+SHIFT_RATE_LIMIT :: f32(1.0)
+
+/*
+	`wanted`, held back to a speed a limb could plausibly move at.
+
+	Clamps the *change* rather than the shift itself, so a correction that is
+	already large and steady -- a grip held for a whole clip -- is untouched,
+	and only the moment it is asked to appear or vanish is spread out. The
+	direction of the change is kept and only its length is cut, which means
+	the correction still heads where the gap says it should; it just takes
+	more than one keyframe to get there.
+
+	Trailing by design: after a fast separation this keeps correcting for a
+	few keyframes longer than `contact_weight` alone would. That is the
+	trade, and it is the right way round -- a grip that releases slightly late
+	reads as a hand lingering, where one that releases instantly reads as a
+	snap.
+*/
+@(private)
+rate_limit_shift :: proc(previous, wanted: [3]f32, dt, limb_length: f32) -> [3]f32 {
+	if dt <= 0 || limb_length <= 0 do return wanted
+
+	step     := wanted - previous
+	distance := linalg.length(step)
+
+	limit := SHIFT_RATE_LIMIT * limb_length * dt
+	if distance <= limit do return wanted
+
+	return previous + step * (limit / distance)
+}
+
+// A limb's length in the pose it is currently in, root to mid to tip. The
+// yardstick `contact_weight` measures a gap against, so that "close" means
+// the same thing whatever size the character is.
+@(private)
+limb_reach :: proc(globals: []matrix[4, 4]f32, roles: map[Vrm_Bone]Retarget_Nodes, limb: Retarget_Limb) -> f32 {
+	root := matrix_position(globals[roles[limb.root].dst])
+	mid  := matrix_position(globals[roles[limb.mid].dst])
+	tip  := matrix_position(globals[roles[limb.tip].dst])
+	return linalg.length(mid - root) + linalg.length(tip - mid)
+}
+
+/*
+	The plane a two-bone chain is bent in, as its normal: which way the elbow
+	or the knee points, which is the one thing about the original pose that a
+	position target does not determine.
+
+	**Taken from the chain's own geometry, not from its offset perpendicular
+	to the target**, and this is the difference between a walk and a walk with
+	a twitch in it. The perpendicular-offset form collapses whenever the
+	target happens to line up with the upper bone -- which happens mid-stride,
+	with the knee still properly bent -- and what is left is numerical noise
+	with a direction. The foot stays put, because the foot is what is being
+	solved for, and the knee swings around the leg. Measured on `Walk_Formal`:
+	the knee moved 10.6cm between two adjacent keys where the source moved
+	3.9cm, against 5.3cm for 5.4cm under the rotation-only path.
+
+	`cross(upper, root_to_tip)` only collapses when the chain really is
+	straight -- and a straight chain genuinely has no plane, so there is
+	nothing to read and the previous keyframe's answer is carried forward
+	instead. That keeps the joint where it was through the moment of
+	straightness rather than letting it pick a new side on the way out, which
+	is what continuity means here. Baking in time order is what makes the
+	hint available; nothing else in this pass depends on the order.
+*/
+@(private)
+bend_plane :: proc(root, mid, tip: [3]f32, hint: [3]f32) -> [3]f32 {
+	upper  := mid - root
+	span   := tip - root
+	normal := linalg.cross(upper, span)
+
+	// sin of the angle at the joint, so the test is "how straight is it" and
+	// not "how long is it" -- an absolute length would call a small limb
+	// straight and a large one bent at the same angle.
+	scale := linalg.length(upper) * linalg.length(span)
+	if scale > 0 && linalg.length(normal) / scale > 0.02 do return linalg.normalize(normal)
+
+	if linalg.length(hint) > 0 do return hint
+
+	// Nothing to go on at all: the first key of a clip that opens with a
+	// straight limb. Any plane containing the limb will do, since a straight
+	// chain looks the same in all of them -- and by the time it bends, the
+	// bend itself will have taken over.
+	fallback := linalg.cross(span, [3]f32{0, 0, 1})
+	if linalg.length(fallback) < 1e-6 do fallback = linalg.cross(span, [3]f32{0, 1, 0})
+	if linalg.length(fallback) < 1e-6 do return {}
+	return linalg.normalize(fallback)
+}
+
+// The shortest turn taking `from`'s direction onto `to`'s. Odin's linalg has
+// no such procedure in this version, and the antiparallel case is the reason
+// to write it once here rather than inline: the cross product vanishes there,
+// so the axis has to be picked rather than computed.
+@(private)
+rotation_between :: proc(from, to: [3]f32) -> quaternion128 {
+	a := linalg.normalize0(from)
+	b := linalg.normalize0(to)
+	if linalg.length(a) <= 0 || linalg.length(b) <= 0 do return linalg.QUATERNIONF32_IDENTITY
+
+	cosine := clamp(linalg.dot(a, b), -1, 1)
+	if cosine > 0.999999 do return linalg.QUATERNIONF32_IDENTITY
+
+	if cosine < -0.999999 {
+		axis := linalg.cross(a, [3]f32{1, 0, 0})
+		if linalg.length(axis) < 1e-6 do axis = linalg.cross(a, [3]f32{0, 1, 0})
+		return transform_rotation(axis, math.PI)
+	}
+
+	return transform_rotation(linalg.cross(a, b), math.acos(cosine))
+}
+
+// A global matrix's translation, which is all the proportion pass wants from
+// most of the poses it builds.
+@(private)
+matrix_position :: proc(m: matrix[4, 4]f32) -> [3]f32 {
+	return {m[0, 3], m[1, 3], m[2, 3]}
+}
+
+// `sample_pose` for a clip that is not on a `Model` yet -- the source's, and
+// the destination's part-built track list. Same rule: from the rest pose
+// every time, so a joint no track touches stays where the file put it.
+@(private)
+sample_clip_pose :: proc(skeleton: Skeleton, clip_tracks: []Animation_Track, time: f32, into: []Transform) {
+	copy(into, skeleton.rest)
+
+	for track in clip_tracks {
+		if int(track.node) >= len(into) do continue
+		sample_track(track, time, &into[track.node])
+	}
+}
+
+// `skeleton_rest_globals`' hierarchy walk over an arbitrary pose rather than
+// the rest one, writing into a buffer the caller reuses across samples --
+// this runs once per keyframe per clip, which is often enough that allocating
+// per call would be the expensive part of the whole pass.
+@(private)
+pose_globals :: proc(skeleton: Skeleton, locals: []Transform, into: []matrix[4, 4]f32) {
+	for node in skeleton.order {
+		local  := transform_matrix(locals[node])
+		parent := skeleton.parents[node]
+
+		if parent < 0 {
+			into[node] = local
+		} else {
+			into[node] = into[parent] * local
+		}
+	}
+}
+
+/*
+	Every distinct time any of `tracks` has a key at, in order.
+
+	The proportion pass needs a whole limb evaluated at one instant, so it
+	needs a single time line rather than each track's own. Measured on the
+	Mesh2Motion export, taking the union costs nothing: every clip in it has
+	at most two distinct time arrays -- one dense LINEAR one for the bones
+	that move, and a two-key STEP one for the bones that do not -- so the
+	union is the dense array plus, at most, its own endpoints. A fixed-rate
+	resample was the obvious alternative and would have thrown away exactly
+	the fidelity this file did not need to lose.
+*/
+@(private)
+union_track_times :: proc(tracks: []Animation_Track, allocator := context.allocator) -> []f32 {
+	total := 0
+	for track in tracks do total += len(track.times)
+
+	gathered := make([dynamic]f32, 0, total, context.temp_allocator)
+	defer delete(gathered)
+
+	for track in tracks do append(&gathered, ..track.times)
+	slice.sort(gathered[:])
+
+	out := make([dynamic]f32, 0, len(gathered), allocator)
+	for time in gathered {
+		if len(out) > 0 && out[len(out) - 1] == time do continue
+		append(&out, time)
+	}
+
+	return out[:]
+}
+
+// Puts `quats` on the track driving `node`'s rotation, replacing whatever was
+// there. Replacing rather than appending because two rotation tracks on one
+// node is not a blend -- `sample_pose` assigns, so the second would simply
+// win, silently and depending on order.
+@(private)
+write_rotation_track :: proc(tracks: ^[dynamic]Animation_Track, node: u32, times: []f32, quats: []quaternion128) {
+	for &track in tracks {
+		if track.node != node || track.path != .ROTATION do continue
+
+		delete(track.times)
+		delete(track.quats)
+
+		track.times         = clone_track_times(times)
+		track.quats         = quats
+		track.interpolation = .LINEAR
+		return
+	}
+
+	append(tracks, Animation_Track{
+		node = node, path = .ROTATION, interpolation = .LINEAR,
+		times = clone_track_times(times), quats = quats,
+	})
 }

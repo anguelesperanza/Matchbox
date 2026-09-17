@@ -27,7 +27,7 @@ package level
 import "core:log"
 import "core:strings"
 
-import mb ".."
+import mb "../matchbox"
 
 Sky_Kind :: enum {
 	NONE,     // no sky: the background colour, as before there was one

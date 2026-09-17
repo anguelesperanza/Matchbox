@@ -13,7 +13,7 @@ import "core:log"
 import "core:os"
 import "core:strings"
 
-import mb ".."
+import mb "../matchbox"
 
 // Whatever stopped a level loading or saving: a file that could not be read
 // or written, or text that was not a level.

@@ -17,7 +17,7 @@ import "core:math/linalg"
 import "core:strings"
 import "core:testing"
 
-import mb ".."
+import mb "../matchbox"
 
 /*
 	An entity name the level owns.

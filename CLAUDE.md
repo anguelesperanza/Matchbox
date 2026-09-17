@@ -8,27 +8,87 @@ tracks bringing the rest of the package into line.
 Matchbox covers the parts of building a game -- and of building software
 around one -- rather than rendering and input alone. Audio, physics, an event
 system and whatever else a game actually needs belong here, as first-class
-parts of the package, not as separate libraries a game is left to bolt on.
+parts of the framework, not as separate libraries a game is left to bolt on.
 
-**This reverses an earlier narrowing, deliberately.** Matchbox began as an
+**This reversed an earlier narrowing, deliberately.** Matchbox began as an
 all-encompassing framework, was cut back to rendering and input on the
-reasoning that everything else could arrive as its own package, and is now
-widened again because those packages did not materialise and the split cost
-more than it bought: a game still needed sound, so `sound.odin` sat in the
-package anyway contradicting the stated scope, and `utility.odin` became an
-explicit "holding pen" for helpers that were useful and had nowhere to live.
-Both of those stop being anomalies under this rule. `refactor.md`'s own scope
-section has the full history.
+reasoning that everything else could arrive as its own package, and was widened
+again because those packages did not materialise and the split cost more than
+it bought: a game still needed sound, so `sound.odin` sat in the package anyway
+contradicting the stated scope, and `utility.odin` became an explicit "holding
+pen" for helpers that were useful and had nowhere to live. `refactor.md`'s own
+scope section has the full history.
 
-**What it does not license.** A wider scope is about *what* may live here, not
-*how* it is built. Everything else in this file still governs: no callbacks,
-`mbi` as the only global, configuration as defaulted structs rather than loose
-constants, comments that explain why. A subsystem that arrives ignoring those
-is a subsystem to send back, whatever its subject. And breadth is not an
-invitation to speculative work -- a thing belongs here when a game needs it,
-not because a complete framework would plausibly have one.
+**The narrowing came back once, as separate repositories, and was reversed
+again on 2026-09-17.** Physics and audio *did* materialise as their own
+projects -- **Tether**, over `vendor:box3d`, and **Eko**, over
+`vendor:miniaudio` -- cloned beside Matchbox by whichever game wanted them. The
+project owner moved both into this repository because the dependency problem
+that split creates has no good answer:
 
-The audio API is the first of these to land, merging in from separate work.
+- `level` wants to describe colliders that a game turns into Tether bodies.
+  With Tether outside, `level` could only reach it by a path out of the
+  repository -- broken for anyone who cloned Matchbox without cloning Tether
+  beside it -- so the dependency had to be left to the game to wire up.
+- And it only gets worse as the framework fills in: an animation system that
+  wants footstep audio, a level that wants to place sound emitters. Every one
+  of those is either a path out of the repository or a job pushed onto the game.
+- A package reached by two different paths is two packages, with two copies of
+  its global. One repository means there is only ever one path.
+
+### Several packages, one repository
+
+Matchbox is **not one Odin package**. It is one repository holding four:
+
+| Package | Where | Depends on | What it is |
+| --- | --- | --- | --- |
+| `matchbox` | `matchbox/` | SDL3, stb | drawing, input, files, UI, the frame |
+| `level` | `level/` | `matchbox`, as `../matchbox` | the level format Stargate's editor writes |
+| `tether` | `tether/` | `vendor:box3d` | physics |
+| `eko` | `eko/` | `vendor:miniaudio` | audio |
+
+**All four are siblings at the repository root.** `level` lived at
+`matchbox/level/` and imported Matchbox as `..` until 2026-09-18; when physics
+and audio arrived as siblings, one package nested inside another was the odd one
+out, and it moved up. Nothing about how it reaches Matchbox actually changed:
+Odin resolves a relative import against the importing file's directory and
+identifies a package by the full path it lands on, so `../matchbox` from `level`
+and `matchbox/matchbox` from a game are two spellings of one directory and
+therefore one package. That is the whole of what the nesting was protecting --
+two paths to Matchbox would be two `mbi`s, and an `mb.Model` from one would not
+be an `mb.Model` to the other -- and one repository already guarantees it.
+
+A package depending on another inside the repository says so with one `../`,
+and that is the point of them all living here.
+
+**Why not fold them into `package matchbox`.** Three reasons, and any one of
+them is enough:
+
+- **Vendor cost.** `package matchbox` is what a game importing a sprite drawer
+  gets. Folding Tether in would link Box3D into a 2D game that never asked for
+  physics, and Eko would link miniaudio into a silent one.
+- **Globals.** `mbi` is `package matchbox`'s only global and stays that way.
+  Tether has `tpi` and Eko has `mac`, each for the same reason `mbi` exists --
+  one world, one audio engine, and an argument at every call site buys nothing.
+  Folded in, that would be three globals in one package, and the rule below
+  would be a lie.
+- **Churn.** A young subsystem changing weekly inside the package everything
+  imports is a rebuild of everything, weekly.
+
+**Where a new subsystem goes.** Into `package matchbox` by default -- that is
+where a thing a game reaches for alongside `draw_model` belongs. Into a package
+of its own beside it when it wraps a vendor library that not every game wants,
+or when it needs a global of its own. It is never a repository of its own
+again.
+
+**What a wider scope does not license.** It is about *what* may live here, not
+*how* it is built. Everything else in this file still governs, in every package:
+no callbacks, one global per package and only where one is earned,
+configuration as defaulted structs rather than loose constants, comments that
+explain why. A subsystem that arrives ignoring those is a subsystem to send
+back, whatever its subject. And breadth is not an invitation to speculative work
+-- a thing belongs here when a game needs it, not because a complete framework
+would plausibly have one.
 
 ## Naming
 
@@ -178,7 +238,7 @@ proc(d: f32 = DEFAULTS.duration)  // a field of one
   Wrapping them in a struct buys nothing and complicates every call site
 - **`mbi`.** The one sanctioned global -- see below
 
-## `mbi` is the only global
+## `mbi` is the only global -- one per package, and only where it is earned
 
 Matchbox is an immediate-mode API: `draw_rect` cannot take a renderer argument
 without every call site carrying one. `mbi` is that state, and it stays.
@@ -186,6 +246,19 @@ without every call site carrying one. `mbi` is that state, and it stays.
 Everything else that has crept out to package scope belongs *inside* it. Adding
 a new top-level `var` is not the answer; adding a field to the right struct
 under `mbi` is.
+
+**The sibling packages each have exactly one of their own**, for the same
+reason and under the same rule: `tether.tpi` holds the one physics world, and
+`eko.mac` the one audio engine. Every body and every ray belongs to a world, and
+threading a world id through `create_box_body` and `cast_ray` would put an
+argument at every call site that no game has ever wanted to vary.
+
+The rule is therefore **one per package, and only where an immediate-mode API
+makes an explicit handle pure cost** -- not "a global per subsystem". A second
+one in any of these packages is the same mistake `mbi` was created to stop, and
+a new package that wants one has to make the same case Matchbox made: that the
+thing is genuinely single, and that passing it would be an argument everywhere
+and a choice nowhere.
 
 ## Write the reasoning, not the mechanics
 
@@ -222,7 +295,24 @@ is a useful sentence.
   Matchbox logs
 - **Vendored code.** Patches to `matchbox/gltf2` are marked `MATCHBOX PATCH` so a
   package refresh can find them
-- **Check everything.** `odin check matchbox -no-entry-point`, then the examples
+- **Check everything.** Every package, then the examples:
+
+  ```
+  odin check matchbox -no-entry-point
+  odin check level -no-entry-point
+  odin check tether -no-entry-point
+  odin check eko -no-entry-point
+  ```
+
+  `odin check matchbox` does **not** reach the others -- they are four separate
+  packages, none of them under `matchbox/`. A change to `Entity` that breaks
+  `level` passes the first line
+- **Tests.** `odin test matchbox`, `odin test level`, and
+  `odin test tether -define:ODIN_TEST_THREADS=1`. **Tether's want the define**:
+  every test there makes and destroys the one world in `tpi`, and the runner
+  otherwise runs them side by side against that same global. `matchbox`'s do
+  not, because `mbi` is thread-local under `odin test`; a package that grows a
+  global without that trick inherits Tether's rule, not Matchbox's
 - **Tests run in parallel, each with its own `mbi`.** Under `odin test`, and only
   there, `mbi` is thread-local (types.odin), so a test may set whatever fields
   it needs without another test seeing them. It starts zeroed, not initialised:
@@ -232,4 +322,6 @@ is a useful sentence.
 - **`cheatsheet.md` is generated**, by `python tools/gen_cheatsheet.py` from the
   repository root. Regenerate it after adding or changing a public procedure
   rather than editing it. Each entry's description is the first sentence of that
-  procedure's doc comment, so a bad line there is a bad comment at the source
+  procedure's doc comment, so a bad line there is a bad comment at the source.
+  **It covers `matchbox/*.odin` only** -- not `level`, `tether` or `eko`, whose
+  own doc comments and `.md` files are where their surface is written down

@@ -310,6 +310,66 @@ test_a_collider_is_fitted_to_its_model :: proc(t: ^testing.T) {
 }
 
 /*
+	A flat model -- `primitive:plane`, every vertex at y = 0 -- is fitted to a
+	collider with a real thickness rather than none, and that thickness survives
+	being saved and read back.
+
+	The round trip is the point. A zero half-extent written to a file is
+	indistinguishable from a key left out, so it comes back as the half-metre
+	default: the floor would be paper-thin in the session it was fitted and a
+	metre thick after a reload, its surface half a metre higher. Found by
+	fitting a collider to Stargate's testbed ground, which is exactly this.
+*/
+@(test)
+test_a_flat_model_is_fitted_to_a_collider_with_an_inside :: proc(t: ^testing.T) {
+	plane := model_with_bounds({-20, 0, -20}, {20, 0, 20})
+
+	level := create_level()
+	defer destroy_level(&level)
+
+	append(&level.entities, Entity{
+		id = 1, name = "ground",
+		transform = {rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+		model     = Model_Component{path = "primitive:plane", tint = {1, 1, 1, 1}, model = &plane},
+		collider  = Collider_Component{kind = .BOX, density = 1, friction = 0.6},
+	})
+	update_level(&level)
+
+	handle := Entity_Handle{index = 0, id = 1}
+	testing.expect(t, fit_collider_to_model(&level, handle))
+
+	fitted, _ := level.entities[0].collider.?
+	testing.expect_value(t, fitted.size.x, f32(20))
+	testing.expect_value(t, fitted.size.z, f32(20))
+	testing.expect_value(t, fitted.size.y, COLLIDER_DEFAULTS.min_size)
+
+	// Written, read back, and still the same collider -- which is what a zero
+	// would not have been.
+	data, err := marshal_level(level)
+	testing.expect_value(t, err, nil)
+	defer delete(data)
+
+	read, problems, _ := unmarshal_level(data)
+	defer destroy_level(&read)
+	defer delete_problems(problems)
+
+	reloaded, _ := read.entities[0].collider.?
+	testing.expect_value(t, reloaded.size, fitted.size)
+
+	// A capsule's radius is floored the same way; its half-height is not,
+	// because zero there is a sphere.
+	if c, is_there := &level.entities[0].collider.?; is_there do c.kind = .CAPSULE
+
+	flat_both_ways := model_with_bounds({0, 0, 0}, {0, 3, 0})
+	if m, is_there := &level.entities[0].model.?; is_there do m.model = &flat_both_ways
+
+	testing.expect(t, fit_collider_to_model(&level, handle))
+	thin, _ := level.entities[0].collider.?
+	testing.expect_value(t, thin.size.x, COLLIDER_DEFAULTS.min_size)
+	testing.expectf(t, thin.size.y > 1.4, "the half-height is still the model's: %v", thin.size.y)
+}
+
+/*
 	A hand-written file that leaves keys out: every zero that has no sensible
 	meaning gets its default, and the ones that do are kept.
 */

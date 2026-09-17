@@ -151,13 +151,21 @@ Collider_Component :: struct {
 
 Collider_Defaults :: struct {
 	size:     f32,
+	min_size: f32,
 	density:  f32,
 	friction: f32,
 }
 
-// Half a metre, and Tether's own density and friction. What a collider with
-// nothing filled in gets on load, and what the editor puts on a new one.
-COLLIDER_DEFAULTS :: Collider_Defaults{size = 0.5, density = 1, friction = 0.6}
+/*
+	Half a metre, and Tether's own density and friction. What a collider with
+	nothing filled in gets on load, and what the editor puts on a new one.
+
+	`min_size` is different in kind: it is not a default but a floor, the
+	thinnest a *fitted* collider is allowed to come out. A centimetre, which is
+	thin enough that nobody sees it and thick enough to be a shape. See
+	`fit_collider_to_model`.
+*/
+COLLIDER_DEFAULTS :: Collider_Defaults{size = 0.5, min_size = 0.01, density = 1, friction = 0.6}
 
 /*
 	One body a game should make, in world space, with everything a physics
@@ -301,6 +309,20 @@ get_level_collider :: proc(level: ^Level, name: string) -> (desc: Collider_Desc,
 	the larger of the two widths, so a model wider than it is deep is not
 	clipped, and the half-height is what is left over the rounded ends -- zero
 	for a model shorter than it is wide, which makes a sphere, and is right.
+
+	**A flat model gets `COLLIDER_DEFAULTS.min_size` on the flat axis, not
+	zero.** `primitive:plane` is the case: every vertex at y = 0, so its bounds
+	have no height and a straight fit would make a box with no inside. Box3D
+	does take such a hull today and a body does rest on it -- measured -- but it
+	is a floor a fast body tunnels through, and worse, a zero written to a file
+	is a key `repair_level` cannot tell from one left out: it comes back as the
+	half-metre default, so the floor is a centimetre thick in the session it was
+	fitted and a metre thick after a reload, with its surface half a metre
+	higher. A collider that changes when a level is saved and opened again is
+	the one thing the format must not do.
+
+	A capsule's radius is floored the same way and for the same reason. Its
+	half-height is not: zero there is a sphere, which is a real shape.
 */
 fit_collider_to_model :: proc(level: ^Level, handle: Entity_Handle) -> bool {
 	entity := get_entity(level, handle)
@@ -315,11 +337,14 @@ fit_collider_to_model :: proc(level: ^Level, handle: Entity_Handle) -> bool {
 	size   := mb.model_size(model.model^)
 	centre := mb.model_center(model.model^)
 
+	floor := COLLIDER_DEFAULTS.min_size
+
 	switch collider.kind {
 	case .BOX:
-		collider.size = size * 0.5
+		half := size * 0.5
+		collider.size = {max(half.x, floor), max(half.y, floor), max(half.z, floor)}
 	case .CAPSULE:
-		radius := max(size.x, size.z) * 0.5
+		radius := max(max(size.x, size.z) * 0.5, floor)
 		collider.size = {radius, max(size.y * 0.5 - radius, 0), 0}
 	}
 	collider.offset = centre

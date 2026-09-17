@@ -3,7 +3,7 @@ package walk_level_example
 /*
 	A level from a file, walked around.
 
-	Everything in the yard except the player is `levels/yard.level`: the
+	Everything in the yard except the player is `levels/yard.json`: the
 	ground, the crates, a wall, a turntable with a lamp post on it, a campfire,
 	the moon, and where the player starts. This file loads it, turns the
 	turntable, and draws. The frame is the four calls a game makes with any
@@ -25,10 +25,10 @@ package walk_level_example
 	    every frame -- the lamp's light and its shadow go round with it
 	  - the small crate is a child of the big one: move the big crate in the
 	    file and both move
-	  - press R to reload the file. Edit yard.level in a text editor while this
+	  - press R to reload the file. Edit yard.json in a text editor while this
 	    runs -- move a crate, change the fire's colour -- and press R
-	  - press F5 to save to levels/yard_saved.level, then compare it with
-	    yard.level. The only difference is the turntable's rotation, which has
+	  - press F5 to save to levels/yard_saved.json, then compare it with
+	    yard.json. The only difference is the turntable's rotation, which has
 	    moved on since it loaded
 	  - change a model path in the file to one that is not there and press R:
 	    that entity is a red wire box, and the log says which file was missing
@@ -44,8 +44,8 @@ import "core:math"
 import mb    "../../matchbox"
 import level "../../matchbox/level"
 
-LEVEL_PATH :: "levels/yard.level"
-SAVE_PATH  :: "levels/yard_saved.level"
+LEVEL_PATH :: "levels/yard.json"
+SAVE_PATH  :: "levels/yard_saved.json"
 
 // The one entity this example moves, and the rotation it loaded with. Turned
 // from that rotation every frame rather than a little more each frame, so an
@@ -137,7 +137,7 @@ main :: proc() {
 		mb.end_drawing_3d()
 
 		font := &mb.mbi.font
-		mb.draw_text(font, "WASD walk, mouse look, R reload yard.level, F5 save a copy, ESC pointer", 20, 40, mb.WHITE)
+		mb.draw_text(font, "WASD walk, mouse look, R reload yard.json, F5 save a copy, ESC pointer", 20, 40, mb.WHITE)
 		mb.draw_text(font, fmt.tprintf("%d entities, %d lights, %d models missing",
 			len(yard.entities), len(lights), count_missing_models(&yard)), 20, 72, mb.WHITE)
 		mb.draw_text(font, status, 20, 104, mb.WHITE)

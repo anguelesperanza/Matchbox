@@ -152,7 +152,7 @@ test_a_shape_survives_the_file_and_an_older_level_still_loads :: proc(t: ^testin
 	)
 	defer destroy_level(&level)
 
-	first, marshal_err := marshal_level(level, context.temp_allocator)
+	first, marshal_err := marshal_level(level, allocator = context.temp_allocator)
 	testing.expectf(t, marshal_err == nil, "marshal: %v", marshal_err)
 
 	read, problems, err := unmarshal_level(first, context.temp_allocator)
@@ -166,7 +166,7 @@ test_a_shape_survives_the_file_and_an_older_level_still_loads :: proc(t: ^testin
 	testing.expect_value(t, shape.size, [3]f32{3, 2, 1})
 	testing.expect_value(t, shape.color, [4]f32{0.2, 0.9, 0.4, 1})
 
-	again, _ := marshal_level(read, context.temp_allocator)
+	again, _ := marshal_level(read, allocator = context.temp_allocator)
 	testing.expect(t, string(first) == string(again), "a level with shapes saves to the same bytes twice")
 
 	// A level from before shapes: no `shape` key at all.

@@ -218,6 +218,68 @@ vrm_bone :: proc(model: Model, bone: Vrm_Bone) -> (node: u32, found: bool) {
 }
 
 /*
+	Fills in a model's humanoid map from a table of node names, and answers how
+	many roles landed.
+
+	`vrm_bone` reads that map and `retarget_animations` is built on it, which
+	is free for a VRM and impossible for anything else: a plain glTF character
+	carries no `humanoid` block, so every role comes back unmapped and a
+	retarget onto it adds nothing, silently, having found no bone to write to.
+	A rig named by convention -- `UNITY_BONE_NAMES`, `UNREAL_BONE_NAMES`, or a
+	table of the caller's own -- has the same information written in its node
+	names instead, and this is the one pass that turns the second form into the
+	first.
+
+	**Why a model is a fine place to put this, given the map is meant to be the
+	file's own.** A humanoid map is a claim about which node plays which role,
+	and nothing downstream cares whether that claim was parsed or asserted --
+	`vrm_bone` returns a node either way. The alternative was a parallel
+	`names`-shaped argument threaded through `retarget_animations` and every
+	other role-taking call, which is the same claim made repeatedly at every
+	use rather than once at load.
+
+	Roles already mapped are overwritten where the table names them and kept
+	where it does not, so this can extend a file's own partial humanoid block
+	rather than only replace a missing one.
+
+	A name the rig does not carry is skipped, and the whole set of them is
+	logged once at the end -- a rig missing a toe bone still retargets
+	everything else, and a table checked against a different rig should say so
+	in one line rather than in twenty. Zero mapped is the caller's to notice,
+	which is what the count is for: it means the table and the rig have nothing
+	to do with each other.
+*/
+map_humanoid_bones :: proc(model: ^Model, names: []Vrm_Bone_Name = UNITY_BONE_NAMES) -> (mapped: int) {
+	missing := make([dynamic]string, 0, len(names), context.temp_allocator)
+	defer delete(missing)
+
+	for entry in names {
+		if entry.bone == .NONE do continue
+
+		node, found := node_index(model^, entry.name)
+		if !found {
+			append(&missing, entry.name)
+			continue
+		}
+
+		model.vrm_humanoid.bones[entry.bone] = node
+		mapped += 1
+	}
+
+	// Naming every missing bone is the useful report for a table that mostly
+	// fits and a rig that is short a toe. For a table that fits nothing it is
+	// the whole table printed back, which says less than one sentence does.
+	switch {
+	case mapped == 0 && len(names) > 0:
+		log.warnf("no humanoid roles mapped: this rig carries none of the %v names in the table, %q among them", len(names), names[0].name)
+	case len(missing) > 0:
+		log.warnf("the rig has no bone named %v, so %v of %v humanoid roles are unmapped", missing[:], len(missing), len(names))
+	}
+
+	return mapped
+}
+
+/*
 	Builds a `Vrm_Humanoid` out of a parsed file's `extensions`, or an empty
 	one for anything that is not VRM or carries no `humanoid` block.
 
@@ -455,12 +517,18 @@ vrm_bone_from_name_v1 :: proc(name: string) -> Vrm_Bone {
 // -----------------------------------------------------------------------
 
 /*
-	One name a source rig uses, and the humanoid role it plays.
+	One name a rig uses, and the humanoid role it plays.
 
-	The destination side of a retarget is free once step 2 lands -- the VRM
-	file's own `humanoid` block already says which node is `leftUpperArm`. The
-	source is an ordinary glTF export with no such block, so it needs a name
-	table instead, and this is one entry of it.
+	The destination side of a retarget is free when the character is a VRM --
+	the file's own `humanoid` block already says which node is `leftUpperArm`.
+	A source file is an ordinary glTF export with no such block, so it needs a
+	name table instead, and this is one entry of it.
+
+	The same entry serves a *destination* that is not a VRM, through
+	`map_humanoid_bones`: a plain glTF character has no humanoid block either,
+	and a table is the only thing that can say which of its nodes is the left
+	elbow. Which is why this is a name and a role rather than anything that
+	assumes one end of the retarget.
 */
 Vrm_Bone_Name :: struct {
 	name: string,
@@ -542,6 +610,58 @@ UNREAL_BONE_NAMES :: []Vrm_Bone_Name{
 	{"pinky_01_r",  .RIGHT_LITTLE_PROXIMAL},
 	{"pinky_02_r",  .RIGHT_LITTLE_INTERMEDIATE},
 	{"pinky_03_r",  .RIGHT_LITTLE_DISTAL},
+}
+
+/*
+	The other convention a humanoid rig arrives in: the role's own name, in
+	PascalCase -- `Hips`, `UpperChest`, `LeftUpperArm`, `LeftToes`. Unity's
+	`HumanBodyBones` spells its enum exactly this way, and a model rigged for
+	Unity's humanoid avatar exports with these names on the nodes, which is
+	where they are met most often.
+
+	Measured against `psx_humanoid_male.glb` -- a Unity-rigged character
+	exported to glTF -- not taken from the enum: every name below is a node
+	that file actually has, the same standard `UNREAL_BONE_NAMES` is held to.
+
+	**This is a destination table, where `UNREAL_BONE_NAMES` is a source one.**
+	Not a rule, just what each convention is used for here: the clip libraries
+	are Unreal-named and the characters they are retargeted onto are rigged in
+	Unity, so the two tables meet at `retarget_animations` from opposite ends
+	-- this one through `map_humanoid_bones`, that one through
+	`Retarget_Options.names`. Either table works at either end for a rig that
+	carries the names.
+
+	**No fingers, deliberately.** The rig measured has none, so there was
+	nothing to check them against, and the thumb is where a guess would land
+	badly: Unity's `LeftThumbProximal` is the joint VRM calls the thumb
+	*metacarpal*, so a table written from the enum by eye would map the whole
+	thumb one joint out. Add them when a rig that has them is in front of you.
+*/
+UNITY_BONE_NAMES :: []Vrm_Bone_Name{
+	{"Hips",       .HIPS},
+	{"Spine",      .SPINE},
+	{"Chest",      .CHEST},
+	{"UpperChest", .UPPER_CHEST},
+	{"Neck",       .NECK},
+	{"Head",       .HEAD},
+
+	{"LeftUpperLeg",  .LEFT_UPPER_LEG},
+	{"LeftLowerLeg",  .LEFT_LOWER_LEG},
+	{"LeftFoot",      .LEFT_FOOT},
+	{"LeftToes",      .LEFT_TOES},
+	{"RightUpperLeg", .RIGHT_UPPER_LEG},
+	{"RightLowerLeg", .RIGHT_LOWER_LEG},
+	{"RightFoot",     .RIGHT_FOOT},
+	{"RightToes",     .RIGHT_TOES},
+
+	{"LeftShoulder",  .LEFT_SHOULDER},
+	{"LeftUpperArm",  .LEFT_UPPER_ARM},
+	{"LeftLowerArm",  .LEFT_LOWER_ARM},
+	{"LeftHand",      .LEFT_HAND},
+	{"RightShoulder", .RIGHT_SHOULDER},
+	{"RightUpperArm", .RIGHT_UPPER_ARM},
+	{"RightLowerArm", .RIGHT_LOWER_ARM},
+	{"RightHand",     .RIGHT_HAND},
 }
 
 /*

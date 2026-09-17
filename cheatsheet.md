@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 418 of them -- with its arguments
+Every public procedure in the package -- 419 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -25,7 +25,7 @@ any.
 - [3D drawing](#3d-drawing) -- 25
 - [Models](#models) -- 12
 - [Animation](#animation) -- 39
-- [VRM](#vrm) -- 6
+- [VRM](#vrm) -- 7
 - [Render targets](#render-targets) -- 6
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
@@ -2572,6 +2572,14 @@ The turn a VRM file's rest pose needs before it agrees with everything else in t
 vrm_bone :: proc(model: Model, bone: Vrm_Bone) -> (node: u32, found: bool)
 ```
 The node playing `bone` in this model's humanoid map, if the file said so.
+
+```odin
+map_humanoid_bones :: proc(
+	model: ^Model,
+	names: []Vrm_Bone_Name = UNITY_BONE_NAMES) -> (mapped: int,
+)
+```
+Fills in a model's humanoid map from a table of node names, and answers how many roles landed.
 
 ```odin
 load_animation_source :: proc(

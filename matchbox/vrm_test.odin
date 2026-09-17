@@ -1106,3 +1106,97 @@ test_humanoid_pairs_names_no_leg :: proc(t: ^testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------
+// A humanoid map built from node names, for a character that is not a VRM
+// -----------------------------------------------------------------------
+
+// A skeleton is `map_humanoid_bones`'s whole input -- it reads names and
+// writes roles, and touches nothing else on the model.
+@(private = "file")
+named_skeleton :: proc(names: []string) -> Model {
+	cloned := make([]string, len(names))
+	for name, i in names do cloned[i] = strings.clone(name)
+
+	return Model{skeleton = Skeleton{names = cloned}}
+}
+
+// The mapping itself: a role asked for by `vrm_bone` comes back as the node
+// the table named, which is the whole point -- `retarget_animations` asks that
+// question and nothing else about the map.
+@(test)
+test_map_humanoid_bones_resolves_roles_by_name :: proc(t: ^testing.T) {
+	model := named_skeleton({"root", "Hips", "Spine", "LeftUpperArm"})
+	defer destroy_model(&model)
+
+	mapped := map_humanoid_bones(&model, {{"Hips", .HIPS}, {"Spine", .SPINE}, {"LeftUpperArm", .LEFT_UPPER_ARM}})
+	testing.expect_value(t, mapped, 3)
+
+	hips, hips_found := vrm_bone(model, .HIPS)
+	testing.expect(t, hips_found, "HIPS should be mapped")
+	testing.expect_value(t, hips, u32(1))
+
+	arm, arm_found := vrm_bone(model, .LEFT_UPPER_ARM)
+	testing.expect(t, arm_found, "LEFT_UPPER_ARM should be mapped")
+	testing.expect_value(t, arm, u32(3))
+}
+
+/*
+	A name the rig does not carry costs that role and nothing else.
+
+	The count is what a caller checks, so it has to say how many roles landed
+	rather than how many entries were read -- a partial map still retargets,
+	minus the bones it could not place.
+*/
+@(test)
+test_map_humanoid_bones_skips_names_the_rig_lacks :: proc(t: ^testing.T) {
+	model := named_skeleton({"Hips", "Spine"})
+	defer destroy_model(&model)
+
+	mapped := map_humanoid_bones(&model, {{"Hips", .HIPS}, {"LeftToes", .LEFT_TOES}})
+	testing.expect_value(t, mapped, 1)
+
+	_, toes_found := vrm_bone(model, .LEFT_TOES)
+	testing.expect(t, !toes_found, "a role whose bone is missing should stay unmapped")
+}
+
+// Zero mapped is the signal that the table and the rig have nothing to do with
+// each other -- an Unreal-named table against a Unity-named rig, most likely,
+// which is a silent no-op retarget if nobody checks.
+@(test)
+test_map_humanoid_bones_maps_nothing_for_the_wrong_table :: proc(t: ^testing.T) {
+	model := named_skeleton({"Hips", "Spine", "LeftUpperArm"})
+	defer destroy_model(&model)
+
+	testing.expect_value(t, map_humanoid_bones(&model, UNREAL_BONE_NAMES), 0)
+}
+
+/*
+	Every name in the shipped table is a node `psx_humanoid_male.glb` actually
+	has -- the claim its doc comment makes, checked here against the rig's node
+	names rather than against the file, which a headless test has no way to
+	read.
+
+	The list is what the measurement produced (see the table's own comment). A
+	table entry that drifts off it is the failure this catches: a typo, or a
+	role spelled the way VRM spells it rather than the way Unity does.
+*/
+@(test)
+test_unity_bone_names_match_the_measured_rig :: proc(t: ^testing.T) {
+	rig := []string{
+		"root", "Male", "Root", "Hips", "Spine", "Chest", "UpperChest", "Neck", "Head",
+		"LeftShoulder", "LeftUpperArm", "LeftUpperArm_twist_01", "LeftLowerArm",
+		"LeftLowerArm_twist_01", "LeftHand",
+		"RightShoulder", "RightUpperArm", "RightUpperArm_twist_01", "RightLowerArm",
+		"RightLowerArm_twist_01", "RightHand",
+		"LeftUpperLeg", "LeftUpperLeg_twist_01", "LeftLowerLeg", "LeftLowerLeg_twist_01",
+		"LeftFoot", "LeftToes",
+		"RightUpperLeg", "RightUpperLeg_twist_01", "RightLowerLeg", "RightLowerLeg_twist_01",
+		"RightFoot", "RightToes",
+	}
+
+	model := named_skeleton(rig)
+	defer destroy_model(&model)
+
+	testing.expect_value(t, map_humanoid_bones(&model, UNITY_BONE_NAMES), len(UNITY_BONE_NAMES))
+}

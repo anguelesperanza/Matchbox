@@ -14,7 +14,7 @@ import "core:log"
 import "core:strings"
 import "core:testing"
 
-import mb ".."
+import mb "../matchbox"
 
 @(private)
 text_bytes :: proc(s: string) -> []byte {

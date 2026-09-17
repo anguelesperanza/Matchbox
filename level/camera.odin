@@ -31,7 +31,7 @@ package level
 
 import "core:math/linalg"
 
-import mb ".."
+import mb "../matchbox"
 
 /*
 	What a transform cannot say about a camera.

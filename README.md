@@ -9,17 +9,57 @@ Matchbox is a **WIP** game framework for making video games; built on SDL3, usin
 ## What is Matchbox
 `Matchbox` is a personal project of mine to make a framework for making video games / graphical applications.
 
+It is a **full game framework**, not a rendering layer: drawing, input, UI,
+levels, physics and audio. That was the original intent, then it was cut back to
+rendering and input on the reasoning that everything else could be its own
+project, and on **2026-09-17** it came back for good -- with the pieces that had
+gone off on their own brought back in. See [Packages](#packages).
+
+## Packages
+
+Matchbox is one repository holding four Odin packages. A game imports the ones
+it needs and pays for nothing else:
+
+| Import | What it is | Needs |
+| --- | --- | --- |
+| `matchbox/matchbox` | drawing, input, files, UI, the frame loop | SDL3, stb |
+| `matchbox/level` | the level format Stargate's editor reads and writes | `matchbox` |
+| `matchbox/tether` | physics: worlds, box and capsule bodies, rays | `vendor:box3d` |
+| `matchbox/eko` | audio: an engine, players, 2D and 3D listeners | `vendor:miniaudio` |
+
+- **Four siblings, no nesting.** `level` sat at `matchbox/level/` until
+  2026-09-18 and moved up beside the others. It reaches Matchbox as
+  `../matchbox`, which is the same directory a game reaches as
+  `matchbox/matchbox` -- one package, not two, because Odin identifies a package
+  by the full path a relative import lands on. Two paths really would be two
+  packages, with two `mbi`s, which is why they all live in one repository.
+- **None of them is folded into `package matchbox`**: that would link Box3D
+  into a 2D game and miniaudio into a silent one, put a level loader in every
+  game that draws a sprite, and give the package three globals where `mbi` is
+  meant to be the only one. `tether` and `eko` also import nothing from
+  Matchbox, so a game may use either without it.
+- **`tether` and `eko` were separate repositories** until 2026-09-17 and are
+  not any more. One repository is what lets `level` describe colliders that
+  `tether` builds without either of them reaching outside it, and that kind of
+  dependency only becomes more common as the framework fills in. `CLAUDE.md`
+  has the full reasoning, and [tether.md](tether.md) is Tether's own guide.
+
 ## Technology Stack for Matchbox
 |Name|Descirption|Repo|
 |----      |-----------|----|
 |SDL3      |The window platform layer *and* the graphics layer, through its GPU API. The version is whatever the current one in Odin is.| In vendor
 |stb       |The font sytem| In vendor
+|Box3D     |The physics solver `tether` wraps. Only linked by a game that imports `tether`.| In vendor
+|miniaudio |The audio engine `eko` wraps. Only linked by a game that imports `eko`.| In vendor
 
-SDL3 is the only thing Matchbox needs at runtime. It used to render through a
-vendored copy of `no_gfx_api`, which required `VK_EXT_shader_object` -- an
-extension Intel's Vulkan driver does not provide, so an Arc B580 could not start
-a game at all. SDL3's GPU API asks for nothing of the kind, and brings a D3D12
-fallback with it.
+SDL3 is the only thing `package matchbox` needs at runtime. It used to render
+through a vendored copy of `no_gfx_api`, which required `VK_EXT_shader_object`
+-- an extension Intel's Vulkan driver does not provide, so an Arc B580 could not
+start a game at all. SDL3's GPU API asks for nothing of the kind, and brings a
+D3D12 fallback with it.
+
+On Windows Box3D's static library ships with the Odin compiler, so a game using
+`tether` has no extra DLL to copy beside the one SDL3 already needs.
 
 ## Shaders
 The built-in shaders live in `matchbox/shaders` as HLSL and are compiled into
@@ -33,7 +73,18 @@ whose shader format it was told about at startup; shipping SPIR-V alone would
 mean Vulkan or nothing.
 
 ## How to use
-Copy the `matchbox` folder to your project directory and import it
+Copy the folders you need into your project and import them. Most games want
+`matchbox` alone; add `tether` for physics, `eko` for sound, and `level` if you
+load levels built in Stargate's editor.
+
+```odin
+import mb  "matchbox/matchbox"
+import lvl "matchbox/level"
+import "matchbox/tether"
+import "matchbox/eko"
+```
+
+The rest of this section is `matchbox` on its own:
 
 ```odin
 package game

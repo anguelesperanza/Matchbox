@@ -46,7 +46,7 @@ import "core:log"
 import "core:math"
 
 import mb    "../../matchbox"
-import level "../../matchbox/level"
+import level "../../level"
 
 LEVEL_PATH :: "levels/yard.json"
 SAVE_PATH  :: "levels/yard_saved.json"

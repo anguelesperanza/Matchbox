@@ -4,25 +4,38 @@ package level
 	Levels
 	------
 	A level saved by the Stargate editor, loaded by the editor or by any
-	Matchbox game -- `import "matchbox/level"` beside `import "matchbox"`.
+	Matchbox game -- `import "matchbox/level"` beside `import "matchbox/matchbox"`.
 	Stargate's `level_editor_plan.md`, sections 3, 4 and 5.11, is the design
 	and the alternatives it turned down.
 
-	**A package of its own inside the Matchbox folder**, rather than files in
-	package `matchbox` or a repository outside it:
+	**A package of its own in the Matchbox repository**, at `level/`, beside
+	`matchbox/`, `tether/` and `eko/` -- rather than files in package `matchbox`
+	or a repository outside it:
 
-	- inside the folder, because Stargate is young and one place to change the
-	  renderer and the format it draws is the easiest thing to work in, and
-	  because a level is a description of what to render. It may move out once
-	  Stargate becomes a proper editor, or stay; that is decided then.
-	- its own package, so the format's churn while the editor is young stays
-	  out of `matchbox`'s own namespace, and moving it later is a folder move
-	  and an import line rather than an untangling.
-	- and it imports Matchbox as `..`, its own parent folder, so it always
-	  reaches the same copy of Matchbox as the program importing both. A
-	  package kept anywhere else reaches Matchbox by a path of its own, and two
-	  paths to Matchbox are two packages: two `mbi` globals, and an `mb.Model`
-	  from one is not an `mb.Model` to the other.
+	- **in the repository**, because a level describes what to render and wants
+	  to change alongside the renderer, and because a package outside would
+	  reach Matchbox by a path of its own. Two paths to Matchbox are two
+	  packages: two `mbi` globals, and an `mb.Model` from one is not an
+	  `mb.Model` to the other.
+	- **its own package**, so the format's churn while the editor is young stays
+	  out of `matchbox`'s own namespace, and so a game that only wants to draw a
+	  sprite does not carry a level loader.
+	- **a sibling rather than a child.** It lived at `matchbox/level/` until
+	  2026-09-18 and imported Matchbox as `..`, its own parent folder. When
+	  physics and audio arrived as `tether/` and `eko/` at the repository root,
+	  one package nested inside another was the odd one out, and it moved up to
+	  sit with them. It now says `../matchbox`, which resolves to exactly the
+	  same directory as before.
+
+	**`../matchbox` is still one Matchbox**, which is the only thing the old
+	nesting was protecting. Odin resolves a relative import against the
+	importing file's own directory and identifies a package by the full path it
+	lands on, so `../matchbox` from here, `matchbox/matchbox` from a game, and
+	`../../Matchbox/matchbox` from Stargate's editor are three spellings of one
+	directory and therefore one package. Asserted by the editor compiling at
+	all: it hands `mb.Model` values straight into `Model_Component.model` while
+	reaching the two packages by different paths, which would not typecheck if
+	they were two.
 
 	**Where things are:**
 
@@ -31,6 +44,11 @@ package level
 	- `world.odin` -- handles, and world transforms through parents
 	- `draw.odin` -- lights and drawing
 	- `load.odin` -- loading a level with its models, and saving one
+	- `sky.odin` -- the skybox behind everything
+	- `instance.odin` -- writing a repeated model component once
+	- `primitive.odin` -- a model with no file behind it
+	- a file per component that has more to it than its fields: `shape.odin`,
+	  `camera.odin`, `collider.odin`
 
 	A game's frame, once loaded: `update_level`, `level_lights` into
 	`mb.set_lights`, `draw_level_shadow_casters` before the 3D pass, and
@@ -49,7 +67,7 @@ import "core:math"
 import "core:reflect"
 import "core:strings"
 
-import mb ".."
+import mb "../matchbox"
 
 /*
 	What this build of the package reads and writes.
@@ -161,6 +179,11 @@ Entity :: struct {
 	// zone a fixed camera shot is framed in. See shape.odin -- the editor draws
 	// these, and a game reads `shape_bounds` or `shape_contains`.
 	shape: Maybe(Shape_Component),
+
+	// What the entity is solid with: a box or a capsule a game gives to a
+	// physics engine. See collider.odin -- a shape is asked questions and a
+	// collider is collided with, so an entity may carry either or both.
+	collider: Maybe(Collider_Component),
 
 	// Resolved once a frame and never saved -- nor could it be, since
 	// json.marshal rejects every matrix type outright.
@@ -474,6 +497,10 @@ repair_level :: proc(level: ^Level, problems: ^[dynamic]string, allocator := con
 			if shape.kind == .BOX && shape.size == {} do shape.size = SHAPE_DEFAULTS.size
 			if shape.kind == .SPHERE && shape.size.x == 0 do shape.size.x = SHAPE_DEFAULTS.size
 		}
+
+		// The collider's own rules are in collider.odin, beside the component
+		// they belong to.
+		if collider, ok := &entity.collider.?; ok do repair_collider(collider)
 	}
 }
 

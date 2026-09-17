@@ -371,11 +371,32 @@ before anything is built on it.
 Both are engine components wrapping **Matchbox** systems; neither is engine
 code. CLAUDE.md already puts physics and audio inside Matchbox's scope.
 
-- Physics: today there are 2D AABB tests in `sprite.odin` and sprite
-  hit-testing in `collisions.odin`, and nothing more. Gap G5.
-- Audio: `sound.odin` has `load_sound`, `play_sound` and `destroy_sound`; the
-  fuller audio API is merging in from separate work. Gap G6. Wait for that
-  rather than designing a component around the current three procedures.
+**Updated 2026-09-17: both now exist, as packages in this repository.** They
+arrived the long way round -- built as separate projects, **Tether** over
+`vendor:box3d` and **Eko** over `vendor:miniaudio`, cloned beside Matchbox by
+whichever game wanted them -- and the project owner moved both in on that date,
+closing G5 and G6. CLAUDE.md's scope section has the reasoning; the part that
+decided it is that `level` wants to describe colliders that Tether
+builds, and a dependency between two repositories is either a path out of the
+repository or a job pushed onto the game.
+
+- **Physics is `tether`**, at `tether/`, documented in `tether.md`. A world, box
+  and capsule bodies with rotation, collision categories, a closest-ray cast,
+  holding and placing, and `destroy_body`. `level` describes colliders
+  as `Collider_Desc` and a game turns each into a Tether body; Stargate's editor
+  does the same to check a level is solid. What Matchbox itself still has is the
+  2D AABB tests in `sprite.odin` and sprite hit-testing in `collisions.odin` --
+  unrelated, and 2D.
+- **Audio is `eko`**, at `eko/`. One miniaudio engine mixing every source,
+  players, and 2D and 3D listeners. `sound.odin`'s `load_sound`,
+  `play_sound` and `destroy_sound` are still in `package matchbox` and are the
+  older, thinner thing; **which of the two a game should reach for, and whether
+  `sound.odin` retires into `eko`, is not decided** and wants a look once a game
+  has used Eko in anger.
+
+An engine component for either is still unwritten, and is still the thing this
+section is about. The difference is that it now has a package to wrap rather
+than a gap to wait on.
 
 ---
 
@@ -392,8 +413,8 @@ someone picks it up.
 | G2 | 3D picking: a screen-to-world ray, ray against box | clicking things in any 3D game | nothing exists; `model_center` and `model_size` give a model's box |
 | G3 | input mapped into a sub-rectangle | a game drawn into part of the window | the same mapping as the letterbox's `draw_scale`/`draw_offset` |
 | G4 | window settings passed to `init` | borderless, transparent or always-on-top windows (desktop-pet games); a remembered editor window size | `init` hard-codes `{.HIGH_PIXEL_DENSITY, .RESIZABLE}` (init.odin:499), and `.TRANSPARENT`/`.UTILITY` only work at window creation |
-| G5 | physics | any game with collision | in scope per CLAUDE.md |
-| G6 | audio beyond load and play | any game with sound | merging in from separate work |
+| G5 | physics | any game with collision | **closed 2026-09-17**: the `tether` package (3.9, `tether.md`) |
+| G6 | audio beyond load and play | any game with sound | **closed 2026-09-17**: the `eko` package (3.9) |
 | G7 | fixed timestep | frame-rate-independent gameplay | already in `improvements.md` |
 | G8 | toggle and number-field widgets | settings menus | |
 
@@ -478,7 +499,23 @@ speculative work CLAUDE.md warns against.
 Each entry: the date, the decision, the alternative rejected, and what that
 alternative would have broken.
 
-*None yet.*
+- **2026-09-17 -- physics and audio are packages in this repository, not
+  repositories of their own.** Taken by the project owner. Tether and Eko had
+  been built as separate projects, cloned beside Matchbox by whichever game
+  wanted them; both moved to `tether/` and `eko/` here, and Matchbox is a full
+  game framework again in fact rather than only in its scope statement. Closes
+  G5 and G6. Rejected: leaving them outside, which had already run out of road
+  -- `level` wants to describe colliders that Tether builds, and from
+  outside the repository that is either an import path that breaks for anyone
+  who cloned Matchbox alone, or a wiring job pushed onto every game, and the
+  same bind returns for every later dependency (animation wanting footstep
+  audio, a level wanting sound emitters). Also rejected: folding them into
+  `package matchbox`, which would link Box3D into a 2D game and miniaudio into
+  a silent one, and would put three globals in the package where `mbi` is meant
+  to be the only one. CLAUDE.md's scope section carries the rule this sets:
+  a new subsystem goes into `package matchbox` unless it wraps a vendor library
+  not every game wants or needs a global of its own, and never into a repository
+  of its own again.
 
 ---
 
@@ -513,3 +550,8 @@ alternative would have broken.
 ## 9. Progress log
 
 - **2026-09-10** -- plan written. Nothing built, no decisions taken.
+- **2026-09-17** -- Tether and Eko moved into this repository as `tether/` and
+  `eko/` (section 7). G5 and G6 closed. `tether.md` written from Tether's own
+  README; `eko` has no guide yet. CLAUDE.md's scope section rewritten to say
+  what "a complete framework" now means structurally, and the one-global rule
+  restated as one per package.

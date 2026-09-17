@@ -17,7 +17,7 @@ import "base:runtime"
 import "core:math/linalg"
 import "core:strings"
 
-import mb ".."
+import mb "../matchbox"
 
 /*
 	A way to refer to an entity that notices when it has gone.

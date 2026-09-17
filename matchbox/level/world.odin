@@ -15,6 +15,7 @@ package level
 
 import "base:runtime"
 import "core:math/linalg"
+import "core:strings"
 
 import mb ".."
 
@@ -40,6 +41,111 @@ find_entity :: proc(level: ^Level, name: string) -> (handle: Entity_Handle, foun
 		if entity.name == name do return {index = i, id = entity.id}, true
 	}
 	return {}, false
+}
+
+/*
+	The first child of `parent` with this name.
+
+	**Because a name is only unique where the level-builder made it so**, and a
+	group built by duplicating another is exactly where they did not: a fixed
+	camera shot is an empty entity holding a `camera` and a `bounds`, so a level
+	with four shots in it has four entities called `camera`. `find_entity` can
+	only ever reach the first of them, which is why this exists.
+
+	Only the direct children are looked at, not the whole subtree. A name is
+	found where it was put rather than somewhere below it, so adding a group
+	deeper down cannot change what a lookup already answered.
+*/
+find_child :: proc(level: ^Level, parent: Entity_Handle, name: string) -> (handle: Entity_Handle, found: bool) {
+	owner := get_entity(level, parent)
+	if owner == nil do return {}, false
+
+	// Read before the loop: `owner` points into the entity list, and the id is
+	// what the children name.
+	id := owner.id
+
+	for entity, i in level.entities {
+		if entity.parent == id && entity.name == name do return {index = i, id = entity.id}, true
+	}
+	return {}, false
+}
+
+// What separates one name from the next in a path (`find_entity_path`). A
+// slash, because a level's entities are a tree and everyone already reads a
+// slash that way.
+ENTITY_PATH_SEPARATOR :: '/'
+
+/*
+	The entity a path of names leads to -- `"fixed_angle_one/camera"`.
+
+	The first name is looked up anywhere in the level, as `find_entity` does;
+	every name after it is looked up among the children of the one before. So a
+	path is as long as it needs to be to say which entity is meant, and no
+	longer: the group is named because there are four `camera`s, and the group's
+	own parent is not because there is one `fixed_angle_one`.
+
+	A name with no separator in it is exactly `find_entity`, which is why the
+	procedures a game calls by name -- `get_level_camera`,
+	`get_level_shape_bounds`, `get_level_entity_transform` -- all read a path
+	now: an existing call means what it always meant.
+
+	An empty path, or an empty name inside one, is not found. `"a//b"` is a
+	typo, and quietly reading it as `"a/b"` would hide it.
+*/
+find_entity_path :: proc(level: ^Level, path: string) -> (handle: Entity_Handle, found: bool) {
+	if path == "" do return {}, false
+
+	rest    := path
+	matched := false
+
+	for {
+		name := rest
+
+		// Whether a separator was cut, rather than whether anything is left
+		// after it: those differ for exactly the trailing separator in
+		// `"a/"`, whose empty last name is the typo this has to catch.
+		more := false
+		if cut := strings.index_byte(rest, ENTITY_PATH_SEPARATOR); cut >= 0 {
+			name = rest[:cut]
+			rest = rest[cut + 1:]
+			more = true
+		}
+
+		if name == "" do return {}, false
+
+		step: bool
+		if matched {
+			handle, step = find_child(level, handle, name)
+		} else {
+			handle, step = find_entity(level, name)
+		}
+		if !step do return {}, false
+
+		matched = true
+		if !more do return handle, true
+	}
+}
+
+/*
+	Every entity whose parent is this one, in the order the level lists them.
+
+	For walking a group the level-builder filled rather than naming each member
+	-- a `cameras` empty holding however many shots the room turned out to need,
+	so adding a fifth is a thing done in the editor and nowhere else.
+
+	`delete` the slice when finished.
+*/
+level_children :: proc(level: ^Level, parent: Entity_Handle, allocator := context.allocator) -> []Entity_Handle {
+	owner := get_entity(level, parent)
+	if owner == nil do return nil
+
+	id := owner.id
+
+	children := make([dynamic]Entity_Handle, 0, 4, allocator)
+	for entity, i in level.entities {
+		if entity.parent == id do append(&children, Entity_Handle{index = i, id = entity.id})
+	}
+	return children[:]
 }
 
 // The entity a handle names, or nil when it is no longer in the level. The
@@ -198,9 +304,9 @@ level_transform_from_transform :: proc(t: mb.Transform) -> Level_Transform {
 	}
 }
 
-/*Gets the transform information of an entity in a provided level, by the entity name*/
+/*Gets the transform information of an entity in a provided level, by the entity name or path (`find_entity_path`)*/
 get_level_entity_transform :: proc(level_instance: ^Level, name:string) -> [3]f32 {
-	entity := find_entity(level_instance, name) or_else Entity_Handle{}
+	entity := find_entity_path(level_instance, name) or_else Entity_Handle{}
 	if t, ok := get_world_transform(level_instance, entity); ok do return t.position
 	return {0, 0, 0}
 }

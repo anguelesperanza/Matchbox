@@ -189,3 +189,192 @@ test_a_camera_survives_a_save_and_a_load :: proc(t: ^testing.T) {
 	_, not_a_camera := get_level_camera(&read, "crate")
 	testing.expect(t, !not_a_camera, "an entity without a camera component is not a camera")
 }
+
+/*
+	A fixed-angle shot as the editor builds one: an empty group holding a camera
+	child and a bounds child, the camera child carrying a shape of its own
+	because that is the marker it is drawn as.
+
+	The bounds are deliberately nothing like the camera's own half-metre marker,
+	so a shot framed on the wrong shape is a wrong number rather than a near
+	miss.
+*/
+@(private = "file")
+add_shot_group :: proc(level: ^Level, id: u64, at: [3]f32, yaw: f32, half: [3]f32) -> Entity_Handle {
+	append(&level.entities, Entity{
+		id        = id,
+		name      = owned(level, "fixed_angle"),
+		transform = {position = at, rotation = turn_y(yaw), scale = {1, 1, 1}},
+	})
+	group := Entity_Handle{index = len(level.entities) - 1, id = id}
+
+	append(&level.entities, Entity{
+		id        = id + 1,
+		parent    = id,
+		name      = owned(level, "camera"),
+		transform = {position = {0, 0, 0}, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+		camera    = Camera_Component{fov = 50, near = 0.1, far = 400},
+		shape     = Shape_Component{kind = .BOX, size = {0.5, 0.5, 0.5}},
+	})
+
+	append(&level.entities, Entity{
+		id        = id + 2,
+		parent    = id,
+		name      = owned(level, "bounds"),
+		transform = {position = {0, 0, 0}, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+		shape     = Shape_Component{kind = .BOX, size = half},
+	})
+
+	return group
+}
+
+@(test)
+test_a_shot_takes_its_lens_from_the_camera_and_its_zone_from_the_bounds :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	add_shot_group(&level, 1, {3, 2, 1}, 0, {8, 4, 6})
+	update_level(&level)
+
+	shot, ok := get_level_camera_shot(&level, "fixed_angle")
+	if !testing.expect(t, ok, "a group with a camera and bounds made no shot") do return
+
+	testing.expect_value(t, shot.position, [3]f32{3, 2, 1})
+	expect_direction(t, shot.target - shot.position, {0, 0, -1}, "an unturned shot looks down -Z")
+	testing.expect_value(t, shot.fov, 50)
+	testing.expect_value(t, shot.aim, mb.Camera_Shot_Aim.FIXED)
+
+	// The bounds child's half-extents about the group, and emphatically not the
+	// camera child's half-metre marker.
+	expect_direction(t, shot.zone_max - shot.zone_min, {8, 4, 6}, "the zone was framed on the wrong shape")
+	testing.expect_value(t, shot.zone_min, [3]f32{-5, -2, -5})
+	testing.expect_value(t, shot.zone_max, [3]f32{11, 6, 7})
+
+	// The character has to be able to stand in it, or the shot never comes on
+	// screen however right its numbers look. Written out rather than called
+	// through `mb.camera_shot_contains`, which is private to Matchbox.
+	inside := true
+	for axis in 0 ..< 3 {
+		if shot.position[axis] < shot.zone_min[axis] || shot.position[axis] > shot.zone_max[axis] do inside = false
+	}
+	testing.expect(t, inside, "the zone does not contain the camera's own spot")
+
+	testing.expect_value(t, mb.Camera_Shot_Aim.TRACK,
+		(get_level_camera_shot(&level, "fixed_angle", .TRACK) or_else {}).aim)
+}
+
+@(test)
+test_each_group_answers_with_its_own_shot :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	// Both groups' children are called `camera` and `bounds`, as duplicating a
+	// shot in the editor leaves them.
+	append(&level.entities, Entity{
+		id        = 100,
+		name      = owned(&level, "cameras"),
+		transform = {rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+	})
+	one := add_shot_group(&level, 1, {10, 0, 0}, 0, {1, 1, 1})
+	two := add_shot_group(&level, 4, {-10, 0, 0}, 90, {1, 1, 1})
+	level.entities[one.index].parent = 100
+	level.entities[two.index].parent = 100
+	update_level(&level)
+
+	group, found := find_entity(&level, "cameras")
+	testing.expect(t, found, "the group holding the shots is not there")
+
+	children := level_children(&level, group, context.temp_allocator)
+	defer delete(children, context.temp_allocator)
+	if !testing.expect_value(t, len(children), 2) do return
+
+	first, ok_first := camera_shot_from_entity(&level, children[0])
+	last, ok_last   := camera_shot_from_entity(&level, children[1])
+	testing.expect(t, ok_first && ok_last, "walking the group missed a shot")
+
+	testing.expect_value(t, first.position, [3]f32{10, 0, 0})
+	testing.expect_value(t, last.position, [3]f32{-10, 0, 0})
+
+	// A quarter turn about +Y takes -Z to -X (world_test.odin's right-hand
+	// rule), so the second shot looks a different way as well as standing
+	// somewhere else -- which is what says the group's own transform reached it.
+	expect_direction(t, first.target - first.position, {0, 0, -1}, "the first shot's aim")
+	expect_direction(t, last.target - last.position, {-1, 0, 0}, "the second shot's aim")
+}
+
+@(test)
+test_a_group_missing_a_camera_or_a_zone_makes_no_shot :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	// A group whose only child is the camera: a shot with no zone contains
+	// nothing, so it would never come on screen and the level-builder would see
+	// no camera and no error.
+	add_shot_group(&level, 1, {0, 0, 0}, 0, {1, 1, 1})
+	bounds := level.entities[2]
+	ordered_remove(&level.entities, 2)
+	delete(bounds.name, level_allocator(&level))
+
+	// And a group with bounds and no camera at all.
+	add_shot_group(&level, 10, {0, 0, 0}, 0, {1, 1, 1})
+	level.entities[len(level.entities) - 2].camera = nil
+
+	update_level(&level)
+
+	for handle in ([]Entity_Handle{{index = 0, id = 1}, {index = 2, id = 10}}) {
+		_, ok := camera_shot_from_entity(&level, handle)
+		testing.expectf(t, !ok, "entity %d made a shot with a part missing", handle.id)
+	}
+
+	// So does a name that is nowhere.
+	_, nowhere := get_level_camera_shot(&level, "no_such_group")
+	testing.expect(t, !nowhere, "a name that is nowhere made a shot")
+}
+
+@(test)
+test_a_group_carrying_its_own_camera_still_makes_a_shot :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	// The older shape: the camera on the group itself, with one child marking
+	// the zone. It has to keep working, or a level built before the split stops
+	// loading.
+	append(&level.entities, Entity{
+		id        = 1,
+		name      = owned(&level, "fixed_angle"),
+		transform = {position = {0, 1, 0}, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+		camera    = Camera_Component{fov = 60},
+	})
+	append(&level.entities, Entity{
+		id        = 2,
+		parent    = 1,
+		name      = owned(&level, "bounds"),
+		transform = {position = {0, 0, 0}, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+		shape     = Shape_Component{kind = .BOX, size = {2, 2, 2}},
+	})
+	update_level(&level)
+
+	shot, ok := get_level_camera_shot(&level, "fixed_angle")
+	if !testing.expect(t, ok, "a group carrying its own camera made no shot") do return
+
+	testing.expect_value(t, shot.position, [3]f32{0, 1, 0})
+	testing.expect_value(t, shot.fov, 60)
+	testing.expect_value(t, shot.zone_min, [3]f32{-2, -1, -2})
+}
+
+@(test)
+test_a_camera_component_left_at_zero_reads_back_as_the_angle_it_is_drawn_at :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	group := add_shot_group(&level, 1, {0, 0, 0}, 0, {1, 1, 1})
+	level.entities[group.index + 1].camera = Camera_Component{}
+	update_level(&level)
+
+	shot, ok := get_level_camera_shot(&level, "fixed_angle")
+	testing.expect(t, ok, "a camera left at zero made no shot")
+
+	// A zero would be 70 by the time it was rendered and 0 to anything that
+	// read the shot back -- a game drawing its own frustum, or a test.
+	testing.expect_value(t, shot.fov, CAMERA_DEFAULTS.fov)
+}

@@ -87,14 +87,132 @@ camera_from_entity :: proc(entity: Entity) -> (camera: mb.Camera3D, ok: bool) {
 	`get_level_shape_bounds`.
 
 		camera, ok := level.get_level_camera(&yard, "hall_shot")
+
+	A name with a slash in it is a path through the tree
+	(`find_entity_path`), which is how the `camera` inside one group is named
+	when every group has one:
+
+		camera, ok := level.get_level_camera(&yard, "fixed_angle_one/camera")
 */
 get_level_camera :: proc(level: ^Level, name: string) -> (camera: mb.Camera3D, ok: bool) {
-	handle := find_entity(level, name) or_else Entity_Handle{}
+	handle := find_entity_path(level, name) or_else Entity_Handle{}
 
 	entity := get_entity(level, handle)
 	if entity == nil do return {}, false
 
 	return camera_from_entity(entity^)
+}
+
+/*
+	A fixed-angle shot assembled from a group of entities: an empty entity
+	holding a camera and the area that camera covers.
+
+	**A shot is two things in two places, and the level is where they are put
+	together.** `mb.Camera_Shot` is a placement plus a box of the world, and
+	those are two different entities in the editor -- one an empty with a camera
+	component on it, the other an empty with a box shape. Both are moved by the
+	same gizmo as anything else, and the group they hang off is what says they
+	belong to each other. So the editor has no shot tool and needs none, and a
+	game reads the shot back in one call:
+
+		shot, ok := level.get_level_camera_shot(&house, "fixed_angle_one")
+		if ok do mb.fixed_camera_add_shot(&rig, shot)
+
+	**Which child is which is decided by component, not by name.** The camera is
+	the group's own camera component, or the first child that has one. The zone
+	is the first child with a shape and no camera -- the camera's child carries a
+	shape of its own, because that is the marker the editor draws it as, and
+	taking the first shape it found would frame every shot on a half-metre cube.
+	Naming the children `camera` and `bounds` is then a convenience for a person
+	reading the file rather than something this depends on.
+
+	**False unless both were found.** A shot with no zone contains nothing, so
+	`fixed_camera_follow` would never pick it and the camera would simply never
+	cut there -- a level-building mistake that shows as nothing at all. A game
+	wanting the placement alone has `get_level_camera`.
+
+	`aim` is not in the level file. A shot that tracks is a decision about how
+	the game plays rather than about where the camera stands, and the editor has
+	nowhere to show the difference -- a tracked shot drawn in the editor is a
+	frustum pointed at a character who is not there. Pass `.TRACK` for the
+	corridors.
+
+	Needs `update_level` to have run, like everything that reads a world
+	placement.
+*/
+get_level_camera_shot :: proc(
+	level: ^Level,
+	name:  string,
+	aim:   mb.Camera_Shot_Aim = .FIXED,
+) -> (shot: mb.Camera_Shot, ok: bool) {
+	return camera_shot_from_entity(level, find_entity_path(level, name) or_else Entity_Handle{}, aim)
+}
+
+// The same, for a group already found -- what walking `level_children` over a
+// `cameras` empty reads, so a level gains a shot without the game being told
+// its name.
+camera_shot_from_entity :: proc(
+	level:  ^Level,
+	handle: Entity_Handle,
+	aim:    mb.Camera_Shot_Aim = .FIXED,
+) -> (shot: mb.Camera_Shot, ok: bool) {
+	group := get_entity(level, handle)
+	if group == nil do return {}, false
+
+	lens := handle
+	if !has_camera(group^) {
+		lens = find_child_camera(level, handle) or_return
+	}
+
+	entity := get_entity(level, lens)
+	if entity == nil do return {}, false
+
+	camera := camera_from_entity(entity^) or_return
+	zone   := find_child_zone(level, handle, lens) or_return
+
+	low, high := shape_bounds(level, zone) or_return
+
+	return mb.Camera_Shot{
+		position = camera.position,
+		target   = camera.target,
+
+		// Filled in rather than left at whatever the component holds, so that a
+		// shot reads back the angle it will be rendered at. A zero would be 70
+		// by the time it was drawn and 0 to anything that looked.
+		fov      = camera_settings(entity.camera.? or_else {}).fov,
+		aim      = aim,
+
+		zone_min = low,
+		zone_max = high,
+	}, true
+}
+
+// The first child of `parent` carrying a camera component.
+@(private)
+find_child_camera :: proc(level: ^Level, parent: Entity_Handle) -> (handle: Entity_Handle, found: bool) {
+	owner := get_entity(level, parent)
+	if owner == nil do return {}, false
+
+	id := owner.id
+	for entity, i in level.entities {
+		if entity.parent == id && has_camera(entity) do return {index = i, id = entity.id}, true
+	}
+	return {}, false
+}
+
+// The first child of `parent` that marks out an area rather than the shot: a
+// shape, on an entity that is not the camera and has no camera of its own.
+@(private)
+find_child_zone :: proc(level: ^Level, parent, lens: Entity_Handle) -> (handle: Entity_Handle, found: bool) {
+	owner := get_entity(level, parent)
+	if owner == nil do return {}, false
+
+	id := owner.id
+	for entity, i in level.entities {
+		if entity.parent != id || entity.id == lens.id || has_camera(entity) do continue
+		if _, has_shape := entity.shape.?; has_shape do return {index = i, id = entity.id}, true
+	}
+	return {}, false
 }
 
 /*

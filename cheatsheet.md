@@ -1,6 +1,6 @@
 # Matchbox cheatsheet
 
-Every public procedure in the package -- 414 of them -- with its arguments
+Every public procedure in the package -- 418 of them -- with its arguments
 and one line on what it does.
 
 **Generated from the source.** Regenerate rather than edit by hand: each
@@ -23,13 +23,13 @@ any.
 - [3D cameras](#3d-cameras) -- 46
 - [3D movement](#3d-movement) -- 4
 - [3D drawing](#3d-drawing) -- 25
-- [Models](#models) -- 11
+- [Models](#models) -- 12
 - [Animation](#animation) -- 39
 - [VRM](#vrm) -- 6
 - [Render targets](#render-targets) -- 6
 - [Sound](#sound) -- 3
 - [Tiled maps](#tiled-maps) -- 3
-- [Other](#other) -- 44
+- [Other](#other) -- 47
 
 ## Getting started
 
@@ -2213,6 +2213,16 @@ create_sphere_model :: proc(
 A sphere of `radius`, built the usual way out of rings of latitude and sectors of longitude.
 
 ```odin
+create_cylinder_model :: proc(
+	radius: f32 = 0.5,
+	height: f32 = 1,
+	sectors: int = 24) -> (Model,
+	Error,
+)
+```
+A cylinder of `radius` and `height`, upright about Y and centred on its own origin, the way `create_cube_model` and `create_sphere_model` are.
+
+```odin
 create_cube_wires_model :: proc(size: f32 = 1) -> (Model, Error)
 ```
 The twelve edges of a cube, as lines.
@@ -2581,7 +2591,7 @@ Gives an `Animation_Source`'s skeleton and clips back.
 retarget_animations :: proc(
 	dst: ^Model,
 	src: Animation_Source,
-	names: []Vrm_Bone_Name = UNREAL_BONE_NAMES) -> (added: int,
+	options: Retarget_Options = {}) -> (added: int,
 )
 ```
 Copies every clip in `src` onto `dst`, rewriting each track to drive the bone playing the same humanoid role, and returns how many clips landed at least one track.
@@ -2688,6 +2698,38 @@ Installs `probe` as the scene's own environment probe, releasing whatever was bo
 destroy_environment_probe :: proc(probe: ^Environment_Probe)
 ```
 Releases a probe's own two textures.
+
+### `camera3d_drift.odin`
+
+```odin
+create_drift_camera :: proc(
+	position: [3]f32 = {0, 0, 0},
+	yaw: f32 = 0,
+	pitch: f32 = CAMERA3D_DEFAULTS.orbit_pitch,
+	distance: f32 = CAMERA3D_DEFAULTS.distance,
+	dead_zone: f32 = CAMERA3D_DEFAULTS.dead_zone,
+	follow_speed: f32 = CAMERA3D_DEFAULTS.follow_speed,
+	swing_speed: f32 = CAMERA3D_DEFAULTS.swing_speed,
+	focus_offset: [3]f32 = CAMERA3D_DEFAULTS.focus_offset,
+	near: f32 = 0.1,
+	far: f32 = 1000,
+) -> Drift_Camera
+```
+A drift camera watching `position`, seated and ready to draw with.
+
+```odin
+drift_camera_follow :: proc(
+	rig: ^Drift_Camera,
+	position: [3]f32,
+	delta_time: f32,
+)
+```
+Drags the camera along after `position`, and seats it.
+
+```odin
+drift_camera_snap :: proc(rig: ^Drift_Camera, position: [3]f32)
+```
+Puts the anchor on `position` with no easing, and seats the camera.
 
 ### `lighting.odin`
 

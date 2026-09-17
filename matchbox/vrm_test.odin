@@ -14,6 +14,7 @@ package matchbox
 */
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -377,7 +378,7 @@ test_retarget_rotation_matches_source_delta_from_rest :: proc(t: ^testing.T) {
 		},
 	})
 
-	added := retarget_animations(&dst, src, names)
+	added := retarget_animations(&dst, src, {names = names})
 	testing.expect_value(t, added, 1)
 	testing.expect_value(t, len(dst.animations), 1)
 	testing.expect_value(t, len(dst.animations[0].tracks), 1)
@@ -435,7 +436,7 @@ test_retarget_leaves_unmapped_destination_bone_at_rest :: proc(t: ^testing.T) {
 		},
 	})
 
-	retarget_animations(&dst, src, names)
+	retarget_animations(&dst, src, {names = names})
 
 	for track in dst.animations[0].tracks {
 		testing.expect(t, track.node != 0, "the retarget only named 'bone' -> node 1; node 0 should never be written")
@@ -464,7 +465,7 @@ test_retarget_drops_a_source_track_with_no_mapped_bone :: proc(t: ^testing.T) {
 		},
 	})
 
-	added := retarget_animations(&dst, src, names)
+	added := retarget_animations(&dst, src, {names = names})
 	testing.expect_value(t, added, 0)
 	testing.expect_value(t, len(dst.animations), 0)
 }
@@ -495,7 +496,7 @@ test_retarget_keeps_keyframe_times_exactly :: proc(t: ^testing.T) {
 		},
 	})
 
-	retarget_animations(&dst, src, names)
+	retarget_animations(&dst, src, {names = names})
 
 	retargeted_times := dst.animations[0].tracks[0].times
 	testing.expect_value(t, len(retargeted_times), len(times))
@@ -537,12 +538,12 @@ test_retarget_appends_rather_than_replacing :: proc(t: ^testing.T) {
 	}
 
 	src.animations = one_clip("walk")
-	testing.expect_value(t, retarget_animations(&dst, src, names), 1)
+	testing.expect_value(t, retarget_animations(&dst, src, {names = names}), 1)
 
 	// A second source file, arriving separately the way a second clip set does.
 	destroy_animations(src.animations)
 	src.animations = one_clip("punch")
-	testing.expect_value(t, retarget_animations(&dst, src, names), 1)
+	testing.expect_value(t, retarget_animations(&dst, src, {names = names}), 1)
 
 	testing.expect_value(t, len(dst.animations), 3)
 
@@ -624,7 +625,7 @@ test_retarget_drops_scale_tracks :: proc(t: ^testing.T) {
 		},
 	})
 
-	added := retarget_animations(&dst, src, names)
+	added := retarget_animations(&dst, src, {names = names})
 	testing.expect_value(t, added, 0)
 }
 
@@ -664,7 +665,7 @@ test_retarget_hips_translation_scales_and_reprojects :: proc(t: ^testing.T) {
 		},
 	})
 
-	added := retarget_animations(&dst, src, names)
+	added := retarget_animations(&dst, src, {names = names})
 	testing.expect_value(t, added, 1)
 
 	track := dst.animations[0].tracks[0]
@@ -678,4 +679,430 @@ test_retarget_hips_translation_scales_and_reprojects :: proc(t: ^testing.T) {
 	testing.expect(t, abs(got.y - (2.0 + 0.2)) < 1e-4,
 		"hips delta should scale by the ratio of rest heights and add onto the destination's own rest position")
 	testing.expect(t, abs(got.x) < 1e-4 && abs(got.z) < 1e-4, "no horizontal motion was authored")
+}
+
+// -----------------------------------------------------------------------
+// Step 4 -- proportions
+// -----------------------------------------------------------------------
+
+/*
+	Two rigs with a pair of arms each and *deliberately mismatched
+	proportions*: the destination is half again as tall, its shoulders are
+	twice as far apart in its own scale, and its arm bones are longer than
+	either of those. No single scale on the skeleton reproduces it, which is
+	the case `Retarget_Fit` exists for.
+
+	`arm_angle` swings both upper arms down about z, which is what brings the
+	hands near each other; leaving it at zero leaves them out at the sides,
+	half a body apart. The two tests below are the same rig in those two
+	poses, because "how far apart are the hands" is the whole of what decides
+	whether the pass touches them.
+*/
+@(private = "file")
+pair_fixture :: proc() -> (dst: Model, src: Animation_Source, names: []Vrm_Bone_Name) {
+	chain :: proc(hips, chest, shoulder, upper, lower: f32, labels: []string) -> Skeleton {
+		ident :: linalg.QUATERNIONF32_IDENTITY
+		return Skeleton{
+			parents = slice.clone([]i32{-1, 0, 1, 2, 3, 1, 5, 6}),
+			order   = slice.clone([]u32{0, 1, 2, 3, 4, 5, 6, 7}),
+			rest    = slice.clone([]Transform{
+				{position = {0, hips, 0},      rotation = ident, scale = {1, 1, 1}},
+				{position = {0, chest, 0},     rotation = ident, scale = {1, 1, 1}},
+				{position = {shoulder, 0, 0},  rotation = ident, scale = {1, 1, 1}},
+				{position = {upper, 0, 0},     rotation = ident, scale = {1, 1, 1}},
+				{position = {lower, 0, 0},     rotation = ident, scale = {1, 1, 1}},
+				{position = {-shoulder, 0, 0}, rotation = ident, scale = {1, 1, 1}},
+				{position = {-upper, 0, 0},    rotation = ident, scale = {1, 1, 1}},
+				{position = {-lower, 0, 0},    rotation = ident, scale = {1, 1, 1}},
+			}),
+			names = slice.clone([]string{
+				strings.clone(labels[0]), strings.clone(labels[1]), strings.clone(labels[2]),
+				strings.clone(labels[3]), strings.clone(labels[4]), strings.clone(labels[5]),
+				strings.clone(labels[6]), strings.clone(labels[7]),
+			}),
+		}
+	}
+
+	src = Animation_Source{
+		skeleton = chain(1.0, 0.5, 0.05, 0.4, 0.4,
+			{"pelvis", "spine_02", "upperarm_l", "lowerarm_l", "hand_l", "upperarm_r", "lowerarm_r", "hand_r"}),
+	}
+
+	dst = Model{
+		skeleton = chain(1.5, 0.75, 0.10, 0.5, 0.45,
+			{"hips", "chest", "arm_l", "fore_l", "hand_l", "arm_r", "fore_r", "hand_r"}),
+	}
+	dst.skeleton.skins = slice.clone([]Model_Skin{{joints = slice.clone([]u32{0, 1, 2, 3, 4, 5, 6, 7})}})
+
+	dst.vrm_humanoid.bones[Vrm_Bone.HIPS]            = u32(0)
+	dst.vrm_humanoid.bones[Vrm_Bone.CHEST]           = u32(1)
+	dst.vrm_humanoid.bones[Vrm_Bone.LEFT_UPPER_ARM]  = u32(2)
+	dst.vrm_humanoid.bones[Vrm_Bone.LEFT_LOWER_ARM]  = u32(3)
+	dst.vrm_humanoid.bones[Vrm_Bone.LEFT_HAND]       = u32(4)
+	dst.vrm_humanoid.bones[Vrm_Bone.RIGHT_UPPER_ARM] = u32(5)
+	dst.vrm_humanoid.bones[Vrm_Bone.RIGHT_LOWER_ARM] = u32(6)
+	dst.vrm_humanoid.bones[Vrm_Bone.RIGHT_HAND]      = u32(7)
+
+	names = slice.clone([]Vrm_Bone_Name{
+		{"pelvis",     .HIPS},
+		{"spine_02",   .CHEST},
+		{"upperarm_l", .LEFT_UPPER_ARM},
+		{"lowerarm_l", .LEFT_LOWER_ARM},
+		{"hand_l",     .LEFT_HAND},
+		{"upperarm_r", .RIGHT_UPPER_ARM},
+		{"lowerarm_r", .RIGHT_LOWER_ARM},
+		{"hand_r",     .RIGHT_HAND},
+	})
+	return dst, src, names
+}
+
+// Both upper arms swung down by `angle`, mirrored so the two arms stay
+// symmetric. At pi/2 the hands hang near the centre line, a hand's width
+// apart; at 0 they stay out at the sides.
+@(private = "file")
+arms_down_clip :: proc(angle: f32) -> []Model_Animation {
+	return slice.clone([]Model_Animation{
+		{
+			name     = strings.clone("pose"),
+			duration = 0,
+			tracks   = slice.clone([]Animation_Track{
+				{
+					node = 2, path = .ROTATION, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					quats = slice.clone([]quaternion128{transform_rotation({0, 0, 1}, -angle)}),
+				},
+				{
+					node = 5, path = .ROTATION, interpolation = .STEP,
+					times = slice.clone([]f32{0}),
+					quats = slice.clone([]quaternion128{transform_rotation({0, 0, 1}, angle)}),
+				},
+			}),
+		},
+	})
+}
+
+@(private = "file")
+posed_position :: proc(skeleton: Skeleton, tracks: []Animation_Track, node: u32) -> [3]f32 {
+	locals  := make([]Transform, len(skeleton.rest), context.temp_allocator)
+	globals := make([]matrix[4, 4]f32, len(skeleton.rest), context.temp_allocator)
+	defer delete(locals, context.temp_allocator)
+	defer delete(globals, context.temp_allocator)
+
+	sample_clip_pose(skeleton, tracks, 0, locals)
+	pose_globals(skeleton, locals, globals)
+	return matrix_position(globals[node])
+}
+
+// Left tip to right tip, which is the one quantity the pass is about.
+@(private = "file")
+posed_gap :: proc(skeleton: Skeleton, tracks: []Animation_Track, left, right: u32) -> [3]f32 {
+	return posed_position(skeleton, tracks, left) - posed_position(skeleton, tracks, right)
+}
+
+/*
+	The property `.PROPORTIONS` exists to guarantee: when the source holds two
+	tips together, the destination holds them the same distance apart at its
+	own scale -- however differently its shoulders are placed.
+
+	Stated as the gap rather than as two positions, because the gap is what
+	the correction promises and each hand's own position is what it
+	deliberately leaves to the angles.
+*/
+@(test)
+test_retarget_proportions_preserves_a_contact_gap :: proc(t: ^testing.T) {
+	dst, src, names := pair_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	src.animations = arms_down_clip(math.PI * 0.5)
+
+	testing.expect_value(t, retarget_animations(&dst, src, {names = names}), 1)
+
+	SCALE :: f32(1.5) // the fixture's two hips heights, 1.5 over 1.0
+
+	want := SCALE * posed_gap(src.skeleton, src.animations[0].tracks, 4, 7)
+	got  := posed_gap(dst.skeleton, dst.animations[0].tracks, 4, 7)
+
+	testing.expect(t, linalg.length(got - want) < 1e-4,
+		fmt.tprintf("hands should end up %v apart, ended up %v apart", want, got))
+
+	// And the correction really was needed -- otherwise this fixture proves
+	// nothing about the pass.
+	before := dst
+	before.animations = nil
+	defer destroy_animations(before.animations)
+	retarget_animations(&before, src, {names = names, fit = .ROTATION_ONLY})
+
+	uncorrected := posed_gap(before.skeleton, before.animations[0].tracks, 4, 7)
+	testing.expect(t, linalg.length(uncorrected - want) > 0.02,
+		"the rotation-only gap should be visibly wrong, or the fixture is not testing anything")
+}
+
+/*
+	The other half, and the one that was learned the hard way: two tips the
+	source holds far apart are not in contact, so the pass leaves both limbs
+	exactly as the angles made them.
+
+	Without this, a hanging idle gets "corrected" -- the arm travels the
+	distance the shoulder should have, and the hand ends up behind the
+	character. Measured on a real pair of rigs before the fade existed: 10cm
+	of it.
+*/
+@(test)
+test_retarget_proportions_leaves_a_free_pose_alone :: proc(t: ^testing.T) {
+	dst, src, names := pair_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	src.animations = arms_down_clip(0) // arms straight out, hands a body apart
+
+	corrected := dst
+	corrected.animations = nil
+	testing.expect_value(t, retarget_animations(&corrected, src, {names = names}), 1)
+	defer destroy_animations(corrected.animations)
+
+	testing.expect_value(t, retarget_animations(&dst, src, {names = names, fit = .ROTATION_ONLY}), 1)
+
+	for node in ([]u32{4, 7}) {
+		angles := posed_position(dst.skeleton, dst.animations[0].tracks, node)
+		fitted := posed_position(corrected.skeleton, corrected.animations[0].tracks, node)
+
+		testing.expect(t, linalg.length(fitted - angles) < 1e-4,
+			fmt.tprintf("a hand with nothing to touch should not move; node %v went from %v to %v", node, angles, fitted))
+	}
+}
+
+// `.ROTATION_ONLY` must still do what it always did: copy the angle and leave
+// the keyframe alone -- one key in, one key out, still STEP.
+@(test)
+test_retarget_rotation_only_keeps_keys :: proc(t: ^testing.T) {
+	dst, src, names := pair_fixture()
+	defer destroy_retarget_fixture(&dst, &src, names)
+
+	src.animations = arms_down_clip(math.PI * 0.5)
+
+	testing.expect_value(t, retarget_animations(&dst, src, {names = names, fit = .ROTATION_ONLY}), 1)
+	testing.expect_value(t, len(dst.animations[0].tracks), 2)
+
+	for track in dst.animations[0].tracks {
+		testing.expect_value(t, len(track.times), 1)
+		testing.expect_value(t, track.interpolation, Animation_Interpolation.STEP)
+	}
+}
+
+// Full weight in contact, none at a distance, and no step in between -- a
+// step in the weight is a step in the pose, since this is evaluated per key.
+@(test)
+test_contact_weight_fades_smoothly :: proc(t: ^testing.T) {
+	LIMB :: f32(1)
+
+	testing.expect_value(t, contact_weight(0, LIMB), 1)
+	testing.expect_value(t, contact_weight(0.2, LIMB), 1)
+	testing.expect_value(t, contact_weight(0.8, LIMB), 0)
+	testing.expect_value(t, contact_weight(5, LIMB), 0)
+
+	// Monotonic, and continuous at both ends of the fade.
+	previous := f32(1)
+	for i in 0 ..= 100 {
+		gap := f32(i) / 100
+		w := contact_weight(gap, LIMB)
+		testing.expect(t, w <= previous + 1e-6, "the weight should never rise as the gap widens")
+		testing.expect(t, abs(w - previous) < 0.1, "the weight should not step")
+		previous = w
+	}
+
+	// Scale-free: the same gap-to-limb ratio gives the same weight whatever
+	// size the character is.
+	testing.expect(t, abs(contact_weight(0.5, 1) - contact_weight(5, 10)) < 1e-6,
+		"the fade should depend on the ratio, not on absolute size")
+}
+
+/*
+	The solver on its own, with points picked by hand: apply the two turns the
+	way the pass does and the tip must land on the target.
+
+	Worth pinning separately because the composition is the part that is easy
+	to get subtly wrong -- `mid_turn` already contains `root_turn`, and a
+	version that expected the caller to combine them would pass any "does it
+	move" test while missing by centimetres.
+*/
+@(test)
+test_solve_two_bone_lands_the_tip_on_the_target :: proc(t: ^testing.T) {
+	root := [3]f32{0, 0, 0}
+	mid  := [3]f32{0, -1, 0}
+	tip  := [3]f32{0.5, -1.8, 0}
+
+	for target in ([][3]f32{{1.2, -0.6, 0}, {0.3, 1.4, 0}, {-0.9, -1.1, 0}, {0.2, -0.2, 0}}) {
+		root_turn, mid_turn, _ := solve_two_bone(root, mid, tip, target)
+
+		new_mid := root + linalg.quaternion_mul_vector3(root_turn, mid - root)
+		new_tip := new_mid + linalg.quaternion_mul_vector3(mid_turn, tip - mid)
+
+		testing.expect(t, linalg.length(new_tip - target) < 1e-4,
+			fmt.tprintf("tip should land on %v, landed on %v", target, new_tip))
+
+		// And the bones cannot change length doing it.
+		testing.expect(t, abs(linalg.length(new_mid - root) - linalg.length(mid - root)) < 1e-5,
+			"the upper bone changed length")
+		testing.expect(t, abs(linalg.length(new_tip - new_mid) - linalg.length(tip - mid)) < 1e-5,
+			"the lower bone changed length")
+	}
+}
+
+// A target the chain cannot reach: it straightens and points at it, rather
+// than folding, overshooting, or producing a NaN.
+@(test)
+test_solve_two_bone_clamps_an_unreachable_target :: proc(t: ^testing.T) {
+	root := [3]f32{0, 0, 0}
+	mid  := [3]f32{0, -1, 0}
+	tip  := [3]f32{0.5, -1.8, 0}
+	target := [3]f32{6, 0, 0}
+
+	root_turn, mid_turn, _ := solve_two_bone(root, mid, tip, target)
+
+	new_mid := root + linalg.quaternion_mul_vector3(root_turn, mid - root)
+	new_tip := new_mid + linalg.quaternion_mul_vector3(mid_turn, tip - mid)
+
+	straight := linalg.length(mid - root) + linalg.length(tip - mid)
+	testing.expect(t, abs(linalg.length(new_tip - root) - straight) < 1e-4,
+		"an unreachable target should leave the chain straight rather than part-folded")
+
+	toward := linalg.dot(linalg.normalize(new_tip - root), linalg.normalize(target - root))
+	testing.expect(t, toward > 0.9999, "a clamped chain should point at the target")
+
+	testing.expect(t, new_tip.x == new_tip.x && new_tip.y == new_tip.y && new_tip.z == new_tip.z,
+		"a clamped solve must not produce a NaN")
+}
+
+/*
+	The bend plane comes from the chain's own geometry, and a chain too
+	straight to have one keeps the plane it had.
+
+	This is the difference between a walk and a walk with a twitch in it: the
+	earlier version read the plane off the joint's offset from the *target*
+	direction, which collapses mid-stride with the knee still properly bent,
+	and the knee swung around the leg while the foot stayed put.
+*/
+@(test)
+test_bend_plane_is_kept_through_straightness :: proc(t: ^testing.T) {
+	root := [3]f32{0, 0, 0}
+	bent := bend_plane(root, {0, -1, 0}, {0.8, -1.6, 0}, {})
+	testing.expect(t, abs(abs(bent.z) - 1) < 1e-4, "a chain bent in the xy plane has a z normal")
+
+	// Straight: nothing to read, so the hint stands.
+	hint := [3]f32{0, 0, 1}
+	straight := bend_plane(root, {0, -1, 0}, {0, -2, 0}, hint)
+	testing.expect_value(t, straight, hint)
+
+	// Straight with no hint at all still answers with *a* plane containing
+	// the chain, rather than a zero vector the caller has to special-case.
+	blind := bend_plane(root, {0, -1, 0}, {0, -2, 0}, {})
+	testing.expect(t, abs(linalg.length(blind) - 1) < 1e-4, "the fallback plane should be a unit normal")
+	testing.expect(t, abs(linalg.dot(blind, [3]f32{0, -1, 0})) < 1e-4, "the plane should contain the chain")
+
+	// A target lining up with the upper bone is exactly the case that used to
+	// collapse. The plane must still come out of the bend.
+	aligned := bend_plane(root, {0, -1, 0}, {0.8, -1.6, 0}, {0, 0, 1})
+	testing.expect(t, abs(abs(aligned.z) - 1) < 1e-4, "a bent chain's plane should not depend on any target")
+}
+
+// Every time any track has a key at, once each, in order -- the single time
+// line the pass evaluates a limb on.
+@(test)
+test_union_track_times_sorts_and_dedupes :: proc(t: ^testing.T) {
+	tracks := []Animation_Track{
+		{times = []f32{0, 0.5, 1.0}},
+		{times = []f32{0, 1.0}},
+		{times = []f32{0.25, 0.5}},
+	}
+
+	times := union_track_times(tracks)
+	defer delete(times)
+
+	testing.expect_value(t, len(times), 4)
+	testing.expect_value(t, times[0], f32(0))
+	testing.expect_value(t, times[1], f32(0.25))
+	testing.expect_value(t, times[2], f32(0.5))
+	testing.expect_value(t, times[3], f32(1.0))
+}
+
+/*
+	A pair correction that lands inside one keyframe interval is a snap, and
+	this is the guard against it. Measured on the real clips, the arm pair was
+	asked to move at 0.02-0.50 limb lengths per second in every clip that
+	holds a grip, and at 5.69 in `Pistol_Reload` -- 10.3cm inside a single
+	interval, as the support hand comes off the weapon. See
+	`SHIFT_RATE_LIMIT`.
+*/
+@(test)
+test_rate_limit_shift_passes_a_change_within_the_limit :: proc(t: ^testing.T) {
+	// 1 limb length per second over a tenth of a second on a 0.4m limb is a
+	// 4cm budget; a 3cm change spends less than that and arrives intact.
+	got := rate_limit_shift({0, 0, 0}, {0.03, 0, 0}, 0.1, 0.4)
+
+	testing.expect(t, linalg.length(got - [3]f32{0.03, 0, 0}) < 1e-6,
+		fmt.tprintf("a change inside the budget should pass through, got %v", got))
+}
+
+@(test)
+test_rate_limit_shift_clamps_a_change_beyond_the_limit :: proc(t: ^testing.T) {
+	// The same 4cm budget against a 20cm demand: the result stops at the
+	// budget and keeps the direction it was heading.
+	got := rate_limit_shift({0, 0, 0}, {0.2, 0, 0}, 0.1, 0.4)
+
+	testing.expect(t, abs(linalg.length(got) - 0.04) < 1e-6,
+		fmt.tprintf("expected the change clamped to the 4cm budget, got %v", linalg.length(got)))
+	testing.expect(t, got.x > 0 && abs(got.y) < 1e-6 && abs(got.z) < 1e-6,
+		fmt.tprintf("the clamp should keep the direction, got %v", got))
+}
+
+// Clamping the *change* and not the shift: a correction already at 20cm and
+// asked to stay there is not dragged back toward zero, however far from the
+// origin it sits. This is what keeps a grip held for a whole clip steady.
+@(test)
+test_rate_limit_shift_leaves_a_large_steady_correction_alone :: proc(t: ^testing.T) {
+	got := rate_limit_shift({0.2, 0, 0}, {0.2, 0, 0}, 0.1, 0.4)
+
+	testing.expect(t, linalg.length(got - [3]f32{0.2, 0, 0}) < 1e-6,
+		fmt.tprintf("an unchanged shift should be returned unchanged, got %v", got))
+}
+
+// A zero or negative interval has no budget to compute against -- the first
+// keyframe of a clip, or two keys at the same time. Passing the demand
+// through is the honest answer: there is no previous shift to rate-limit from.
+@(test)
+test_rate_limit_shift_passes_through_a_degenerate_interval :: proc(t: ^testing.T) {
+	got := rate_limit_shift({0, 0, 0}, {0.2, 0, 0}, 0, 0.4)
+	testing.expect(t, linalg.length(got - [3]f32{0.2, 0, 0}) < 1e-6,
+		fmt.tprintf("dt of zero should pass the demand through, got %v", got))
+
+	got = rate_limit_shift({0, 0, 0}, {0.2, 0, 0}, 0.1, 0)
+	testing.expect(t, linalg.length(got - [3]f32{0.2, 0, 0}) < 1e-6,
+		fmt.tprintf("a zero-length limb should pass the demand through, got %v", got))
+}
+
+/*
+	The legs are not a contact pair, and this is the guard on that decision
+	rather than on any one number.
+
+	They were in `HUMANOID_PAIRS` once, on the argument that the two rigs' hip
+	spans agree to 4mm so the correction would be nearly nothing. The pass is
+	gated on the gap between the *feet*, which measured 0.27-0.39m wrong in
+	every clip -- moving a foot up to 16.6cm, and up to 14.9cm between two
+	adjacent keyframes. Two feet hold no constraint with each other; what a
+	foot needs to meet is the ground. See `HUMANOID_PAIRS`.
+*/
+@(test)
+test_humanoid_pairs_names_no_leg :: proc(t: ^testing.T) {
+	legs := bit_set[Vrm_Bone]{
+		.LEFT_UPPER_LEG, .LEFT_LOWER_LEG, .LEFT_FOOT, .LEFT_TOES,
+		.RIGHT_UPPER_LEG, .RIGHT_LOWER_LEG, .RIGHT_FOOT, .RIGHT_TOES,
+	}
+
+	for pair in HUMANOID_PAIRS {
+		for limb in ([]Retarget_Limb{pair.left, pair.right}) {
+			for bone in ([]Vrm_Bone{limb.root, limb.mid, limb.tip}) {
+				testing.expect(t, bone not_in legs,
+					fmt.tprintf("%v is a leg bone; the pair correction does not apply to feet", bone))
+			}
+		}
+	}
 }

@@ -62,11 +62,25 @@ Level_Format :: struct {
 	extension: string,
 }
 
-LEVEL_FORMAT :: Level_Format{version = 1, extension = ".level"}
+/*
+	**`.json`, not a name of its own.** A level *is* a JSON file, so a reader,
+	an editor and a diff tool all already know what to do with one, and an
+	extension of its own bought nothing but a file the system opens with
+	nothing. Changed on 2026-09-16; the editor still opens a `.level` file so
+	that levels written before the change are not stranded, and always saves
+	`.json`.
+*/
+LEVEL_FORMAT :: Level_Format{version = 1, extension = ".json"}
 
 Level :: struct {
 	version:  int,
 	settings: Level_Settings,
+
+	// Model components written once and referred to by many entities
+	// (instance.odin). Filled only in a file: a level in memory has always had
+	// its components expanded onto the entities themselves.
+	instances: [dynamic]Instance_Source,
+
 	entities: [dynamic]Entity,
 
 	runtime: Level_Runtime `json:"-"`,
@@ -84,6 +98,10 @@ Level_Runtime :: struct {
 	// logged again.
 	models: map[string]^mb.Model,
 
+	// The loaded skybox, and which path and kind it was loaded from
+	// (sky.odin).
+	sky: Sky_Runtime,
+
 	// Rebuilt by `update_level` each frame: where each id is in `entities`,
 	// and the scratch space resolving parents needs, kept rather than
 	// allocated every frame.
@@ -94,6 +112,12 @@ Level_Runtime :: struct {
 
 Level_Settings :: struct {
 	background: [4]f32,
+
+	// The skybox drawn behind everything, or none (sky.odin). In the level
+	// rather than in the editor, because an outdoor area is built against its
+	// sky and a sky only the editor knew about would be a backdrop that lies
+	// about the game.
+	sky: Sky_Settings,
 
 	// Saved whole rather than as a level-owned copy of some of its fields, so
 	// that every lighting feature Matchbox gains is in the file and the
@@ -112,6 +136,20 @@ Entity :: struct {
 	// tells a person reading the file nothing.
 	model: Maybe(Model_Component),
 	light: Maybe(Light_Component),
+
+	// Which instance's model this entity draws, or 0 (instance.odin).
+	//
+	// **On the entity rather than inside `Model_Component`**, which is where it
+	// first went. In a file a folded entity has no model component at all -- it
+	// is `"model": null` and `"instance": 3`, two lines -- whereas an emptied
+	// component still costs every key marshal writes, and a zeroed tint alone
+	// is six lines of pretty-printed zeros. Measured: folding the reference
+	// inside the component made a six-entity level *larger*, 5545 bytes against
+	// 5383; moving it out here is what actually makes the file smaller.
+	//
+	// In memory it is only a note of which group the entity belongs to: the
+	// model component is always whole by the time anything reads it.
+	instance: u64,
 
 	// A box or a sphere: a spawn point, an area that triggers something, the
 	// zone a fixed camera shot is framed in. See shape.odin -- the editor draws
@@ -138,9 +176,16 @@ Level_Transform :: struct {
 }
 
 Model_Component :: struct {
-	path:         string, // relative to the project root, with forward slashes
+	// Relative to the project root, with forward slashes -- or `primitive:cube`
+	// and friends for a generated shape with no file behind it
+	// (primitive.odin).
+	path:         string,
 	tint:         [4]f32,
 	casts_shadow: bool,
+
+	// Kept out of every instance, so that changing this one's tint or its model
+	// does not change the others'. What "make this one different" means.
+	unique: bool,
 
 	// The loaded model, from the level's asset table. A GPU handle means
 	// nothing in a file, so it is never written and never read.
@@ -171,9 +216,10 @@ Light_Component :: struct {
 */
 create_level :: proc(allocator := context.allocator) -> Level {
 	return Level{
-		version  = LEVEL_FORMAT.version,
-		settings = {background = {0, 0, 0, 1}, lighting = mb.LIGHTING_DEFAULTS},
-		entities = make([dynamic]Entity, allocator),
+		version   = LEVEL_FORMAT.version,
+		settings  = {background = {0, 0, 0, 1}, lighting = mb.LIGHTING_DEFAULTS},
+		instances = make([dynamic]Instance_Source, allocator),
+		entities  = make([dynamic]Entity, allocator),
 	}
 }
 
@@ -183,11 +229,22 @@ create_level :: proc(allocator := context.allocator) -> Level {
 destroy_level :: proc(level: ^Level) {
 	allocator := level_allocator(level)
 
+	// Before the entities, so the sky's own copy of its path is freed out of
+	// the same allocator while there still is one.
+	unload_level_sky(level)
+	delete(level.settings.sky.path, allocator)
+
 	for &entity in level.entities {
 		delete(entity.name, allocator)
 		if model, ok := entity.model.?; ok do delete(model.path, allocator)
 	}
 	delete(level.entities)
+
+	// An instance list survives only between unmarshalling a file and
+	// `expand_instances` copying each path onto the entities that share it; a
+	// level built in memory has none. Its paths are its own either way.
+	for source in level.instances do delete(source.model.path, allocator)
+	delete(level.instances)
 
 	rt := &level.runtime
 	for path, model in rt.models {
@@ -206,15 +263,26 @@ destroy_level :: proc(level: ^Level) {
 }
 
 /*
-	The level as the text of a `.level` file.
+	The level as the text of a level file.
 
 	**Enum names rather than numbers** (`use_enum_names`), for a file a person
 	can read that also survives an enum being reordered. **Pretty-printed**, so
 	a moved entity is a small diff rather than one changed line a megabyte
 	long.
+
+	`instancing` writes every model component that more than one entity shares
+	once, under an id those entities refer to (instance.odin). It changes the
+	shape of the file and not the level: `unmarshal_level` puts the components
+	back, and a level saved either way reads back the same.
 */
-marshal_level :: proc(level: Level, allocator := context.allocator) -> (data: []byte, err: json.Marshal_Error) {
-	return json.marshal(level, {pretty = true, use_enum_names = true}, allocator)
+marshal_level :: proc(level: Level, instancing := true, allocator := context.allocator) -> (data: []byte, err: json.Marshal_Error) {
+	written := level
+	if instancing {
+		// Into the temp allocator, and never destroyed: the packed copy shares
+		// the level's own names and paths, so freeing it would free theirs.
+		written = pack_instances(level, context.temp_allocator)
+	}
+	return json.marshal(written, {pretty = true, use_enum_names = true}, allocator)
 }
 
 /*
@@ -272,6 +340,13 @@ unmarshal_level :: proc(
 	}
 
 	check_enum_names(value, type_info_of(Level), "level", &problems, allocator)
+
+	// Before the repairs, so that an entity which is only a reference to an
+	// instance is repaired as the whole component it stands for -- otherwise
+	// every instanced entity would look like a model component with a black
+	// tint and get `mb.WHITE` written over the instance's own.
+	expand_instances(&level, &problems, allocator)
+
 	repair_level(&level, &problems, allocator)
 
 	return level, problems, nil

@@ -397,9 +397,9 @@ load_animation_source :: proc(path: string) -> (Animation_Source, Error)
 // Copies every clip in `src` onto `dst`, rewriting each track to drive the
 // bone playing the same humanoid role. Returns how many clips landed.
 retarget_animations :: proc(
-	dst:   ^Model,
-	src:   Animation_Source,
-	names: []Vrm_Bone_Name = UNREAL_BONE_NAMES,
+	dst:     ^Model,
+	src:     Animation_Source,
+	options: Retarget_Options = {},   // .names, and .fit -- see step 4
 ) -> (added: int)
 
 destroy_animation_source :: proc(src: ^Animation_Source)
@@ -416,6 +416,300 @@ defer mb.destroy(&clips)
 mb.retarget_animations(&character, clips)   // now character.animations is populated
 mb.play_animation(&animator, character, "Walk_Formal")
 ```
+
+## Step 4 -- proportions, where two limbs have to meet
+
+**Added after step 3 shipped and was watched rather than reasoned about.** The
+clips read as the right motion, and one thing was plainly wrong: in
+`Pistol_Reload` the supporting left hand, which belongs under the pistol,
+slides past the right hand and ends up outside it.
+
+### What it is, measured
+
+A rotation track carries a joint *angle*, and each limb does come out right
+relative to its own shoulder. What no angle carries is where the two
+shoulders sit relative to *each other*, and that is proportions -- unevenly,
+which is what rules out fixing it with a scale on the skeleton:
+
+```
+                      source     vrm    vrm/src
+clavicle               0.180    0.087     0.48
+shoulder span          0.309    0.217     0.70
+upper arm              0.181    0.220     1.21
+forearm                0.207    0.215     1.04
+hips height            0.816    0.908     1.11
+```
+
+The VRM's shoulders sit about 9cm narrower, so both hands come inward with
+their own shoulder -- measured at the reload's two-handed hold, the left
+shoulder moves 3.8cm to the character's right and the right shoulder 6.6cm to
+its left. What is left of that on the gap between the hands, which is the
+thing a two-handed pose is about:
+
+```
+                     right hand -> left hand, cm, in body axes
+                     left     up     forward
+source               +4.9   -2.0     +0.0      left hand under the right
+retargeted, angles   -1.2   -3.3     -3.6      left hand outside the right
+```
+
+5.6cm, and on the wrong side. That is the whole of the reported bug.
+
+**It is not a facing problem**, which was checked three ways before anything
+was built -- across the hips, the shoulders and the hands -- and both rigs'
+rest facings agree to +1.000. An earlier measurement in chest-local axes
+appeared to show the hands mirrored, and that was an artefact of asking the
+question in each rig's own bone axes, which the conjugation deliberately does
+not preserve.
+
+### The fix: correct the gap, and only the gap
+
+After the rotation pass, for the two hands, the distance between the tips is
+restored to the source's, at this rig's scale, with each tip moving half the
+error:
+
+```
+error = scale * (tip_left_src - tip_right_src) - (tip_left_dst - tip_right_dst)
+```
+
+Then a closed-form two-bone solve puts each tip on its target, keeping the
+bend plane the rotation pass already produced. Nothing about either limb's own
+shape is asked for, which is the property that makes this safe.
+
+**`scale` is the whole rig's**, the ratio of hip rest heights and the same
+number the hips translation already uses. A gap is a distance across the body,
+not along a limb, so it belongs to the body's scale -- and the arm's own ratio
+is 1.118 against the body's 1.113 anyway, a millimetre over the length of an
+arm.
+
+### Two designs that were right in the numbers and wrong on screen
+
+Both earlier attempts measured a tip's offset from a point on the body and
+scaled it. Both hit their targets exactly. Both were wrong, and neither
+measurement taken before running the game showed it.
+
+**From the chest.** A bone's placement inside a torso is the rigger's
+arbitrary choice, and these two disagree: measured, the VRM's shoulders sit
+6cm lower and 4cm behind its chest bone relative to where the source's sit
+relative to its own. Transferring a chest-to-hand offset carries that
+arbitrary difference into the arm. Reported from the running game as *the
+right hand is behind the player, and bent a bit*.
+
+**From the midpoint of the two limb roots.** Fixes the height error -- the
+idle hand came back to within 3mm of where the angles put it vertically -- and
+still carries the clavicle difference. In this idle the source pulls its right
+shoulder 9.1cm behind its chest on a clavicle of 0.180; the VRM's 0.087
+clavicle manages 1cm. Insisting the hand match makes the arm travel the
+distance the shoulder did not, and the hand still ends up ~10cm back.
+
+The lesson generalises: *reproducing a source pose exactly is not the goal
+when the destination skeleton cannot hold it honestly.* A relationship between
+two limbs asks nothing of either limb's own shape, which is why correcting
+that one thing is safe where correcting a position is not.
+
+### Contact, and how it is inferred
+
+Correcting the gap everywhere would do the same damage -- in the idle above,
+the source's hands sit 28.7cm apart front-to-back where the angle copy gives
+8.8cm, and closing that moves each hand 10cm. But that 20cm is not a grip
+coming apart; it is two hands that are nowhere near each other.
+
+Contact is not something a glTF file records, so it is inferred from the only
+signal available: how close the source holds the two tips, measured in units
+of the limb's own length so it means the same thing on any size of character.
+Full correction within 0.30 of a limb length, none beyond 0.75, `smoothstep`
+between -- smooth because the weight is evaluated per keyframe and a step in
+it would be a step in the pose.
+
+Measured on the real clips, with a 0.435m arm:
+
+```
+                                    gap      weight   hands moved
+Pistol_Reload, two-handed hold     0.07m      1.00      3.7 cm
+Pistol_Aim_Neutral                 0.07m      1.00      3.7 cm
+Pistol_Reload, reaching for a mag  0.38m      0.00      0.0 cm
+Idle_Subtle, arms hanging          0.45m      0.00      0.0 cm
+```
+
+The gap at the hold matches the source exactly; everything else is bit-for-bit
+what the rotation-only path produced.
+
+### The knee that swung: a bend plane is not a pole vector
+
+The first version read the bend plane off the joint's offset perpendicular to
+the *target* direction. That collapses whenever the target lines up with the
+upper bone -- which happens mid-stride with the knee still properly bent -- and
+what is left is noise with a direction. The foot stays put, because the foot is
+what is being solved for, and the knee swings around the leg.
+
+Taking it from the chain's own geometry, `cross(upper, root_to_tip)`, collapses
+only when the chain really is straight, and a straight chain has no plane to
+read -- so the previous keyframe's answer is carried forward instead, which
+keeps the joint on the side it was already on through the moment of
+straightness. Measured on `Walk_Formal`, worst movement of the knee between two
+adjacent keys:
+
+```
+                          knee step   source
+rotation only               5.3 cm     5.4 cm
+perpendicular-to-target    10.6 cm     3.9 cm
+from the chain's geometry    5.7 cm     5.4 cm
+```
+
+### Clamping, and the leg rule that caused it
+
+A target past a limb's reach can only clamp to the straight-limb pose. That is
+continuous in *position* and violently discontinuous in *pose*, because the
+knee angle near full extension is a near-vertical function of reach: an early
+version of this pass held the leg at 179.8 degrees for four keyframes and then
+dropped it to 148 in one, which is the "legs briefly snap" this section exists
+to record.
+
+The cause was the leg rule, not the clamp. Scaling a foot target by the body
+ratio asks a rig whose legs are 1.028x for 1.113x of leg, and it does not have
+it -- 76 of 518 leg targets over six clips, out by up to 4.1cm. Scaling by the
+leg's own ratio instead puts the feet 6cm off the floor, because the hips they
+hang from were placed by the body ratio. There is no scale that fixes both,
+which is the real finding: a rig with a long torso and short legs cannot hold
+a uniformly scaled pose, and asking it to is how you get a locked knee.
+
+Correcting the gap rather than the position sidesteps the *clamp*. It did not
+sidestep the leg rule, and the paragraph that used to stand here said it did:
+
+> The feet are a pair like the hands, the two rigs' hip spans agree to 4mm
+> where their shoulder spans differ by 9cm, and so the leg correction is
+> nearly nothing -- which is the right answer rather than a missing feature.
+
+**That was checked on the wrong joint, and it was wrong.** Hip spans do agree
+to 4mm. The pass is not gated on the hip span; it is gated on the gap between
+the **feet**, and `scale` is still the body ratio -- so the same "1.028x legs
+asked for 1.113x" mismatch that produced the locked knee is still in `want`,
+just measured across the stance instead of along the leg. Measured over every
+clip in the Mesh2Motion export, with the pass as shipped:
+
+```
+                      |want - have|   foot moved   between adjacent keys
+every clip, legs      0.27 - 0.39 m   up to 16.6cm  up to 14.9cm
+```
+
+A 0.27-0.39m foot gap also lands in the middle of `contact_weight`'s leg band
+-- 0.231m to 0.576m on this rig -- so the weight was *partial* in nearly every
+clip and swung as the stride opened and closed. `Run_Stealth` moves the weight
+0.90 between two adjacent keys. That is a snap in every locomotion clip, and it
+is the one the game was reporting.
+
+**The legs are out of `HUMANOID_PAIRS`.** Not because the numbers can be
+fixed -- a leg-length `scale` would fix `want` and is a real option -- but
+because the premise does not hold: two hands on one weapon are a constraint
+the source actually holds, and reproducing it is the entire point of this
+pass. Two feet hold no constraint with *each other*. What a foot needs to meet
+is the ground, which is a different reference, and is the "No ground contact
+pass" item below rather than a pair correction.
+
+### A fade is not a rate: the reload that snapped
+
+`contact_weight` fades on how far apart the source holds the tips, which is
+the right signal, and it says nothing about how fast that distance may change.
+Where a clip separates the hands quickly -- `Pistol_Reload`, taking the
+support hand off the weapon to reach for a magazine -- the weight falls most
+of the way inside one keyframe interval and the correction lets go all at
+once. Measured as the peak rate the arm correction was asked to move at, in
+limb lengths per second:
+
+```
+Pistol_Idle    0.02     Pistol_Shoot   0.50
+Walk_Carry     0.04     Pistol_Reload  5.69    <- 10.3cm in one interval
+```
+
+Everything that is not spiking sits at or under 0.50; the one that is sits an
+order of magnitude above. `rate_limit_shift` clamps the per-keyframe *change*
+in the shift to `SHIFT_RATE_LIMIT` (1.0) limb lengths per second -- a factor
+of two above the highest honest clip, a factor of five under the spike.
+
+Clamping the change and not the shift is what keeps it from costing anything
+elsewhere: a grip held steady for a whole clip is never dragged toward zero,
+and the first keyframe passes through unlimited so a clip that opens mid-grip
+is right from frame one. Replayed over the real clips:
+
+```
+                jump before   jump after   peak correction kept
+Pistol_Reload      10.3cm        1.8cm            68.6%
+every other clip    unchanged    unchanged        100.0%
+```
+
+The 31% is taken off a transient spike, not off the held grip. The pass now
+trails slightly: after a fast separation it keeps correcting for a few
+keyframes longer than the weight alone would. That is the right way round --
+a grip that releases slightly late reads as a hand lingering, where one that
+releases instantly reads as a snap.
+
+### The bend-plane hint has to keep up
+
+`bend_plane` carries the previous keyframe's plane forward so a limb passing
+through straight keeps its joint on the side it was already on. The early-out
+for "nothing to correct at this keyframe" returned without updating it, so the
+hint went stale across every uncorrected keyframe -- and when a pair came back
+into contact on a near-straight chain, the solve was handed a plane from
+before the limb moved. That is the knee-swing this section already records,
+returning through the door marked *nothing to do here*. The early-out now
+updates the hint from the uncorrected pose before returning.
+
+### What it costs, which is less than it sounds
+
+**No fixed-rate resampling.** The solve needs a whole limb at one instant, so
+it needs a single time line -- but taking the union of the clip's own key times
+gives one for free here. Measured on the Mesh2Motion export: every clip in it
+has at most *two* distinct time arrays, a dense LINEAR one for the bones that
+move and a two-key STEP one for the bones that do not. So the union is the
+dense array, and step 3's "one source key, one destination key" property
+survives for the bones that had keys.
+
+A clip whose pairs are never in contact keeps the tracks it arrived with --
+same keys, same interpolation, same values -- rather than a re-baked copy of
+itself. A limb the clip never animates is left alone rather than corrected into
+the source's rest pose, so a clip that drives nothing below the chest still
+drives nothing below the chest, which is what `animation_mask_below` layering
+depends on.
+
+The cost is a hierarchy walk per keyframe at load, and nothing per frame ever.
+
+### Verified, and how the verification failed the first time
+
+The maths was built in numpy against the three real files and the Odin checked
+against it: at every keyframe of `Pistol_Reload` the two agree on both hands'
+world positions to 0.1mm.
+
+**That was not enough, and it is worth being precise about why.** The numpy
+check confirmed the implementation computed what was intended. It could not
+confirm the intention, because both wrong designs put the hand exactly where
+they were asked to -- the error was in the target, and a check that recomputes
+the target cannot see it. What found both was running the game and looking at
+the character: once for a hand behind the back, once for a knee that snapped.
+
+The measurements that *do* generalise, and that this pass is now checked
+against, are the ones phrased as comparisons against the rotation-only path
+rather than against the target: how far a hand moved from where the angles put
+it, and how far a joint travelled between two adjacent keyframes against how
+far the source's did. A correction that damages a pose shows up in the first;
+one that snaps shows up in the second.
+
+### Not done, and why
+
+- **The clavicle is not corrected**, though it is the bone most responsible
+  for the error. Asking one at 0.48x the length to travel the whole difference
+  reads as a shrug, and the pair correction absorbs the same error without
+  moving anything visible.
+- **A hand touching the *body*** -- on a hip, on the opposite shoulder -- is
+  not corrected. It is the same class of problem and needs the same treatment
+  against a different reference; nothing in hand needs it yet.
+- **No ground contact pass.** Feet land where the angles put them, which is
+  not the same as planted. That wants foot IK against a collision result,
+  which is a different subsystem's problem. This is now the *only* thing
+  acting on foot placement, since the leg pair came out of `HUMANOID_PAIRS` --
+  see "Clamping, and the leg rule that caused it".
+- **Fingers.** Three-bone chains, and the pair that would matter is a finger
+  against the other hand's prop, which is not a relationship this table can
+  name.
 
 ## Not in this document, and why
 
@@ -500,7 +794,12 @@ whenever the public API moves.
 3. **Retargeting.** `Animation_Source`, `load_animation_source`,
    `retarget_animations`, `destroy_animation_source`, the Unreal-style name
    table, the conjugation, the hips translation case.
-4. **Optional, once 1-3 land:** point `examples/animation-layers` at a `.vrm`
+4. **Proportions.** `Retarget_Fit`, `Retarget_Options`, the pair table, the
+   two-bone solve, `contact_weight`, `bend_plane`, and the union-of-key-times
+   sampling. Default `.PROPORTIONS`. **Watch a character before believing
+   this one** -- see the section's own account of two designs that measured
+   correctly and looked wrong.
+5. **Optional, once 1-3 land:** point `examples/animation-layers` at a `.vrm`
    plus a retargeted clip set, and replace its `UPPER_BODY_ROOT :: "spine_02"`
    with `vrm_bone(model, .CHEST)` -- the demonstration that this was worth
    doing rather than a parser exercise.

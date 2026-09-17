@@ -218,6 +218,14 @@ Camera3D_Defaults :: struct {
 	// character pivots to face where it is going.
 	shoulder_offset: f32,
 	turn_speed:      f32,
+
+	// `Drift_Camera`: how far the character may stray before the camera is
+	// dragged after them, how fast it closes once they have, and how fast it
+	// turns to look the way they are walking. See camera3d_drift.odin -- the
+	// swing is off by default, because a fixed angle is the point of that rig.
+	dead_zone:    f32,
+	follow_speed: f32,
+	swing_speed:  f32,
 }
 
 CAMERA3D_DEFAULTS :: Camera3D_Defaults{
@@ -238,6 +246,12 @@ CAMERA3D_DEFAULTS :: Camera3D_Defaults{
 
 	shoulder_offset = 0.75,
 	turn_speed      = 12,
+
+	// A stride and a half of slack, and a second or so to take up what is left
+	// of it -- slow enough to read as a camera following rather than tracking.
+	dead_zone    = 1.5,
+	follow_speed = 3,
+	swing_speed  = 0,
 }
 
 // Which way you are facing, from the two angles. Yaw 0 looks along +x.

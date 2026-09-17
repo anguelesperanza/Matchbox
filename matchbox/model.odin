@@ -390,6 +390,86 @@ create_sphere_model :: proc(radius: f32 = 1, rings: int = 16, sectors: int = 24)
 	return create_model_from_mesh(vertices, indices[:])
 }
 
+/*
+	A cylinder of `radius` and `height`, upright about Y and centred on its own
+	origin, the way `create_cube_model` and `create_sphere_model` are.
+
+	**The side and the two caps share no vertices.** A cap's normal points along
+	Y and the side's points outwards, so a shared rim vertex would have to
+	average the two and round the edge off -- the same reason the cube is
+	twenty-four vertices rather than eight.
+
+	The side runs to `<=` sectors so the seam where the texture wraps has two
+	vertices in the same place with different uvs, as the sphere's does. The
+	caps do not: they have no seam, and a fan round a middle vertex is the
+	fewest triangles that closes them.
+
+	Wound counter-clockwise seen from outside, which is what the pipeline's
+	`front_face` expects. **Checked** rather than reasoned: every one of the 96
+	triangles at the default sector count has its cross product pointing away
+	from the axis, every edge is used exactly twice, and the signed volume comes
+	to 0.7765 against a 24-sided prism's exact 0.78540 * cos-correction --
+	0.98862 of the ideal cylinder, which is what `12 * sin(15 degrees) / pi`
+	says a 24-gon should be. The first cut had the side wall inside out and
+	looked right in the source.
+*/
+create_cylinder_model :: proc(radius: f32 = 0.5, height: f32 = 1, sectors: int = 24) -> (Model, Error) {
+	sectors := max(sectors, 3)
+	h := height * 0.5
+
+	// The side: two rings of sectors+1. Each cap: a middle vertex and a ring of
+	// sectors round it.
+	side_count := (sectors + 1) * 2
+	cap_count  := (sectors + 1) * 2
+
+	vertices := make([]Vertex3D, side_count + cap_count, context.temp_allocator)
+	indices  := make([dynamic]u32, 0, sectors * 6 + sectors * 6, context.temp_allocator)
+
+	for s in 0 ..= sectors {
+		theta := 2 * math.PI * f32(s) / f32(sectors)
+		out   := [3]f32{math.cos(theta), 0, math.sin(theta)}
+		u     := f32(s) / f32(sectors)
+
+		vertices[s]               = Vertex3D{pos = {out.x * radius,  h, out.z * radius}, normal = out, uv = {u, 0}}
+		vertices[sectors + 1 + s] = Vertex3D{pos = {out.x * radius, -h, out.z * radius}, normal = out, uv = {u, 1}}
+	}
+
+	for s in 0 ..< sectors {
+		top    := u32(s)
+		bottom := u32(sectors + 1 + s)
+		append(&indices, top, bottom + 1, bottom)
+		append(&indices, top, top + 1, bottom + 1)
+	}
+
+	// Each cap is its own middle vertex followed by its own ring, so the two
+	// fans below can index them by an offset and a sector alone.
+	top_middle    := side_count
+	bottom_middle := side_count + sectors + 1
+
+	vertices[top_middle]    = Vertex3D{pos = {0,  h, 0}, normal = { 0,  1, 0}, uv = {0.5, 0.5}}
+	vertices[bottom_middle] = Vertex3D{pos = {0, -h, 0}, normal = { 0, -1, 0}, uv = {0.5, 0.5}}
+
+	for s in 0 ..< sectors {
+		theta := 2 * math.PI * f32(s) / f32(sectors)
+		x, z  := math.cos(theta), math.sin(theta)
+
+		vertices[top_middle + 1 + s]    = Vertex3D{pos = {x * radius,  h, z * radius}, normal = { 0,  1, 0}, uv = {x * 0.5 + 0.5, z * 0.5 + 0.5}}
+		vertices[bottom_middle + 1 + s] = Vertex3D{pos = {x * radius, -h, z * radius}, normal = { 0, -1, 0}, uv = {x * 0.5 + 0.5, z * 0.5 + 0.5}}
+	}
+
+	for s in 0 ..< sectors {
+		next := (s + 1) % sectors
+
+		// Seen from above, the top's ring runs clockwise in x/z, so the fan is
+		// wound middle, next, s to come out counter-clockwise from outside; the
+		// bottom, seen from below, is the other way round.
+		append(&indices, u32(top_middle), u32(top_middle + 1 + next), u32(top_middle + 1 + s))
+		append(&indices, u32(bottom_middle), u32(bottom_middle + 1 + s), u32(bottom_middle + 1 + next))
+	}
+
+	return create_model_from_mesh(vertices, indices[:])
+}
+
 // -----------------------------------------------------------------------
 // Generated geometry -- lines
 // -----------------------------------------------------------------------

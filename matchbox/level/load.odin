@@ -25,8 +25,8 @@ Level_Error :: union #shared_nil {
 }
 
 /*
-	Reads a `.level` file, loads every model it names and works out where
-	everything is -- ready to draw.
+	Reads a level file, loads every model and the sky it names, and works out
+	where everything is -- ready to draw.
 
 	What was read but could not be used -- an unknown enum name, a repaired
 	parent, a model file that is not there -- is **logged, not returned**: the
@@ -53,6 +53,7 @@ load_level :: proc(path: string, allocator := context.allocator) -> (level: Leve
 	for problem in problems do log.warnf("%s: %s", path, problem)
 
 	load_level_models(&level)
+	load_level_sky(&level)
 	update_level(&level)
 	return level, nil
 }
@@ -61,6 +62,11 @@ load_level :: proc(path: string, allocator := context.allocator) -> (level: Leve
 	Loads every model the level names that is not loaded yet, once per path,
 	and points each model component at its model. Returns how many components
 	are left without one.
+
+	**A `primitive:` path is built rather than read** (primitive.odin): a cube,
+	a sphere, a cylinder or a plane with no file behind it. It goes into the
+	same asset table under the same rules, so a level of two hundred blocked-out
+	cubes builds one mesh.
 
 	A path that fails is logged once and remembered as failed, so it is not
 	tried again on the next call; its entities are drawn as wire boxes and keep
@@ -79,7 +85,8 @@ load_level_models :: proc(level: ^Level) -> (missing: int) {
 
 		loaded, tried := rt.models[component.path]
 		if !tried {
-			if model, err := mb.load_model(component.path); err == nil {
+			model, err := build_model(component.path)
+			if err == nil {
 				loaded = new_clone(model, allocator)
 			} else {
 				log.warnf("could not load model %q (%v); entities using it are drawn as wire boxes", component.path, err)
@@ -104,8 +111,8 @@ load_level_models :: proc(level: ^Level) -> (missing: int) {
 	to write into a game's own folder: saving a level is for the editor, on a
 	desktop. A game saving its players' progress wants `mb.get_pref_path`.
 */
-save_level :: proc(level: Level, path: string, allocator := context.allocator) -> Level_Error {
-	data := marshal_level(level, allocator) or_return
+save_level :: proc(level: Level, path: string, instancing := true, allocator := context.allocator) -> Level_Error {
+	data := marshal_level(level, instancing, allocator) or_return
 	defer delete(data, allocator)
 
 	temporary := strings.concatenate({path, ".tmp"}, allocator)
@@ -114,4 +121,16 @@ save_level :: proc(level: Level, path: string, allocator := context.allocator) -
 	os.write_entire_file(temporary, data) or_return
 	os.rename(temporary, path) or_return
 	return nil
+}
+
+// A model path as a model: a generated primitive, or a file.
+@(private)
+build_model :: proc(path: string) -> (mb.Model, mb.Error) {
+	if is_primitive_path(path) {
+		// A prefixed name this build does not know comes back `NONE`, and
+		// `create_primitive_model` fails on it -- so a newer editor's primitive
+		// is a missing model here rather than the wrong shape.
+		return create_primitive_model(primitive_from_path(path))
+	}
+	return mb.load_model(path)
 }

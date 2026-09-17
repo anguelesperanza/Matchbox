@@ -387,6 +387,28 @@ decides where that movement ends up, which is what makes walls stop the player.
 Floor friction does not slow a player moved this way: a capsule on the floor at
 the default friction covers the same distance as one with none.
 
+**A floor built out of tiles does, and badly.** That measurement above was taken
+on one large slab. A floor made of separate colliders -- which is what a level
+blocked out in Stargate has, one per floor tile -- catches the capsule's rounded
+bottom on the *edge* where two boxes meet, and every seam pushes back against
+the walk. Measured, asking for 1.2 units a second over two seconds:
+
+| floor | covered |
+| --- | --- |
+| one slab | 2.40 |
+| 1-metre tiles | 0.48 |
+| 1-metre tiles, capsule held 0.02 above them | 2.40 |
+
+Tile thickness makes no difference; the seams do. It is not friction -- setting
+the capsule's friction to zero barely helps.
+
+**Hold the capsule clear of the floor.** With `.LINEAR_Y` locked the capsule
+never falls, so a two-centimetre gap is free and permanent: make the body that
+much higher, and subtract it again when working out where to draw the character.
+Take the lock off for a staircase and this has to go with it, since a floating
+character cannot be carried down by gravity -- give the room one floor collider
+instead of one per tile.
+
 ### Looking at things
 
 Cast from the eye along the view, and ask each item whether the ray hit it:
@@ -781,6 +803,10 @@ and `normal: [3]f32`. Every field is zero on a miss.
   the spawn point. Give it no body.
 - **Things sink into the floor after a hitch.** `step` was given the frame's
   delta time, and long steps make contacts soft. Keep the fixed step.
+- **The player walks at a fraction of its speed, and snags on nothing.** The
+  floor is many colliders rather than one, and the capsule is catching on the
+  seams between them. Hold it a couple of centimetres above the floor, or give
+  the room one floor collider. See [A first-person player](#a-first-person-player).
 - **`held` points at garbage.** The array it points into grew. Keep items in a
   fixed array.
 - **A held item shoves the player.** It overlaps the capsule. Hold it further

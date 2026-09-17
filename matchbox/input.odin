@@ -115,6 +115,8 @@ Cursor_Shape :: enum {
 	HAND,        // a link, or anything clicked that does not look like a button
 	RESIZE_EW,   // an edge dragged left and right
 	RESIZE_NS,   // an edge dragged up and down
+	RESIZE_NWSE, // a corner dragged from top-left to bottom-right
+	RESIZE_NESW, // a corner dragged from top-right to bottom-left
 	MOVE,
 	NOT_ALLOWED,
 	WAIT,
@@ -397,6 +399,8 @@ cursor_begin_frame :: proc() {
 		.HAND        = .POINTER,
 		.RESIZE_EW   = .EW_RESIZE,
 		.RESIZE_NS   = .NS_RESIZE,
+		.RESIZE_NWSE = .NWSE_RESIZE,
+		.RESIZE_NESW = .NESW_RESIZE,
 		.MOVE        = .MOVE,
 		.NOT_ALLOWED = .NOT_ALLOWED,
 		.WAIT        = .WAIT,

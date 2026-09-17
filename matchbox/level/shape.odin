@@ -94,9 +94,11 @@ shape_bounds :: proc(level: ^Level, handle: Entity_Handle) -> (low, high: [3]f32
 }
 
 // The same, for the entity with this name -- what a game reads while it is
-// setting up, beside `get_level_entity_transform`.
+// setting up, beside `get_level_entity_transform`. A name with a slash in it is
+// a path through the tree (`find_entity_path`), so the `bounds` inside one
+// group is reachable when every group has one.
 get_level_shape_bounds :: proc(level: ^Level, name: string) -> (low, high: [3]f32, ok: bool) {
-	handle := find_entity(level, name) or_else Entity_Handle{}
+	handle := find_entity_path(level, name) or_else Entity_Handle{}
 	return shape_bounds(level, handle)
 }
 

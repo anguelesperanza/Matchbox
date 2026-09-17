@@ -230,3 +230,111 @@ test_handles_follow_their_entity_and_notice_it_is_gone :: proc(t: ^testing.T) {
 	delete(gone.name)
 	testing.expect(t, get_entity(&level, spawn) == nil, "a removed entity's handle still names something")
 }
+
+/*
+	Two groups whose children have the same names as each other -- what the
+	editor makes the moment a shot is duplicated, and what `find_entity` alone
+	cannot get past.
+
+		cameras
+		  fixed_angle_one   camera  bounds
+		  fixed_angle_two   camera  bounds
+*/
+@(private = "file")
+two_shot_groups :: proc(level: ^Level) {
+	named :: proc(level: ^Level, id, parent: u64, name: string, position: [3]f32) {
+		append(&level.entities, Entity{
+			id        = id,
+			parent    = parent,
+			name      = strings.clone(name, level_allocator(level)),
+			transform = {position = position, rotation = {0, 0, 0, 1}, scale = {1, 1, 1}},
+		})
+	}
+
+	named(level, 1, 0, "cameras",         {0, 0, 0})
+	named(level, 2, 1, "fixed_angle_one", {10, 0, 0})
+	named(level, 3, 2, "camera",          {0, 2, 0})
+	named(level, 4, 2, "bounds",          {0, 0, 5})
+	named(level, 5, 1, "fixed_angle_two", {-10, 0, 0})
+	named(level, 6, 5, "camera",          {0, 3, 0})
+	named(level, 7, 5, "bounds",          {0, 0, -5})
+}
+
+@(test)
+test_a_path_reaches_the_child_that_shares_its_name_with_another :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	two_shot_groups(&level)
+	update_level(&level)
+
+	// The premise: by name alone, both lookups answer the same entity, which is
+	// the bug this is here to fix rather than a quirk of the fixture.
+	first, found := find_entity(&level, "camera")
+	testing.expect(t, found, "find_entity missed a name that is there")
+	testing.expect_value(t, first.id, 3)
+
+	one, ok_one := find_entity_path(&level, "fixed_angle_one/camera")
+	two, ok_two := find_entity_path(&level, "fixed_angle_two/camera")
+	testing.expect(t, ok_one && ok_two, "a path missed a child that is there")
+	testing.expect_value(t, one.id, 3)
+	testing.expect_value(t, two.id, 6)
+
+	// And the whole way down from the root of the group.
+	deep, ok_deep := find_entity_path(&level, "cameras/fixed_angle_two/bounds")
+	testing.expect(t, ok_deep, "a three-name path missed")
+	testing.expect_value(t, deep.id, 7)
+
+	// The world transform is the group's plus the child's, so a path is worth
+	// having only if it answers the right one: -10 + 0, not 10 + 0.
+	expect_near(t, get_level_entity_transform(&level, "fixed_angle_two/camera"), {-10, 3, 0},
+		"a path read the wrong group's camera")
+}
+
+@(test)
+test_a_path_that_names_nothing_is_not_found :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	two_shot_groups(&level)
+	update_level(&level)
+
+	for path in ([]string{
+		"",                              // nothing at all
+		"fixed_angle_one/",              // a trailing separator
+		"/fixed_angle_one",              // a leading one
+		"cameras//fixed_angle_one",      // a doubled one
+		"fixed_angle_one/lens",          // a child that is not there
+		"fixed_angle_one/camera/bounds", // a grandchild of a leaf
+		"bounds/camera",                 // the right names, the wrong way round
+		"cameras/camera",                // a grandchild named as a child
+	}) {
+		_, found := find_entity_path(&level, path)
+		testing.expectf(t, !found, "%q was found and should not have been", path)
+	}
+}
+
+@(test)
+test_children_are_the_direct_ones_in_list_order :: proc(t: ^testing.T) {
+	level := create_level()
+	defer destroy_level(&level)
+
+	two_shot_groups(&level)
+	update_level(&level)
+
+	group, _ := find_entity(&level, "cameras")
+
+	children := level_children(&level, group, context.temp_allocator)
+	defer delete(children, context.temp_allocator)
+
+	// The two groups and not their four children: one level down, so a shot
+	// gaining a part cannot turn into another shot here.
+	testing.expect_value(t, len(children), 2)
+	testing.expect_value(t, children[0].id, 2)
+	testing.expect_value(t, children[1].id, 5)
+
+	// A handle whose entity has gone answers nothing rather than answering the
+	// roots, which is what an id of 0 would have matched.
+	gone := level_children(&level, Entity_Handle{index = 99, id = 404}, context.temp_allocator)
+	testing.expect(t, gone == nil, "a dead handle listed children")
+}

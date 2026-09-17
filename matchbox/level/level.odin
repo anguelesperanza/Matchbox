@@ -151,6 +151,12 @@ Entity :: struct {
 	// model component is always whole by the time anything reads it.
 	instance: u64,
 
+	// Where a shot is taken from, and what it can see. Position and aim come
+	// from the entity's world matrix, so only the lens is here -- see
+	// camera.odin. The editor can look through one; a game reads
+	// `get_level_camera`.
+	camera: Maybe(Camera_Component),
+
 	// A box or a sphere: a spawn point, an area that triggers something, the
 	// zone a fixed camera shot is framed in. See shape.odin -- the editor draws
 	// these, and a game reads `shape_bounds` or `shape_contains`.

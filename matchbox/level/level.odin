@@ -98,6 +98,10 @@ Level_Runtime :: struct {
 	// logged again.
 	models: map[string]^mb.Model,
 
+	// The loaded skybox, and which path and kind it was loaded from
+	// (sky.odin).
+	sky: Sky_Runtime,
+
 	// Rebuilt by `update_level` each frame: where each id is in `entities`,
 	// and the scratch space resolving parents needs, kept rather than
 	// allocated every frame.
@@ -108,6 +112,12 @@ Level_Runtime :: struct {
 
 Level_Settings :: struct {
 	background: [4]f32,
+
+	// The skybox drawn behind everything, or none (sky.odin). In the level
+	// rather than in the editor, because an outdoor area is built against its
+	// sky and a sky only the editor knew about would be a backdrop that lies
+	// about the game.
+	sky: Sky_Settings,
 
 	// Saved whole rather than as a level-owned copy of some of its fields, so
 	// that every lighting feature Matchbox gains is in the file and the
@@ -218,6 +228,11 @@ create_level :: proc(allocator := context.allocator) -> Level {
 // frames -- with the allocator the level was made with.
 destroy_level :: proc(level: ^Level) {
 	allocator := level_allocator(level)
+
+	// Before the entities, so the sky's own copy of its path is freed out of
+	// the same allocator while there still is one.
+	unload_level_sky(level)
+	delete(level.settings.sky.path, allocator)
 
 	for &entity in level.entities {
 		delete(entity.name, allocator)

@@ -12,7 +12,11 @@ package walk_level_example
 		level.update_level(&yard)                        where everything is
 		level.level_lights(&yard, ...) -> mb.set_lights  the level's lights, plus any of the game's
 		level.draw_level_shadow_casters(&yard)           before the 3D pass
+		level.draw_level_sky(&yard)                      first inside it
 		level.draw_level(&yard)                          inside it
+
+	The sky is first in the pass because a skybox writes no depth: everything
+	drawn afterwards covers it, and anything drawn before it is covered.
 
 	The only model is `assets/cube.gltf`, a white unit cube written by
 	`assets/make_cube.py`, placed, scaled and tinted per entity.
@@ -133,6 +137,7 @@ main :: proc() {
 		level.draw_level_shadow_casters(&yard)
 
 		mb.begin_drawing_3d(rig.camera)
+		level.draw_level_sky(&yard)
 		level.draw_level(&yard)
 		mb.end_drawing_3d()
 

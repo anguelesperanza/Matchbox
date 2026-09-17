@@ -25,8 +25,8 @@ Level_Error :: union #shared_nil {
 }
 
 /*
-	Reads a level file, loads every model it names and works out where
-	everything is -- ready to draw.
+	Reads a level file, loads every model and the sky it names, and works out
+	where everything is -- ready to draw.
 
 	What was read but could not be used -- an unknown enum name, a repaired
 	parent, a model file that is not there -- is **logged, not returned**: the
@@ -53,6 +53,7 @@ load_level :: proc(path: string, allocator := context.allocator) -> (level: Leve
 	for problem in problems do log.warnf("%s: %s", path, problem)
 
 	load_level_models(&level)
+	load_level_sky(&level)
 	update_level(&level)
 	return level, nil
 }

@@ -245,9 +245,10 @@ current_aspect :: proc() -> f32 {
 	is open, but a general shader API is not what this is.
 */
 Post_Effect :: enum {
-	NONE, // the target drawn as it is, which is still a pass and still useful
-	PSX,  // coarse pixels, ordered dither, 15-bit colour, scanlines
-	VHS,  // tape wobble, chroma smear, tracking band, grain
+	NONE,     // the target drawn as it is, which is still a pass and still useful
+	PSX,      // coarse pixels, ordered dither, 15-bit colour, scanlines
+	VHS,      // tape wobble, chroma smear, tracking band, grain
+	PIXELATE, // coarse pixels and nothing else -- PSX's first step alone
 }
 
 /*
@@ -258,8 +259,20 @@ Post_Effect :: enum {
 	the window -- which is why an effect costs a fragment shader and nothing
 	else.
 
-	`grid` is the PSX effect's coarse pixel size and is ignored by the others.
-	320x240 is a PlayStation; larger is a cleaner picture.
+	`grid` is the number of coarse pixels across and down for `.PSX` and
+	`.PIXELATE`, and is ignored by the others. 320x240 is a PlayStation; larger
+	is a cleaner picture. Pass the same grid as `Psx_Geometry.grid` when
+	vertices are snapped, so that triangle edges land on the coarse pixels'
+	edges.
+
+	**Both sample the scene on the grid rather than rendering it at that
+	size.** The scene is still drawn at full resolution and then thrown mostly
+	away, so a coarse grid costs more than no effect rather than less. The
+	picture it gives differs from a real low-resolution render in one way worth
+	knowing: textures are sampled from their detailed mip levels, so detail
+	crawls inside each coarse pixel as the camera moves, where a real 320x240
+	render would pick a blurrier, steadier level. The PlayStation had no mip
+	levels at all and crawled the same way.
 
 	Call it after `end_drawing_target`, with the window as the destination.
 */
@@ -278,6 +291,9 @@ draw_post :: proc(target: Render_Target, effect: Post_Effect = .NONE, grid: [2]f
 		// one texel rather than a blend of four. Smoothing here would undo the
 		// entire effect.
 		pipeline, sampler = r.pipelines.psx, r.sprite_sampler
+	case .PIXELATE:
+		// Nearest, for the same reason as PSX: it is PSX's own snap.
+		pipeline, sampler = r.pipelines.pixelate, r.sprite_sampler
 	case .VHS:
 		// Linear, because this one samples at arbitrary offsets -- the barrel
 		// curve, the chroma taps, the ghost -- and nearest makes all of them

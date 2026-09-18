@@ -21,16 +21,29 @@ package post_example
 	goes into a texture, and one full-screen quad reads that texture and writes
 	the window.
 
-	Press 1, 2, 3:
+	Press 1, 2, 3, 4:
 
 	  - **1 — none.** The target drawn back as it is. Still a full-screen pass,
-	    and the honest baseline to judge the other two against
+	    and the honest baseline to judge the others against
 	  - **2 — VHS.** Barrel curve, tape wobble, a tracking band that moves a
 	    couple of times a second, chroma smeared sideways, grain, and head noise
 	    in the strip at the bottom
 	  - **3 — PSX.** Sampled on a coarse grid, dithered with a Bayer matrix, cut
 	    to five bits a channel, and scanlined. Press [ and ] to make the grid
 	    coarser or finer -- 320x240 is a PlayStation
+	  - **4 — pixelate.** PSX's coarse grid alone, without the dither, the
+	    colour cut or the scanlines
+
+	And two that are not post effects at all, because they happen while the
+	models are drawn rather than to the finished picture -- see
+	`Psx_Geometry`:
+
+	  - **V — vertex snap.** Every vertex rounded to a corner of the same grid,
+	    so edges jitter from coarse pixel to coarse pixel as you walk
+	  - **T — affine textures.** Textures mapped without perspective
+	    correction, so they swim and bend on the props as the camera moves
+
+	All three together, on the same grid, is the PlayStation's picture.
 
 	**The HUD is drawn after the effect and is not filtered**, which is
 	deliberate and is what PsxGame does: the world is a video signal and the
@@ -103,11 +116,13 @@ main :: proc() {
 	effect := mb.Post_Effect.PSX
 	grid   := [2]f32{320, 240}
 
-	mb.set_lighting({
+	lighting := mb.Lighting_Settings{
 		enabled  = true,
 		ambient  = {color = {0.35, 0.35, 0.55, 1}},
 		fog      = {enabled = true, color = FOG_COLOR, start = 3, end = 12},
-	})
+		psx      = {grid = grid},
+	}
+	mb.set_lighting(lighting)
 	mb.set_cursor_locked(true)
 
 	for mb.is_running() {
@@ -123,9 +138,23 @@ main :: proc() {
 		if mb.is_key_pressed(._1) do effect = .NONE
 		if mb.is_key_pressed(._2) do effect = .VHS
 		if mb.is_key_pressed(._3) do effect = .PSX
+		if mb.is_key_pressed(._4) do effect = .PIXELATE
 
 		if mb.is_key_pressed(.LEFTBRACKET)  do grid = {max(grid.x * 0.5, 40),  max(grid.y * 0.5, 30)}
 		if mb.is_key_pressed(.RIGHTBRACKET) do grid = {min(grid.x * 2, 1280), min(grid.y * 2, 720)}
+
+		// The snap wants the grid the effect cuts the picture into, so edges
+		// land on coarse pixels' edges. set_lighting is only called when
+		// something changed -- it is scene state, not a per-frame call.
+		psx := mb.Psx_Geometry{
+			snap_vertices   = lighting.psx.snap_vertices ~ mb.is_key_pressed(.V),
+			affine_textures = lighting.psx.affine_textures ~ mb.is_key_pressed(.T),
+			grid            = grid,
+		}
+		if psx != lighting.psx {
+			lighting.psx = psx
+			mb.set_lighting(lighting)
+		}
 
 		if mb.is_cursor_locked() {
 			mb.first_person_walk(&rig, &player, 4, mb.get_delta_time())
@@ -167,16 +196,18 @@ main :: proc() {
 
 		// --- the HUD, after the filter, unfiltered ---
 		font := &mb.mbi.font
-		mb.draw_text(font, "1 none, 2 VHS, 3 PSX   [ ] grid   WASD walk, ESC pointer", 20, 40, mb.WHITE)
+		mb.draw_text(font, "1 none, 2 VHS, 3 PSX, 4 pixelate   [ ] grid   V snap, T affine   WASD walk, ESC pointer", 20, 40, mb.WHITE)
 
 		name := "none"
 		switch effect {
-		case .PSX:  name = fmt.tprintf("PSX  grid %.0f x %.0f", grid.x, grid.y)
-		case .VHS:  name = "VHS"
-		case .NONE: name = "none"
+		case .PSX:      name = fmt.tprintf("PSX  grid %.0f x %.0f", grid.x, grid.y)
+		case .PIXELATE: name = fmt.tprintf("pixelate  grid %.0f x %.0f", grid.x, grid.y)
+		case .VHS:      name = "VHS"
+		case .NONE:     name = "none"
 		}
 		mb.draw_text(font, fmt.tprintf("effect: %s", name), 20, 70, mb.WHITE)
-		mb.draw_text(font, "this text is drawn after the effect, so it stays sharp", 20, 100, mb.WHITE)
+		mb.draw_text(font, fmt.tprintf("vertex snap: %v   affine textures: %v", lighting.psx.snap_vertices, lighting.psx.affine_textures), 20, 100, mb.WHITE)
+		mb.draw_text(font, "this text is drawn after the effect, so it stays sharp", 20, 130, mb.WHITE)
 
 		mb.end_drawing()
 	}

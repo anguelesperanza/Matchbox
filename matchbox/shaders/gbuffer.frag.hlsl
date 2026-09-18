@@ -54,12 +54,13 @@ cbuffer Material : register(b0, space3)
 #include "surface.hlsli"
 #include "brdf/contract.hlsli" // SHADING_* only -- gbuffer_encode's own switch
 #include "gbuffer.hlsli"
+#include "psx_geometry.hlsli"
 
 struct PSInput
 {
     float4 pos    : SV_Position;
     float3 normal : TEXCOORD0;
-    float2 uv     : TEXCOORD1;
+    float3 uv     : TEXCOORD1; // uv * q, q -- see psx_uv (psx_geometry.hlsli)
     float3 world  : TEXCOORD2; // unread here -- position is not part of the G-buffer, see gbuffer.hlsli
 };
 
@@ -73,10 +74,12 @@ struct PSOutput
 
 PSOutput main(PSInput input)
 {
-    float4 sampled      = tex.Sample(smp, input.uv);
-    float4 metal_rough  = metal_rough_tex.Sample(metal_rough_smp, input.uv);
-    float  occlusion_tx = occlusion_tex.Sample(occlusion_smp, input.uv).r;
-    float3 emissive_tx  = emissive_tex.Sample(emissive_smp, input.uv).rgb;
+    float2 uv = psx_uv_resolve(input.uv);
+
+    float4 sampled      = tex.Sample(smp, uv);
+    float4 metal_rough  = metal_rough_tex.Sample(metal_rough_smp, uv);
+    float  occlusion_tx = occlusion_tex.Sample(occlusion_smp, uv).r;
+    float3 emissive_tx  = emissive_tex.Sample(emissive_smp, uv).rgb;
 
     // Only the fields gbuffer_encode actually reads -- position/view/alpha
     // are not part of the G-buffer at all (gbuffer.hlsli's own top comment),

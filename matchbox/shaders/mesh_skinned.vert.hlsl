@@ -6,16 +6,22 @@
     shaders do not know or care which vertex shader fed them, and a skinned
     model is lit, fogged and textured by exactly the code an unskinned one is.
 
-    Uniform layout must match matchbox.Mesh_Vert_Data exactly: 192 bytes in
+    Uniform layout must match matchbox.Mesh_Vert_Data exactly: 208 bytes in
     b0. Skin_Vert_Data in b1 is one uint now -- see below.
 */
 #pragma pack_matrix(column_major)
+
+#include "psx_geometry.hlsli"
 
 cbuffer Mesh_Vert_Data : register(b0, space1)
 {
     float4x4 mvp;
     float4x4 model;
     float4x4 normal_matrix;
+
+    float2   snap_grid;     // Psx_Geometry: cells to snap to, or zero for off
+    float    affine;        // Psx_Geometry: 1 for affine texture mapping
+    float    _pad;
 };
 
 /*
@@ -59,7 +65,7 @@ struct VSOutput
 {
     float4 pos    : SV_Position;
     float3 normal : TEXCOORD0;
-    float2 uv     : TEXCOORD1;
+    float3 uv     : TEXCOORD1; // uv * q, q -- see psx_uv
     float3 world  : TEXCOORD2;
 };
 
@@ -99,7 +105,10 @@ VSOutput main(VSInput input)
 
     VSOutput output;
 
-    output.pos   = mul(mvp,   float4(skinned_pos.xyz, 1.0));
+    // Snapped for where it lands on screen and nothing else: `world` below is
+    // the unsnapped point, so lighting, fog and shadow lookups do not wobble
+    // with the edges. The shadow pass pushes a zero grid -- see draw_model_immediate.
+    output.pos   = psx_snap(mul(mvp, float4(skinned_pos.xyz, 1.0)), snap_grid);
     output.world = mul(model, float4(skinned_pos.xyz, 1.0)).xyz;
 
     /*
@@ -112,7 +121,7 @@ VSOutput main(VSInput input)
         two are the same up to a length the normalize below removes.
     */
     output.normal = normalize(mul(normal_matrix, float4(skinned_normal, 0.0)).xyz);
-    output.uv     = input.uv;
+    output.uv     = psx_uv(input.uv, output.pos, affine);
 
     return output;
 }

@@ -727,6 +727,7 @@ draw_model_immediate :: proc(
 		// it.
 		normal_matrix = linalg.matrix4_inverse_transpose_f32(model_matrix),
 	}
+	vert_data.snap_grid, vert_data.affine = psx_geometry_switches(r.lighting.settings.psx, r.in_shadow_pass)
 
 	skin_data: Skin_Vert_Data
 

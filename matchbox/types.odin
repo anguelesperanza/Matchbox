@@ -179,7 +179,8 @@ Skin_Vert_Data :: struct #align(16) {
 	joint_offset: u32,
 }
 
-// 192 bytes: three whole matrices, one after another.
+// 208 bytes: three whole matrices, one after another, then one float4 of
+// Psx_Geometry switches.
 //
 // The normal matrix is 4x4 rather than the 3x3 it mathematically is, because a
 // float3x3 in a cbuffer is three separate 16-byte rows with padding between
@@ -189,6 +190,14 @@ Mesh_Vert_Data :: struct #align(16) {
 	mvp:           matrix[4, 4]f32,
 	model:         matrix[4, 4]f32,
 	normal_matrix: matrix[4, 4]f32,
+
+	// Psx_Geometry (psx_geometry.odin), per draw rather than per frame so the
+	// shadow pass can push zeroes for the same models -- see
+	// draw_model_immediate. `affine` is a float 0 or 1 rather than a b32 for
+	// the reason Tonemap_Resolve_Frag_Data's own flags are.
+	snap_grid: [2]f32,
+	affine:    f32,
+	_pad:      f32,
 }
 
 /*

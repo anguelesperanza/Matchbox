@@ -161,10 +161,11 @@ Shaders :: struct {
 	skybox_panorama: ^sdl.GPUShader,
 	skybox_cubemap:  ^sdl.GPUShader,
 
-	// Post-processing. All three take the shared quad vertex shader.
-	post: ^sdl.GPUShader,
-	psx:  ^sdl.GPUShader,
-	vhs:  ^sdl.GPUShader,
+	// Post-processing. All four take the shared quad vertex shader.
+	post:     ^sdl.GPUShader,
+	psx:      ^sdl.GPUShader,
+	vhs:      ^sdl.GPUShader,
+	pixelate: ^sdl.GPUShader,
 
 	/*
 		The bloom chain's own three -- also on the shared quad vertex shader,
@@ -283,9 +284,10 @@ Pipelines :: struct {
 
 	// A render target drawn back over the window, with or without an effect on
 	// the way. Colour-only and depthless, like every other 2D pipeline.
-	post: ^sdl.GPUGraphicsPipeline,
-	psx:  ^sdl.GPUGraphicsPipeline,
-	vhs:  ^sdl.GPUGraphicsPipeline,
+	post:     ^sdl.GPUGraphicsPipeline,
+	psx:      ^sdl.GPUGraphicsPipeline,
+	vhs:      ^sdl.GPUGraphicsPipeline,
+	pixelate: ^sdl.GPUGraphicsPipeline,
 
 	// The tonemap resolve -- see Shaders.tonemap's own comment. Built against
 	// the swapchain's own format like every other 2D pipeline here: it writes

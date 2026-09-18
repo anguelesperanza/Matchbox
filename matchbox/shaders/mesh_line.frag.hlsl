@@ -43,7 +43,7 @@ struct PSInput
 {
     float4 pos    : SV_Position;
     float3 normal : TEXCOORD0;
-    float2 uv     : TEXCOORD1;
+    float3 uv     : TEXCOORD1; // uv * q, q -- see psx_uv (psx_geometry.hlsli)
     float3 world  : TEXCOORD2;
 };
 

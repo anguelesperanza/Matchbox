@@ -538,7 +538,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	#assert(size_of(Font_Frag_Data)    == 16)
 	#assert(size_of(Rect_Frag_Data)  == 16)
 	#assert(size_of(Vertex3D)          == 32)
-	#assert(size_of(Mesh_Vert_Data)    == 192)
+	#assert(size_of(Mesh_Vert_Data)    == 208)
 	#assert(size_of(Tint_Frag_Data)    == 16)
 	#assert(size_of(Material_Frag_Data) == 112)
 	#assert(size_of(Light_Uniform)     == 112)
@@ -708,13 +708,15 @@ init :: proc(title: string, width: i32, height: i32) {
 		.FRAGMENT, DEFERRED_LIGHTING_SAMPLER_COUNT, 4, 3)
 
 	// Post-processing. One sampler -- the render target -- and one uniform
-	// block shared by all three, so an effect that ignores a field ignores it.
+	// block shared by all four, so an effect that ignores a field ignores it.
 	mbi.renderer.shaders.post = create_builtin_shader(
 		#load("shaders/post.frag.spv"), #load("shaders/post.frag.dxil"), .FRAGMENT, 1)
 	mbi.renderer.shaders.psx = create_builtin_shader(
 		#load("shaders/psx.frag.spv"), #load("shaders/psx.frag.dxil"), .FRAGMENT, 1)
 	mbi.renderer.shaders.vhs = create_builtin_shader(
 		#load("shaders/vhs.frag.spv"), #load("shaders/vhs.frag.dxil"), .FRAGMENT, 1)
+	mbi.renderer.shaders.pixelate = create_builtin_shader(
+		#load("shaders/pixelate.frag.spv"), #load("shaders/pixelate.frag.dxil"), .FRAGMENT, 1)
 
 	// The tonemap resolve -- **two** samplers since P7a (the HDR target at
 	// t0, the bloom chain's level 0 at t1, which is a 1x1 black placeholder
@@ -818,6 +820,7 @@ init :: proc(title: string, width: i32, height: i32) {
 	mbi.renderer.pipelines.post    = create_pipeline(mbi.renderer.shaders.post)
 	mbi.renderer.pipelines.psx     = create_pipeline(mbi.renderer.shaders.psx)
 	mbi.renderer.pipelines.vhs     = create_pipeline(mbi.renderer.shaders.vhs)
+	mbi.renderer.pipelines.pixelate = create_pipeline(mbi.renderer.shaders.pixelate)
 	mbi.renderer.pipelines.tonemap = create_pipeline(mbi.renderer.shaders.tonemap)
 
 	/*
@@ -1459,6 +1462,7 @@ cleanup :: proc() {
 	if mbi.renderer.pipelines.post    != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.post)
 	if mbi.renderer.pipelines.psx     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.psx)
 	if mbi.renderer.pipelines.vhs     != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.vhs)
+	if mbi.renderer.pipelines.pixelate != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.pixelate)
 	if mbi.renderer.pipelines.tonemap != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.tonemap)
 	if mbi.renderer.pipelines.bloom_prefilter  != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_prefilter)
 	if mbi.renderer.pipelines.bloom_downsample != nil do sdl.ReleaseGPUGraphicsPipeline(device, mbi.renderer.pipelines.bloom_downsample)
@@ -1491,6 +1495,7 @@ cleanup :: proc() {
 	if mbi.renderer.shaders.post != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.post)
 	if mbi.renderer.shaders.psx  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.psx)
 	if mbi.renderer.shaders.vhs  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.vhs)
+	if mbi.renderer.shaders.pixelate != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.pixelate)
 	if mbi.renderer.shaders.tonemap != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.tonemap)
 	if mbi.renderer.shaders.bloom_prefilter  != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_prefilter)
 	if mbi.renderer.shaders.bloom_downsample != nil do sdl.ReleaseGPUShader(device, mbi.renderer.shaders.bloom_downsample)

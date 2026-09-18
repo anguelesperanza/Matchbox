@@ -284,6 +284,17 @@ Lighting_Settings :: struct {
 		The zero value is off.
 	*/
 	volumetric: Volumetric,
+
+	/*
+		Vertex snapping and affine texture mapping, for a PlayStation look --
+		see `Psx_Geometry` (psx_geometry.odin). Here rather than on `post`
+		because neither is done to a finished picture: both happen while a
+		model is drawn, in the mesh shaders.
+
+		The zero value is both off, which is the picture every scene got
+		before this existed.
+	*/
+	psx: Psx_Geometry,
 }
 
 /*
@@ -389,6 +400,7 @@ lighting_settings_normalized :: proc(settings: Lighting_Settings) -> Lighting_Se
 	s.post    = post_settings_normalized(s.post)
 	s.ssao       = ssao_settings_normalized(s.ssao)
 	s.volumetric = volumetric_settings_normalized(s.volumetric)
+	s.psx        = psx_geometry_normalized(s.psx)
 
 	return s
 }

@@ -103,21 +103,24 @@ cbuffer Material : register(b0, space3)
 };
 
 #include "lighting_core.hlsli"
+#include "psx_geometry.hlsli"
 
 struct PSInput
 {
     float4 pos    : SV_Position;
     float3 normal : TEXCOORD0;
-    float2 uv     : TEXCOORD1;
+    float3 uv     : TEXCOORD1; // uv * q, q -- see psx_uv (psx_geometry.hlsli)
     float3 world  : TEXCOORD2;
 };
 
 float4 main(PSInput input) : SV_Target0
 {
-    float4 sampled      = tex.Sample(smp, input.uv);
-    float4 metal_rough  = metal_rough_tex.Sample(metal_rough_smp, input.uv);
-    float  occlusion_tx = occlusion_tex.Sample(occlusion_smp, input.uv).r;
-    float3 emissive_tx  = emissive_tex.Sample(emissive_smp, input.uv).rgb;
+    float2 uv = psx_uv_resolve(input.uv);
+
+    float4 sampled      = tex.Sample(smp, uv);
+    float4 metal_rough  = metal_rough_tex.Sample(metal_rough_smp, uv);
+    float  occlusion_tx = occlusion_tex.Sample(occlusion_smp, uv).r;
+    float3 emissive_tx  = emissive_tex.Sample(emissive_smp, uv).rgb;
 
     Surface surface;
     surface.position      = input.world;

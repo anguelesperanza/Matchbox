@@ -1,6 +1,44 @@
 # Matchbox
 ---
-**Highly Experimental**
+
+STATUS: **ARCHIVED**
+Due to my complete lack of understanding of Graphics Programming and that this code base is AI Generated over the
+course of a few months; Matchbox is currenlty archived.
+
+I've encounted issues I don't quite know how to solve due to never learning a graphics api, and while I could
+weed my way through it with Claude; which is what I've done this far; I've started noticing gaps appearing
+randomly. Fixes to those gaps, create more gaps and the cycle just repeats.
+
+The point of matchbox was to add to it; as I needed more features to make games. At somepoint though, I lost
+the plot and just started adding things to it. 
+
+I might spend some time learning a graphics api on my own but it's not a subject I'm super interested in
+in the first place. I like the idea of graphics programming, but I think the API implementations are hard to follow
+and learning resources are either out dated, or hard to follow.
+
+The inner matchbox folder -> This contains the api implementation; should work just fine.
+eko should work just fine as well.
+tether should work just fine, though that needs a bunch of polish it doesn't have so it's sort of a pain to use
+
+The examples may not work. They should have been kept updated as changes to the api are made, but they may point
+resources not in the repo as claude got hooked on importing resources from other projects 
+
+It uses SDL 3 and SDL_GPU.
+
+Matchbox follows very specific style guide for how I like to program. This means enums, struct, proc names are
+all formatted in very specific ways. You can find the specific style guide in `CLAUDE.md`.
+
+Ideally, this should make the repo more on the human readable side of AI generated code since it follows my
+personal preference of programing, and not whatever way Claude decided things should look.
+
+Everything in this repo is left as is, and wasn't touched up for the public switch.
+
+**I don't recommend using this for projects.** I've made this repo public so others can take a look at how
+things in matchbox are implemented for their own projects.
+
+Maybe I'll come back to this if I learn more graphics programming, but for now, the project remains archived.
+
+--- 
 
 Matchbox is a **WIP** game framework for making video games; built on SDL3, using its GPU API for rendering.
 

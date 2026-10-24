@@ -15,10 +15,13 @@ For example `matchbox.draw_sprite(...)` -> should call 3D311 on PC to handle it,
 
 As this is still in very early stages of development the implementation details are still being worked out.
 
-# First Milestone: 2D
+# First Milestone: D3D11 Backend Working (2D)
 
-As 2D is easier than 3D the first milestone will be for Matchbox to be able to compile 2D games to both PC and 3DS.
-3D will come after and is not an immediate priority.
+As 2D is easier than 3D the first milestone will be for Matchbox to be able to compile 2D games PC
+
+# Second Milestone: 3DS Backend Working (2D)
+
+After PC is working the next milstone will be to connect it to the 03DX for 3DS support
 
 # Why DirectX 11 (D3D11)
 

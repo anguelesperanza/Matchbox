@@ -8,9 +8,6 @@ render_start :: proc() {
 }
 
 render_end :: proc() {
-	win.InvalidateRect(hWnd = mbi.window, lpRect = nil, bErase = win.TRUE)
-	win.UpdateWindow(hWnd = mbi.window)
-
 }
 
 render_sprite :: proc(sprite:Sprite) {

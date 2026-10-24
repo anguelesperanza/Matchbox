@@ -3,6 +3,7 @@
 Matchbox is a graphics framework making games for PC and 3DS using a custom unified API and the Odin programing language.
 
 PC Backend: `DirectX 11 (D3D11)`
+
 3DS Backend: `O3DX`
 
 # Unified API
@@ -21,17 +22,19 @@ As 2D is easier than 3D the first milestone will be for Matchbox to be able to c
 
 # Why DirectX 11 (D3D11)
 
-While D3D11 is an old graphics API; it's not as complicated as D3D12 or Metal. As I do not know how to graphics program,
+While D3D11 is an old graphics API; it's not as complicated as D3D12 or Vulkan. As I do not know how to graphics program,
 the options I felt comfortable picking where:
   - D3D11
   - OpenGL
   - WGPU
 
-While I do have the most experience with WGPU (see: https://github.com/anguelesperanza/Odin-wgpu-win32-learnings), every update breaks it.
-More than an graphics API with modern features, I care more about a Graphics API that's stable. As such, WGPU was out of the question.
+While I do have the most experience with WGPU (see: https://github.com/anguelesperanza/Odin-wgpu-win32-learnings), it breaks with every update. This does not
+make it ideal for learning graphics programing.
 
-OpenGL was a good candiate and it has the most documentation that's easily accessible and readable for beginners; it's my primary PC target is Windows not Linux,
-Outside of documentation (which is a good reason), I don't see a reason to use OpenGL over D3D11.
+More than an graphics API with modern features, I care more about a graphics API that's stable. As such, WGPU was out of the question.
+
+OpenGL was a good candiate and it has the most documentation that's easily accessible and readable for beginners.
+However, my primary PC target is Windows not Linux and outside of documentation (which is a good reason), I don't see a reason to use OpenGL over D3D11.
 
 D3D11 was picked as it makes the most sense to me.
   - I develop on windows mainly
@@ -41,7 +44,9 @@ D3D11 was picked as it makes the most sense to me.
 # Why 3DS
 
 I spent good money on my `New 3DS LL`
+
 I spent a lot of my Claude tokens writting bindings for `Cirtro2D`, `Citro3D`, `Citru` to show that Odin can run on a 3DS.
+
 I spent a good amount of my personal time modding my 3DS to run homebrew.
 
 I will be using it somewhere, somehow.

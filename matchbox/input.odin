@@ -1,5 +1,18 @@
 package matchbox
 
+/*
+	Input
+	=====
+	Handles the input mapping
+
+	On windows: Creates an enum of names based on the
+	VK (Virtual Keys) that win32 supports, and assigs those
+	VK Key values to each value in the enum
+
+	--> Usage requires #sparse keyward as there are gaps in the index
+	enum values index
+*/
+
 import win "core:sys/windows"
 
 Key :: enum {
@@ -81,10 +94,12 @@ Key :: enum {
 	
 }
 
+/*Checks if a key is pressed*/
 is_key_pressed :: proc(key:Key) -> bool {
 	return mbi.is_keys_pressed[key]
 }
 
+/*Checks if a key is held*/
 is_key_held :: proc(key:Key) -> bool {
 	return false
 }

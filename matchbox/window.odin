@@ -4,12 +4,15 @@ package matchbox
 /*
 	Window
 	======
-	This file handles the window creation events for D3D11
+	This file handles the window creation events
+
+	For Windows: this handles win32 and D3D11 Setup
+
+	For 3DS: TBD
 */
 
 // Core
 import "core:log"
-import "core:slice"
 import win "core:sys/windows"
 
 // Vendor
@@ -190,15 +193,15 @@ init :: proc(title:string, width:i32, height:i32) {
 
 	// Debug Layer
 	when ODIN_DEBUG {
-		device_debug:^d3d11.IDBUG
-		device->QueryInterface(d3d11.IDebug_UUID, (^rawptr)(&device_debug))
+		device_debug:^d3d11.IDebug
+		mbi.device->QueryInterface(d3d11.IDebug_UUID, (^rawptr)(&device_debug))
 
 		if device_debug != nil {
-			info_queue:^d3d11.IIInfoQueue
+			info_queue:^d3d11.IInfoQueue
 			res := device_debug->QueryInterface(d3d11.IInfoQueue_UUID, (^rawptr)(&info_queue))
 			if win.SUCCEEDED(res) {
 				info_queue->SetBreakOnSeverity(.CORRUPTION, true)
-				info_queue->SetBreakOnSEverity(.ERROR, true)
+				info_queue->SetBreakOnSeverity(.ERROR, true)
 
 
 				allow_severities := []d3d11.MESSAGE_SEVERITY {.CORRUPTION, .ERROR, .INFO}
@@ -215,7 +218,6 @@ init :: proc(title:string, width:i32, height:i32) {
 			device_debug->Release()
 		}
 	}
-
 
 	// Create swapchain
 	{
@@ -365,40 +367,23 @@ init :: proc(title:string, width:i32, height:i32) {
         ensure(win.SUCCEEDED(res), "Input layout creation failed")
 	}
 
-	// Create vertex buffer -- Not sure if vertex_* goes in mbi or not
-	// vertex_count:u32
-	// vertex_stride:u32
-	// vertex_offset:u32
 	{
-
-		// Triangle vertex data
-        vertex_data := []f32 {
-        //      x,    y,        r, g, b, a
-                0,    0.5,      0, 1, 0, 1,
-                0.5,  -0.5,     1, 0, 0, 1,
-                -0.5, -0.5,     0, 0, 1, 1,
-        }
-
-        mbi.vertex_stride = size_of(f32) * 6
-        mbi.vertex_count = u32(len(vertex_data) / 6)
-        mbi.vertex_offset = 0
-
 		vertex_buffer_desc := d3d11.BUFFER_DESC {
-			ByteWidth = u32(slice.size(vertex_data)),
-			Usage = .IMMUTABLE,
+			ByteWidth = MAX_BATCH_VERTICIES * size_of(Vertex),
+			Usage = .DYNAMIC,
 			BindFlags = {.VERTEX_BUFFER},
-		}
-		vertex_subresource_data := d3d11.SUBRESOURCE_DATA {
-			pSysMem = raw_data(vertex_data)
+			CPUAccessFlags = {.WRITE},
 		}
 
 		res := mbi.device->CreateBuffer(
 			pDesc = &vertex_buffer_desc,
-			pInitialData = &vertex_subresource_data,
-			ppBuffer = &mbi.vertex_buffer
+			pInitialData = nil,
+			ppBuffer = &batch.gpu_buffer,
 		)
 
 		ensure(win.SUCCEEDED(res), "Create VertexBuffer Failed")
+
+		// TODO: What reserve does and how it works "You also reserve(&batch.vertices, MAX_BATCH_VERTICES) so appending never reallocates."
 		
 	}
 
@@ -431,7 +416,6 @@ get_delta_time :: proc() -> (dt:f64) {
 cleanup :: proc() {
 	log.destroy_console_logger(mbi.logger)
 
-	mbi.vertex_buffer->Release()
 	mbi.input_layout->Release()
 	mbi.pixel_shader_blob->Release()
 	mbi.pixel_shader->Release()
@@ -446,4 +430,3 @@ cleanup :: proc() {
 	mbi.device_context->Release()
 	mbi.device->Release()
 }
-

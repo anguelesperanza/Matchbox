@@ -1,11 +1,14 @@
 package matchbox
 
+/*
+	Events
+	======
+	Handles the events that trigger window callback procedure in window.odin
+*/
+
 import win "core:sys/windows"
 
-import "vendor:directx/d3d11"
-import "vendor:directx/dxgi"
-import "vendor:directx/d3d_compiler"
-import "vendor:directx/d3d_common"
+
 
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {

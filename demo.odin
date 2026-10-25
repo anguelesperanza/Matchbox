@@ -15,49 +15,64 @@ import mb "matchbox"
 
 main :: proc() {
 
-	mb.init("Demo Window", 200, 200)
+	mb.init("Demo Window", 200, 200) // works
 
-	context.logger = mb.get_logger()
-	
+	context.logger = mb.get_logger() // works
+
+	// WIP
+	triangle:mb.Triangle = mb.create_triangle()
+
+	// TODO	
 	player:mb.Sprite = mb.create_sprite(filepath = "path-to-sprite")
 	player.x = 50
 	player.y = 50
 	player.speed = 100
 
+	// TODO
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
 	
-	for mb.is_running() {
-		mb.poll_events()
+	for mb.is_running() { // Works
+		mb.poll_events() // Works
 
+		// Works
 		if mb.is_key_pressed(.F) {
 			log.info("F Pressed")
 		}
+
+		// Works
 		dt := mb.get_delta_time()
 
+		// Works
 		if mb.is_key_pressed(.ESCAPE) {
 			mb.stop_running()
 		}
 
+		// TODO
 		if mb.is_key_held(.D) {
 			player.x += dt * player.speed
 		}
 
-		if mb.is_key_pressed(.SPACE) {
-			mb.play_audio(audio = jump_sound)
-		}
 		
+		if mb.is_key_pressed(.SPACE) {
+			mb.play_audio(audio = jump_sound) // TODO
+		}
+
+		// Works
 		mb.render_start()
 		mb.clear_background(color = {0, 0.4, 0.6, 1})
-		mb.render_triangle()
+		mb.render_triangle(a = {-0.8, 0.2}, b = {-0.4, -0.4}, c = {-1.0, -0.4}, color = {0.3, 0.6, 0.9, 1})
+		mb.render_triangle(a = {0.5, 0.6}, b = {0.9, -0.1}, c = {0.1, -0.1}, color = {0.5, 0.5, 0.5, 1})
 
-		mb.render_sprite(sprite = player)
-		
+		mb.render_sprite(sprite = player) // TODO
+
+		// Works
 		mb.render_end() 
 	}
 
-
+	// TODO
 	mb.destroy(player)
 	mb.destroy(jump_sound)
 
+	// Works
 	mb.cleanup()
 }

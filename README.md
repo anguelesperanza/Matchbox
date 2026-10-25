@@ -6,7 +6,7 @@ PC Backend: `DirectX 11 (D3D11)`
 
 3DS Backend: `O3DX`
 
-# Unified API
+## Unified API
 
 In order to develop for both targets the way I want to, I need to create a unified API. This is a a series of procedures,
 structs, enums, etc, that will compile to both PC and the 3DS.
@@ -15,15 +15,25 @@ For example `matchbox.draw_sprite(...)` -> should call 3D311 on PC to handle it,
 
 As this is still in very early stages of development the implementation details are still being worked out.
 
-# First Milestone: D3D11 Backend Working (2D)
+
+
+
+## Milestones
+
+There are goals that need to be hit before the 2D can be completed; and these milesstones will be to track those
+
+|Milestone|Hit|Status|
+|---------|---|------|
+|Triangle | ~ | WIP - Can render one triangle, but need to render multiple to properly test proc|
+|Textured Quad | - | Not started yet|
 
 As 2D is easier than 3D the first milestone will be for Matchbox to be able to compile 2D games PC
 
-# Second Milestone: 3DS Backend Working (2D)
+## Second Milestone: 3DS Backend Working (2D)
 
 After PC is working the next milstone will be to connect it to the 03DX for 3DS support
 
-# Why DirectX 11 (D3D11)
+## Why DirectX 11 (D3D11)
 
 While D3D11 is an old graphics API; it's not as complicated as D3D12 or Vulkan. As I do not know how to graphics program,
 the options I felt comfortable picking where:
@@ -44,7 +54,7 @@ D3D11 was picked as it makes the most sense to me.
   - Can target linux through Wine/Proton
   - The API is not as complex as OpenGL (so I've heard)
 
-# Why 3DS
+## Why 3DS
 
 I spent good money on my `New 3DS LL`
 
@@ -56,7 +66,7 @@ I will be using it somewhere, somehow.
 
 But also - I want to be able to make games and have them run on the 3DS.
 
-# How and Why Linux Support Works the way it does
+## How and Why Linux Support Works the way it does
 
 TLDR: Wine/Proton
 
@@ -70,7 +80,7 @@ As such, I am taking the `Win32 is the only stable ABI for linux` approach: (htt
 
 Compatability layers like Wine and Proton should be able to handle the exectuables produced by Matchbox.
 
-# History
+## History
 
 Matchbox was previously written fully by AI (Claude) guided by my direction. While development went smoothly,
 due to it being a fully AI coded project; there were issues that kept developing I could not solve or random gaps I wasn't expecting

@@ -29,3 +29,7 @@ examples/animation-layers/assets/
 # What pressing F5 in examples/walk-level writes, to compare against the level
 # it loaded. A local experiment, not part of the example.
 examples/walk-level/levels/yard_saved.level
+
+
+*.pdb
+*.pdb.rdi

@@ -7,6 +7,9 @@ package matchbox
 	procedures I couldn't thematically find a spot for
 */
 
+CONSOLE :: #config(CONSOLE, "PC")
+
+
 
 /* |===============|
    |PROCEDURE GROUP|

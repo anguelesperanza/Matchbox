@@ -2,6 +2,11 @@ package matchbox
 
 import win "core:sys/windows"
 
+import "vendor:directx/d3d11"
+import "vendor:directx/dxgi"
+import "vendor:directx/d3d_compiler"
+import "vendor:directx/d3d_common"
+
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
 	
@@ -10,12 +15,9 @@ poll_events :: proc() {
 
 	event_message:win.MSG
 
-	if win.PeekMessageW(lpMsg = &event_message, hWnd = mbi.window, wMsgFilterMin = 0,wMsgFilterMax = 0,wRemoveMsg = win.PM_REMOVE){
+	for win.PeekMessageW(lpMsg = &event_message, hWnd = mbi.window, wMsgFilterMin = 0,wMsgFilterMax = 0,wRemoveMsg = win.PM_REMOVE){
 		win.TranslateMessage(lpMsg = &event_message)
 		win.DispatchMessageW(lpMsg = &event_message)
-	} else {
-		win.InvalidateRect(hWnd = mbi.window, lpRect = nil, bErase = win.FALSE)
-		win.UpdateWindow(hWnd = mbi.window)
 	}
 }
 

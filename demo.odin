@@ -26,7 +26,6 @@ main :: proc() {
 
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
 	
-
 	for mb.is_running() {
 		mb.poll_events()
 
@@ -48,7 +47,8 @@ main :: proc() {
 		}
 		
 		mb.render_start()
-		mb.clear_background()
+		mb.clear_background(color = {0, 0.4, 0.6, 1})
+		mb.render_triangle()
 
 		mb.render_sprite(sprite = player)
 		

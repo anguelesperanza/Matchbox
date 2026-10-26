@@ -15,9 +15,6 @@ For example `matchbox.draw_sprite(...)` -> should call 3D311 on PC to handle it,
 
 As this is still in very early stages of development the implementation details are still being worked out.
 
-
-
-
 ## Milestones
 
 There are goals that need to be hit before the 2D can be completed; and these milesstones will be to track those

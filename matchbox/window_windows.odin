@@ -43,6 +43,7 @@ Matchbox_Info :: struct {
 	window:win.HWND,
 	is_running:bool,
 	is_keys_pressed: #sparse [Key]bool,
+	is_button_pressed: #sparse [Button]bool,
 	event_message:^win.MSG,
 
 	//D3D11 Values

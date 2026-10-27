@@ -34,6 +34,7 @@ Matchbox_Info :: struct {
 	top_screen:rawptr,
 	bottom_screen:rawptr,
 	is_keys_pressed: #sparse [Key]bool,
+	is_button_pressed: #sparse [Button]bool,
 
 	// Shaders
 	shader_buffer:rawptr,

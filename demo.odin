@@ -34,25 +34,27 @@ main :: proc() {
 	for mb.is_running() { // Works
 		mb.poll_events() // Works
 
-		// Works
-		if mb.is_key_pressed(.F) {
-		}
 
 		// Works
 		dt := mb.get_delta_time()
+		
+		// Works
+		if mb.is_key_pressed(.F) || mb.is_gamepad_pressed(.FACE_UP,0 ) {
+			
+		}
 
 		// Works
-		if mb.is_key_pressed(.N) {
+		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) {
 			mb.stop_running()
 		}
 
 		// TODO
-		if mb.is_key_held(.S) {
+		if mb.is_key_held(.S) || mb.is_gamepad_pressed(.DPAD_LEFT, 0) {
 			player.x += dt * player.speed
 		}
 
 		
-		if mb.is_key_pressed(.A) {
+		if mb.is_key_pressed(.SPACE) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			mb.play_audio(audio = jump_sound) // TODO
 		}
 

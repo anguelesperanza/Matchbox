@@ -7,55 +7,142 @@ package matchbox
 
 	On 3DS -> Mapes to u32 values
 
-	The button layout for keyboard maps to the button layout
-	used by the Citra Emulator
+	There are two struct: Key and Button:
+	
+	Key -> does nothing. It's only there so the application
+	doesn't crash when compiling. The related is_key_* procs
+	all return false
 
-	What's not mapped at this time:
-	circle pad
-	Home
-	Power
-	Circle Mod
-	GPIO14 --> Never noticed this before; not sure what this is
-	Debub --> Probably don't need to map this
+	Button -> This is the struct that the 3DS uses
+	This is where the buttons are mapped for the 3DS
+
 */
 
 import "o3dx/ctru"
 
-Key :: enum u32 {
+Button :: enum u32 {
 
 	// Face Buttons
-    A = ctru.KEY_A,
-    S = ctru.KEY_B,
-    Z = ctru.KEY_X,
-    X = ctru.KEY_Y,
+    FACE_UP = ctru.KEY_X,
+    FACE_DOWN = ctru.KEY_B,
+    FACE_LEFT = ctru.KEY_Y,
+    FACE_RIGHT = ctru.KEY_A,
 
     // DPAD
-    F = ctru.KEY_DRIGHT,
-    H = ctru.KEY_DLEFT,
-    T = ctru.KEY_DDOWN,
-    G = ctru.KEY_DUP,
+    DPAD_UP = ctru.KEY_DUP,
+    DPAD_DOWN = ctru.KEY_DDOWN,
+    DPAD_LEFT = ctru.KEY_DLEFT,
+    DPAD_RIGHT = ctru.KEY_DRIGHT,
 
 	// Shoulder Buttons
-    Q = ctru.KEY_L,
-    W = ctru.KEY_R,
-    _1 = ctru.KEY_ZL,
-    _2  = ctru.KEY_ZR,
+    L = ctru.KEY_L,
+    R = ctru.KEY_R,
+    ZL = ctru.KEY_ZL,
+    ZR  = ctru.KEY_ZR,
 
 	// Misc.
-	M = ctru.KEY_SELECT,
-    N = ctru.KEY_START,
+    START = ctru.KEY_START,
+	SELECT = ctru.KEY_SELECT,
 	// Circle Pad
 		
 	// C-Stick
 }
 
-/*Checks if a key is pressed -- :any is temporary using as stub*/
-is_key_pressed :: proc(key:Key) -> bool {
-	return false
-	// return mbi.is_keys_pressed[key]
+Key :: enum {
+	BACK, 
+	TAB, 
+	CLEAR,
+	RETURN,
+	SHIFT,
+	CONTROL,
+	MENU,
+	PAUSE,
+	CAPITAL,
+	KANA,
+	HANGUEL,
+	HANGUL,
+	IME_ON,
+	JUNJA,
+	FINAL,
+	HANJA,
+	KANJI,
+	IME_OFF,
+	ESCAPE,
+	CONVERT,
+	NONCONVERT,
+	ACCEPT,
+	MODECHANGE,
+	SPACE,
+	PRIOR,
+	NEXT,
+	END,
+	HOME,
+	LEFT,
+	UP,
+	RIGHT,
+	DOWN,
+	SELECT,
+	PRINT,
+	EXECUTE,
+	SNAPSHOT,
+	INSERT,
+	DELETE,
+	HELP,
+    _0,
+    _1,
+    _2,
+    _3,
+    _4,
+    _5,
+    _6,
+    _7,
+    _8,
+    _9,
+	A,
+	B,
+	C,
+	D,
+	E,
+	F,
+	G,
+	H,
+	I,
+	J,
+	K,
+	L,
+	M,
+	N,
+	O,
+	P,
+	Q,
+	R,
+	S,
+	T,
+	U,
+	V,
+	W,
+	X,
+	Y,
+	Z,
 }
 
-/*Checks if a key is held* -- :any is temporary using as stub*/
+
+/*
+	On the 3DS this will check if a gamepad button is pressed
+	gb -> value from the Gamepad_Button enum
+	id -> Useless; used to track the gamepad id however there's only
+		  one gamepad on the 3DS, so it's default is 0
+*/
+is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
+	return mbi.is_button_pressed[button]
+}
+
+/*On the 3DS this will always return false*/
+is_key_pressed :: proc(key:Key) -> bool {
+	return false
+}
+
+/*On the 3DS this will always return false*/
 is_key_held :: proc(key:Key) -> bool {
 	return false
 }

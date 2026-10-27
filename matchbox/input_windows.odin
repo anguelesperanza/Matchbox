@@ -15,6 +15,13 @@ package matchbox
 
 import win "core:sys/windows"
 
+Button :: enum {
+	FACE_UP,
+	FACE_DOWN,
+	SELECT,
+	DPAD_LEFT,
+}
+
 Key :: enum {
 	BACK = win.VK_BACK, 
 	TAB = win.VK_TAB, 
@@ -92,6 +99,17 @@ Key :: enum {
 	Y = win.VK_Y,
 	Z = win.VK_Z,
 	
+}
+
+
+/*
+	On the 3DS this will check if a gamepad button is pressed
+	gb -> value from the Gamepad_Button enum
+	id -> Useless; used to track the gamepad id however there's only
+		  one gamepad on the 3DS, so it's default is 0
+*/
+is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
+	return mbi.is_button_pressed[button]
 }
 
 /*Checks if a key is pressed*/

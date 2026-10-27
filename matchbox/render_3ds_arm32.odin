@@ -9,6 +9,15 @@ package matchbox
 import "o3dx/ctru"
 import "o3dx/c3d"
 
+// Constants
+MAX_BATCH_VERTICES :: 4096 // Total number of vertices that can be drawn at once
+
+
+Vertex :: struct {
+	x, y, z: f32,
+	r, g, b, a: f32,
+}
+
 render_start :: proc() {
 	c3d.FrameBegin(c3d.FRAME_SYNCDRAW)
 
@@ -33,7 +42,7 @@ render_end :: proc() {
 
 /*Renders a triangle -- specifically adds vertex data to global array that will be rendered
 a, b, c are the points that make up the triangle*/
-render_triangle :: proc(a, b, c:[2]f32, color:[4]f32) {
+render_triangle_points :: proc(a, b, c:[2]f32, color:[4]f32) {
 
 	if mbi.vertex_count + 3 > MAX_BATCH_VERTICES do return // batch full: drop for now
 	z :: 0.5
@@ -45,6 +54,24 @@ render_triangle :: proc(a, b, c:[2]f32, color:[4]f32) {
 	c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
 	
 }
+
+
+render_triangle_shape :: proc(triangle:Triangle) {
+	// render_triangle_points(
+	// 	a = triangle.position + triangle.points[0],
+	// 	b = triangle.position + triangle.points[1],
+	// 	c = triangle.position + triangle.points[2],
+	// 	color = triangle.color,
+	// )
+}
+
+/*Renders a triangle*/
+render_triangle :: proc {
+	render_triangle_points,
+	// render_triangle_shape,
+}
+
+
 
 render_sprite :: proc(sprite:Sprite) {
 	// TODO: Implement

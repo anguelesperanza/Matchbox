@@ -11,6 +11,14 @@ import "core:mem"
 
 import "vendor:directx/d3d11"
 
+// Constants
+MAX_BATCH_VERTICIES :: 65536 // Total number of vertices that can be drawn at once
+
+Vertex :: struct {
+	position:[2]f32,
+	color:[4]f32
+}
+
 render_start :: proc() {
 	if mbi.did_resize {
 		mbi.device_context->OMSetRenderTargets(0, nil, nil)
@@ -79,27 +87,32 @@ render_end :: proc() {
 	mbi.swapchain->Present(1, {})
 }
 
-/*Renders a triangle -- specifically adds vertex data to global array that will be rendered
-a, b, c are the points that make up the triangle*/
-render_triangle :: proc(a, b, c:[2]f32, color:[4]f32) {
+/*Renders a triangle using points*/
+render_triangle_points :: proc(a, b, c:[2]f32, color:[4]f32) {
 
 	if len(batch.verticies) + 3 > MAX_BATCH_VERTICIES {
 		flush() // No more space in the buffer to just draw what we have and start again
 	}
 
 	append(&batch.verticies, Vertex{a, color}, {b, color}, {c, color})
-	
-	
-	// mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
-	// mbi.device_context->IASetInputLayout(mbi.input_layout)
-
-	// mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-	// mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-
-	// mbi.device_context->IASetVertexBuffers(0, 1, &mbi.vertex_buffer, &mbi.vertex_stride, &mbi.vertex_offset)
-
-	// mbi.device_context->Draw(mbi.vertex_count, 0)
 }
+
+/*Renders a triangle using triangle shape*/
+render_triangle_shape :: proc(triangle:Triangle) {
+	// render_triangle_points(
+	// 	a = triangle.position + triangle.points[0],
+	// 	b = triangle.position + triangle.points[1],
+	// 	c = triangle.position + triangle.points[2],
+	// 	color = triangle.color,
+	// )
+}
+
+/*Renders a triangle*/
+render_triangle :: proc {
+	render_triangle_points,
+	// render_triangle_shape,
+}
+
 
 render_sprite :: proc(sprite:Sprite) {
 	// TODO: Implement

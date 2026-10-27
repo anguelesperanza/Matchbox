@@ -19,8 +19,8 @@ main :: proc() {
 
 	// context.logger = mb.get_logger() // works
 
-	// WIP
-	triangle:mb.Triangle = mb.create_triangle()
+	// WIP -- Want to pass pixel positions as parameters -- Need projection mapping working
+	triangle:mb.Triangle = mb.create_triangle({5, 10})
 
 	// TODO	
 	player:mb.Sprite = mb.create_sprite(filepath = "path-to-sprite")
@@ -42,17 +42,17 @@ main :: proc() {
 		dt := mb.get_delta_time()
 
 		// Works
-		if mb.is_key_pressed(.ESCAPE) {
+		if mb.is_key_pressed(.N) {
 			mb.stop_running()
 		}
 
 		// TODO
-		if mb.is_key_held(.D) {
+		if mb.is_key_held(.S) {
 			player.x += dt * player.speed
 		}
 
 		
-		if mb.is_key_pressed(.SPACE) {
+		if mb.is_key_pressed(.A) {
 			mb.play_audio(audio = jump_sound) // TODO
 		}
 

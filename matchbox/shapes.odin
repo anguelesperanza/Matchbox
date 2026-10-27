@@ -9,15 +9,7 @@ package matchbox
 
 import "vendor:directx/d3d11"
 
-// Constants
-MAX_BATCH_VERTICIES :: 65536 // Total number of vertices that can be drawn at once
-
-
 // Structs
-Vertex :: struct {
-	position:[2]f32,
-	color:[4]f32
-}
 
 Batch :: struct {
 	verticies: [dynamic]Vertex,
@@ -28,15 +20,21 @@ Batch :: struct {
 batch:Batch
 
 Triangle :: struct {
-	vertex_count:u32,
-	vertex_stride:u32,
-	vertex_offset:u32
+	position:[2]f32,
+	points:[3][2]f32,
+	color:[4]f32,
 }
 
-
 /*Create a triangle to render to the screen*/
-create_triangle :: proc() -> (triangle:Triangle) {
+create_triangle :: proc(position:[2]f32, size:f32 = 50, color:[4]f32 = {1, 1, 1, 1}) -> (triangle:Triangle) {
+
+	h := size / 2
+
+	triangle = {
+		position = position,
+		points = {{0, -h}, {h, h}, {-h, h}},
+		color = color
+	}
 	
-	
-	return 
+	return triangle
 }

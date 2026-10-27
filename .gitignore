@@ -33,3 +33,8 @@ examples/walk-level/levels/yard_saved.level
 
 *.pdb
 *.pdb.rdi
+*.smdh
+*.3dsx
+*.elf
+odin_asm/
+

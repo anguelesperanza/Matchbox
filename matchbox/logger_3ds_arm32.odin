@@ -6,9 +6,9 @@ package matchbox
 	Handles Logging
 */
 
-import "core:log"
+// import "core:log"
 
 
-get_logger :: proc() -> log.Logger {
-	return mbi.logger
-}
+// get_logger :: proc() -> log.Logger {
+// 	return mbi.logger
+// }

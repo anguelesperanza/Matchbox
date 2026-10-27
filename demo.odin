@@ -17,7 +17,7 @@ main :: proc() {
 
 	mb.init("Demo Window", 200, 200) // works
 
-	context.logger = mb.get_logger() // works
+	// context.logger = mb.get_logger() // works
 
 	// WIP
 	triangle:mb.Triangle = mb.create_triangle()
@@ -36,7 +36,6 @@ main :: proc() {
 
 		// Works
 		if mb.is_key_pressed(.F) {
-			log.info("F Pressed")
 		}
 
 		// Works

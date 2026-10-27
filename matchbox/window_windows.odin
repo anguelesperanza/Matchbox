@@ -7,8 +7,6 @@ package matchbox
 	This file handles the window creation events
 
 	For Windows: this handles win32 and D3D11 Setup
-
-	For 3DS: TBD
 */
 
 // Core

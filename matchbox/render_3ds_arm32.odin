@@ -6,106 +6,66 @@ package matchbox
 	Handles the rendering
 */
 
-import win "core:sys/windows"
-import "core:mem"
-
-import "vendor:directx/d3d11"
+import "o3dx/ctru"
+import "o3dx/c3d"
 
 render_start :: proc() {
-	if mbi.did_resize {
-		mbi.device_context->OMSetRenderTargets(0, nil, nil)
-		mbi.framebuffer_view->Release()
-		mbi.framebuffer->Release()
+	c3d.FrameBegin(c3d.FRAME_SYNCDRAW)
 
-		res := mbi.swapchain->ResizeBuffers(0, 0, 0, .UNKNOWN, {})
-		ensure(win.SUCCEEDED(res), "Swapchain buffer resize failed")
-
-		res = mbi.swapchain->GetBuffer(0, d3d11.ITexture2D_UUID, (^rawptr)(&mbi.framebuffer))
-
-	    res  = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
-	    ensure(win.SUCCEEDED(res), "Create RenderTargetView failed")
-
-		mbi.did_resize = false
-
-	}
-
-	window_rect:win.RECT
-	win.GetClientRect(mbi.window, &window_rect)
-
-	viewport := d3d11.VIEWPORT {
-		TopLeftX = 0,
-	    TopLeftY = 0,
-	    Width    = f32(window_rect.right - window_rect.left),
-	    Height   = f32(window_rect.bottom - window_rect.top),
-	    MinDepth = 0,
-	    MaxDepth = 1,
-	}
-	
-	mbi.device_context->RSSetViewports(1, &viewport)
-	mbi.device_context-> OMSetRenderTargets(1, &mbi.framebuffer_view, nil)
+    c3d.FrameDrawOn(mbi.top_screen) // Will need to decide how to handle drawing on top or bottom
 	
 }
-
-flush :: proc() {
-	count := u32(len(batch.verticies))
-	if count == 0 do return // if we have nothing batches, don't do anything
-
-	stride:u32 = size_of(Vertex)
-	offset:u32 = 0
-
-	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
-	mbi.device_context->IASetInputLayout(mbi.input_layout)
-
-	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-
-	mbi.device_context->IASetVertexBuffers(0, 1, &batch.gpu_buffer, &stride, &offset)
-
-
-	
-	mapped:d3d11.MAPPED_SUBRESOURCE
-	res := mbi.device_context->Map(batch.gpu_buffer, 0, .WRITE_DISCARD, {}, &mapped)
-	mem.copy(mapped.pData, raw_data(batch.verticies), int(count) * size_of(Vertex))
-	mbi.device_context->Unmap(batch.gpu_buffer, 0)
-
-	mbi.device_context->Draw(count, 0)
-	clear(&batch.verticies)
-}
-
 
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
-	flush() // Draw everthing (in the vertex buffer)
-	mbi.swapchain->Present(1, {})
+
+	// Not sure if this is a good location to put the DrawArrays call
+    // c3d.DrawArrays(.TRIANGLES, 0, 3)
+    // c3d.FrameEnd(0)
+	
+	if mbi.vertex_count > 0 {
+		ctru.memcpy(mbi.vbo_data, &mbi.vertices[0], uint(mbi.vertex_count) * size_of(Vertex))
+		c3d.DrawArrays(.TRIANGLES, 0, i32(mbi.vertex_count))
+		mbi.vertex_count = 0
+	}
+	c3d.FrameEnd(0)
 }
 
 /*Renders a triangle -- specifically adds vertex data to global array that will be rendered
 a, b, c are the points that make up the triangle*/
 render_triangle :: proc(a, b, c:[2]f32, color:[4]f32) {
 
-	if len(batch.verticies) + 3 > MAX_BATCH_VERTICIES {
-		flush() // No more space in the buffer to just draw what we have and start again
-	}
+	if mbi.vertex_count + 3 > MAX_BATCH_VERTICES do return // batch full: drop for now
+	z :: 0.5
+	mbi.vertices[mbi.vertex_count + 0] = {a.x, a.y, z, color.r, color.g, color.b, color.a}
+	mbi.vertices[mbi.vertex_count + 1] = {b.x, b.y, z, color.r, color.g, color.b, color.a}
+	mbi.vertices[mbi.vertex_count + 2] = {c.x, c.y, z, color.r, color.g, color.b, color.a}
+	mbi.vertex_count += 3
 
-	append(&batch.verticies, Vertex{a, color}, {b, color}, {c, color})
+	c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
 	
-	
-	// mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
-	// mbi.device_context->IASetInputLayout(mbi.input_layout)
-
-	// mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-	// mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-
-	// mbi.device_context->IASetVertexBuffers(0, 1, &mbi.vertex_buffer, &mbi.vertex_stride, &mbi.vertex_offset)
-
-	// mbi.device_context->Draw(mbi.vertex_count, 0)
 }
 
 render_sprite :: proc(sprite:Sprite) {
 	// TODO: Implement
 }
 
+
+color_to_u32 :: proc(color:[4]f32) -> u32 {
+	
+	r := u32(color.r * 255 + 0.5)
+	g := u32(color.g * 255 + 0.5)
+	b := u32(color.b * 255 + 0.5)
+	a := u32(color.a * 255 + 0.5)
+	
+	return r << 24 | g << 16 | b << 8 | a 
+}
+
 clear_background :: proc(color:[4]f32) {
-	color := color
-	mbi.device_context->ClearRenderTargetView(mbi.framebuffer_view, &color)
+
+	
+	cov_color := color_to_u32(color)
+
+    c3d.RenderTargetClear(mbi.top_screen, c3d.CLEAR_ALL, cov_color, 0)
+	
 }

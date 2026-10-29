@@ -1,3 +1,5 @@
+#+build windows
+
 package matchbox
 
 
@@ -10,7 +12,6 @@ package matchbox
 */
 
 // Core
-
 import "core:log"
 import win "core:sys/windows"
 
@@ -19,6 +20,8 @@ import "vendor:directx/d3d11"
 import "vendor:directx/dxgi"
 import "vendor:directx/d3d_compiler"
 import "vendor:directx/d3d_common"
+import gi "vendor:windows/GameInput"
+
 // Base
 import "base:runtime"
 
@@ -43,8 +46,15 @@ Matchbox_Info :: struct {
 	window:win.HWND,
 	is_running:bool,
 	is_keys_pressed: #sparse [Key]bool,
-	is_button_pressed: #sparse [Button]bool,
 	event_message:^win.MSG,
+
+	// GameInput Values
+	is_button_pressed: #sparse [Button]bool,
+	input:^gi.IGameInput,
+	gamepad:^gi.IDevice,
+	reading:^gi.IReading,
+
+
 
 	//D3D11 Values
 	device: ^d3d11.IDevice,
@@ -390,6 +400,13 @@ init :: proc(title:string, width:i32, height:i32) {
 	// Setup the initial frequency and counter for delta time
 	win.QueryPerformanceFrequency(&timestamp.frequency)
 	win.QueryPerformanceCounter(&timestamp.last_time)
+
+	
+	result := gi.Create(&mbi.input)
+	if win.SUCCEEDED(result) == false {
+		log.error("Could not create input stream for controller/gamepad")
+	}
+	
 }
 
 /*Returns true if the window is running; other returns fale -> Almost always will return true*/
@@ -416,6 +433,13 @@ get_delta_time :: proc() -> (dt:f64) {
 cleanup :: proc() {
 	log.destroy_console_logger(mbi.logger)
 
+
+	// GameInput -- User may not have a controller so the values can be nil by cleanup call
+	if mbi.input != nil do mbi.input->Release()
+	if mbi.gamepad != nil do mbi.gamepad->Release()
+	// if mbi.reading != nil do mbi.reading->Release() // -> Causes an access error violation and not sure why, need to look into
+
+	// D3D11
 	mbi.input_layout->Release()
 	mbi.pixel_shader_blob->Release()
 	mbi.pixel_shader->Release()

@@ -1,44 +1,42 @@
-# Shared API
+# Matchbox API Development Status
 
-This file aims to document how the shared api works, it's current state, and what's in progress
-
-this document is broken up into 3 sections
-- Shared -- Procedues / Structs / Enums / ect that are not backend specific
-- Backend -- Anything backend specific
-- WIP -- Features still in the works but not completed yet
-
-`Status`: WIP - Everything just started
-
-## WIP
-
-`Projection` -- PC backend does not have projections yet, this mean rendering a triangle with a shape is not possible
-as this time, but render with points directly. Will be fixed once PC backend can do projection
-  - will need something like this: `c3d.Mtx_OrthoTilt(&mbi.projection, 0, 400, 240, 0, 0, 1, true)` however adding
-  now will break feature parity
-
-`Input` -- while input works now; it's not great. PC has it's own bindings and so does o3dx,
-but that means that pressing N in the emulator 
+This document keeps track of the current status of the Matchbox API, it's procedures that do things, and how
+the api is currenlty split up -- this will certaintly change as changes to the API are made.
 
 
-## Shared
-`shapes.odin` - Only the `render_triangle` call is backend specific
+# Approach to API Design
 
+the `demo.odin` file is designed first. The procedure calls, game loop shape, etc, are all added there first.
+Even if there is no implementation for a procedure yet.
 
+The backends are then designed around that and procedures are tweaked accordingly when and where it makes sense.
 
-## demo.odin
+Procedures that aren't properly implmemented in a backend are marked as TODO and stubbed out so they don't fail at
+compile time and runtime.
 
-The demo file - demo.odin - is an example of how the shared api will work
+Procedures that won't be implemented in a backend are simple stubbed out and never used.
 
-## entry_point_arm32
+An example of this are the `is_key_*` procedures. The 3DS does not have a keyboard so there is nothing to map here.
+In order to not break the API or add any confusing input logic; the `is_key_*` procs are all return false on the 3DS.
 
-O3DX is compiled using the dev kit pro toolchain. This tool chain requires a specific entry point.
+# Demo.odin
 
-That entry point is `entry_point_arm32.odin`, which creates an export procedure that is called by main.c 
+The `demo.odin` file is the example odin file that uses the matchbox api.
 
-## init
+Running `odin build .` / `odin run .` will generate an exe using that file for PC
+Running `build.bat` will generate a .3dx and .elf file using that file for the 3DS
 
-The `matchbox.init(...)` proc behaves differenlty dependings on the platform, however the arguments remain the same
+# What needs implementation
 
-On windows, the title, width, height of the window are decided based on the arguments passed
+There are a few things that need to be implemented properly before I can call them.
 
-On the 3DS these values are fixed as the new 3DS LL/XL has a fixed screensize
+`Logging` - This works on PC but there's no logging implemented on the 3DS yet
+
+`Input - Joystics and Triggers` - While the face buttons are all implemented for both PC and 3DS,
+the joystics movement values are not yet captured by Matchbox for either the PC or 3DS.
+
+Specifically on PC the triggers are not yet captured. The 3DS does not have triggers and will need that
+call stubbed out
+
+How a game choses to interpret input values like joysticks and triggers -- where they are a range of 0 to 1,
+is up to the game. Matchbox simple provided that value to be used

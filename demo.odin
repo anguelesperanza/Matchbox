@@ -13,6 +13,8 @@ package demo
 import "core:log"
 import mb "matchbox"
 
+import "core:fmt"
+
 main :: proc() {
 
 	mb.init("Demo Window", 200, 200) // works
@@ -40,7 +42,6 @@ main :: proc() {
 		
 		// Works
 		if mb.is_key_pressed(.F) || mb.is_gamepad_pressed(.FACE_UP,0 ) {
-			
 		}
 
 		// Works
@@ -48,7 +49,7 @@ main :: proc() {
 			mb.stop_running()
 		}
 
-		// TODO
+		// TODO -- works but may need tweaking on PC side
 		if mb.is_key_held(.S) || mb.is_gamepad_pressed(.DPAD_LEFT, 0) {
 			player.x += dt * player.speed
 		}

@@ -1,3 +1,5 @@
+#+build freestanding arm32
+
 package matchbox
 
 

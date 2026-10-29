@@ -140,3 +140,25 @@ The second and the one it currenlty uses is SDL3_GPU: https://github.com/libsdl-
     - Compling the SDL3 .so file ended up being a challenge due to having to find the right version, and build it without it crashing.
 
 It's for these reasons I am rewriting Matchbox.
+
+
+# Inspiration
+
+Matchbox is heavily inspired by Raylib. I really enjoy just how easy it is to get things going in Raylib.
+And while I have tried other options, I always end up coming back to raylib because of how simple it is.
+
+XNA was another big inspiration. I have fond memories of playing around in the XNA examples and being astounded
+by what others did with it on YouTube.
+
+Another two inspirations are Kha and HaxeFlixel.
+I would often bounce around between Kha and HaxeFlixel before discovering Raylib. Both were nice to use and before raylib
+where my go to game frameworks for game development.
+
+
+Raylib: https://www.raylib.com/
+
+XNA: https://github.com/FNA-XNA/FNA (XNA itself is gone and has been for years, but is spritually succeeded b FNA)
+
+Kha: https://github.com/Kode/Kha | https://kha.tech/
+
+HaxeFlixel: https://haxeflixel.com/

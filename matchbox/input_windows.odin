@@ -1,3 +1,5 @@
+#+build windows
+
 package matchbox
 
 /*
@@ -15,13 +17,37 @@ package matchbox
 
 import win "core:sys/windows"
 
-Button :: enum {
-	FACE_UP,
-	FACE_DOWN,
+import gi "vendor:windows/GameInput"
+
+Button :: enum u32 {
+	// Misc.
+    START,
 	SELECT,
-	DPAD_LEFT,
+	
+	// Face Buttons
+    FACE_DOWN,
+    FACE_RIGHT,
+    FACE_LEFT,
+    FACE_UP,
+
+    // DPAD
+    DPAD_UP,
+    DPAD_DOWN,
+    DPAD_LEFT,
+    DPAD_RIGHT,
+
+	// Shoulder Buttons
+    LEFT_SHOULDER,
+    RIGHT_SHOULDER,
+    
+    LEFT_THUMBSTICK,
+    RIGHT_THUMBSTICK,
 }
 
+/*
+	This doesn't use GameInput as Keyboard check logic was completed
+	before GameInput was added to codebase
+*/
 Key :: enum {
 	BACK = win.VK_BACK, 
 	TAB = win.VK_TAB, 
@@ -103,10 +129,11 @@ Key :: enum {
 
 
 /*
-	On the 3DS this will check if a gamepad button is pressed
+
 	gb -> value from the Gamepad_Button enum
-	id -> Useless; used to track the gamepad id however there's only
-		  one gamepad on the 3DS, so it's default is 0
+	id -> This is supposed to track the gamepad ID;
+		  however using GameInput so that functionality isn't implemented in
+		  Matchbox yet -- Just grabbing first registered controller
 */
 is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
 	return mbi.is_button_pressed[button]

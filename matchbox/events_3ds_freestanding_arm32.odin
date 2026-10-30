@@ -19,12 +19,13 @@ import "o3dx/ctru"
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
 
-	mbi.is_keys_pressed = {}
+	mbi.is_button_pressed = {}
 
 	left_thumbstick:ctru.circlePosition
 	right_thumbstick:ctru.circlePosition
 	
     ctru.hidScanInput()
+    ctru.irrstScanInput()
     ctru.hidCircleRead(&left_thumbstick)
     
     ctru.irrstCstickRead(&right_thumbstick)
@@ -33,7 +34,8 @@ poll_events :: proc() {
 
     // TODO == NEEDS REWORKING | USES OLD STYLE OF KEY BINDINGS FROM INPUT POC
 
-	if pressed & cast(u32)Button.SELECT != 0 do stop_running()
+	if pressed & cast(u32)Button.SELECT != 0 do mbi.is_button_pressed[.START] = true
+	if pressed & cast(u32)Button.START != 0 do mbi.is_button_pressed[.START] = true
 
 	// FACE buttons
 	if pressed & cast(u32)Button.FACE_UP != 0 do mbi.is_button_pressed[.FACE_UP] = true

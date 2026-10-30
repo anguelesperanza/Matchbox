@@ -187,7 +187,11 @@ is_key_pressed :: proc(key:Key) -> bool {
 
 /*Checks if a key is held*/
 is_key_held :: proc(key:Key) -> bool {
-	return false
+	return mbi.is_keys_held[key]
+}
+
+is_key_released :: proc(key:Key) -> bool {
+	return mbi.is_keys_released[key]
 }
 
 get_mouse_position :: proc() -> [2]i32 {
@@ -198,17 +202,5 @@ get_mouse_wheel_value :: proc() -> [2]i16 {
 }
 
 is_mouse_pressed :: proc(mouse:Mouse) -> bool {
-	switch mouse {
-		case .LEFT:
-			return mbi.is_mouse_pressed[.LEFT]
-		case .RIGHT:
-			return mbi.is_mouse_pressed[.RIGHT]
-		case .MIDDLE:
-			return mbi.is_mouse_pressed[.MIDDLE]
-		case .SIDE_1:
-			return mbi.is_mouse_pressed[.SIDE_1]
-		case .SIDE_2:
-			return mbi.is_mouse_pressed[.SIDE_2]
-	}
-	return false
+	return mbi.is_mouse_pressed[mouse]
 }

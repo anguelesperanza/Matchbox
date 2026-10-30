@@ -173,7 +173,14 @@ get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
 	As such, this behavior is slightly different depending on the target platform
 */
 get_trigger_value :: proc(trigger:Button) -> f32 {
-	if mbi.is_button_pressed[trigger] == true do return 1
+
+	#partial switch trigger {
+		case .LEFT_TRIGGER:
+			return 1
+		case .RIGHT_TRIGGER:
+			return 1
+	}
+	
 	return 0
 }
 
@@ -182,8 +189,8 @@ get_mouse_position :: proc() -> [2]i32 {
 	return {} 
 }
 /*On the 3DS this will always return false*/
-get_mouse_wheel_value :: proc() -> [2]i16 {
-	return {}
+get_mouse_wheel_value :: proc() -> i16 {
+	return 0
 }
 
 /*On the 3DS this will always return false*/

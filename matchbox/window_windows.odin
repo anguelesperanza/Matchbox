@@ -45,14 +45,24 @@ Matchbox_Info :: struct {
 	// Win32 Related Values
 	window:win.HWND,
 	is_running:bool,
+	
 	is_keys_pressed: #sparse [Key]bool,
+	is_keys_released: #sparse [Key]bool,
+	is_keys_held: #sparse [Key]bool,
+	
 	event_message:^win.MSG,
 	mouse_wheel_value:i16,
 	mouse_position:[2]i32,
+
 	is_mouse_pressed:[Mouse]bool,
+	is_mouse_released:[Mouse]bool,
+	is_mouse_held:[Mouse]bool,
 
 	// GameInput Values
 	is_button_pressed: #sparse [Button]bool,
+	is_button_released: #sparse [Button]bool,
+	is_button_held: #sparse [Button]bool,
+
 	input:^gi.IGameInput,
 	gamepad:^gi.IDevice,
 	reading:^gi.IReading,

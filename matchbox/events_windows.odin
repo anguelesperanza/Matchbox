@@ -27,19 +27,25 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			switch wParam {
 				case win.VK_A..=win.VK_Z:
 					mbi.is_keys_pressed[cast(Key)wParam] = true
+					mbi.is_keys_held[cast(Key)wParam] = true
 				case win.VK_0 ..= win.VK_9:
 					mbi.is_keys_pressed[cast(Key)wParam] = true
+					mbi.is_keys_held[cast(Key)wParam] = true
 				case win.VK_BACK ..= win.VK_HELP:
 					mbi.is_keys_pressed[cast(Key)wParam] = true
+					mbi.is_keys_held[cast(Key)wParam] = true
 			}
 		case win.WM_KEYUP:
 			switch wParam {
 				case win.VK_A..=win.VK_Z:
-					mbi.is_keys_pressed[cast(Key)wParam] = false
+					mbi.is_keys_held[cast(Key)wParam] = false
+					mbi.is_keys_released[cast(Key)wParam] = true
 				case win.VK_0 ..= win.VK_9:
-					mbi.is_keys_pressed[cast(Key)wParam] = false
+					mbi.is_keys_held[cast(Key)wParam] = false
+					mbi.is_keys_released[cast(Key)wParam] = true
 				case win.VK_BACK ..= win.VK_HELP:
-					mbi.is_keys_pressed[cast(Key)wParam] = false
+					mbi.is_keys_held[cast(Key)wParam] = false
+					mbi.is_keys_released[cast(Key)wParam] = true
 			}
 
 		case win.WM_MOUSEMOVE:
@@ -50,27 +56,48 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 
 		case win.WM_LBUTTONDOWN:
 			mbi.is_mouse_pressed[.LEFT] = true
+			mbi.is_mouse_held[.LEFT] = true
 		case win.WM_RBUTTONDOWN:
 			mbi.is_mouse_pressed[.RIGHT] = true
+			mbi.is_mouse_held[.RIGHT] = true
 		case win.WM_MBUTTONDOWN:
 			mbi.is_mouse_pressed[.MIDDLE] = true
+			mbi.is_mouse_held[.MIDDLE] = true
 		
 		case win.WM_XBUTTONDOWN: // The two side buttons on some mice
 			button := win.GET_KEYSTATE_WPARAM(wParam)
-			if button == 64 do mbi.is_mouse_pressed[.SIDE_1] = true
-			if button == 32 do mbi.is_mouse_pressed[.SIDE_2] = true
+
+			switch button {
+				case 32:
+					mbi.is_mouse_pressed[.SIDE_1] = true
+					mbi.is_mouse_held[.SIDE_1] = true
+				case 64:
+					mbi.is_mouse_pressed[.SIDE_2] = true
+					mbi.is_mouse_held[.SIDE_2] = true
+					
+			}
 
 		case win.WM_LBUTTONUP:
-			mbi.is_mouse_pressed[.LEFT] = false
+			mbi.is_mouse_held[.LEFT] = false
+			mbi.is_mouse_released[.LEFT] = true
 		case win.WM_RBUTTONUP:
-			mbi.is_mouse_pressed[.RIGHT] = false
+			mbi.is_mouse_held[.RIGHT] = false
+			mbi.is_mouse_released[.RIGHT] = true
 		case win.WM_MBUTTONUP:
-			mbi.is_mouse_pressed[.MIDDLE] = false
+			mbi.is_mouse_held[.MIDDLE] = false
+			mbi.is_mouse_released[.MIDDLE] = true
 		
 		case win.WM_XBUTTONUP: // The two side buttons on some mice
 			button := win.GET_KEYSTATE_WPARAM(wParam)
-			if button == 64 do mbi.is_mouse_pressed[.SIDE_1] = false
-			if button == 32 do mbi.is_mouse_pressed[.SIDE_2] = false
+
+			switch button {
+				case 32:
+					mbi.is_mouse_held[.SIDE_1] = false
+					mbi.is_mouse_pressed[.SIDE_1] = true
+				case 64:
+					mbi.is_mouse_held[.SIDE_2] = false
+					mbi.is_mouse_pressed[.SIDE_2] = true
+			}
 		}
 
 	return win.DefWindowProcW(window, message, wParam, lParam)
@@ -81,8 +108,15 @@ poll_events :: proc() {
 	
 	// Before processing messages clear the input for keys pressed
 	mbi.is_keys_pressed = {}
+	mbi.is_keys_released = {}
+	
 	mbi.is_button_pressed = {}
+	mbi.is_button_released = {}
+	
 	mbi.is_mouse_pressed = {}
+	mbi.is_mouse_released = {}
+
+	
 	mbi.mouse_wheel_value = 0
 
 	event_message:win.MSG
@@ -116,7 +150,7 @@ poll_events :: proc() {
 			}
 
 			if .B in state.buttons  {
-				mbi.is_button_pressed[.FACE_LEFT] = true
+				mbi.is_button_pressed[.FACE_RIGHT] = true
 			}
 
 			if .DPadUp in state.buttons {

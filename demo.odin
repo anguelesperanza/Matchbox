@@ -76,12 +76,17 @@ main :: proc() {
 			mb.print("Side 2 Mouse Pressed")
 		}
 
+		if mb.is_key_held(.J) {
+			// mb.print("J is held")
+		}
+
+		if mb.is_key_released(.J) {
+			mb.print("J released")
+		}
+
+
 		mouse_position := mb.get_mouse_position()
-		mb.print(mouse_position)
-
 		mouse_wheel_value := mb.get_mouse_wheel_value()
-		mb.print(mouse_wheel_value)
-
 		
 		left_trigger_value := mb.get_trigger_value(trigger = .LEFT_TRIGGER)
 		right_trigger_value := mb.get_trigger_value(trigger = .RIGHT_TRIGGER)

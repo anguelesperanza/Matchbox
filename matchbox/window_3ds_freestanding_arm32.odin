@@ -66,9 +66,6 @@ init :: proc(title:string, width:i32, height:i32) {
 	/*Based on my New 3DS LL values*/
 	mbi.left_thumbstick_max = 156
 	mbi.right_thumbstick_max = 146
-
-	// mbi.logger = log.create_console_logger()
-	// context.logger = mbi.logger
 	
     romfs_rc := ctru.romfsInit()
     ctru.irrstInit()
@@ -76,7 +73,6 @@ init :: proc(title:string, width:i32, height:i32) {
     ctru.gfxInitDefault()
     c3d.Init(c3d.C3D_DEFAULT_CMDBUF_SIZE)
     ctru.consoleInit(ctru.GFX_BOTTOM, nil)
-    ctru.printf("\x1b[5;1HromfsInit rc: 0x%08lX", romfs_rc)
 
 
     mbi.top_screen = c3d.RenderTargetCreate(
@@ -102,7 +98,6 @@ init :: proc(title:string, width:i32, height:i32) {
     mbi.shader_buffer = ctru.malloc(uint(sh_size))
     ctru.fread(mbi.shader_buffer, 1, uint(sh_size), sf)
     ctru.fclose(sf)
-    ctru.printf("\x1b[3;1Hsh_size: %d    ", sh_size) // expect 252
 
     // Parse the binary.  sh_buf must stay valid while dvlb is in use.
     mbi.dvlb = ctru.DVLB_ParseFile(cast(^u32)mbi.shader_buffer, u32(sh_size))

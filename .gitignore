@@ -37,4 +37,5 @@ examples/walk-level/levels/yard_saved.level
 *.3dsx
 *.elf
 odin_asm/
+cheatsheet.md
 

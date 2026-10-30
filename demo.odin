@@ -10,16 +10,11 @@ package demo
 	Before the API Implementation this demo stands to scaffold what the API should look like
 */
 
-import "core:log"
 import mb "matchbox"
-
-import "core:fmt"
 
 main :: proc() {
 
-	mb.init("Demo Window", 200, 200) // works
-
-	// context.logger = mb.get_logger() // works
+	mb.init("Demo Window", 600, 600) // works
 
 	// WIP -- Want to pass pixel positions as parameters -- Need projection mapping working
 	triangle:mb.Triangle = mb.create_triangle({5, 10})
@@ -33,7 +28,7 @@ main :: proc() {
 	// TODO
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
 
-	mb.print("Hello", "World")
+	mb.print("Hello", "World", 10)
 
 
 	for mb.is_running() { // Works
@@ -56,14 +51,42 @@ main :: proc() {
 		if mb.is_key_held(.S) || mb.is_gamepad_pressed(.DPAD_LEFT, 0) {
 			player.x += dt * player.speed
 		}
-
 		
 		if mb.is_key_pressed(.SPACE) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			mb.play_audio(audio = jump_sound) // TODO
 		}
 
+		if mb.is_mouse_pressed(.LEFT) {
+			mb.print("Left Mouse Pressed")
+		}
+
+		if mb.is_mouse_pressed(.RIGHT) {
+			mb.print("Right Mouse Print")
+		}
+
+		if mb.is_mouse_pressed(.MIDDLE) {
+			mb.print("Middle Mouse Pressed")
+		}
+
+		if mb.is_mouse_pressed(.SIDE_1) {
+			mb.print("Side 1 Mouse Pressed")
+		}
+		
+		if mb.is_mouse_pressed(.SIDE_2) {
+			mb.print("Side 2 Mouse Pressed")
+		}
+
+		mouse_position := mb.get_mouse_position()
+		mb.print(mouse_position)
+
+		mouse_wheel_value := mb.get_mouse_wheel_value()
+		mb.print(mouse_wheel_value)
+
+		
 		left_trigger_value := mb.get_trigger_value(trigger = .LEFT_TRIGGER)
 		right_trigger_value := mb.get_trigger_value(trigger = .RIGHT_TRIGGER)
+
+		if left_trigger_value > 0 do mb.stop_running()
 
 		left_thumb := mb.get_thumbstick_value(.LEFT_THUMBSTICK)
 		right_thumb := mb.get_thumbstick_value(.RIGHT_THUMBSTICK)

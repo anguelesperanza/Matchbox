@@ -47,6 +47,9 @@ Matchbox_Info :: struct {
 	is_running:bool,
 	is_keys_pressed: #sparse [Key]bool,
 	event_message:^win.MSG,
+	mouse_wheel_value:i16,
+	mouse_position:[2]i32,
+	is_mouse_pressed:[Mouse]bool,
 
 	// GameInput Values
 	is_button_pressed: #sparse [Button]bool,
@@ -57,8 +60,6 @@ Matchbox_Info :: struct {
 	right_thumbstick_axis:[2]f32,
 	left_trigger_value:f32,
 	right_trigger_value:f32,
-
-
 
 	//D3D11 Values
 	device: ^d3d11.IDevice,
@@ -89,42 +90,6 @@ Matchbox_Info :: struct {
 }
 
 mbi:Matchbox_Info
-
-/*The window callback procedure for processing events (a win32 requirement)*/
-window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam: win.WPARAM, lParam: win.LPARAM) -> win.LRESULT {
-	context = runtime.default_context()
-	log.info("Processing Events")
-	switch message {
-		case win.WM_QUIT:
-			stop_running()
-		case win.WM_DESTROY:
-			stop_running()
-
-		case win.WM_SIZE:
-			mbi.did_resize = true
-		case win.WM_KEYDOWN:
-			switch wParam {
-				case win.VK_A..=win.VK_Z:
-					mbi.is_keys_pressed[cast(Key)wParam] = true
-				case win.VK_0 ..= win.VK_9:
-					mbi.is_keys_pressed[cast(Key)wParam] = true
-				case win.VK_BACK ..= win.VK_HELP:
-					mbi.is_keys_pressed[cast(Key)wParam] = true
-			}
-		case win.WM_KEYUP:
-			switch wParam {
-				case win.VK_A..=win.VK_Z:
-					mbi.is_keys_pressed[cast(Key)wParam] = false
-				case win.VK_0 ..= win.VK_9:
-					mbi.is_keys_pressed[cast(Key)wParam] = false
-				case win.VK_BACK ..= win.VK_HELP:
-					mbi.is_keys_pressed[cast(Key)wParam] = false
-			}
-
-		}
-
-	return win.DefWindowProcW(window, message, wParam, lParam)
-}
 
 /*Initialize the core of Matchbox; from Windows, to logging, to D3D11, etc*/
 init :: proc(title:string, width:i32, height:i32) {

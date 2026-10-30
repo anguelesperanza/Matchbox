@@ -3,6 +3,8 @@
 This document keeps track of the current status of the Matchbox API, it's procedures that do things, and how
 the api is currenlty split up -- this will certaintly change as changes to the API are made.
 
+For references on the actual procedure calls / API and how they work and Platform specific details -- see cheatsheet.md
+
 
 # Approach to API Design
 

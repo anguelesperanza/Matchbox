@@ -130,6 +130,13 @@ Key :: enum {
 	
 }
 
+Mouse :: enum {
+	LEFT,
+	RIGHT,
+	MIDDLE,
+	SIDE_1, // Side button on some mice 
+	SIDE_2, // Side button on some mice
+}
 
 /*
 
@@ -153,7 +160,15 @@ get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
 	}
 	return {}
 }
-/*returns the trigger axis / value of the trigger being pressed between 0-1*/
+
+
+/*
+	Behaves differenlty depending on the Platform
+	On Windows: The value is tracked on a range of 0 - 1 (not pressed to full pressed)
+	On 3DS: Value is tracked as either 0 or 1 (not pressed or pressed) as the 3DS does not have analoge triggers
+
+	As such, this behavior is slightly different depending on the target platform
+*/
 get_trigger_value :: proc(trigger:Button) -> f32 {
 	
 	#partial switch trigger {
@@ -172,5 +187,28 @@ is_key_pressed :: proc(key:Key) -> bool {
 
 /*Checks if a key is held*/
 is_key_held :: proc(key:Key) -> bool {
+	return false
+}
+
+get_mouse_position :: proc() -> [2]i32 {
+	return mbi.mouse_position
+}
+get_mouse_wheel_value :: proc() -> [2]i16 {
+	return mbi.mouse_wheel_value
+}
+
+is_mouse_pressed :: proc(mouse:Mouse) -> bool {
+	switch mouse {
+		case .LEFT:
+			return mbi.is_mouse_pressed[.LEFT]
+		case .RIGHT:
+			return mbi.is_mouse_pressed[.RIGHT]
+		case .MIDDLE:
+			return mbi.is_mouse_pressed[.MIDDLE]
+		case .SIDE_1:
+			return mbi.is_mouse_pressed[.SIDE_1]
+		case .SIDE_2:
+			return mbi.is_mouse_pressed[.SIDE_2]
+	}
 	return false
 }

@@ -9,11 +9,74 @@ package matchbox
 */
 
 import win "core:sys/windows"
-
 import gi "vendor:windows/GameInput"
+import "base:runtime"
 
-import "core:fmt"
 
+
+/*The window callback procedure for processing events (a win32 requirement)*/
+window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam: win.WPARAM, lParam: win.LPARAM) -> win.LRESULT {
+	context = runtime.default_context()
+	switch message {
+		case win.WM_QUIT:
+			stop_running()
+		case win.WM_DESTROY:
+			stop_running()
+
+		case win.WM_SIZE:
+			mbi.did_resize = true
+		case win.WM_KEYDOWN:
+			switch wParam {
+				case win.VK_A..=win.VK_Z:
+					mbi.is_keys_pressed[cast(Key)wParam] = true
+				case win.VK_0 ..= win.VK_9:
+					mbi.is_keys_pressed[cast(Key)wParam] = true
+				case win.VK_BACK ..= win.VK_HELP:
+					mbi.is_keys_pressed[cast(Key)wParam] = true
+			}
+		case win.WM_KEYUP:
+			switch wParam {
+				case win.VK_A..=win.VK_Z:
+					mbi.is_keys_pressed[cast(Key)wParam] = false
+				case win.VK_0 ..= win.VK_9:
+					mbi.is_keys_pressed[cast(Key)wParam] = false
+				case win.VK_BACK ..= win.VK_HELP:
+					mbi.is_keys_pressed[cast(Key)wParam] = false
+			}
+
+		case win.WM_MOUSEMOVE:
+			mbi.mouse_position = {win.GET_X_LPARAM(lParam),win.GET_Y_LPARAM(lParam)}
+			
+		case win.WM_MOUSEWHEEL:
+			mbi.mouse_wheel_value = win.GET_WHEEL_DELTA_WPARAM(wParam)
+
+		case win.WM_LBUTTONDOWN:
+			mbi.is_mouse_pressed[.LEFT] = true
+		case win.WM_RBUTTONDOWN:
+			mbi.is_mouse_pressed[.RIGHT] = true
+		case win.WM_MBUTTONDOWN:
+			mbi.is_mouse_pressed[.MIDDLE] = true
+		
+		case win.WM_XBUTTONDOWN: // The two side buttons on some mice
+			button := win.GET_KEYSTATE_WPARAM(wParam)
+			if button == 64 do mbi.is_mouse_pressed[.SIDE_1] = true
+			if button == 32 do mbi.is_mouse_pressed[.SIDE_2] = true
+
+		case win.WM_LBUTTONUP:
+			mbi.is_mouse_pressed[.LEFT] = false
+		case win.WM_RBUTTONUP:
+			mbi.is_mouse_pressed[.RIGHT] = false
+		case win.WM_MBUTTONUP:
+			mbi.is_mouse_pressed[.MIDDLE] = false
+		
+		case win.WM_XBUTTONUP: // The two side buttons on some mice
+			button := win.GET_KEYSTATE_WPARAM(wParam)
+			if button == 64 do mbi.is_mouse_pressed[.SIDE_1] = false
+			if button == 32 do mbi.is_mouse_pressed[.SIDE_2] = false
+		}
+
+	return win.DefWindowProcW(window, message, wParam, lParam)
+}
 
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
@@ -21,6 +84,7 @@ poll_events :: proc() {
 	// Before processing messages clear the input for keys pressed
 	mbi.is_keys_pressed = {}
 	mbi.is_button_pressed = {}
+	mbi.is_mouse_pressed = {}
 
 	event_message:win.MSG
 

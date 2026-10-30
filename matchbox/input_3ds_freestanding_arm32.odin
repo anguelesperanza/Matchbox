@@ -37,20 +37,14 @@ Button :: enum u32 {
     DPAD_RIGHT = ctru.KEY_DRIGHT,
 
 	// Shoulder Buttons
-    L = ctru.KEY_L,
-    R = ctru.KEY_R,
-    ZL = ctru.KEY_ZL,
-    ZR  = ctru.KEY_ZR,
+    LEFT_SHOULDER = ctru.KEY_L,
+    RIGHT_SHOULDER = ctru.KEY_R,
+    LEFT_TRIGGER = ctru.KEY_ZL,
+    RIGHT_TRIGGER  = ctru.KEY_ZR,
 
 	// Misc.
     START = ctru.KEY_START,
 	SELECT = ctru.KEY_SELECT,
-
-	
-
-	// Fake -- Doesn't exist on 3DS but required to prevent api breaking | numberical numbers don't matter
-	LEFT_TRIGGER = 99,
-	RIGHT_TRIGGER = 100,
 
 	// Fake -- While these exist (circle pad and cstick), these are for buttons you can press in (R3/L3).
 	// On the 3DS, that doesn't exist
@@ -141,6 +135,14 @@ Key :: enum {
 	Z,
 }
 
+/*Fake: The 3DS does not have a mouse so this is just to stub out the api*/
+Mouse :: enum {
+	LEFT,
+	RIGHT,
+	MIDDLE,
+	SIDE_1, // Side button on some mice 
+	SIDE_2, // Side button on some mice
+}
 
 /*
 	On the 3DS this will check if a gamepad button is pressed
@@ -163,9 +165,25 @@ get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
 	}
 	return {}
 }
-/*returns the trigger axis / value of the trigger being pressed between 0-1*/
+/*
+	Behaves differenlty depending on the Platform
+	On Windows: The value is tracked on a range of 0 - 1 (not pressed to full pressed)
+	On 3DS: Value is tracked as either 0 or 1 (not pressed or pressed) as the 3DS does not have analoge triggers
+
+	As such, this behavior is slightly different depending on the target platform
+*/
 get_trigger_value :: proc(trigger:Button) -> f32 {
+	if mbi.is_button_pressed[trigger] == true do return 1
 	return 0
+}
+
+/*On the 3DS this will always return false*/
+get_mouse_position :: proc() -> [2]i32 {
+	return
+}
+/*On the 3DS this will always return false*/
+get_mouse_wheel_value :: proc() -> [2]i16 {
+	return
 }
 
 /*On the 3DS this will always return false*/
@@ -175,5 +193,10 @@ is_key_pressed :: proc(key:Key) -> bool {
 
 /*On the 3DS this will always return false*/
 is_key_held :: proc(key:Key) -> bool {
+	return false
+}
+
+/*On the 3DS this will always return false*/
+is_mouse_pressed :: proc(mouse:Mouse) -> bool {
 	return false
 }

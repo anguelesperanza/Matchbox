@@ -16,9 +16,6 @@ package matchbox
 import "core:math/linalg"
 import "o3dx/ctru"
 
-
-
-
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
 
@@ -34,7 +31,31 @@ poll_events :: proc() {
 	pressed := ctru.hidKeysDown()
 
 
+    // TODO == NEEDS REWORKING | USES OLD STYLE OF KEY BINDINGS FROM INPUT POC
+
+	if pressed & cast(u32)Button.SELECT != 0 do stop_running()
+
+	// FACE buttons
+	if pressed & cast(u32)Button.FACE_UP != 0 do mbi.is_button_pressed[.FACE_UP] = true
+	if pressed & cast(u32)Button.FACE_DOWN != 0 do mbi.is_button_pressed[.FACE_DOWN] = true
+	if pressed & cast(u32)Button.FACE_LEFT != 0 do mbi.is_button_pressed[.FACE_LEFT] = true
+	if pressed & cast(u32)Button.FACE_RIGHT != 0 do mbi.is_button_pressed[.FACE_RIGHT] = true
+
+	// DPAD
+	if pressed & cast(u32)Button.DPAD_UP != 0 do mbi.is_button_pressed[.DPAD_UP] = true
+	if pressed & cast(u32)Button.DPAD_DOWN != 0 do mbi.is_button_pressed[.DPAD_DOWN] = true
+	if pressed & cast(u32)Button.DPAD_LEFT != 0 do mbi.is_button_pressed[.DPAD_LEFT] = true
+	if pressed & cast(u32)Button.DPAD_RIGHT != 0 do mbi.is_button_pressed[.DPAD_RIGHT] = true
+
+	// Shoulder Buttons
+	if pressed & cast(u32)Button.LEFT_SHOULDER != 0 do mbi.is_button_pressed[.LEFT_SHOULDER] = true
+	if pressed & cast(u32)Button.RIGHT_SHOULDER != 0 do mbi.is_button_pressed[.RIGHT_SHOULDER] = true
+	
+	if pressed & cast(u32)Button.LEFT_TRIGGER != 0 do mbi.is_button_pressed[.LEFT_TRIGGER] = true
+	if pressed & cast(u32)Button.RIGHT_TRIGGER != 0 do mbi.is_button_pressed[.RIGHT_TRIGGER] = true
+
 	/*
+		Circle Pad and CStick / Circle Pad Pro
 		This does two things: converts the input into a float and stores it, and then clamps the diagnals so they
 		don't go over the max => 156
 	*/
@@ -45,23 +66,4 @@ poll_events :: proc() {
 	mbi.right_thumbstick_axis = {f32(right_thumbstick.dx), f32(right_thumbstick.dy)} / mbi.right_thumbstick_max
 	l = linalg.length(mbi.right_thumbstick_axis)
 	if l > 1 do  mbi.right_thumbstick_axis = mbi.right_thumbstick_axis / l
-
-    // TODO == NEEDS REWORKING | USES OLD STYLE OF KEY BINDINGS FROM INPUT POC
-    if pressed & cast(u32)Key.M != 0 do mbi.is_running = false
-    if pressed & cast(u32)Key.A != 0 do mbi.is_keys_pressed[.A] = true
-    if pressed & cast(u32)Key.S != 0 do mbi.is_keys_pressed[.S] = true
-    if pressed & cast(u32)Key.Z != 0 do mbi.is_keys_pressed[.Z] = true
-    if pressed & cast(u32)Key.X != 0 do mbi.is_keys_pressed[.X] = true
-    if pressed & cast(u32)Key.F != 0 do mbi.is_keys_pressed[.F] = true
-    if pressed & cast(u32)Key.H != 0 do mbi.is_keys_pressed[.H] = true
-    if pressed & cast(u32)Key.T != 0 do mbi.is_keys_pressed[.T] = true
-    if pressed & cast(u32)Key.G != 0 do mbi.is_keys_pressed[.G] = true
-    if pressed & cast(u32)Key.Q != 0 do mbi.is_keys_pressed[.Q] = true
-    if pressed & cast(u32)Key.W != 0 do mbi.is_keys_pressed[.W] = true
-    if pressed & cast(u32)Key.M != 0 do mbi.is_keys_pressed[.M] = true
-    if pressed & cast(u32)Key.N != 0 do mbi.is_keys_pressed[.N] = true
-    if pressed & cast(u32)Key._1 != 0 do mbi.is_keys_pressed[._1] = true
-    if pressed & cast(u32)Key._2 != 0 do mbi.is_keys_pressed[._2] = true
 }
-
-

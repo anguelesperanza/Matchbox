@@ -204,3 +204,9 @@ get_mouse_wheel_value :: proc() -> [2]i16 {
 is_mouse_pressed :: proc(mouse:Mouse) -> bool {
 	return mbi.is_mouse_pressed[mouse]
 }
+is_mouse_held :: proc(mouse:Mouse) -> bool {
+	return mbi.is_mouse_held[mouse]
+}
+is_mouse_released :: proc(mouse:Mouse) -> bool {
+	return mbi.is_mouse_released[mouse]
+}

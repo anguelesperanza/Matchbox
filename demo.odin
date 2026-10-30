@@ -56,35 +56,6 @@ main :: proc() {
 			mb.play_audio(audio = jump_sound) // TODO
 		}
 
-		if mb.is_mouse_pressed(.LEFT) {
-			mb.print("Left Mouse Pressed")
-		}
-
-		if mb.is_mouse_pressed(.RIGHT) {
-			mb.print("Right Mouse Print")
-		}
-
-		if mb.is_mouse_pressed(.MIDDLE) {
-			mb.print("Middle Mouse Pressed")
-		}
-
-		if mb.is_mouse_pressed(.SIDE_1) {
-			mb.print("Side 1 Mouse Pressed")
-		}
-		
-		if mb.is_mouse_pressed(.SIDE_2) {
-			mb.print("Side 2 Mouse Pressed")
-		}
-
-		if mb.is_key_held(.J) {
-			// mb.print("J is held")
-		}
-
-		if mb.is_key_released(.J) {
-			mb.print("J released")
-		}
-
-
 		mouse_position := mb.get_mouse_position()
 		mouse_wheel_value := mb.get_mouse_wheel_value()
 		

@@ -65,13 +65,11 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			mbi.is_mouse_held[.MIDDLE] = true
 		
 		case win.WM_XBUTTONDOWN: // The two side buttons on some mice
-			button := win.GET_KEYSTATE_WPARAM(wParam)
-
-			switch button {
-				case 32:
+			switch win.GET_XBUTTON_WPARAM(wParam) {
+				case win.XBUTTON1:
 					mbi.is_mouse_pressed[.SIDE_1] = true
 					mbi.is_mouse_held[.SIDE_1] = true
-				case 64:
+				case win.XBUTTON2:
 					mbi.is_mouse_pressed[.SIDE_2] = true
 					mbi.is_mouse_held[.SIDE_2] = true
 					
@@ -88,15 +86,13 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			mbi.is_mouse_released[.MIDDLE] = true
 		
 		case win.WM_XBUTTONUP: // The two side buttons on some mice
-			button := win.GET_KEYSTATE_WPARAM(wParam)
-
-			switch button {
-				case 32:
+			switch win.GET_XBUTTON_WPARAM(wParam){
+				case win.XBUTTON1:
 					mbi.is_mouse_held[.SIDE_1] = false
-					mbi.is_mouse_pressed[.SIDE_1] = true
-				case 64:
+					mbi.is_mouse_released[.SIDE_1] = true
+				case win.XBUTTON2:
 					mbi.is_mouse_held[.SIDE_2] = false
-					mbi.is_mouse_pressed[.SIDE_2] = true
+					mbi.is_mouse_released[.SIDE_2] = true
 			}
 		}
 

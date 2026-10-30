@@ -32,7 +32,10 @@ main :: proc() {
 
 	// TODO
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
-	
+
+	mb.print("Hello", "World")
+
+
 	for mb.is_running() { // Works
 		mb.poll_events() // Works
 

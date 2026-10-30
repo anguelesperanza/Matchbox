@@ -46,7 +46,7 @@ poll_events :: proc() {
 	l = linalg.length(mbi.right_thumbstick_axis)
 	if l > 1 do  mbi.right_thumbstick_axis = mbi.right_thumbstick_axis / l
 
-    
+    // TODO == NEEDS REWORKING | USES OLD STYLE OF KEY BINDINGS FROM INPUT POC
     if pressed & cast(u32)Key.M != 0 do mbi.is_running = false
     if pressed & cast(u32)Key.A != 0 do mbi.is_keys_pressed[.A] = true
     if pressed & cast(u32)Key.S != 0 do mbi.is_keys_pressed[.S] = true

@@ -62,6 +62,8 @@ mbi:Matchbox_Info
 init :: proc(title:string, width:i32, height:i32) {
 
 	mbi.is_running = true
+
+	/*Based on my New 3DS LL values*/
 	mbi.left_thumbstick_max = 156
 	mbi.right_thumbstick_max = 146
 
@@ -69,6 +71,8 @@ init :: proc(title:string, width:i32, height:i32) {
 	// context.logger = mbi.logger
 	
     romfs_rc := ctru.romfsInit()
+    ctru.irrstInit()
+    
     ctru.gfxInitDefault()
     c3d.Init(c3d.C3D_DEFAULT_CMDBUF_SIZE)
     ctru.consoleInit(ctru.GFX_BOTTOM, nil)

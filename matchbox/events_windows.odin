@@ -85,6 +85,7 @@ poll_events :: proc() {
 	mbi.is_keys_pressed = {}
 	mbi.is_button_pressed = {}
 	mbi.is_mouse_pressed = {}
+	mbi.mouse_wheel_value = 0
 
 	event_message:win.MSG
 

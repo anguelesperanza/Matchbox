@@ -78,10 +78,12 @@ poll_events :: proc() {
 			}
 			
 			// gamepad joysticks
-			if state.leftThumbstickX != 0 {
-			}
-			if state.leftThumbstickY != 0 {
-			}
+
+			mbi.left_thumbstick_axis = {state.leftThumbstickX, state.leftThumbstickY}
+			mbi.right_thumbstick_axis = {state.rightThumbstickX, state.rightThumbstickY}
+
+			mbi.left_trigger_value = state.leftTrigger
+			mbi.right_trigger_value = state.rightTrigger
 	
 		}
 

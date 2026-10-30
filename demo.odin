@@ -59,6 +59,12 @@ main :: proc() {
 			mb.play_audio(audio = jump_sound) // TODO
 		}
 
+		left_trigger_value := mb.get_trigger_value(trigger = .LEFT_TRIGGER)
+		right_trigger_value := mb.get_trigger_value(trigger = .RIGHT_TRIGGER)
+
+		left_thumb := mb.get_thumbstick_value(.LEFT_THUMBSTICK)
+		right_thumb := mb.get_thumbstick_value(.RIGHT_THUMBSTICK)
+
 		// Works
 		mb.render_start()
 		mb.clear_background(color = {0, 0.4, 0.6, 1})
@@ -71,7 +77,7 @@ main :: proc() {
 		mb.render_end() 
 	}
 
-	// TODO
+	// TODO -- stubbed | sprites and audio are not implemented yet; 
 	mb.destroy(player)
 	mb.destroy(jump_sound)
 

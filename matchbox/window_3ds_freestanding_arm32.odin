@@ -37,6 +37,10 @@ Matchbox_Info :: struct {
 	bottom_screen:rawptr,
 	is_keys_pressed: #sparse [Key]bool,
 	is_button_pressed: #sparse [Button]bool,
+	left_thumbstick_axis:[2]f32,
+	right_thumbstick_axis:[2]f32,
+	left_thumbstick_max:f32,
+	right_thumbstick_max:f32,
 
 	// Shaders
 	shader_buffer:rawptr,
@@ -58,6 +62,8 @@ mbi:Matchbox_Info
 init :: proc(title:string, width:i32, height:i32) {
 
 	mbi.is_running = true
+	mbi.left_thumbstick_max = 156
+	mbi.right_thumbstick_max = 146
 
 	// mbi.logger = log.create_console_logger()
 	// context.logger = mbi.logger

@@ -17,8 +17,6 @@ package matchbox
 
 import win "core:sys/windows"
 
-import gi "vendor:windows/GameInput"
-
 Button :: enum u32 {
 	// Misc.
     START,
@@ -39,9 +37,14 @@ Button :: enum u32 {
 	// Shoulder Buttons
     LEFT_SHOULDER,
     RIGHT_SHOULDER,
-    
+
+    // Thumstricks
     LEFT_THUMBSTICK,
     RIGHT_THUMBSTICK,
+
+	// Triggers
+    LEFT_TRIGGER,
+    RIGHT_TRIGGER,
 }
 
 /*
@@ -137,6 +140,29 @@ Key :: enum {
 */
 is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
 	return mbi.is_button_pressed[button]
+}
+
+/*Returns the x, y values on a range of -1-1 for a joystick*/
+get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
+
+	#partial switch thumstick {
+		case .LEFT_THUMBSTICK:
+			return mbi.left_thumbstick_axis
+		case .RIGHT_THUMBSTICK:
+			return mbi.right_thumbstick_axis
+	}
+	return {}
+}
+/*returns the trigger axis / value of the trigger being pressed between 0-1*/
+get_trigger_value :: proc(trigger:Button) -> f32 {
+	
+	#partial switch trigger {
+		case .LEFT_TRIGGER:
+			return mbi.left_trigger_value
+		case .RIGHT_TRIGGER:
+			return mbi.right_trigger_value
+	}
+	return 0
 }
 
 /*Checks if a key is pressed*/

@@ -45,6 +45,19 @@ Button :: enum u32 {
 	// Misc.
     START = ctru.KEY_START,
 	SELECT = ctru.KEY_SELECT,
+
+	
+
+	// Fake -- Doesn't exist on 3DS but required to prevent api breaking | numberical numbers don't matter
+	LEFT_TRIGGER = 99,
+	RIGHT_TRIGGER = 100,
+
+	// Fake -- While these exist (circle pad and cstick), these are for buttons you can press in (R3/L3).
+	// On the 3DS, that doesn't exist
+	LEFT_THUMBSTICK = 101,
+	RIGHT_THUMBSTICK = 102,
+
+	
 	// Circle Pad
 		
 	// C-Stick
@@ -137,6 +150,22 @@ Key :: enum {
 */
 is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
 	return mbi.is_button_pressed[button]
+}
+
+/*Returns the x, y values on a range of 0-1 for a joystick*/
+get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
+
+	#partial switch thumstick {
+		case .LEFT_THUMBSTICK:
+			return mbi.left_thumbstick_axis
+		case .RIGHT_THUMBSTICK:
+			return mbi.right_thumbstick_axis
+	}
+	return {}
+}
+/*returns the trigger axis / value of the trigger being pressed between 0-1*/
+get_trigger_value :: proc(trigger:Button) -> f32 {
+	return 0
 }
 
 /*On the 3DS this will always return false*/

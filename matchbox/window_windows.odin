@@ -53,6 +53,10 @@ Matchbox_Info :: struct {
 	input:^gi.IGameInput,
 	gamepad:^gi.IDevice,
 	reading:^gi.IReading,
+	left_thumbstick_axis:[2]f32,
+	right_thumbstick_axis:[2]f32,
+	left_trigger_value:f32,
+	right_trigger_value:f32,
 
 
 

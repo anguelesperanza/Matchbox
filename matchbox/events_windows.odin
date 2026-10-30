@@ -12,8 +12,6 @@ import win "core:sys/windows"
 import gi "vendor:windows/GameInput"
 import "base:runtime"
 
-
-
 /*The window callback procedure for processing events (a win32 requirement)*/
 window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam: win.WPARAM, lParam: win.LPARAM) -> win.LRESULT {
 	context = runtime.default_context()
@@ -151,9 +149,7 @@ poll_events :: proc() {
 			mbi.right_trigger_value = state.rightTrigger
 	
 		}
-
 	}
-	
 }
 
 

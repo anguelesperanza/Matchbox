@@ -179,11 +179,11 @@ get_trigger_value :: proc(trigger:Button) -> f32 {
 
 /*On the 3DS this will always return false*/
 get_mouse_position :: proc() -> [2]i32 {
-	return
+	return {} 
 }
 /*On the 3DS this will always return false*/
 get_mouse_wheel_value :: proc() -> [2]i16 {
-	return
+	return {}
 }
 
 /*On the 3DS this will always return false*/

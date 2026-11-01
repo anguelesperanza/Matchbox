@@ -35,12 +35,13 @@ Matchbox_Info :: struct {
 	did_resize:bool,
 	top_screen:rawptr,
 	bottom_screen:rawptr,
-	is_keys_pressed: #sparse [Key]bool,
-	is_button_pressed: #sparse [Button]bool,
 	left_thumbstick_axis:[2]f32,
 	right_thumbstick_axis:[2]f32,
 	left_thumbstick_max:f32,
 	right_thumbstick_max:f32,
+	gamepad_pressed:u32,
+	gamepad_held:u32,
+	gamepad_released:u32,
 
 	// Shaders
 	shader_buffer:rawptr,

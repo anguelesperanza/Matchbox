@@ -49,7 +49,6 @@ main :: proc() {
 			mb.stop_running()
 		}
 
-		// TODO -- works but may need tweaking on PC side
 		if mb.is_key_held(.S) || mb.is_gamepad_pressed(.DPAD_LEFT, 0) {
 			player.x += dt * player.speed
 		}
@@ -67,6 +66,14 @@ main :: proc() {
 
 		if mb.is_gamepad_pressed(.FACE_DOWN) {
 			mb.print("A is pressed")
+		}
+
+		if mb.is_gamepad_held(.FACE_LEFT) {
+			mb.print("Left Face is held")
+		}
+
+		if mb.is_gamepad_released(.FACE_LEFT) {
+			mb.print("Left Face released")
 		}
 
 		if mb.is_mouse_pressed(.LEFT) {

@@ -146,14 +146,32 @@ Mouse :: enum {
 
 /*
 	On the 3DS this will check if a gamepad button is pressed
-	gb -> value from the Gamepad_Button enum
+	button -> value from the Gamepad_Button enum
 	id -> Useless; used to track the gamepad id however there's only
 		  one gamepad on the 3DS, so it's default is 0
 */
 is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
-	return mbi.is_button_pressed[button]
+
+	if button == .LEFT_THUMBSTICK || button == .RIGHT_THUMBSTICK do return false
+
+	return mbi.gamepad_pressed & u32(button) != 0
+	
+}
+is_gamepad_held :: proc (button:Button, id:i32 = 0) -> bool {
+
+	if button == .LEFT_THUMBSTICK || button == .RIGHT_THUMBSTICK do return false
+
+	return mbi.gamepad_held & u32(button) != 0
+	
 }
 
+is_gamepad_released :: proc (button:Button, id:i32 = 0) -> bool {
+
+	if button == .LEFT_THUMBSTICK || button == .RIGHT_THUMBSTICK do return false
+
+	return mbi.gamepad_released & u32(button) != 0
+	
+}
 /*Returns the x, y values on a range of 0-1 for a joystick*/
 get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
 
@@ -175,10 +193,9 @@ get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
 get_trigger_value :: proc(trigger:Button) -> f32 {
 
 	#partial switch trigger {
-		case .LEFT_TRIGGER:
-			if mbi.is_button_pressed[trigger] == true do return 1
-		case .RIGHT_TRIGGER:
-			if mbi.is_button_pressed[trigger] == true do return 1
+		case .LEFT_TRIGGER, .RIGHT_TRIGGER:
+			if mbi.gamepad_held & u32(trigger) != 0 do return 1
+			if mbi.gamepad_held & u32(trigger) != 0 do return 1
 	}
 	return 0
 }
@@ -220,5 +237,5 @@ is_mouse_released :: proc(mouse:Mouse) -> bool {
 }
 
 
-set_mouse_capture :: proc(is_capture:bool){
+set_mouse_capture :: proc(){
 }

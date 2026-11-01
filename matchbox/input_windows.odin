@@ -146,7 +146,13 @@ Mouse :: enum {
 		  Matchbox yet -- Just grabbing first registered controller
 */
 is_gamepad_pressed :: proc (button:Button, id:i32 = 0) -> bool {
-	return mbi.is_button_pressed[button]
+	return button in mbi.gamepad_pressed
+}
+is_gamepad_held :: proc (button:Button, id:i32 = 0) -> bool {
+	return button in mbi.gamepad_held
+}
+is_gamepad_released :: proc (button:Button, id:i32 = 0) -> bool {
+	return button in mbi.gamepad_released
 }
 
 /*Returns the x, y values on a range of -1-1 for a joystick*/
@@ -182,31 +188,36 @@ get_trigger_value :: proc(trigger:Button) -> f32 {
 
 /*Checks if a key is pressed*/
 is_key_pressed :: proc(key:Key) -> bool {
-	return mbi.is_keys_pressed[key]
+	return mbi.keys_pressed[key]
 }
 
 /*Checks if a key is held*/
 is_key_held :: proc(key:Key) -> bool {
-	return mbi.is_keys_held[key]
+	return mbi.keys_held[key]
 }
 
 is_key_released :: proc(key:Key) -> bool {
-	return mbi.is_keys_released[key]
+	return mbi.keys_released[key]
 }
 
 get_mouse_position :: proc() -> [2]i32 {
 	return mbi.mouse_position
 }
-get_mouse_wheel_value :: proc() -> [2]i16 {
+get_mouse_wheel_value :: proc() -> i16 {
 	return mbi.mouse_wheel_value
 }
 
 is_mouse_pressed :: proc(mouse:Mouse) -> bool {
-	return mbi.is_mouse_pressed[mouse]
+	return mbi.mouse_pressed[mouse]
 }
 is_mouse_held :: proc(mouse:Mouse) -> bool {
-	return mbi.is_mouse_held[mouse]
+	return mbi.mouse_held[mouse]
 }
 is_mouse_released :: proc(mouse:Mouse) -> bool {
-	return mbi.is_mouse_released[mouse]
+	return mbi.mouse_released[mouse]
+}
+
+/*Sets window to always capture mouse input*/
+set_mouse_capture :: proc(){
+	win.SetCapture(mbi.window)
 }

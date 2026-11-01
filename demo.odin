@@ -29,7 +29,7 @@ main :: proc() {
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
 
 	mb.print("Hello", "World", 10)
-
+	mb.set_mouse_capture()
 
 	for mb.is_running() { // Works
 		mb.poll_events() // Works
@@ -40,10 +40,12 @@ main :: proc() {
 		
 		// Works
 		if mb.is_key_pressed(.F) || mb.is_gamepad_pressed(.FACE_UP,0 ) {
+			mb.print("FACE UP or F Pressed")
 		}
 
 		// Works
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) {
+			mb.print("Stopping Application")
 			mb.stop_running()
 		}
 
@@ -56,16 +58,32 @@ main :: proc() {
 			mb.play_audio(audio = jump_sound) // TODO
 		}
 
+		if mb.is_gamepad_pressed(.LEFT_TRIGGER) {
+			mb.print("left trigger pressed")
+		}
+		if mb.is_gamepad_pressed(.RIGHT_TRIGGER) {
+			mb.print("right trigger pressed")
+		}
+
+		if mb.is_gamepad_pressed(.FACE_DOWN) {
+			mb.print("A is pressed")
+		}
+
+		if mb.is_mouse_pressed(.LEFT) {
+			mb.print("Left Mouse pressed")
+		}
+
 		mouse_position := mb.get_mouse_position()
 		mouse_wheel_value := mb.get_mouse_wheel_value()
 		
 		left_trigger_value := mb.get_trigger_value(trigger = .LEFT_TRIGGER)
 		right_trigger_value := mb.get_trigger_value(trigger = .RIGHT_TRIGGER)
 
-		if left_trigger_value > 0 do mb.stop_running()
 
 		left_thumb := mb.get_thumbstick_value(.LEFT_THUMBSTICK)
 		right_thumb := mb.get_thumbstick_value(.RIGHT_THUMBSTICK)
+
+		
 
 		// Works
 		mb.render_start()

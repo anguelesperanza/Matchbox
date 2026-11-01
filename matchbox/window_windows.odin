@@ -12,7 +12,6 @@ package matchbox
 */
 
 // Core
-import "core:log"
 import win "core:sys/windows"
 
 // Vendor
@@ -39,29 +38,28 @@ timestamp:Timestamp
 Matchbox_Info :: struct {
 
 	// General values
-	logger:log.Logger,
 	did_resize:bool,
 
 	// Win32 Related Values
 	window:win.HWND,
 	is_running:bool,
 	
-	is_keys_pressed: #sparse [Key]bool,
-	is_keys_released: #sparse [Key]bool,
-	is_keys_held: #sparse [Key]bool,
+	keys_pressed: #sparse [Key]bool,
+	keys_released: #sparse [Key]bool,
+	keys_held: #sparse [Key]bool,
 	
 	event_message:^win.MSG,
 	mouse_wheel_value:i16,
 	mouse_position:[2]i32,
 
-	is_mouse_pressed:[Mouse]bool,
-	is_mouse_released:[Mouse]bool,
-	is_mouse_held:[Mouse]bool,
+	mouse_pressed:[Mouse]bool,
+	mouse_released:[Mouse]bool,
+	mouse_held:[Mouse]bool,
 
 	// GameInput Values
-	is_button_pressed: #sparse [Button]bool,
-	is_button_released: #sparse [Button]bool,
-	is_button_held: #sparse [Button]bool,
+	gamepad_pressed: bit_set [Button],
+	gamepad_released: bit_set [Button],
+	gamepad_held: bit_set [Button],
 
 	input:^gi.IGameInput,
 	gamepad:^gi.IDevice,
@@ -70,6 +68,12 @@ Matchbox_Info :: struct {
 	right_thumbstick_axis:[2]f32,
 	left_trigger_value:f32,
 	right_trigger_value:f32,
+
+	// For feature parity; the controller on PC can also be a button as the 3DS
+	// so added these as values to set the value where the trigger being >= to
+	// will be considered "pressed"
+	left_trigger_as_button_value:f32,
+	right_trigger_as_button_value:f32,
 
 	//D3D11 Values
 	device: ^d3d11.IDevice,
@@ -101,15 +105,13 @@ Matchbox_Info :: struct {
 
 mbi:Matchbox_Info
 
-/*Initialize the core of Matchbox; from Windows, to logging, to D3D11, etc*/
+/*Initialize the core of Matchbox; from Windows, to D3D11, etc*/
 init :: proc(title:string, width:i32, height:i32) {
 
 	mbi.is_running = true
-
-	mbi.logger = log.create_console_logger()
-	context.logger = mbi.logger
-	// log.info("Init")
-
+	mbi.left_trigger_as_button_value = 0.2
+	mbi.right_trigger_as_button_value = 0.2
+		
 	rect:win.RECT = {left = 0, top = 0, right = width, bottom = height}
 
 	// Create a handle to the instance of the application - The thing the OS uses to ID the executable
@@ -150,7 +152,6 @@ init :: proc(title:string, width:i32, height:i32) {
 	)
 
 	if mbi.window == nil {
-		log.error("Could not create window")
 		return
 	}
 
@@ -269,7 +270,6 @@ init :: proc(title:string, width:i32, height:i32) {
 		if win.FAILED(res) {
 			if mbi.compile_errors != nil {
 				error_str := mbi.compile_errors->GetBufferPointer()
-				log.error(error_str)
 				mbi.compile_errors->Release()
 			}
 
@@ -304,7 +304,6 @@ init :: proc(title:string, width:i32, height:i32) {
 		if win.FAILED(res) {
 			if mbi.compile_errors != nil {
 				error_str := mbi.compile_errors->GetBufferPointer()
-				log.error(error_str)
 				mbi.compile_errors->Release()
 			}
 
@@ -383,7 +382,6 @@ init :: proc(title:string, width:i32, height:i32) {
 	
 	result := gi.Create(&mbi.input)
 	if win.SUCCEEDED(result) == false {
-		log.error("Could not create input stream for controller/gamepad")
 	}
 	
 }
@@ -410,13 +408,13 @@ get_delta_time :: proc() -> (dt:f64) {
 
 /*Cleans up resources created by Matchbox*/
 cleanup :: proc() {
-	log.destroy_console_logger(mbi.logger)
 
+	// Win32
+	win.ReleaseCapture()
 
 	// GameInput -- User may not have a controller so the values can be nil by cleanup call
-	if mbi.input != nil do mbi.input->Release()
 	if mbi.gamepad != nil do mbi.gamepad->Release()
-	// if mbi.reading != nil do mbi.reading->Release() // -> Causes an access error violation and not sure why, need to look into
+	if mbi.input != nil do mbi.input->Release() // -> Left commented out as something causes this to wait for 8 seconds and not sure what
 
 	// D3D11
 	mbi.input_layout->Release()

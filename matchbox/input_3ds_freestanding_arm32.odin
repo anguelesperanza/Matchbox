@@ -176,11 +176,10 @@ get_trigger_value :: proc(trigger:Button) -> f32 {
 
 	#partial switch trigger {
 		case .LEFT_TRIGGER:
-			return 1
+			if mbi.is_button_pressed[trigger] == true do return 1
 		case .RIGHT_TRIGGER:
-			return 1
+			if mbi.is_button_pressed[trigger] == true do return 1
 	}
-	
 	return 0
 }
 
@@ -203,7 +202,23 @@ is_key_held :: proc(key:Key) -> bool {
 	return false
 }
 
+is_key_released :: proc(key:Key) -> bool {
+	return false
+}
+
 /*On the 3DS this will always return false*/
 is_mouse_pressed :: proc(mouse:Mouse) -> bool {
 	return false
+}
+
+is_mouse_held :: proc(mouse:Mouse) -> bool {
+	return false
+}
+
+is_mouse_released :: proc(mouse:Mouse) -> bool {
+	return false
+}
+
+
+set_mouse_capture :: proc(is_capture:bool){
 }

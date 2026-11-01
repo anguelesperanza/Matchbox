@@ -34,7 +34,7 @@ poll_events :: proc() {
 
     // TODO == NEEDS REWORKING | USES OLD STYLE OF KEY BINDINGS FROM INPUT POC
 
-	if pressed & cast(u32)Button.SELECT != 0 do mbi.is_button_pressed[.START] = true
+	if pressed & cast(u32)Button.SELECT != 0 do mbi.is_button_pressed[.SELECT] = true
 	if pressed & cast(u32)Button.START != 0 do mbi.is_button_pressed[.START] = true
 
 	// FACE buttons

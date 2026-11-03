@@ -15,6 +15,7 @@ Batch :: struct {
 	verticies: [dynamic]Vertex,
 	gpu_buffer: ^d3d11.IBuffer, // Dynamic but fixed capacity; replaced mbi.vertex_buffer
 	gpu_cursor: u32, // needed for NO_OVERWRITE
+	current_texture_view: ^d3d11.IShaderResourceView,
 	
 }
 batch:Batch

@@ -21,8 +21,6 @@ import "vendor:directx/d3d_compiler"
 import "vendor:directx/d3d_common"
 import gi "vendor:windows/GameInput"
 
-// Base
-import "base:runtime"
 
 Timestamp :: struct {
 	fixed_timestamp:f64,
@@ -39,15 +37,16 @@ Matchbox_Info :: struct {
 
 	// General values
 	did_resize:bool,
+	asset_path:string, // required as otherwise loading assets between targets will be messy
 
 	// Win32 Related Values
 	window:win.HWND,
 	is_running:bool,
-	
+
 	keys_pressed: #sparse [Key]bool,
 	keys_released: #sparse [Key]bool,
 	keys_held: #sparse [Key]bool,
-	
+
 	event_message:^win.MSG,
 	mouse_wheel_value:i16,
 	mouse_position:[2]i32,
@@ -86,6 +85,7 @@ Matchbox_Info :: struct {
 	dxgi_desc:^dxgi.ADAPTER_DESC,
 	framebuffer:^d3d11.ITexture2D,
 	framebuffer_view: ^d3d11.IRenderTargetView,
+	sampler:^d3d11.ISamplerState,
 
 	// Shaders
 	shader_src:[]u8,
@@ -96,6 +96,7 @@ Matchbox_Info :: struct {
 	pixel_shader_blob:^d3d11.IBlob,
 	input_layout:^d3d11.IInputLayout, // The layout of the input struct VS_Input in the shader
 	vertex_buffer:^d3d11.IBuffer,
+	constant_buffer:^d3d11.IBuffer,
 
 	// Shapes
 	vertex_count:u32,
@@ -111,7 +112,8 @@ init :: proc(title:string, width:i32, height:i32) {
 	mbi.is_running = true
 	mbi.left_trigger_as_button_value = 0.2
 	mbi.right_trigger_as_button_value = 0.2
-		
+	mbi.asset_path = "assets/pc/"
+
 	rect:win.RECT = {left = 0, top = 0, right = width, bottom = height}
 
 	// Create a handle to the instance of the application - The thing the OS uses to ID the executable
@@ -333,7 +335,7 @@ init :: proc(title:string, width:i32, height:i32) {
 				InstanceDataStepRate = 0,
 			},
 			{
-				
+
 				SemanticName = "color",
 				SemanticIndex = 0,
 				Format = .R32G32B32A32_FLOAT,
@@ -342,9 +344,18 @@ init :: proc(title:string, width:i32, height:i32) {
 				InputSlotClass = .VERTEX_DATA,
 				InstanceDataStepRate = 0,
 			},
+			{
+				SemanticName = "texcoord",
+				SemanticIndex = 0,
+				Format = .R32G32_FLOAT,
+				InputSlot = 0,
+				AlignedByteOffset = d3d11.APPEND_ALIGNED_ELEMENT,
+				InputSlotClass = .VERTEX_DATA,
+				InstanceDataStepRate = 0,
+			},
 		}
 
-		
+
         res := mbi.device->CreateInputLayout(
                 pInputElementDescs                = raw_data(input_element_descs),
                 NumElements                       = u32(len(input_element_descs)),
@@ -371,19 +382,53 @@ init :: proc(title:string, width:i32, height:i32) {
 
 		ensure(win.SUCCEEDED(res), "Create VertexBuffer Failed")
 
+
+
 		// TODO: What reserve does and how it works "You also reserve(&batch.vertices, MAX_BATCH_VERTICES) so appending never reallocates."
-		
+
+	}
+	
+	{
+		sampler_desc := d3d11.SAMPLER_DESC {
+			Filter = .MIN_MAG_MIP_POINT,
+			AddressU = .BORDER,
+			AddressV = .BORDER,
+			AddressW = .BORDER,
+			ComparisonFunc = .NEVER,
+			BorderColor = {1, 1,1, 0},
+		}
+
+		res := mbi.device->CreateSamplerState(&sampler_desc, &mbi.sampler)
+		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
+	}
+	
+	{
+		constant_buffer_desc := d3d11.BUFFER_DESC {
+			ByteWidth = size_of(Constants),
+			Usage = .DYNAMIC,
+			BindFlags = {.CONSTANT_BUFFER},
+			CPUAccessFlags = {.WRITE},
+		}
+
+		res := mbi.device->CreateBuffer(
+			pDesc = &constant_buffer_desc,
+			pInitialData = nil,
+			ppBuffer = &mbi.constant_buffer,
+		)
+
+		ensure(win.SUCCEEDED(res), "Create ConstantBuffer Failed")
+
 	}
 
 	// Setup the initial frequency and counter for delta time
 	win.QueryPerformanceFrequency(&timestamp.frequency)
 	win.QueryPerformanceCounter(&timestamp.last_time)
 
-	
+
 	result := gi.Create(&mbi.input)
 	if win.SUCCEEDED(result) == false {
 	}
-	
+
 }
 
 /*Returns true if the window is running; other returns fale -> Almost always will return true*/
@@ -397,11 +442,11 @@ stop_running :: proc() {
 }
 
 /*Returns the delta time value*/
-get_delta_time :: proc() -> (dt:f64) {
+get_delta_time :: proc() -> (dt:f32) {
 	/*In C, a LARGE_INTEGER is a struct, In Odin, it's a c_longlong --> an f64*/
 	now:win.LARGE_INTEGER
 	win.QueryPerformanceCounter(lpPerformanceCount = &now)
-	dt = f64(now - timestamp.last_time) / cast(f64)timestamp.frequency
+	dt = f32(f64(now - timestamp.last_time) / cast(f64)timestamp.frequency)
 	timestamp.last_time = now
 	return dt
 }
@@ -417,6 +462,8 @@ cleanup :: proc() {
 	if mbi.input != nil do mbi.input->Release() // -> Left commented out as something causes this to wait for 8 seconds and not sure what
 
 	// D3D11
+	mbi.constant_buffer->Release()
+	mbi.sampler->Release()
 	mbi.input_layout->Release()
 	mbi.pixel_shader_blob->Release()
 	mbi.pixel_shader->Release()

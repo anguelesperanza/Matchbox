@@ -14,22 +14,22 @@ import mb "matchbox"
 
 main :: proc() {
 
-	mb.init("Demo Window", 600, 600) // works
+	mb.init("Demo Window", 1920, 1080) // works
 
 	// WIP -- Want to pass pixel positions as parameters -- Need projection mapping working
 	triangle:mb.Triangle = mb.create_triangle({5, 10})
 
 	// TODO	
-	player:mb.Sprite = mb.create_sprite(filepath = "path-to-sprite")
-	player.x = 50
-	player.y = 50
+	player:mb.Sprite = mb.create_sprite(filename = "toyota.png")
+	player.x = 10
+	player.y = 10
 	player.speed = 100
 
 	// TODO
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
 
 	mb.print("Hello", "World", 10)
-	mb.set_mouse_capture()
+	// mb.set_mouse_capture()
 
 	for mb.is_running() { // Works
 		mb.poll_events() // Works

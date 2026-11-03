@@ -7,8 +7,8 @@ setlocal enabledelayedexpansion
 ::   set TRITEX=tritex
 ::   set MP3TOWAV=mp3towav
 :: ---------------------------------------------------------------
-set TRITEX=.tools\tritex.exe
-set MP3TOWAV=.tools\mp3towav.exe
+set TRITEX=tools\tritex.exe
+set MP3TOWAV=tools\mp3towav.exe
 :: ---------------------------------------------------------------
 :: Project settings — update these for your project
 :: ---------------------------------------------------------------
@@ -24,8 +24,8 @@ set ROMFS=romfs
 set GFXOUT=%ROMFS%\gfx
 set AUDIOOUT=%ROMFS%\audio
 set ODINASM=odin_asm
-set IMAGES=assets\images
-set AUDIO=assets\audio
+set IMAGES=assets\3ds\images
+set AUDIO=assets\3ds\audio
 :: Shared library root (relative to this project at the repo root)
 set LIB=matchbox\o3dx
 :: ---------------------------------------------------------------

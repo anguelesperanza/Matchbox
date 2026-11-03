@@ -38,4 +38,6 @@ examples/walk-level/levels/yard_saved.level
 *.elf
 odin_asm/
 cheatsheet.md
+assets/*
+romfs/*
 

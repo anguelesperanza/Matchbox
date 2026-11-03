@@ -16,6 +16,7 @@ package matchbox
 // Core
 import "o3dx/ctru"
 import "o3dx/c3d"
+import "o3dx/c2d"
 
 
 // Constants
@@ -31,7 +32,9 @@ Matchbox_Info :: struct {
 
 	// General values
 	is_running:bool,
-	// logger:log.Logger,
+	asset_path:string,
+
+	
 	did_resize:bool,
 	top_screen:rawptr,
 	bottom_screen:rawptr,
@@ -63,6 +66,7 @@ mbi:Matchbox_Info
 init :: proc(title:string, width:i32, height:i32) {
 
 	mbi.is_running = true
+	mbi.asset_path = "romfs:/"
 
 	/*Based on my New 3DS LL values*/
 	mbi.left_thumbstick_max = 156
@@ -72,7 +76,9 @@ init :: proc(title:string, width:i32, height:i32) {
     ctru.irrstInit()
     
     ctru.gfxInitDefault()
-    c3d.Init(c3d.C3D_DEFAULT_CMDBUF_SIZE)
+    c3d.Init(c3d.DEFAULT_CMDBUF_SIZE)
+    c2d.Init(c2d.DEFAULT_MAX_OBJECTS)
+    c2d.Prepare()
     ctru.consoleInit(ctru.GFX_BOTTOM, nil)
 
 
@@ -107,15 +113,15 @@ init :: proc(title:string, width:i32, height:i32) {
     // prog: ctru.shaderProgram_s
     ctru.shaderProgramInit(&mbi.prog)
     ctru.shaderProgramSetVsh(&mbi.prog, mbi.dvlb.DVLE) // dvlb.DVLE points to DVLE[0]
-    c3d.BindProgram(&mbi.prog)
+    // c3d.BindProgram(&mbi.prog)
 
     // Look up the projection uniform register index.
     mbi.uloc_proj = i32(ctru.shaderInstanceGetUniformLocation(mbi.prog.vertexShader, "projection"))
     
-	attr_info := c3d.GetAttrInfo()
-    c3d.AttrInfo_Init(attr_info)
-    c3d.AttrInfo_AddLoader(attr_info, 0, .FLOAT, 3) // v0 = position (xyz)
-    c3d.AttrInfo_AddLoader(attr_info, 1, .FLOAT, 4) // v1 = colour   (rgba)
+	// attr_info := c3d.GetAttrInfo()
+ //    c3d.AttrInfo_Init(attr_info)
+ //    c3d.AttrInfo_AddLoader(attr_info, 0, .FLOAT, 3) // v0 = position (xyz)
+ //    c3d.AttrInfo_AddLoader(attr_info, 1, .FLOAT, 4) // v1 = colour   (rgba)
 
 
     // The GPU DMA engine requires vertex data in the 3DS linear heap.
@@ -123,15 +129,15 @@ init :: proc(title:string, width:i32, height:i32) {
     mbi.vbo_data = ctru.linearAlloc(vbo_size)
     // ctru.memcpy(mbi.vbo_data, &vertex_list, vbo_size)
 
-    buf_info := c3d.C3D_GetBufInfo()
-    c3d.BufInfo_Init(buf_info)
-    c3d.BufInfo_Add(buf_info, mbi.vbo_data, size_of(Vertex), 2, 0x10)
+    // buf_info := c3d.C3D_GetBufInfo()
+    // c3d.BufInfo_Init(buf_info)
+    // c3d.BufInfo_Add(buf_info, mbi.vbo_data, size_of(Vertex), 2, 0x10)
 
 	
-    env := c3d.C3D_GetTexEnv(0)
-    c3d.TexEnvInit(env)
-    c3d.TexEnvSrc(env, c3d.C3D_Both,.PRIMARY_COLOR, .PRIMARY_COLOR, .PRIMARY_COLOR)
-    c3d.TexEnvFunc(env, c3d.C3D_Both, .REPLACE)
+    // env := c3d.C3D_GetTexEnv(0)
+    // c3d.TexEnvInit(env)
+    // c3d.TexEnvSrc(env, c3d.C3D_Both,.PRIMARY_COLOR, .PRIMARY_COLOR, .PRIMARY_COLOR)
+    // c3d.TexEnvFunc(env, c3d.C3D_Both, .REPLACE)
 
     mbi.projection.r[0] = c3d.FVec{ 0.0, 0.0, 1.0, 0.0} // Row 0 – screen-Y → GPU-X:  C(w,z,y,x) = ( 1,  0, -2/240,  0)
     mbi.projection.r[1] = c3d.FVec{ 0.0, 0.0, 0.0, -1.0} // Row 1 – screen-X → GPU-Y:  C(w,z,y,x) = ( 1,  0,  0, −2/400)
@@ -140,8 +146,8 @@ init :: proc(title:string, width:i32, height:i32) {
     r00 := transmute(u32)(mbi.projection.r[0].x)
     r01 := transmute(u32)(mbi.projection.r[0].y)
 
-    c3d.DepthTest(false, .ALWAYS, .ALL)
-    c3d.CullFace(.NONE)
+    // c3d.DepthTest(false, .ALWAYS, .ALL)
+    // c3d.CullFace(.NONE)
 
 
 
@@ -160,11 +166,12 @@ stop_running :: proc() {
 }
 
 /*Returns the delta time value*/
-get_delta_time :: proc() -> (dt:f64) {
+get_delta_time :: proc() -> (dt:f32) {
 	now := ctru.osGetTime() // u64, milliseconds
-	dt = f64(now - timestamp.last_time) / 1000.0
+	dt = f32(f64(now - timestamp.last_time) / 1000.0)
 	timestamp.last_time = now
-	return dt}
+	return dt
+}
 
 /*Cleans up resources created by Matchbox*/
 cleanup :: proc() {
@@ -173,7 +180,8 @@ cleanup :: proc() {
     ctru.shaderProgramFree(&mbi.prog)
     ctru.DVLB_Free(mbi.dvlb)
     ctru.free(mbi.shader_buffer)
-    c3d.C3D_Fini()
+    c3d.Fini()
+    c2d.Fini()
     ctru.gfxExit()
     ctru.romfsExit()
 	

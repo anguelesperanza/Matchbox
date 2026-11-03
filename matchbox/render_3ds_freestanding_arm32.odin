@@ -10,6 +10,7 @@ package matchbox
 
 import "o3dx/ctru"
 import "o3dx/c3d"
+import "o3dx/c2d"
 
 // Constants
 MAX_BATCH_VERTICES :: 4096 // Total number of vertices that can be drawn at once
@@ -22,24 +23,46 @@ Vertex :: struct {
 
 render_start :: proc() {
 	c3d.FrameBegin(c3d.FRAME_SYNCDRAW)
-
     c3d.FrameDrawOn(mbi.top_screen) // Will need to decide how to handle drawing on top or bottom
 	
 }
 
+/*Draws any queued triangles using Matchbox's own GPU state | WIP May need improvement based on performance*/
+flush_triangles :: proc() {
+	if mbi.vertex_count == 0 do return
+	bind_triangle_state()
+	ctru.memcpy(mbi.vbo_data, &mbi.vertices[0], uint(mbi.vertex_count) * size_of(Vertex))
+	c3d.DrawArrays(.TRIANGLES, 0, i32(mbi.vertex_count))
+	mbi.vertex_count = 0
+}
+
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
-
-	// Not sure if this is a good location to put the DrawArrays call
-    // c3d.DrawArrays(.TRIANGLES, 0, 3)
-    // c3d.FrameEnd(0)
-	
-	if mbi.vertex_count > 0 {
-		ctru.memcpy(mbi.vbo_data, &mbi.vertices[0], uint(mbi.vertex_count) * size_of(Vertex))
-		c3d.DrawArrays(.TRIANGLES, 0, i32(mbi.vertex_count))
-		mbi.vertex_count = 0
-	}
+	flush_triangles()
 	c3d.FrameEnd(0)
+}
+
+bind_triangle_state :: proc() {
+	c3d.BindProgram(&mbi.prog)
+
+	attr_info := c3d.GetAttrInfo()
+	c3d.AttrInfo_Init(attr_info)
+	c3d.AttrInfo_AddLoader(attr_info, 0, .FLOAT, 3) // v0 = position (xyz)
+	c3d.AttrInfo_AddLoader(attr_info, 1, .FLOAT, 4) // v1 = colour   (rgba)
+
+	buf_info := c3d.C3D_GetBufInfo()
+	c3d.BufInfo_Init(buf_info)
+	c3d.BufInfo_Add(buf_info, mbi.vbo_data, size_of(Vertex), 2, 0x10)
+
+	env := c3d.C3D_GetTexEnv(0)
+	c3d.TexEnvInit(env)
+	c3d.TexEnvSrc(env, c3d.C3D_Both, .PRIMARY_COLOR, .PRIMARY_COLOR, .PRIMARY_COLOR)
+	c3d.TexEnvFunc(env, c3d.C3D_Both, .REPLACE)
+
+	c3d.DepthTest(false, .ALWAYS, .ALL)
+	c3d.CullFace(.NONE)
+
+	c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
 }
 
 /*Renders a triangle -- specifically adds vertex data to global array that will be rendered
@@ -53,7 +76,7 @@ render_triangle_points :: proc(a, b, c:[2]f32, color:[4]f32) {
 	mbi.vertices[mbi.vertex_count + 2] = {c.x, c.y, z, color.r, color.g, color.b, color.a}
 	mbi.vertex_count += 3
 
-	c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
+	// c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
 	
 }
 
@@ -73,10 +96,34 @@ render_triangle :: proc {
 	// render_triangle_shape,
 }
 
+render_sprite :: proc(sprite:Sprite, tint:[4]f32 = {1, 1, 1, 1}) {
 
+	flush_triangles()
+	c2d.Prepare()
+	c2d.SceneBegin(mbi.top_screen)
+	
+	sprite := sprite
+	image := c2d.Image{&sprite.texture, &sprite.sub_texture}
+	
+	tint:c2d.ImageTint = {
+		{{color_to_u32(tint), 0.0},
+		{color_to_u32(tint), 0.0},
+		{color_to_u32(tint), 0.0},
+		{color_to_u32(tint), 0.0}}
+	}	
+	
+	c2d.DrawImageAt(
+		img = image,
+		x = sprite.x,
+		y = sprite.y,
+		depth = 0,
+		tint = &tint,
+		// tint = nil,
+		scaleX = 1.0,
+		scaleY = 1.0,
+	)
 
-render_sprite :: proc(sprite:Sprite) {
-	// TODO: Implement
+	c2d.Flush()
 }
 
 

@@ -18,7 +18,13 @@ MAX_BATCH_VERTICIES :: 65536 // Total number of vertices that can be drawn at on
 
 Vertex :: struct {
 	position:[2]f32,
-	color:[4]f32
+	color:[4]f32,
+	uv:[2]f32,
+}
+
+Constants :: struct {
+    viewport_size: [2]f32,
+    _padding: [2]f32, // pads to 16 bytes
 }
 
 render_start :: proc() {
@@ -50,10 +56,21 @@ render_start :: proc() {
 	    MinDepth = 0,
 	    MaxDepth = 1,
 	}
-	
+
 	mbi.device_context->RSSetViewports(1, &viewport)
+	mbi.device_context->VSSetConstantBuffers(0, 1, &mbi.constant_buffer)
 	mbi.device_context-> OMSetRenderTargets(1, &mbi.framebuffer_view, nil)
-	
+
+	constants := Constants {
+		viewport_size = {viewport.Width, viewport.Height}
+	}
+
+	mapped:d3d11.MAPPED_SUBRESOURCE
+	res := mbi.device_context->Map(mbi.constant_buffer, 0, .WRITE_DISCARD, {}, &mapped)
+	ensure(win.SUCCEEDED(res), "Map constant buffer failed")
+	mem.copy(mapped.pData, &constants, size_of(Constants))
+	mbi.device_context->Unmap(mbi.constant_buffer, 0)
+
 }
 
 flush :: proc() {
@@ -69,10 +86,14 @@ flush :: proc() {
 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
 
+	mbi.device_context->PSSetShaderResources(0, 1, &batch.current_texture_view)
+	mbi.device_context->PSSetSamplers(0, 1, &mbi.sampler)
+
+
 	mbi.device_context->IASetVertexBuffers(0, 1, &batch.gpu_buffer, &stride, &offset)
 
 
-	
+
 	mapped:d3d11.MAPPED_SUBRESOURCE
 	res := mbi.device_context->Map(batch.gpu_buffer, 0, .WRITE_DISCARD, {}, &mapped)
 	mem.copy(mapped.pData, raw_data(batch.verticies), int(count) * size_of(Vertex))
@@ -81,7 +102,6 @@ flush :: proc() {
 	mbi.device_context->Draw(count, 0)
 	clear(&batch.verticies)
 }
-
 
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
@@ -96,7 +116,7 @@ render_triangle_points :: proc(a, b, c:[2]f32, color:[4]f32) {
 		flush() // No more space in the buffer to just draw what we have and start again
 	}
 
-	append(&batch.verticies, Vertex{a, color}, {b, color}, {c, color})
+	append(&batch.verticies, Vertex{a, color, {}}, {b, color, {}}, {c, color, {}})
 }
 
 /*Renders a triangle using triangle shape*/
@@ -116,8 +136,24 @@ render_triangle :: proc {
 }
 
 
-render_sprite :: proc(sprite:Sprite) {
-	// TODO: Implement
+/*Renders the sprite, with an optional tint (default is white -- no tint)*/
+render_sprite :: proc(sprite:Sprite, tint:[4]f32 = {1, 1, 1, 1}) {
+
+	if len(batch.verticies) + 6 > MAX_BATCH_VERTICIES {
+		flush() // No more space in the buffer to just draw what we have and start again
+	}
+
+	if batch.current_texture_view != sprite.texture_view {
+		flush() // "render" what we already have
+		batch.current_texture_view = sprite.texture_view // update the view
+	}
+
+	top_left := Vertex{position = {sprite.x, sprite.y}, color = tint, uv = {0, 0}}
+	top_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y}, color = tint, uv = {1,0}}
+	bottom_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y + cast(f32)sprite.height}, color = tint, uv = {1,1}}
+	bottom_left := Vertex{position = {sprite.x, sprite.y + cast(f32)sprite.height}, color = tint, uv = {0, 1}}
+
+	append(&batch.verticies, top_left, top_right, bottom_right, top_left, bottom_right, bottom_left)
 }
 
 clear_background :: proc(color:[4]f32) {

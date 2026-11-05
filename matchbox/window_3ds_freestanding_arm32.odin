@@ -33,6 +33,7 @@ Matchbox_Info :: struct {
 	// General values
 	is_running:bool,
 	asset_path:string,
+	window_size:[2]i32,
 
 	
 	did_resize:bool,
@@ -81,6 +82,7 @@ init :: proc(title:string, width:i32, height:i32) {
     c2d.Prepare()
     ctru.consoleInit(ctru.GFX_BOTTOM, nil)
 
+	mbi.window_size = {240, 400}
 
     mbi.top_screen = c3d.RenderTargetCreate(
     	width = 240,

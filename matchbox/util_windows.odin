@@ -20,6 +20,10 @@ print :: proc(args: ..any) {
 	fmt.println(..args)
 }
 
+/*returns the size of the window for a given target*/
+get_window_size :: proc() -> [2]i32 {
+	return mbi.window_size
+}
 
 
 /* |===============|

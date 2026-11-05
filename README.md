@@ -27,11 +27,33 @@ constantly changing until a good path is made for it but loosly, there are the m
 
 [x] POC -> Proof of concept that the Matchbox API can compile to both PC and the 3DS
 
-[ ] 2D  -> 2D is the first target for this and where the initial large bulk of work will be done
+[-] 2D  -> 2D is the first target for this and where the initial large bulk of work will be done
+
+[ ] Improved build system -> Rework Farlite project, enable a custom odin install with modified complier for 3ds target
+
+[?] Research other targets to Add -> There are other targets; like the PS Vita that I'd like to add but I will need to research first
 
 [ ] 3D  -> 3D is the last big milestone
 - This is by far the one with the most effort.
 - O3DX Bindings for 3D need to be touched up and any gaps in the bindings need to be filled
+
+The {POC, 2D, 3D, Improved Build System} are the most important milestones to hit.
+
+POC:
+  - Proves the Matchbox concept works
+
+2D:
+  - Make 2D games
+  - Lays the foundation for how the Matchbox API will be shapped in the future.
+
+3D: Make 3D Games
+
+The Improved Build System:
+ - Creates an easy to use way to compile Matchbox projects
+ - Allows for install of custom odin compiler with changes for 3DS target (compile hard float directly)
+ - Allows for easy install of Matchbox
+
+At the point of the 2D Milestone being
 
 Current In-Progress Milestone: `2D`
 

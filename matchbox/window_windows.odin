@@ -42,6 +42,7 @@ Matchbox_Info :: struct {
 	// Win32 Related Values
 	window:win.HWND,
 	is_running:bool,
+	window_size:[2]i32,
 
 	keys_pressed: #sparse [Key]bool,
 	keys_released: #sparse [Key]bool,
@@ -113,6 +114,7 @@ init :: proc(title:string, width:i32, height:i32) {
 	mbi.left_trigger_as_button_value = 0.2
 	mbi.right_trigger_as_button_value = 0.2
 	mbi.asset_path = "assets/pc/"
+	mbi.window_size = {width, height}
 
 	rect:win.RECT = {left = 0, top = 0, right = width, bottom = height}
 

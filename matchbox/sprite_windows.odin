@@ -44,7 +44,8 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 	image.alpha_add_if_missing(img)
 	ensure(img.depth == 8 && img.channels == 4, "Image is not RGBA8")
 
-	img_data := bytes.buffer_to_bytes(&img.pixels)
+	// img_data := bytes.buffer_to_bytes(&img.pixels)
+	img_data := img.pixels[:]
 
 	texture_desc := d3d11.TEXTURE2D_DESC {
 		Width = u32(img.width),

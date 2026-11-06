@@ -14,7 +14,7 @@ main :: proc() {
 	player.speed = 100
 
 
-	meme:mb.Sprite = mb.create_sprite(filename = "cat_transparent.png")
+	meme:mb.Sprite = mb.create_sprite(filename = "meme_cat.png")
 
 	// TODO
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
@@ -64,7 +64,12 @@ main :: proc() {
 		// mb.render_triangle(a = {400, 100}, b = {500, 300}, c = {350, 300}, color = {0.5, 0.5, 0.5, 1})
 		mb.render_sprite(sprite = player) // WIP -- Still more work to do for transparenet sprites
 		mb.render_sprite(sprite = meme)
-		mb.render_triangle(a = {400, 100}, b = {500, 300}, c = {350, 300}, color = {1, 0, 0, 0.5})
+
+		// I need a way to normalize the cooridinates ???? Not sure what the word here is but
+		// but essentially -- But I need a way to provide cooridantes that work accross all targets as anyting greater
+		// than the target's screen size will be rendered off screen; thus not showing
+		mb.render_triangle(a = {-0.8, 0.2}, b = {-0.4, -0.4}, c = {-1.0, -0.4}, color = {1, 0, 0, 0.5})		
+		// mb.render_triangle(a = {400, 100}, b = {500, 300}, c = {350, 300}, color = {1, 0, 0, 0.5})
 		// Works
 		mb.render_end() 
 	}

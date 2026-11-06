@@ -62,6 +62,8 @@ bind_triangle_state :: proc() {
 	c3d.DepthTest(false, .ALWAYS, .ALL)
 	c3d.CullFace(.NONE)
 
+	c3d.AlphaBlend(.ADD, .ADD, .SRC_ALPHA, .ONE_MINUS_SRC_ALPHA, .SRC_ALPHA, .ONE_MINUS_SRC_ALPHA)	
+
 	c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
 }
 
@@ -99,7 +101,7 @@ render_triangle :: proc {
 render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint:[4]f32 = {1, 1, 1, 1}) {
 
 	flush_triangles()
-	c2d.Prepare()
+	c2d.Prepare() // I do not believe this is the best approach as each render is a new render pass instead of batch | Should be reworked
 	c2d.SceneBegin(mbi.top_screen)
 	
 	sprite := sprite

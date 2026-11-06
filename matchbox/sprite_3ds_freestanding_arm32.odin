@@ -28,6 +28,8 @@ Sprite :: struct {
 	x:f32,
 	y:f32,
 	speed:f32,
+	width:u16,
+	height:u16
 }
 
 create_sprite :: proc(filename:string) -> (sprite:Sprite) {
@@ -69,6 +71,9 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 	res := c2d.load_t3x_image(concat_string, &sprite.texture, &sprite.sub_texture)
 	ensure(res == true, "Could not load image")
+
+	sprite.width = sprite.sub_texture.width
+	sprite.height = sprite.sub_texture.height
 
 	return sprite
 }

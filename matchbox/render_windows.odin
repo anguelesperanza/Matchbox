@@ -8,8 +8,9 @@ package matchbox
 	Handles the rendering
 */
 
-import win "core:sys/windows"
 import "core:mem"
+import "core:math"
+import win "core:sys/windows"
 
 import "vendor:directx/d3d11"
 
@@ -56,6 +57,10 @@ render_start :: proc() {
 	    MinDepth = 0,
 	    MaxDepth = 1,
 	}
+
+	blend_factor := [4]f32{0, 0, 0, 0}
+	mbi.device_context->OMSetBlendState(mbi.blend_state, &blend_factor, 0xFFFFFFFF)
+
 
 	mbi.device_context->RSSetViewports(1, &viewport)
 	mbi.device_context->VSSetConstantBuffers(0, 1, &mbi.constant_buffer)
@@ -115,7 +120,12 @@ render_triangle_points :: proc(a, b, c:[2]f32, color:[4]f32) {
 	if len(batch.verticies) + 3 > MAX_BATCH_VERTICIES {
 		flush() // No more space in the buffer to just draw what we have and start again
 	}
-
+	
+	if batch.current_texture_view != mbi.white_texture_view {
+		flush()
+		batch.current_texture_view = mbi.white_texture_view
+	}
+	
 	append(&batch.verticies, Vertex{a, color, {}}, {b, color, {}}, {c, color, {}})
 }
 
@@ -135,9 +145,14 @@ render_triangle :: proc {
 	// render_triangle_shape,
 }
 
+/*used to calculate the corner vertex positions to help with rotation and scale*/
+corner :: proc(offset, center:[2]f32, s, c:f32) -> [2]f32 {
+	return center + {offset.x * c - offset.y * s, offset.x * s + offset.y * c}
+}
+
 
 /*Renders the sprite, with an optional tint (default is white -- no tint)*/
-render_sprite :: proc(sprite:Sprite, tint:[4]f32 = {1, 1, 1, 1}) {
+render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint:[4]f32 = {1, 1, 1, 1}) {
 
 	if len(batch.verticies) + 6 > MAX_BATCH_VERTICIES {
 		flush() // No more space in the buffer to just draw what we have and start again
@@ -148,13 +163,25 @@ render_sprite :: proc(sprite:Sprite, tint:[4]f32 = {1, 1, 1, 1}) {
 		batch.current_texture_view = sprite.texture_view // update the view
 	}
 
-	top_left := Vertex{position = {sprite.x, sprite.y}, color = tint, uv = {0, 0}}
-	top_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y}, color = tint, uv = {1,0}}
-	bottom_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y + cast(f32)sprite.height}, color = tint, uv = {1,1}}
-	bottom_left := Vertex{position = {sprite.x, sprite.y + cast(f32)sprite.height}, color = tint, uv = {0, 1}}
+
+	center := [2]f32{sprite.x + cast(f32)sprite.width / 2, sprite.y + cast(f32)sprite.height / 2}
+	half := [2]f32{cast(f32)sprite.width, cast(f32)sprite.height} * scale / 2
+
+	s, c := math.sincos(rotation_angle)
+
+	// top_left := Vertex{position = {sprite.x, sprite.y}, color = tint, uv = {0, 0}}
+	// top_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y}, color = tint, uv = {1,0}}
+	// bottom_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y + cast(f32)sprite.height}, color = tint, uv = {1,1}}
+	// bottom_left := Vertex{position = {sprite.x, sprite.y + cast(f32)sprite.height}, color = tint, uv = {0, 1}}
+
+	top_left     := Vertex{position = corner({-half.x, -half.y}, center, s, c), color = tint, uv = {0, 0}}
+	top_right    := Vertex{position = corner({ half.x, -half.y}, center, s, c), color = tint, uv = {1, 0}}
+	bottom_right := Vertex{position = corner({ half.x,  half.y}, center, s, c), color = tint, uv = {1, 1}}
+	bottom_left  := Vertex{position = corner({-half.x,  half.y}, center, s, c), color = tint, uv = {0, 1}}	
 
 	append(&batch.verticies, top_left, top_right, bottom_right, top_left, bottom_right, bottom_left)
 }
+
 
 clear_background :: proc(color:[4]f32) {
 	color := color

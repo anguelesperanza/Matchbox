@@ -87,6 +87,8 @@ Matchbox_Info :: struct {
 	framebuffer:^d3d11.ITexture2D,
 	framebuffer_view: ^d3d11.IRenderTargetView,
 	sampler:^d3d11.ISamplerState,
+	white_texture:^d3d11.ITexture2D,
+	blend_state:^d3d11.IBlendState,
 
 	// Shaders
 	shader_src:[]u8,
@@ -98,7 +100,8 @@ Matchbox_Info :: struct {
 	input_layout:^d3d11.IInputLayout, // The layout of the input struct VS_Input in the shader
 	vertex_buffer:^d3d11.IBuffer,
 	constant_buffer:^d3d11.IBuffer,
-
+	white_texture_view:^d3d11.IShaderResourceView,
+	
 	// Shapes
 	vertex_count:u32,
 	vertex_stride:u32,
@@ -403,6 +406,46 @@ init :: proc(title:string, width:i32, height:i32) {
 		res := mbi.device->CreateSamplerState(&sampler_desc, &mbi.sampler)
 		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
 	}
+
+
+	{
+		blend_desc:d3d11.BLEND_DESC
+
+		blend_desc.RenderTarget[0] = {
+			BlendEnable = true,
+			SrcBlend = .SRC_ALPHA,
+			DestBlend = .INV_SRC_ALPHA,
+			BlendOp = .ADD,
+			SrcBlendAlpha = .ONE,
+			DestBlendAlpha = .INV_SRC_ALPHA,
+			BlendOpAlpha = .ADD,
+			RenderTargetWriteMask = 0xF // R | G | B | A
+		}
+
+		res := mbi.device->CreateBlendState(&blend_desc, &mbi.blend_state)
+		ensure(win.SUCCEEDED(res), "Create BlendState Failed")
+		
+	}
+
+	{
+		pixel := [4]u8{255, 255, 255, 255}
+
+		desc := d3d11.TEXTURE2D_DESC {
+			Width = 1, Height = 1, MipLevels = 1, ArraySize = 1,
+			Format = .R8G8B8A8_UNORM,
+			Usage = .IMMUTABLE,
+			BindFlags = {.SHADER_RESOURCE},
+			SampleDesc = {Count = 1},
+		}
+		data := d3d11.SUBRESOURCE_DATA{pSysMem = &pixel, SysMemPitch = 4}
+
+		res := mbi.device->CreateTexture2D(&desc, &data, &mbi.white_texture)
+		ensure(win.SUCCEEDED(res), "Create white texture failed")
+		res = mbi.device->CreateShaderResourceView(mbi.white_texture, nil, &mbi.white_texture_view)
+		ensure(win.SUCCEEDED(res), "Create white texture view failed")
+
+		batch.current_texture_view = mbi.white_texture_view
+	}	
 	
 	{
 		constant_buffer_desc := d3d11.BUFFER_DESC {
@@ -464,6 +507,9 @@ cleanup :: proc() {
 	if mbi.input != nil do mbi.input->Release() // -> Left commented out as something causes this to wait for 8 seconds and not sure what
 
 	// D3D11
+	mbi.blend_state->Release()
+	mbi.white_texture_view->Release()
+	mbi.white_texture->Release()
 	mbi.constant_buffer->Release()
 	mbi.sampler->Release()
 	mbi.input_layout->Release()

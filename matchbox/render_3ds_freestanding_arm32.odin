@@ -96,7 +96,7 @@ render_triangle :: proc {
 	// render_triangle_shape,
 }
 
-render_sprite :: proc(sprite:Sprite, tint:[4]f32 = {1, 1, 1, 1}) {
+render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint:[4]f32 = {1, 1, 1, 1}) {
 
 	flush_triangles()
 	c2d.Prepare()
@@ -112,20 +112,19 @@ render_sprite :: proc(sprite:Sprite, tint:[4]f32 = {1, 1, 1, 1}) {
 		{color_to_u32(tint), 0.0}}
 	}	
 	
-	c2d.DrawImageAt(
+	c2d.DrawImageAtRotated(
 		img = image,
-		x = sprite.x,
-		y = sprite.y,
+		x = sprite.x + cast(f32)sprite.width / 2,
+		y = sprite.y + cast(f32)sprite.height / 2,
 		depth = 0,
+		angle = rotation_angle,
 		tint = &tint,
-		// tint = nil,
-		scaleX = 1.0,
-		scaleY = 1.0,
+		scaleX = scale,
+		scaleY = scale,
 	)
 
 	c2d.Flush()
 }
-
 
 color_to_u32 :: proc(color:[4]f32) -> u32 {
 	

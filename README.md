@@ -53,7 +53,8 @@ The Improved Build System:
  - Allows for install of custom odin compiler with changes for 3DS target (compile hard float directly)
  - Allows for easy install of Matchbox
 
-At the point of the 2D Milestone being
+Research other targets is more of a want then a must-have. I have some more modded consoles and I'd like to
+see what it would take to get Matchbox running on those platforms.
 
 Current In-Progress Milestone: `2D`
 

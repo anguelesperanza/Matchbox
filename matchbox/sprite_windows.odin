@@ -77,6 +77,8 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 	image.destroy(img)
 
+	delete(contat_path)
+
 	return
 }
 

@@ -28,12 +28,13 @@ Timestamp :: struct {
 }
 timestamp:Timestamp
 
+
 Matchbox_Info :: struct {
 
 	// General values
 	is_running:bool,
 	asset_path:string,
-	window_size:[2]i32,
+	window_size:[4]i32,
 
 	
 	did_resize:bool,
@@ -46,6 +47,8 @@ Matchbox_Info :: struct {
 	gamepad_pressed:u32,
 	gamepad_held:u32,
 	gamepad_released:u32,
+	active_renderer:Renderer,
+	vbo_cursor:u32, // vertices arlready written to the vbo_data this frame
 
 	// Shaders
 	shader_buffer:rawptr,
@@ -82,8 +85,10 @@ init :: proc(title:string, width:i32, height:i32) {
     c2d.Prepare()
     ctru.consoleInit(ctru.GFX_BOTTOM, nil)
 
-	mbi.window_size = {240, 400}
+	mbi.window_size[0] = 240
+	mbi.window_size[1] = 400
 
+	
     mbi.top_screen = c3d.RenderTargetCreate(
     	width = 240,
     	height = 400,
@@ -127,7 +132,8 @@ init :: proc(title:string, width:i32, height:i32) {
 
 
     // The GPU DMA engine requires vertex data in the 3DS linear heap.
-    vbo_size := uint(MAX_BATCH_VERTICES * size_of(Vertex))
+	vbo_size := uint(VBO_VERTEX_CAPACITY * size_of(Vertex))
+    // vbo_size := uint(MAX_BATCH_VERTICES * size_of(Vertex))
     mbi.vbo_data = ctru.linearAlloc(vbo_size)
     // ctru.memcpy(mbi.vbo_data, &vertex_list, vbo_size)
 
@@ -141,8 +147,8 @@ init :: proc(title:string, width:i32, height:i32) {
     // c3d.TexEnvSrc(env, c3d.C3D_Both,.PRIMARY_COLOR, .PRIMARY_COLOR, .PRIMARY_COLOR)
     // c3d.TexEnvFunc(env, c3d.C3D_Both, .REPLACE)
 
-    mbi.projection.r[0] = c3d.FVec{ 0.0, 0.0, 1.0, 0.0} // Row 0 – screen-Y → GPU-X:  C(w,z,y,x) = ( 1,  0, -2/240,  0)
-    mbi.projection.r[1] = c3d.FVec{ 0.0, 0.0, 0.0, -1.0} // Row 1 – screen-X → GPU-Y:  C(w,z,y,x) = ( 1,  0,  0, −2/400)
+    mbi.projection.r[0] = c3d.FVec{ 1.0, 0.0, -2.0 / cast(f32) mbi.window_size[0] , 0.0} // Row 0 – screen-Y → GPU-X:  C(w,z,y,x) = ( 1,  0, -2/240,  0)
+    mbi.projection.r[1] = c3d.FVec{ 1.0, 0.0, 0.0, -2.0 / cast(f32)mbi.window_size[1]} // Row 1 – screen-X → GPU-Y:  C(w,z,y,x) = ( 1,  0,  0, −2/400)
     mbi.projection.r[2] = c3d.FVec{-1.0, 1.0, 0.0, 0.0} // Row 2 – Z transform:        C(w,z,y,x) = (−1,  1,  0,  0)
     mbi.projection.r[3] = c3d.FVec{ 1.0, 0.0, 0.0, 0.0} // Row 3 – homogeneous W:      C(w,z,y,x) = ( 1,  0,  0,  0)
     r00 := transmute(u32)(mbi.projection.r[0].x)

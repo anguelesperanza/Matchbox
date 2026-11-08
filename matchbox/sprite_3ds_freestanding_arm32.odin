@@ -12,6 +12,7 @@ package matchbox
 
 import "o3dx/c3d"
 import "o3dx/c2d"
+import "o3dx/ctru"
 
 /*I should problably move this into the bindings directly in a util file or something*/
 // foreign import example_c "system:example_c"
@@ -22,7 +23,7 @@ import "o3dx/c2d"
 // }
 
 Sprite :: struct {
-	texture: c3d.Tex,
+	texture: ^c3d.Tex,
 	sub_texture:c2d.Tex3DS_SubTexture,
 	image:c2d.Image,
 	x:f32,
@@ -69,8 +70,10 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 	concat_string := cstring(raw_data(buf[:]))
 
-	res := c2d.load_t3x_image(concat_string, &sprite.texture, &sprite.sub_texture)
+	sprite.texture = cast(^c3d.Tex)ctru.malloc(size_of(c3d.Tex))
+	res := c2d.load_t3x_image(concat_string, sprite.texture, &sprite.sub_texture)
 	ensure(res == true, "Could not load image")
+
 
 	sprite.width = sprite.sub_texture.width
 	sprite.height = sprite.sub_texture.height
@@ -80,5 +83,6 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 destroy_sprite :: proc(sprite:Sprite) {
 	sprite := sprite
-	c3d.TexDelete(&sprite.texture)
+	c3d.TexDelete(sprite.texture)
+	ctru.free(sprite.texture)
 }

@@ -14,31 +14,79 @@ import "o3dx/c2d"
 
 // Constants
 MAX_BATCH_VERTICES :: 4096 // Total number of vertices that can be drawn at once
-
+VBO_VERTEX_CAPACITY :: MAX_BATCH_VERTICES * 4
 
 Vertex :: struct {
 	x, y, z: f32,
 	r, g, b, a: f32,
 }
 
+
+Renderer :: enum {
+	NONE,
+	TRIANGLES,
+	SPRITES,
+}
+
 render_start :: proc() {
 	c3d.FrameBegin(c3d.FRAME_SYNCDRAW)
     c3d.FrameDrawOn(mbi.top_screen) // Will need to decide how to handle drawing on top or bottom
+	mbi.active_renderer = .NONE
+	mbi.vbo_cursor = 0
+
+	
+}
+
+finish_renderer :: proc() {
+	#partial switch mbi.active_renderer {
+		case .SPRITES:
+			c2d.Flush()
+		case .TRIANGLES:
+			flush_triangles()
+	}
+}
+
+use_renderer:: proc(next:Renderer) {
+	if mbi.active_renderer == next do return
+
+	finish_renderer()
+	 
+	if next == .SPRITES {
+		c2d.Prepare()
+		c2d.SceneBegin(mbi.top_screen)
+	}
+
+	mbi.active_renderer = next
 	
 }
 
 /*Draws any queued triangles using Matchbox's own GPU state | WIP May need improvement based on performance*/
+
 flush_triangles :: proc() {
 	if mbi.vertex_count == 0 do return
+
+	// Out of space for this frame: drop the batch
+	if mbi.vbo_cursor + mbi.vertex_count > VBO_VERTEX_CAPACITY {
+		mbi.vertex_count = 0
+		return
+	}
+
 	bind_triangle_state()
-	ctru.memcpy(mbi.vbo_data, &mbi.vertices[0], uint(mbi.vertex_count) * size_of(Vertex))
-	c3d.DrawArrays(.TRIANGLES, 0, i32(mbi.vertex_count))
+
+	dest := rawptr(uintptr(mbi.vbo_data) + uintptr(mbi.vbo_cursor) * size_of(Vertex))
+	ctru.memcpy(dest, &mbi.vertices[0], uint(mbi.vertex_count) * size_of(Vertex))
+
+	// "first" skips the vertices from earlier flushes, so each draw reads only its own batch
+	c3d.DrawArrays(.TRIANGLES, i32(mbi.vbo_cursor), i32(mbi.vertex_count))
+
+	mbi.vbo_cursor += mbi.vertex_count
 	mbi.vertex_count = 0
 }
 
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
-	flush_triangles()
+	finish_renderer()
+	mbi.active_renderer = .NONE
 	c3d.FrameEnd(0)
 }
 
@@ -71,15 +119,13 @@ bind_triangle_state :: proc() {
 a, b, c are the points that make up the triangle*/
 render_triangle_points :: proc(a, b, c:[2]f32, color:[4]f32) {
 
-	if mbi.vertex_count + 3 > MAX_BATCH_VERTICES do return // batch full: drop for now
-	z :: 0.5
-	mbi.vertices[mbi.vertex_count + 0] = {a.x, a.y, z, color.r, color.g, color.b, color.a}
-	mbi.vertices[mbi.vertex_count + 1] = {b.x, b.y, z, color.r, color.g, color.b, color.a}
-	mbi.vertices[mbi.vertex_count + 2] = {c.x, c.y, z, color.r, color.g, color.b, color.a}
-	mbi.vertex_count += 3
+	use_renderer(.TRIANGLES)
 
-	// c3d.FVUnifMtx4x4(.VERTEX_SHADER, mbi.uloc_proj, &mbi.projection)
-	
+	if mbi.vertex_count + 3 > MAX_BATCH_VERTICES do flush_triangles()
+	mbi.vertices[mbi.vertex_count + 0] = {a.x, a.y, 0.5, color.r, color.g, color.b, color.a}
+	mbi.vertices[mbi.vertex_count + 1] = {b.x, b.y, 0.5, color.r, color.g, color.b, color.a}
+	mbi.vertices[mbi.vertex_count + 2] = {c.x, c.y, 0.5, color.r, color.g, color.b, color.a}
+	mbi.vertex_count += 3
 }
 
 
@@ -100,12 +146,14 @@ render_triangle :: proc {
 
 render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint:[4]f32 = {1, 1, 1, 1}) {
 
-	flush_triangles()
-	c2d.Prepare() // I do not believe this is the best approach as each render is a new render pass instead of batch | Should be reworked
-	c2d.SceneBegin(mbi.top_screen)
+	use_renderer(.SPRITES)
+
+	// flush_triangles()
+	// c2d.Prepare() // I do not believe this is the best approach as each render is a new render pass instead of batch | Should be reworked
+	// c2d.SceneBegin(mbi.top_screen)
 	
 	sprite := sprite
-	image := c2d.Image{&sprite.texture, &sprite.sub_texture}
+	image := c2d.Image{sprite.texture, &sprite.sub_texture}
 	
 	tint:c2d.ImageTint = {
 		{{color_to_u32(tint), 0.0},
@@ -125,7 +173,7 @@ render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint
 		scaleY = scale,
 	)
 
-	c2d.Flush()
+	// c2d.Flush()
 }
 
 color_to_u32 :: proc(color:[4]f32) -> u32 {

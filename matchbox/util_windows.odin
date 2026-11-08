@@ -20,8 +20,18 @@ print :: proc(args: ..any) {
 	fmt.println(..args)
 }
 
-/*returns the size of the window for a given target*/
-get_window_size :: proc() -> [2]i32 {
+/*
+	returns the size of the window for a given target
+	return value is a [4]i32 as the 3DS backend has two screens
+	On PC & Vita: value[0] and value[1] are all you need
+	On 3DS:
+		value[0] => top screen width
+		value[1] => top screen height
+		value[2] => bottom screen width
+		value[3] => bottom screen height
+*/
+
+get_window_size :: proc() -> [4]i32 {
 	return mbi.window_size
 }
 

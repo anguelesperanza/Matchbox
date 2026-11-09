@@ -154,6 +154,7 @@ corner :: proc(offset, center:[2]f32, s, c:f32) -> [2]f32 {
 /*Renders the sprite, with an optional tint (default is white -- no tint)*/
 render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint:[4]f32 = {1, 1, 1, 1}) {
 
+
 	if len(batch.verticies) + 6 > MAX_BATCH_VERTICIES {
 		flush() // No more space in the buffer to just draw what we have and start again
 	}
@@ -163,21 +164,24 @@ render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint
 		batch.current_texture_view = sprite.texture_view // update the view
 	}
 
+	texture_width := cast(f32)sprite.width
+	texture_height := cast(f32)sprite.height
 
-	center := [2]f32{sprite.x + cast(f32)sprite.width / 2, sprite.y + cast(f32)sprite.height / 2}
-	half := [2]f32{cast(f32)sprite.width, cast(f32)sprite.height} * scale / 2
+	u0 := sprite.source.x / texture_width 
+	v0 := sprite.source.y / texture_height
+
+	u1 := (sprite.source.x + sprite.source.width) / texture_width
+	v1 := (sprite.source.y + sprite.source.height) / texture_height
+
+	center := [2]f32{sprite.x + sprite.source.width / 2, sprite.y + sprite.source.height / 2}
+	half   := [2]f32{sprite.source.width, sprite.source.height} * scale / 2
 
 	s, c := math.sincos(rotation_angle)
 
-	// top_left := Vertex{position = {sprite.x, sprite.y}, color = tint, uv = {0, 0}}
-	// top_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y}, color = tint, uv = {1,0}}
-	// bottom_right := Vertex{position = {sprite.x + cast(f32)sprite.width, sprite.y + cast(f32)sprite.height}, color = tint, uv = {1,1}}
-	// bottom_left := Vertex{position = {sprite.x, sprite.y + cast(f32)sprite.height}, color = tint, uv = {0, 1}}
-
-	top_left     := Vertex{position = corner({-half.x, -half.y}, center, s, c), color = tint, uv = {0, 0}}
-	top_right    := Vertex{position = corner({ half.x, -half.y}, center, s, c), color = tint, uv = {1, 0}}
-	bottom_right := Vertex{position = corner({ half.x,  half.y}, center, s, c), color = tint, uv = {1, 1}}
-	bottom_left  := Vertex{position = corner({-half.x,  half.y}, center, s, c), color = tint, uv = {0, 1}}	
+	top_left     := Vertex{position = corner({-half.x, -half.y}, center, s, c), color = tint, uv = {u0, v0}}
+	top_right    := Vertex{position = corner({ half.x, -half.y}, center, s, c), color = tint, uv = {u1, v0}}
+	bottom_right := Vertex{position = corner({ half.x,  half.y}, center, s, c), color = tint, uv = {u1, v1}}
+	bottom_left  := Vertex{position = corner({-half.x,  half.y}, center, s, c), color = tint, uv = {u0, v1}}	
 
 	append(&batch.verticies, top_left, top_right, bottom_right, top_left, bottom_right, bottom_left)
 }

@@ -12,6 +12,7 @@ main :: proc() {
 	player.x = 10
 	player.y = 10
 	player.speed = 100
+	player.source = {0, 0, cast(f32)player.width / 2, cast(f32)player.height / 2}
 
 
 	meme:mb.Sprite = mb.create_sprite(filename = "meme_cat.png")
@@ -73,22 +74,4 @@ main :: proc() {
 	mb.destroy(jump_sound) // TODO: Audio not implemeted yet
 
 	mb.cleanup()
-}
-
-/*Triangle tests -- see the expected results below*/
-draw_triangle_tests :: proc() {
-
-	// 1. Orientation marker: right angle at the top-left corner.
-	//    Legs are different lengths (100 along x, 60 along y) so a mirrored or swapped axis is obvious
-	mb.render_triangle(a = {0, 0}, b = {100, 0}, c = {0, 60}, color = {1, 0, 0, 1})
-
-	// 2. Same shape anchored at (400, 240): bottom-right of the 3DS top screen
-	mb.render_triangle(a = {400, 240}, b = {300, 240}, c = {400, 180}, color = {0, 0.4, 1, 1})
-
-	// 3. Small centered triangle at (200, 120)
-	mb.render_triangle(a = {200, 100}, b = {220, 140}, c = {180, 140}, color = {0, 1, 0, 1})
-
-	// 4. Alpha test: two overlapping half-transparent triangles
-	mb.render_triangle(a = {120, 160}, b = {200, 160}, c = {120, 220}, color = {1, 1, 0, 0.5})
-	mb.render_triangle(a = {160, 180}, b = {240, 180}, c = {160, 230}, color = {1, 0, 1, 0.5})
 }

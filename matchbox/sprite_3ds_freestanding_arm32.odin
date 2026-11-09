@@ -23,6 +23,7 @@ import "o3dx/ctru"
 // }
 
 Sprite :: struct {
+	source:Rectangle,
 	texture: ^c3d.Tex,
 	sub_texture:c2d.Tex3DS_SubTexture,
 	image:c2d.Image,
@@ -77,6 +78,8 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 	sprite.width = sprite.sub_texture.width
 	sprite.height = sprite.sub_texture.height
+
+	sprite.source = {0, 0, cast(f32)sprite.width, cast(f32)sprite.height}
 
 	return sprite
 }

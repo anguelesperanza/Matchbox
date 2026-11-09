@@ -153,7 +153,27 @@ render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint
 	// c2d.SceneBegin(mbi.top_screen)
 	
 	sprite := sprite
-	image := c2d.Image{sprite.texture, &sprite.sub_texture}
+	src := sprite.source
+
+	// UV size of one image pixel, taken from the full image's sub-texture
+	full := sprite.sub_texture
+	du := (full.right - full.left) / f32(full.width)
+	dv := (full.top - full.bottom) / f32(full.height)
+
+	// citro3d's v axis points up, so moving down the image lowers v
+	part := c2d.Tex3DS_SubTexture{
+		width  = u16(src.width),
+		height = u16(src.height),
+		left   = full.left + src.x * du,
+		right  = full.left + (src.x + src.width) * du,
+		top    = full.top - src.y * dv,
+		bottom = full.top - (src.y + src.height) * dv,
+	}
+
+	image := c2d.Image{sprite.texture, &part}
+
+
+
 	
 	tint:c2d.ImageTint = {
 		{{color_to_u32(tint), 0.0},
@@ -164,8 +184,8 @@ render_sprite :: proc(sprite:Sprite, rotation_angle:f32 = 0, scale:f32 = 1, tint
 	
 	c2d.DrawImageAtRotated(
 		img = image,
-		x = sprite.x + cast(f32)sprite.width / 2,
-		y = sprite.y + cast(f32)sprite.height / 2,
+		x = sprite.x + src.width / 2,
+		y = sprite.y + src.height / 2,
 		depth = 0,
 		angle = rotation_angle,
 		tint = &tint,

@@ -14,12 +14,11 @@ package matchbox
 import win "core:sys/windows"
 import "vendor:directx/d3d11"
 import "core:image"
+import "core:image/png" // Do not removed -- required for core:image
 import "core:strings"
-import "core:image/png"
-
-import "core:bytes"
 
 Sprite :: struct {
+	source:Rectangle,
 	texture:^d3d11.ITexture2D,
 	texture_view:^d3d11.IShaderResourceView,
 	x:f32,
@@ -78,6 +77,8 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 	image.destroy(img)
 
 	delete(contat_path)
+
+	sprite.source = {0, 0, cast(f32)sprite.width, cast(f32)sprite.height}
 
 	return
 }

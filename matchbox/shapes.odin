@@ -20,6 +20,13 @@ Batch :: struct {
 }
 batch:Batch
 
+Rectangle :: struct {
+	x:f32,
+	y:f32,
+	width:f32,
+	height:f32,
+}
+
 Triangle :: struct {
 	position:[2]f32,
 	points:[3][2]f32,

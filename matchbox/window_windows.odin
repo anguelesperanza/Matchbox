@@ -37,7 +37,8 @@ Matchbox_Info :: struct {
 
 	// General values
 	did_resize:bool,
-	asset_path:string, // required as otherwise loading assets between targets will be messy
+	asset_path:string, // General asset path for shared assets
+	target_asset_path:string, // Asset path for pc specific assets
 
 	// Win32 Related Values
 	window:win.HWND,
@@ -116,7 +117,8 @@ init :: proc(title:string, width:i32, height:i32) {
 	mbi.is_running = true
 	mbi.left_trigger_as_button_value = 0.2
 	mbi.right_trigger_as_button_value = 0.2
-	mbi.asset_path = "assets/pc/"
+	mbi.asset_path = "assets/"
+	mbi.target_asset_path = "assets/pc/"
 	mbi.window_size = {width, height, 0, 0}
 
 	rect:win.RECT = {left = 0, top = 0, right = width, bottom = height}

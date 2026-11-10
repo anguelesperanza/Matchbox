@@ -36,45 +36,13 @@ Sprite :: struct {
 
 create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
-	// First: Convert png into .t3x file using tools/tritex -- done during built step (compiling .3dsx file)
 
-	// Two: Load in that image using load_t3x_image -- 3DS has no allocator so need to manually do the string contat
-
-	buf:[256]u8
-	last_index:int
-	gfx:string = "gfx/" // Variable that stors the text "gfx/" -- needed so I can loop through text and pull out characters at index
-	ext:string = ".t3x" // Same as above but load_t3x_image takes a .t3x image -- so internally, create_sprite will actually load the .t3x version of the file created during the build step
-	for index in 0..< len(mbi.asset_path) {
-		buf[index] = mbi.asset_path[index]
-		last_index = index
-	}
-
-
-	for index in 0..< len(gfx) {
-		last_index += 1
-		buf[last_index] = gfx[index]
-	}
-
-	for index in 0..< len(filename) {
-		last_index += 1
-		buf[last_index] = filename[index]
-
-		if filename[index + 1] == 46 do break // stop once we get to the file exention -- need to append .t3x instead 
-	}
-
-	for index in 0..< len(ext) {
-		last_index += 1
-		buf[last_index] = ext[index]
-	}
-
-	// concat_string := transmute([256]rune)([256]u8)
-
-	concat_string := cstring(raw_data(buf[:]))
+	buf: [256]u8
+	path, ok := get_asset(buf[:], filename, .IMAGE)
+	ensure(ok && file_exists(path), "Image not found in romfs")
 
 	sprite.texture = cast(^c3d.Tex)ctru.malloc(size_of(c3d.Tex))
-	res := c2d.load_t3x_image(concat_string, sprite.texture, &sprite.sub_texture)
-	ensure(res == true, "Could not load image")
-
+	res := c2d.load_t3x_image(path, sprite.texture, &sprite.sub_texture)
 
 	sprite.width = sprite.sub_texture.width
 	sprite.height = sprite.sub_texture.height

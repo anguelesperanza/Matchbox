@@ -10,6 +10,14 @@ package matchbox
 */
 
 import "core:fmt"
+import "core:strings"
+import "core:os"
+
+Asset_Type :: enum {
+	IMAGE,
+	AUDIO,
+}
+
 
 /*
 	prints a line to the console
@@ -35,6 +43,43 @@ get_window_size :: proc() -> [4]i32 {
 	return mbi.window_size
 }
 
+
+/*
+	Find the correct asset path and returns it
+	Checks shared assets first, then checks target specific
+
+	The last one found is the one returned
+*/
+
+
+/*
+	Find the correct asset path and returns it
+	Checks target specific assets first, then shared assets
+
+	The caller owns the returned string and should delete it
+*/
+get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
+
+	folder := "images/"
+	if asset_type == .AUDIO do folder = "audio/"
+
+	// Target-specific first
+	dir := strings.concatenate({mbi.target_asset_path, folder})
+	file := strings.concatenate({dir, filename})
+	delete(dir)
+	if os.is_file(file) do return file
+	delete(file)
+
+	// Then shared
+	dir = strings.concatenate({mbi.asset_path, folder})
+	file = strings.concatenate({dir, filename})
+	delete(dir)
+	if os.is_file(file) do return file
+	delete(file)
+
+	print("Asset not found")
+	panic("Asset not found")
+}
 
 /* |===============|
    |PROCEDURE GROUP|

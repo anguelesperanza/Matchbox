@@ -32,11 +32,11 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 	path := filename
 
-	contat_path := strings.concatenate({mbi.asset_path, "images/", path})
-
-	print(contat_path)
+	// contat_path := strings.concatenate({mbi.asset_path, "images/", path})
 	
-	img, err := image.load_from_file(contat_path)
+	// img, err := image.load_from_file(contat_path)
+	asset := get_asset(filename, .IMAGE)
+	img, err := image.load_from_file(asset)
 	ensure(err == nil, "Failed to load image")
 
 
@@ -76,7 +76,7 @@ create_sprite :: proc(filename:string) -> (sprite:Sprite) {
 
 	image.destroy(img)
 
-	delete(contat_path)
+	delete(asset)
 
 	sprite.source = {0, 0, cast(f32)sprite.width, cast(f32)sprite.height}
 

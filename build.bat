@@ -37,6 +37,19 @@ if exist %ODINASM% rd /s /q %ODINASM%
 :: Create output folders
 :: ---------------------------------------------------------------
 mkdir %BUILD%
+
+set STAGE=%BUILD%\assets_stage
+mkdir %STAGE%\images
+mkdir %STAGE%\audio
+
+if exist assets\images     xcopy /E /Y /I assets\images     %STAGE%\images >nul
+if exist assets\3ds\images xcopy /E /Y /I assets\3ds\images %STAGE%\images >nul
+if exist assets\audio      xcopy /E /Y /I assets\audio      %STAGE%\audio  >nul
+if exist assets\3ds\audio  xcopy /E /Y /I assets\3ds\audio  %STAGE%\audio  >nul
+
+set IMAGES=%STAGE%\images
+set AUDIO=%STAGE%\audio
+
 if not exist %ROMFS%    mkdir %ROMFS%
 if not exist %GFXOUT%   mkdir %GFXOUT%
 if not exist %AUDIOOUT% mkdir %AUDIOOUT%

@@ -114,6 +114,8 @@ mbi:Matchbox_Info
 /*Initialize the core of Matchbox; from Windows, to D3D11, etc*/
 init :: proc(title:string, width:i32, height:i32) {
 
+	win.SetProcessDPIAware()
+
 	mbi.is_running = true
 	mbi.left_trigger_as_button_value = 0.2
 	mbi.right_trigger_as_button_value = 0.2

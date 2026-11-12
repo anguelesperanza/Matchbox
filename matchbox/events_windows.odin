@@ -35,6 +35,10 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 
 		case win.WM_SIZE:
 			mbi.did_resize = true
+			if wParam != win.SIZE_MINIMIZED {
+				mbi.window_size[0] = i32(win.LOWORD(lParam))
+				mbi.window_size[1] = i32(win.HIWORD(lParam))
+			}
 		case win.WM_KEYDOWN:
 			switch wParam {
 				case win.VK_A..=win.VK_Z:

@@ -126,7 +126,7 @@ if "%AUDIO_FOUND%"=="1" (
 :: ---------------------------------------------------------------
 echo.
 echo Building Odin assembly...
-odin build . -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:arm1176jz-s
+odin build . -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:mpcore
 if errorlevel 1 goto :fail
 echo Moving Odin assembly files...
 for %%f in (*.S) do (

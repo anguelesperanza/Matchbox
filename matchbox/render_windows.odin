@@ -52,8 +52,8 @@ render_start :: proc() {
 	viewport := d3d11.VIEWPORT {
 		TopLeftX = 0,
 	    TopLeftY = 0,
-	    Width    = f32(window_rect.right - window_rect.left),
-	    Height   = f32(window_rect.bottom - window_rect.top),
+	    Width    = cast(f32)mbi.window_size[0],
+	    Height   = cast(f32)mbi.window_size[1],
 	    MinDepth = 0,
 	    MaxDepth = 1,
 	}

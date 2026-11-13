@@ -1,0 +1,14 @@
+// 2D drawing: a position in pixels, a texture coordinate and a colour.
+void main(
+    float2 aPosition,
+    float2 aTexcoord,
+    float4 aColor,
+    uniform float4x4 uMvp,
+    out float4 vPosition : POSITION,
+    out float2 vTexcoord : TEXCOORD0,
+    out float4 vColor : COLOR0)
+{
+    vPosition = mul(float4(aPosition, 0.f, 1.f), uMvp);
+    vTexcoord = aTexcoord;
+    vColor = aColor;
+}

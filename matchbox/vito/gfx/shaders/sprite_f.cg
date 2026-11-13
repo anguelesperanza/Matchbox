@@ -1,0 +1,8 @@
+// The texture multiplied by the vertex colour.
+float4 main(
+    float2 vTexcoord : TEXCOORD0,
+    float4 vColor : COLOR0,
+    uniform sampler2D uTexture) : COLOR
+{
+    return tex2D(uTexture, vTexcoord) * vColor;
+}

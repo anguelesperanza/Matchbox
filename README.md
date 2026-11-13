@@ -25,47 +25,31 @@ backend main uses
 Before Matchbox is considered `complete` there are a series of milestones that need to be hit. These milestones are
 constantly changing until a good path is made for it but loosly, there are the milestones
 
-[x] POC -> Proof of concept that the Matchbox API can compile to both PC and the 3DS
+[x] POC
 
-[-] 2D  -> 2D is the first target for this and where the initial large bulk of work will be done
+[-] Renderer core: 3D pipeline on PC and 3DS       (Phases A, B, C)
 
-[ ] Improved build system -> Rework Farlite project, enable a custom odin install with modified complier for 3ds target
+[ ] 2D: 2D as an orthographic projection           (Phases D, E, F)
 
-[?] Research other targets to Add -> There are other targets; like the PS Vita that I'd like to add but I will need to research first
+[ ] 3D: 3D games                                   (Phase G)
 
-[ ] 3D  -> 3D is the last big milestone
-- This is by far the one with the most effort.
-- O3DX Bindings for 3D need to be touched up and any gaps in the bindings need to be filled
+[ ] Improved build system                          (shader step lands in Phase C)
 
-The {POC, 2D, 3D, Improved Build System} are the most important milestones to hit.
+[ ] Vita target                                    (Phase H, after 3D)
 
-POC:
-  - Proves the Matchbox concept works
+[ ] 3DS hard-float (performance)                   (Phase I, via Farlite, late)
 
-2D:
-  - Make 2D games
-  - Lays the foundation for how the Matchbox API will be shapped in the future.
 
-3D: Make 3D Games
+Research into the Vita Target has concluded and Odin can compile into the PS Vita. Those bindings will be developed
+futher when the Vita target milestone comes into play.
 
-The Improved Build System:
- - Creates an easy to use way to compile Matchbox projects
- - Allows for install of custom odin compiler with changes for 3DS target (compile hard float directly)
- - Allows for easy install of Matchbox
+Current In-Progress Milestone: `Render core`
 
-Research other targets is more of a want then a must-have. I have some more modded consoles and I'd like to
-see what it would take to get Matchbox running on those platforms.
+Previously, the Milestones had 2D before 3D; due to letter boxing and different screen sizes for the different targets,
+it was decided to scrap 2D as a seperate feature in Matchbox, and instead make it a part of 3D.
 
-Current In-Progress Milestone: `2D`
-
-The POC worked and the API does act as intended. However I need to address issues found during the POC
-in regards to API design -- as what was used for the POC simply will not do for the 2D milestone. The PC backend also needs
-2D implmentation added as well. O3DX has Ctru2D bindings so no heavy implementation there; just procedure calls
-
-I need to hammer out excatly what the 2D implementation will entail in terms of graphics.
-
-Gamepad support needs to be added here; audio support; file system interactions; figure out how to handle the
-3DS' second screen, etc. Lots of work to do here in terms of figuring all that out.
+Now, 2D will be in 3D, but with orthographic projection.
+This means 2D now comes after the render core as it relys on 3D.
 
 ## Why DirectX 11 (D3D11)
 

@@ -1,0 +1,5 @@
+// Clears the screen: one triangle that covers it, at the far plane.
+float4 main(float2 aPosition) : POSITION
+{
+    return float4(aPosition, 1.f, 1.f);
+}

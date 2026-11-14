@@ -140,6 +140,10 @@ for %%f in (%ODINASM%\*.odin.s) do (
     arm-none-eabi-gcc -c "%%f" -o "%BUILD%\%%~nf.o" ^
         -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
     if errorlevel 1 goto :fail
+    REM Odin calls libm/libgcc float helpers soft-float style; devkitARM's are
+    REM hard-float. Rename them to the o3dx_* wrappers in o3dx\libm\bridge.c.
+    arm-none-eabi-objcopy --redefine-syms="%LIB%\libm\redefine.syms" "%BUILD%\%%~nf.o"
+    if errorlevel 1 goto :fail
 )
 :: ---------------------------------------------------------------
 :: Compile main.c entry shim
@@ -166,6 +170,9 @@ if errorlevel 1 goto :fail
 arm-none-eabi-gcc -c "%LIB%\c3d\bridge.c" -o "%BUILD%\c3d_bridge.o" ^
     -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft ^
     -I"%DEVKITPRO%\libctru\include" -D__3DS__
+if errorlevel 1 goto :fail
+arm-none-eabi-gcc -c "%LIB%\libm\bridge.c" -o "%BUILD%\libm_bridge.o" ^
+    -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -O2
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
 :: Collect all object files and link ELF

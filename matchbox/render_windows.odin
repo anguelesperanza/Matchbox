@@ -38,6 +38,18 @@ Draw_Constants :: struct {
 #assert(size_of(Frame_Constants) % 16 == 0)
 #assert(size_of(Draw_Constants) % 16 == 0)
 
+// linalg builds OpenGL clip space (depth -1..1); D3D wants 0..1: z_new = 0.5 * z + 0.5 * w
+GL_TO_D3D_DEPTH :: matrix[4, 4]f32 {
+	1, 0, 0,   0,
+	0, 1, 0,   0,
+	0, 0, 0.5, 0.5,
+	0, 0, 0,   1,
+}
+
+/*Perspective projection for D3D (right-handed, looks down -Z, depth 0..1). fov_y is in radians*/
+perspective_projection :: proc(fov_y, aspect, near, far:f32) -> matrix[4, 4]f32 {
+	return GL_TO_D3D_DEPTH * linalg.matrix4_perspective_f32(fov_y, aspect, near, far)
+}
 
 create_constant_buffer :: proc(size:u32) -> (buffer:^d3d11.IBuffer) {
 	desc := d3d11.BUFFER_DESC {
@@ -274,10 +286,10 @@ create_test_triangle :: proc() {
 	// Counter-clockwise as seen from the front: top, bottom-left, bottom-right.
 	// For now these are clip-space positions: x and y from -1 to 1, depth from 0 to 1.
 	vertices := [3]Vertex {
-		{position = { 0.0,  0.5, 0.5}, uv = {0.5, 0}, color = {1, 0, 0, 1}}, // top, red
-		{position = {-0.5, -0.5, 0.5}, uv = {0, 1},   color = {0, 1, 0, 1}}, // bottom left, green
-		{position = { 0.5, -0.5, 0.5}, uv = {1, 1},   color = {0, 0, 1, 1}}, // bottom right, blue
-	}
+		{position = { 0,  1, 0}, uv = {0.5, 0}, color = {1, 0, 0, 1}}, // top, red
+		{position = {-1, -1, 0}, uv = {0, 1},   color = {0, 1, 0, 1}}, // bottom left, green
+		{position = { 1, -1, 0}, uv = {1, 1},   color = {0, 0, 1, 1}}, // bottom right, blue
+	}	
 
 	desc := d3d11.BUFFER_DESC {
 		ByteWidth = size_of(vertices),
@@ -302,10 +314,6 @@ render_test_triangle :: proc(model:matrix[4,4]f32 = linalg.MATRIX4F32_IDENTITY, 
 	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
 	mbi.device_context->IASetInputLayout(mbi.input_layout)
 	mbi.device_context->IASetVertexBuffers(0, 1, &mbi.test_vertex_buffer, &stride, &offset)
-
-	
-
-
 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
 	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)

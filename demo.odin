@@ -28,15 +28,8 @@ main :: proc() {
 		mb.clear_background(color = {0, 0.4, 0.6, 1})
 
 		mb.set_view_projection(linalg.MATRIX4F32_IDENTITY)
-		// mb.set_view_projection(linalg.matrix4_translate_f32({0, -0.3, 0}))
 
 		mb.render_test_triangle()
-		// mb.render_test_triangle(tint = {1, 0.3, 0.3, 1})
-
-		// mb.render_test_triangle(linalg.matrix4_translate_f32({0.5, 0, 0}))
-
-
-		 
 		mb.render_end()
 	}
 

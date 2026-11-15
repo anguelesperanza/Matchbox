@@ -1,8 +1,16 @@
+
 # Matchbox: 3D-first rendering plan
 
 Status: proposed 2026-11-12, branch `full-rewrite`. Updated 2026-11-12 with
-the A1 results (3DS float maths) and Phase I (hard-float, later).
-Targets now: PC (D3D11) and 3DS (citro3d). Vita: after 3D is done (see Phase H).
+the A1 results (3DS float maths) and Phase H (hard-float, later). Updated
+2026-11-14 for commits 763b3a3 and a0d559f: `matchbox/vito` added, build
+scripts renamed to `3ds_*.bat` / `vita_*.bat`, and the o3dx runtime and libm
+rename (new step A0; revised "3DS float rules"; shorter Phase H and I).
+Updated 2026-11-14 (later): **the Vita is now a core target.** Targets are PC
+(D3D11), 3DS (citro3d) and Vita (GXM, through `matchbox/vito`). The Vita's
+specifics are settled up front (section "The three targets", step A0b, and the
+new Phase V), and every later step is "done" only when it works on all three.
+The old Phase H (Vita, late) is gone; the hard-float phase is now Phase H.
 
 ## The decision
 
@@ -24,8 +32,9 @@ free parallax.
 
 ## What carries over unchanged
 
-- Input, audio, events, logger, the asset lookup (`get_asset`) and `build.bat`.
-  `build.bat` gains a shader step in Phase C.
+- Input, audio, events, logger, the asset lookup (`get_asset`) and the build
+  scripts. `3ds_build.bat` gains a shader step in Phase C, and the empty
+  `vita_build.bat` / `vita_check.bat` are filled in at A0b and V0.
 - Everything decided for resolution independence:
   - Units, not pixels.
   - One axis fixed, plus a fit policy: letterbox, overscan (with a cap),
@@ -37,30 +46,159 @@ free parallax.
 - The 3DS lessons:
   - Textures must stay at a stable address while a draw is pending.
   - Vertex buffers need a write cursor, because draws run at `FrameEnd`.
-  - Float arguments to C go through bridges, and so does any libm call
-    (`sinf`, `cosf`, `fmaf`, ...). See "3DS float rules" below.
+  - Float *parameters* of calls into citro3d / citro2d / libctru go through
+    `uint32_t` bridges. Odin's own libm calls do not (see below).
   - The framebuffer is portrait, so x and y swap.
 
-## 3DS float rules (until Phase I)
+## 3DS float rules (updated 2026-11-14)
 
 Odin calls C with the soft-float convention (floats in `r` registers), while
 devkitARM's libraries are hard-float (floats in `s` registers). A mismatched
-call links fine and returns garbage. The build now uses `-microarch:mpcore`
-(done 2026-11-12, runs in the emulator), so Odin's own float maths uses the
-hardware FPU; only calls *into C* are affected.
+call links fine and returns garbage. There are now two separate cases.
 
-- **Never use `*` on Odin `matrix` types in code that runs on the 3DS.** It
-  lowers to libm `fmaf` (64 calls per 4x4 multiply). The same goes for
-  `core:math/linalg` procs that multiply matrices. Use the hand-written procs
-  from A1.
-- **Never call `math.sin`, `cos`, `tan`, `atan2`, `pow`** etc. on the 3DS. They
-  become libm calls. Use the bridged versions from A1. (`math.sqrt` is fine
-  with `mpcore`: it becomes the `vsqrt` instruction.)
-- **Plain arithmetic is fine:** `+ - * /`, comparisons, `min`/`max`, `abs`, and
-  loops over `[N]f32` all compile to VFP instructions.
-- **Check:** after a 3DS build, `odin_asm/*.s` must contain no `bl fmaf`,
-  `bl sinf`, `bl cosf`, `bl tanf` or `bl __*sf3`. Worth adding as a
-  `findstr` step in `build.bat` that fails the build.
+**1. Calls Odin itself emits (libm and libgcc helpers): handled at link time.**
+`3ds_build.bat` runs `objcopy --redefine-syms` with `o3dx/libm/redefine.syms`
+on the Odin object, which renames every libm call (`sinf`, `fmaf`, `__fixdfdi`,
+...) to a wrapper in `o3dx/libm/bridge.c` that fixes the registers. So
+`core:math`, `core:math/linalg`, matrix `*` and `core:fmt` float printing are
+**correct** on the 3DS. A libm function that has no wrapper fails the link with
+`undefined reference to o3dx_<name>`, so it can't misbehave silently.
+- This depends on that `objcopy` step and on `-microarch:mpcore` (FPU on). If
+  either is dropped, the same code returns garbage without an error.
+- **Speed is the remaining problem.** Odin's matrix `*` lowers to 64 `fmaf`
+  calls per 4x4 multiply. VFPv2 has no fused multiply-add, and each call goes
+  through two wrapper layers. Use the hand-written `mat4_mul`, `mat4_mul_vec4`
+  and `quat_mul` from A1 for anything per-draw or per-vertex; use `linalg`
+  freely for one-off work (building a camera, an inverse, a projection).
+- Plain arithmetic, comparisons, `min`/`max` and `math.sqrt` compile to VFP
+  instructions (no call at all).
+
+**2. Calls into C libraries that take floats (citro3d, citro2d, libctru):
+still need bridges.** Odin passes the float in `r0`; the library reads `s0`.
+The o3dx bindings declare these as `u32` and bridge them in each `bridge.c`.
+New bindings need the same.
+
+**Check after a 3DS build:** the link succeeds, and
+`arm-none-eabi-nm -u build\<odin object>.o` lists only `o3dx_*` for float
+maths (a bare `sinf`, `fmaf` or `__*sf3` there means the rename step didn't run).
+
+## 3DS runtime (o3dx), new 2026-11-14
+
+`matchbox/o3dx/o3dx` supplies what `freestanding_arm32` lacks: a heap
+allocator on newlib `malloc`, a per-frame temp arena (1 MB, grows by blocks), a
+logger, an assertion handler that prints and logs to `sdmc:/o3dx_panic.log`,
+and `print` helpers. With it, `new`, `make`, `append`, `map`, `delete`,
+`strings.*`, `fmt.tprintf`, `slice.sort_by` and `core:log` work on the 3DS.
+**Without it they silently do nothing** (the default allocator is the nil
+allocator), and a failed `assert` traps with no message.
+
+**It is not switched on yet.** Nothing in Matchbox imports it:
+`3ds_entry_point_freestanding_arm32.odin` still uses
+`runtime.default_context()`. See step A0.
+
+What this changes in the plan:
+- **Shared code can use `[dynamic]`, slices and maps.** The render queue (B7,
+  C4), mesh generators (B6), sheet and `.meta` parsing (D2), and the animation
+  clip tables (E6) are written once, in shared files, with no fixed-size arrays
+  or 3DS-only variants.
+- **Per-frame data goes in `context.temp_allocator`,** freed once per frame with
+  `free_all(context.temp_allocator)`. Matchbox does it at the start or end of the
+  frame, so games don't have to.
+- **Long-lived data (textures, meshes, sheets)** uses the heap, and GPU data
+  still uses linear memory (`linearAlloc`). The heap and the linear heap split
+  the application's memory (`__ctru_heap_size`, `__ctru_linear_heap_size` in
+  `main.c`), so watch both on a real console.
+- **The two 3DS utility files can shrink.** `get_asset` and `print` in
+  `util_3ds_*.odin` use fixed buffers because there was no allocator; they can
+  match the PC versions (`strings.concatenate`, `fmt`).
+- **Use `assert` freely** for invariants (matrix inverse, mesh index ranges,
+  queue overflow). It now reports on the 3DS.
+- Bounds-check and nil-dereference failures still trap with no message. They
+  don't go through the assertion handler.
+
+## The three targets (Vita specifics, settled 2026-11-14)
+
+The Vita is built like the 3DS (arm32, freestanding, Odin assembly compiled by
+a GCC from the vendor SDK) but its GPU is nothing like the 3DS's. This is what
+differs, so every shared design choice below accounts for it.
+
+| | PC | 3DS | Vita |
+|---|---|---|---|
+| Odin target | `windows_amd64` | `freestanding_arm32`, `-microarch:mpcore` | `freestanding_arm32`, `-microarch:cortex-a9` |
+| Toolchain | `odin build` | devkitARM, `3ds_build.bat` | VitaSDK (`C:\vitasdk`), `vita_build.bat` |
+| GPU API | D3D11 | citro3d (PICA200) | SceGxm (`vito/gfx`, `vito/sce/gxm.odin`) |
+| Shaders | HLSL, compiled at runtime | PICA `.v.pica` (picasso) to `.shbin` | Cg `.cg` to `.gxp` (`psp2cgc`, `tools/build_shaders.py`) |
+| Clip-space depth | 0..1 | citro3d's own helpers | -1..1 (OpenGL style) |
+| Matrix in shader | `mul(M, v)` | PICA uniforms: 4 rows, tilt helper | Cg `mul(v, M)`, Odin matrix passed as-is |
+| Screens | 1 window, any size | 400x240 top plus 320x240 bottom | 960x544, fixed |
+| GPU memory | D3D owns it | `linearAlloc` | `gfx.alloc` only (CDRAM / mapped) |
+| Float calls to C | no issue | `u32` bridges plus libm rename | `u32` bridges (`vito/sce/bridge.c`) plus libm rename (`vito/libm`) |
+| Runtime | normal | `o3dx.init()` | `vito.init()` (same shape) |
+| Touch | mouse | bottom screen, 320x240 | front panel (and rear), own coordinate range |
+| Assets | `assets/` | romfs `.t3x` | `assets/` packed into the `.vpk` as `app0:/assets/` |
+
+Shared code assumes none of the left-hand column. Each backend owns its
+GPU memory, its shader, its projection depth and its input mapping.
+
+**Vita rules that shape the shared design** (from `vito/gfx/gfx.odin`):
+- **GPU memory:** anything the GPU reads (vertices, indices, textures) comes from
+  `gfx.alloc`, never `new` / `make`. So the render queue's *CPU-side* arrays use
+  the temp allocator, and only the final vertex upload goes to GPU memory.
+- **No overwrite while in flight:** a frame can still be rendering while the CPU
+  writes the next one. Dynamic quad buffers are a ring of 3 (one per display
+  buffer), and nothing GPU-visible is freed without `gfx.finish()`. This is the
+  same rule as the 3DS write cursor, in a different shape; write the quad
+  batcher with a per-frame buffer index so both backends use it.
+- **Depth is reset every scene,** so `gfx.clear` doesn't touch it, but it leaves
+  depth test `LESS_EQUAL` with writes on and culling off. The backend sets its
+  own state per draw (B5's table) and doesn't rely on defaults.
+- **Fixed 960x544 surface** (`STRIDE` 960, 3 display buffers, optional 4x MSAA
+  through `gfx.Config`). No resize event, so there is no "recreate on resize"
+  step like B1; it is only a fit input.
+- **Matrices:** the Cg vertex shader uses `mul(vector, matrix)` and the uniform
+  is written with `gfx.set_uniform_matrix(buffer, param, &m)` using the same
+  `matrix[4,4]f32` as PC. If something draws mirrored or at the origin, the
+  multiplication order in the `.cg` file is the first suspect, not the matrix.
+- **Shader toolchain** is proprietary-ish: `psp2cgc.exe` is not in the Matchbox
+  repo (it lives in the separate `vito` repo's `tools/`). Commit the compiled
+  `.gxp` files next to the `.cg` sources, as `vito/gfx/shaders/` does, and keep
+  the compile step optional in `vita_build.bat`, so a clean checkout builds
+  without the tool.
+
+**Selecting the target's files** (tested 2026-11-14 with `odin check`/`build`
+on scratchpad packages; not yet used in Matchbox). The 3DS and Vita are both
+`freestanding_arm32`, so the `_3ds_freestanding_arm32` suffix and
+`#+build freestanding arm32` match both. What was tried:
+- **`odin build -file`: does not work.** `-file` builds one file as its own
+  package, and several files are rejected ("takes a package/directory").
+- **A microarch build tag (`#+build mpcore`): does not exist.** Odin's tags are
+  OS and architecture only.
+- **`when ODIN_MICROARCH_STRING == "cortex-a9"`: works for `odin build`,** but
+  `odin check` has no `-microarch` flag and always sees the default
+  (`arm1176jzf-s`), so the Vita check couldn't check Vita code.
+- **`#config` with `-define:MATCHBOX_VITA=true`: works for both `check` and
+  `build`. This is the chosen mechanism.** `VITA :: #config(MATCHBOX_VITA, false)`
+  once in a shared file; `when !VITA { ... }` wraps the contents of each 3DS
+  file and `when VITA { ... }` the Vita file. `vita_build.bat` and
+  `vita_check.bat` pass `-define:MATCHBOX_VITA=true`.
+- **Catch:** `import` is a syntax error inside `when`, so each target file
+  imports its packages at the top, unconditionally. A 3DS build therefore
+  type-checks the Vita files' imports (`vito/...`) and a Vita build those of
+  the 3DS (`o3dx/...`). Whether that compiles cleanly, and whether `foreign
+  import` libraries of the unused target leak into the link, is **untested: it
+  is the first thing A0b verifies.**
+- **Longer term:** Farlite's patched Odin (Phase H) could add `3ds` and `vita`
+  build tags, and the `when` blocks then become `#+build` lines. The compiler
+  already has a subtarget mechanism (the Playdate target uses it).
+
+**File layout:** a module with per-target code gets one file per target:
+`window_windows.odin`, `window_3ds_freestanding_arm32.odin` (wrapped in
+`when !VITA`) and `window_vita_freestanding_arm32.odin` (wrapped in `when
+VITA`). The `_vita_` part isn't a known OS name, so Odin treats it as an
+ordinary name and the arch suffix still selects arm32. Shared files stay
+unsuffixed.
+
+---
 
 ## Conventions (decide before Phase A ends)
 
@@ -72,8 +210,9 @@ them at the top of the shared math file.
 | Handedness and up | Right-handed, **+Y up**, camera looks down **-Z** | Matches glTF, which main already loads, and most 3D tutorials. |
 | 2D y direction | Also +Y up | One world, one rule. Unity, Bevy and Godot 3D do this. 2D code written y-down needs flipping (demo, shia-test). |
 | Angles | Radians | Already the case in `render_sprite`. |
-| Matrix layout | Store as Odin `matrix[4,4]f32` (column-major, column vectors), but multiply only through `mat4_mul` / `mat4_mul_vec4` | Odin's native layout, uploadable as-is. The `*` operator is off-limits on the 3DS (see 3DS float rules). Watch HLSL packing in B4. |
-| Depth range | Per backend | D3D uses 0..1. citro3d's own helpers build its range. Shared code describes the camera, and each backend builds the projection matrix. |
+| Matrix layout | Store as Odin `matrix[4,4]f32` (column-major, column vectors). Use `mat4_mul` / `mat4_mul_vec4` for per-draw and per-vertex work | Odin's native layout, uploadable as-is. The `*` operator is correct on the 3DS now but slow (see 3DS float rules). Watch HLSL packing in B4. |
+| Depth range | Per backend | D3D uses 0..1. citro3d's own helpers build its range. The Vita's GXM clip space is OpenGL's, -1..1 (per `vito/gfx/gfx.odin`), so A1 also has `mat4_perspective_gl` and `mat4_ortho_gl`. Shared code describes the camera, and each backend builds the projection matrix. |
+| Screen and pixel units | Fit works on any surface size | PC: any size. 3DS: 400x240. Vita: 960x544 (aspect 1.765). All three are inputs to A4. | Don't hard-code 400x240; the design aspect should be chosen with all three screens in mind (16:9 designs letterbox slightly on both handhelds). |
 | Units | 3D: 1 unit = 1 metre. 2D: the game picks its ortho view height. With PPU 1, one unit is one art pixel at 1x. | Keeps 2D numbers familiar. |
 | Sprite pivot | `{0.5, 0.5}` = centre is the position | Opposite of main. Main's comment calls its own convention surprising. |
 
@@ -81,12 +220,11 @@ them at the top of the shared math file.
 
 ```
 [x] POC
-[-] Renderer core: 3D pipeline on PC and 3DS       (Phases A, B, C)
-[ ] 2D: 2D as an orthographic projection           (Phases D, E, F)
-[ ] 3D: 3D games                                   (Phase G)
-[ ] Improved build system                          (shader step lands in Phase C)
-[ ] Vita target                                    (Phase H, after 3D)
-[ ] 3DS hard-float (performance)                   (Phase I, via Farlite, late)
+[-] Renderer core: 3D pipeline on PC, 3DS, Vita    (Phases A, B, C, V)
+[ ] 2D: 2D as an orthographic projection           (Phases D, E, F; all three targets)
+[ ] 3D: 3D games                                   (Phase G; all three targets)
+[ ] Improved build system                          (shader steps land in Phases C and V)
+[ ] Hard-float on the handhelds (performance)      (Phase H, via Farlite, late)
 ```
 
 2D can't come first, because it is built on the 3D pipeline. The 2D milestone
@@ -95,9 +233,14 @@ models or skinning.
 
 ## How to work through it
 
-- **PC first, then the same step on the 3DS before moving on.** Don't let the
-  3DS fall more than one step behind; the bugs found so far all came from
-  differences between the targets.
+- **PC first, then the same step on the 3DS and the Vita before moving on.**
+  Don't let either handheld fall more than one step behind; the bugs found so
+  far all came from differences between the targets. Phases B, C and V are
+  one core phase done three times: each B step has a C step and a V step, and
+  they're listed together in the table at the start of Phase B.
+- **Hammer out each target's specifics at the step that first touches them,**
+  not later. That is why the Vita's build, entry point and depth rules are in
+  Phase A, before any rendering.
 - **Keep the demo running.**
   - The new path is added beside the old one (`render_mesh` beside
     `render_sprite`).
@@ -107,44 +250,144 @@ models or skinning.
   - Files have no target suffix, and `odin test` runs on PC.
   - Main's `display_test.odin` is the model.
 - **Every step has a "done when".** Don't start the next step until it is met
-  on both targets (Citra for the 3DS; real hardware at the end of each phase).
+  on all three targets (Citra for the 3DS, Vita3K or real hardware for the
+  Vita; real hardware at the end of each phase). If the Vita emulator isn't
+  trusted for GXM details, treat a step as done on the Vita only after a
+  hardware run.
 
 ---
 
 ## Phase A: shared foundations (no rendering changes)
 
-**A1. Shared maths file.** Investigated 2026-11-12: `core:math/linalg`
-compiles and links for the 3DS but gives wrong results there (see "3DS float
-rules"). The FPU part is done: `build.bat` uses `-microarch:mpcore`.
-Remaining:
-- [x] **Trig bridge** (done 2026-11-12, pushed). `o3dx/c3d` now has
-  `c3d.sinf`, `cosf`, `tanf`, `asinf`, `acosf`, `atanf`, `atan2f`, `powf`,
-  `fmodf`, `sqrtf` and `sincosf`, declared `u32` on the C side. Not yet
-  checked for values on the emulator.
-- **`math.odin` in `matchbox/`** (shared, no target suffix), with
-  target-specific `sin`/`cos`/`tan`/`atan2`/`sincos` in `math_windows.odin`
-  (calls `core:math`) and `math_3ds_freestanding_arm32.odin` (calls the
-  `c3d.*f` wrappers).
-- **Procs to write by hand:** `mat4_identity`, `mat4_mul`, `mat4_mul_vec4`,
-  `mat4_translate`, `mat4_scale`, `mat4_from_quat`, `mat4_inverse`,
-  `mat4_ortho`, `mat4_perspective`, `mat4_look_at`, `quat_angle_axis`,
-  `quat_mul`, `quat_normalize`, `quat_rotate_vec3`, plus `vec3` `dot`,
-  `cross`, `normalize`, `length`. Write `mat4_mul` as explicit loops over
-  indices, never `a * b`.
-- **Tests** in `math_test.odin` on PC: compare each hand-written proc against
-  `core:math/linalg` (allowed on PC) within a small epsilon. That gives
-  correctness for free.
-- Write the conventions table (right-handed, +Y up, -Z forward, radians,
-  column-major) as a comment at the top of `math.odin`.
-- Done when: the tests pass on PC, the 3DS build passes the "no libm calls"
-  check above, and a 3DS test that prints `sin(PI/2)` and a rotated vector
-  shows the right numbers in Citra.
+**A0. Turn the 3DS runtime on** (new 2026-11-14; do this before anything
+else, since later steps assume `make` and `append` work).
+- In `3ds_entry_point_freestanding_arm32.odin`, replace
+  `context = runtime.default_context()` with the o3dx context:
+  ```odin
+  package demo
+
+  import o3dx "matchbox/o3dx/o3dx"
+
+  @(export, link_name = "odin_main")
+  odin_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
+  	context = o3dx.init()
+  	defer o3dx.shutdown()
+  	main()
+  	return 0
+  }
+  ```
+- Free the temp arena once per frame inside Matchbox (for example at the
+  start of `poll_events`): `free_all(context.temp_allocator)`.
+- Check that `3ds_build.bat` still compiles `o3dx/libm/bridge.c` and runs the
+  `objcopy` rename (it does as of commit a0d559f). `core:fmt` now pulls in
+  libgcc float helpers, and those need the rename.
+- Verified statically 2026-11-14 (scratchpad copy of `3ds_build.bat` with this
+  entry point; no emulator was run): it builds and links, the Odin object
+  calls only `o3dx_*` for `sinf`, `cosf`, `powf`, `expf`, `fmaf` and the
+  integer/float conversion helpers (no bare libm symbol left), and
+  `o3dx::init`, `heap_allocator_proc`, `assertion_failure_proc` and `logger_proc`
+  are in the ELF.
+- **Vita counterpart (same step, written in A0b):** `vito.init()` /
+  `vito.shutdown()` in the Vita entry point, and `free_all(context.temp_allocator)`
+  in the Vita `poll_events`. `vito` has the identical shape to `o3dx`, so
+  nothing else differs.
+- Done when: on Citra, a one-off `s := fmt.tprintf("%v", 1.5)` followed by
+  `mb.print(s)` shows `1.5`, a `make([]int, 4)` returns a non-empty slice, and
+  a deliberately failed `assert(false, "test")` prints its message.
+
+**A0b. Target selection and the Vita scripts** (new 2026-11-14; right after A0,
+before A1, because it fixes the file layout everything after it uses). See "The
+three targets" for the mechanism and its untested catch.
+- Add one shared file, e.g. `matchbox/target.odin`:
+  `VITA :: #config(MATCHBOX_VITA, false)`.
+- Wrap the contents of every existing `*_3ds_freestanding_arm32.odin` in
+  `when !VITA { ... }`, keeping the imports at the top, unconditional. The root
+  `3ds_entry_point_freestanding_arm32.odin` gets the same treatment (it's in
+  `package demo`, so import `target` through `matchbox`, or use a second
+  `#config` there; pick the smaller change).
+- Add the Vita entry point (`vita_entry_point_freestanding_arm32.odin`, wrapped
+  in `when VITA`):
+  ```odin
+  import vito "matchbox/vito/vito"
+
+  @(export, link_name = "odin_main")
+  odin_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
+  	context = vito.init()
+  	defer vito.shutdown()
+  	main()
+  	return 0
+  }
+  ```
+- **`vita_check.bat`:** the same as `3ds_check.bat` plus
+  `-define:MATCHBOX_VITA=true`. Run both checks after the wrapping; **both must
+  pass**, which is the test of the "imports compile in the other target" catch.
+- **`vita_build.bat`:** based on `vito/NewProjectTemplate/build.bat` (the
+  separate `vito` repo), with these settings:
+  - `odin build . -target:freestanding_arm32 -o:speed -build-mode:asm
+    -no-entry-point -min-link-libs -no-thread-local -microarch:cortex-a9
+    -define:MATCHBOX_VITA=true`
+  - Assemble each `.S` with `arm-vita-eabi-gcc -march=armv7-a -mtune=cortex-a9
+    -mfpu=neon -mfloat-abi=hard`.
+  - Then `arm-vita-eabi-objcopy --remove-section .ARM.attributes
+    --redefine-syms=matchbox\vito\libm\redefine.syms` on each object. (This
+    differs from the 3DS script: the Vita **removes** the ABI attributes so
+    `ld` accepts the soft-float objects, while the 3DS appends
+    `.eabi_attribute 28, 1`.)
+  - Compile a Vita `main.c` shim (the same 3 lines as the 3DS one; keep it in a
+    `vita/` folder so it doesn't clash with the root `main.c`), plus the
+    bridges: `matchbox\vito\libm\bridge.c` and `matchbox\vito\sce\bridge.c`
+    (`-O2`).
+  - Link with `-Wl,-q -Wl,--defsym,__sce_headroom=0x10000` and the stubs the
+    template lists (`SceDisplay`, `SceGxm`, `SceSysmodule`, `SceCtrl`,
+    `SceTouch`, `SceMotion`, `SceKernelThreadMgr`, `SceIofilemgr`, `SceAudio`,
+    `ScePgf`, `ScePvf`, `SceCommonDialog`, `SceAppMgr`, `SceAppUtil`,
+    `ScePower`, `SceSysmem`, `SceLibKernel`, plus `-lpng16 -lz -lm`).
+  - Package: `vita-elf-create`, `vita-make-fself -c`, `vita-mksfoex` (needs a
+    9-character `TITLE_ID`, 4 letters + 5 digits), `vita-pack-vpk` with
+    `-a assets=assets` for the shared assets folder.
+  - It needs VitaSDK at `C:\vitasdk` (or `VITASDK` set) on `PATH`.
+- Done when: `3ds_check.bat` and `vita_check.bat` both pass; `3ds_build.bat`
+  still produces a working `.3dsx`; `vita_build.bat` produces a `.vpk` for an
+  empty `main` that prints through `mb.print` and runs in Vita3K (or on
+  hardware) without a crash; and `arm-vita-eabi-nm -u` on the Vita Odin object
+  shows only `vito_*` for float maths (the same check as the 3DS's).
+
+**A1. Shared maths file.** The FPU is done (`3ds_build.bat` uses
+`-microarch:mpcore`) and libm calls are corrected at link time (see "3DS float
+rules"). So the maths file no longer needs per-target trig; it is **one shared
+file plus its tests**, already written and `odin check`-clean on PC and on the
+3DS target (scratchpad copy; not yet run).
+- [x] The `c3d.sinf`, `cosf`, ... `u32` bridges (pushed 2026-11-12) still
+  exist. They are redundant for Odin's own libm calls now. Keep them while
+  nothing depends on them; remove them with Phase H if unused.
+- **`matchbox/math.odin`** (shared): `Vec3`, `Vec4`, `Mat4`, a plain `Quat`
+  struct, `sin`/`cos`/`tan`/`atan2`/`sincos` over `core:math`, `radians`,
+  `degrees`, the `vec3_*` helpers, and `mat4_identity`, `mat4_mul`,
+  `mat4_mul_vec4`, `mat4_mul_point`, `mat4_translate`, `mat4_scale`,
+  `mat4_from_quat`, `mat4_inverse`, `mat4_perspective` and `mat4_ortho` (both
+  depth 0..1), `mat4_look_at`, `quat_angle_axis`, `quat_mul`,
+  `quat_normalize`, `quat_rotate_vec3`. The multiplies are written as plain
+  loops, for speed on the 3DS (the Vita's Cortex-A9 has VFPv3 and NEON but no
+  fused multiply-add either, so `fmaf` is a library call there too, and the same
+  hand-written code is used).
+- **Vita additions to the file:** `mat4_perspective_gl` and `mat4_ortho_gl`
+  (depth -1..1) beside the 0..1 versions, with test cases against
+  `linalg.matrix4_perspective_f32`. The same maths file is used for all three
+  targets; the Vita's libm calls go through `vito/libm`'s rename, the same
+  mechanism as the 3DS's.
+- **`matchbox/math_test.odin`** (`#+build windows`, so `core:testing` stays out
+  of the 3DS check): compares against `linalg` and checks the conventions.
+  Run with `odin test matchbox`.
+- Done when: the tests pass on PC; on Citra a print of `sin(PI/2)` and a
+  rotated vector shows the right numbers (this now exercises the link-time
+  rename); and `nm -u` on the Odin object shows only `o3dx_*` float symbols.
+- Decided 2026-11-14: keep `Quat` as a plain struct (not `quaternion128`) and
+  keep `mat4_mul` hand-written, for 3DS speed, not for correctness.
 
 **A2. `Transform`** (shared): `position: [3]f32`, `rotation: quaternion128`,
 `scale: [3]f32`, plus `transform_matrix(t) -> matrix[4,4]f32`, built with the
 A1 procs (translate × rotate × scale).
-- Odin's built-in quaternion `*` may also lower to `fmaf`; use `quat_mul`
-  from A1 unless the 3DS check shows it is clean.
+- Use `Quat` and `quat_mul` from A1.
 - Done when: tests cover identity, translate-only and rotate-then-translate
   order.
 
@@ -169,17 +412,46 @@ camera.
   - letterbox 1080p: 4.5x with 60px bars
   - overscan 1080p: 400x225 visible
   - Vita expand: 423.5x240 visible
+  - Vita (960x544, aspect 1.765) with a 16:9 design under letterbox: 960x540
+    viewport, 2px bars; and under overscan, the cropped width or height
   - ultrawide with a 10% cap: partial bars
 
 **A5. Projection description per backend:** `camera_projection_params(cam,
 viewport)` returns what a backend needs (fov, aspect, near, far, or ortho
 extents). Backends build the actual matrix:
-- PC: D3D 0..1 depth.
+- PC: D3D 0..1 depth (`mat4_perspective` / `mat4_ortho` from A1).
 - 3DS: `Mtx_PerspTilt` / `Mtx_OrthoTilt`, which handle the rotated
   framebuffer. `o3dx/c3d/bridge.c` already bridges the projection functions;
-  check the Odin declarations pass `u32` (see A1).
+  check the Odin declarations pass `u32` (see "3DS float rules", case 2).
+- Vita: OpenGL-style -1..1 depth: `mat4_perspective_gl` / `mat4_ortho_gl` from
+  A1. `gfx.set_viewport` maps clip space onto 960x544 (y up), so no flip is
+  needed. Cg multiplies `mul(v, M)`; the matrix memory is the same as PC's.
 
 ---
+
+## Phases B, C, V: the core, once per target
+
+The core is one set of steps done three times. Every row is "done" only when
+all three columns are:
+
+| What | PC (B) | 3DS (C) | Vita (V) |
+|---|---|---|---|
+| Shader toolchain | (HLSL is in the source) | C0 | V1 |
+| Depth buffer | B1 | C1 | V2 |
+| Vertex format and layout | B2 | C0 | V3 |
+| Constants / uniforms | B3 | C0 | V3 |
+| Shader maths and matrix order | B4 | C0 | V3 |
+| Pipeline state (cull, depth, blend) | B5 | C1, C2 | V4 |
+| Textures | (D1) | C2 | V5 |
+| Meshes | B6 | C3 | V6 |
+| Render queue execution | B7 | C4 | V7 |
+| Viewport and scissor (fit) | B8 | C5 | V8 |
+| Phase gate | cube and quad | same scene | same scene |
+
+Do PC, then 3DS, then Vita for each row, or PC and both handhelds in one
+sitting if they share the work. The render queue's sorting and the mesh
+generators are shared code: they're written once, in B, and the other two
+backends only execute them.
 
 ## Phase B: PC 3D core (D3D11)
 
@@ -222,7 +494,9 @@ layout.
 - `Mesh` holds a GPU vertex buffer and a 16-bit index buffer, plus counts.
 - `create_mesh(vertices, indices)`, `destroy_mesh(mesh)`.
 - Generators in shared code: `mesh_cube`, `mesh_plane`, `mesh_sphere`. They
-  return vertex and index arrays only, with no GPU work.
+  return vertex and index slices only, with no GPU work. With the 3DS runtime
+  (A0) they can `make` the slices, taking the allocator as a parameter
+  (default `context.allocator`); the caller frees them after `create_mesh`.
 
 **B7. Render queue** (shared logic, backend execution). This replaces the
 immediate batch.
@@ -235,6 +509,10 @@ immediate batch.
 - Quads (sprites, shapes) are pre-transformed on the CPU into one dynamic
   vertex buffer per texture run, with `model = identity`.
 - Meshes use their own buffers and the per-draw cbuffer.
+- The queue is a `[dynamic]` of items built in `context.temp_allocator` and
+  sorted with `slice.sort_by` (`odin check` accepts both on the 3DS target;
+  not yet run there). It is shared code, so C4 is only the 3DS executor. The
+  queue is freed with the temp arena each frame (A0).
 
 **B8. Viewport and scissor from A4.**
 - `RSSetViewports` and `RSSetScissorRects` from the fit result.
@@ -253,8 +531,8 @@ still draws.
 - Only `romfs/vshader.shbin` (a compiled binary) is in the repo; its source
   isn't.
 - Add `matchbox/shaders/vshader.v.pica`.
-- Add a step to `build.bat` that runs `picasso` (part of devkitPro) on it and
-  outputs to `romfs/`.
+- Add a step to `3ds_build.bat` that runs `picasso` (part of devkitPro) on it
+  and outputs to `romfs/`. (The Vita's Cg shader step is V1.)
 - New shader inputs: position (v0), uv (v1), color (v2).
 - Uniforms: `projection` (from the tilt helper) and `model_view`.
 - Done when: the existing triangles draw through the rebuilt shader.
@@ -299,6 +577,143 @@ Citra and on real hardware, and the old 2D demo still draws.
 
 ---
 
+## Phase V: Vita 3D core (GXM)
+
+Done after (or alongside) Phase C, with the same scene as the gate. The
+bindings and setup already exist: `matchbox/vito/sce/gxm.odin` (about 1,800
+lines) and `matchbox/vito/gfx` (context, three display buffers, depth buffer,
+shader patcher, `gfx.alloc`, textures, render targets). A0b already gave the
+Vita a working build and entry point, so this phase is only rendering. The
+rules that apply throughout are in "The three targets". Files are
+`render_vita_freestanding_arm32.odin` (and others) wrapped in `when VITA`.
+
+**V0. Backend skeleton.**
+- `render_vita_freestanding_arm32.odin` implements the same public procedures
+  as `render_windows.odin`: `render_start`, `render_end`, `render_mesh`,
+  `render_sprite` (and later the rest). It imports `vito/gfx` and `vito/sce`.
+- `gfx.init()` in the window / render init. Check `gfx.init_step` and
+  `init_error` on failure and log them through the logger.
+- Optional 4x MSAA through `gfx.Config{multisample = ._4X}`; leave it off until
+  V8 (fit) works, then decide (it costs GPU time and memory).
+- Frame loop: `gfx.begin_frame()`, `gfx.clear(...)`, draws, `gfx.end_frame()`,
+  `gfx.swap()`. `gfx.swap()` waits for the display and so gives 60 fps.
+- Done when: the Vita clears to a colour each frame with the Matchbox API and
+  `mb.print` shows the init result.
+
+**V1. Shader toolchain.**
+- New sources in `matchbox/shaders/vita/`: `mesh_v.cg` and `mesh_f.cg`.
+  `vito/gfx/shaders/sprite_v.cg` is the model (position, uv, colour in; uniform
+  `float4x4`; `mul(vector, matrix)`).
+- Compile with `tools/build_shaders.py` (psp2cgc) from the `vito` repo, to
+  `.gxp`. **Commit the `.gxp` outputs** next to the sources, and embed them with
+  `#load`, as `gfx` does for its clear shaders. A clean checkout then builds
+  without `psp2cgc`.
+- Add an optional step to `vita_build.bat`: if `psp2cgc.exe` is found, rebuild
+  the `.gxp` files; otherwise use the committed ones.
+- Done when: the existing `gfx` sprite shaders are replaced by the Matchbox
+  ones and a coloured triangle draws.
+
+**V2. Depth.**
+- The screen's depth buffer already exists (`gfx` creates it) and is **reset
+  every scene**, so there is nothing to clear. Check that `gfx.init` creates it
+  with the same multisample mode as the colour surface.
+- Set depth state per draw (V4); `gfx.clear` leaves `LESS_EQUAL` with writes
+  on and culling off.
+- Depth range is -1..1: use `mat4_perspective_gl` (A1).
+- Done when: two overlapping quads of known order draw in the right order
+  regardless of submission order.
+
+**V3. Vertex format, uniforms, shader maths.**
+- Same vertex layout as B2: `position: [3]f32, uv: [2]f32, color: [4]f32`,
+  described with `gfx.attribute(...)` and `gfx.create_vertex_program(...)`.
+- Uniforms: `view_projection` and `model` (and `tint`) through
+  `gfx.use_programs(...)` and `gfx.set_uniform_matrix`. GXM has one default
+  uniform buffer per program; write the per-draw values before each draw.
+- Cg: `out = mul(float4(pos, 1), mul(...))` is the HLSL expression reversed.
+  Keep one source of truth: the matrices are built exactly as for PC, and only
+  the multiplication order in the shader differs.
+- Verify with the same test as B4: a quad at x = +1 must move right. If it
+  moves wrong or mirrors, fix the order in the `.cg` file, not the matrix.
+- Done when: the test quad is in the right place and the view/projection from
+  the camera move it correctly.
+
+**V4. Pipeline state.**
+- Cull mode: `sceGxmSetCullMode` back (counter-clockwise front, matching B5)
+  and a no-cull mode for sprites. Check the winding on hardware; the winding
+  convention is the first thing to test: draw one triangle both ways.
+- Depth: opaque test and write; transparent test without write; HUD off, with
+  `sceGxmSetFrontDepthFunc` and `sceGxmSetFrontDepthWriteEnable`.
+- Blend: a fragment program per blend mode (`gfx.create_fragment_program` with
+  `.None` and `.Alpha`; a fragment program is tied to its vertex program, blend
+  and multisample mode, so create the pairs up front and look them up).
+- Alpha test: no fixed-function alpha test on GXM; cut-out sprites (E3) use
+  `discard` in the fragment shader, the same as the PC.
+- Done when: the three states behave as in B5 on the test scene.
+
+**V5. Textures.**
+- `gfx.create_texture(w, h)` returns a linear 32-bit texture in CDRAM with
+  `pixels` and `stride` (rows padded to 8 pixels). Pixels are
+  `0xAABBGGRR`, which is `R8G8B8A8` byte order; load PNGs with the template's
+  `libpng` (`-lpng16 -lz`), as `gfx/image.odin` does.
+- Filter (point or linear) per texture: the `filter` parameter (D1).
+- Stable address: texture memory is GPU-mapped and doesn't move; keep the
+  `gfx.Texture` in a stable place (heap, not stack) for the frame's life.
+- Size limit: a GXM texture is at most 4096x4096; the shia-test sheet (3328px)
+  fits. Check the format limits when picking sheet sizes in D3.
+- Done when: a textured quad draws, point and linear.
+
+**V6. Meshes.**
+- Vertex and index buffers from `gfx.alloc` (CDRAM or mapped uncached memory),
+  16-bit indices; `sceGxmDraw` with `.U16` indices.
+- `destroy_mesh`: call `gfx.finish()` first if the mesh could still be in
+  flight, then `gfx.free(uid)`. Track allocations; GPU memory is a separate
+  budget from the heap.
+- Done when: the cube from B6 draws and destroys cleanly in a loop (no leak,
+  no crash after 1,000 create/destroy cycles).
+
+**V7. Render queue execution.**
+- The queue's sorting and batching are shared (B7). The Vita executes it:
+  - Quads: the CPU-transformed vertices go into a **ring of three** GPU
+    buffers (one per display buffer) so a frame in flight is never overwritten.
+    `vito/gfx/draw2d.odin` is a working example of exactly this (`push_quad`,
+    `flush_2d`, `draw2d_next_frame`); lift its buffer handling, not its pixel
+    maths.
+  - Meshes use their own buffers and the per-draw uniforms.
+- The queue and its sort scratch stay in `context.temp_allocator`; only the
+  quad vertices are copied into GPU memory each frame.
+- Done when: the Phase B scene (spinning textured cube, half-transparent quad
+  passing through it) renders on the Vita.
+
+**V8. Fit and viewport.**
+- The surface is fixed at 960x544. `gfx.set_viewport(width, height, x, y)`
+  takes the fit viewport; GXM also has `sceGxmSetRegionClip` for the scissor
+  (bars). Clear the full screen to the bar colour first.
+- Aspect 1.765 is a different shape from both the PC and the 3DS. The fit's
+  default policy (F1) has to look right on all three.
+- Done when: letterbox, overscan and expand behave as in the mockups, with the
+  same design aspect as PC and 3DS.
+
+**V9. Input and audio parity** (can run in parallel with V0-V8, platform layer
+only; no rendering).
+- `vito/vito/input.odin` provides `input_init`, `input_update`, a normalised
+  `dpad`, two sticks, face buttons, triggers and the front/rear touch panels.
+  Map it onto Matchbox's input API with the same names as the PC and 3DS
+  backends; touch maps into the screen rect, as in F3.
+- `vito/vito/audio.odin` exists; map it onto Matchbox's audio API. (Vorbis for
+  music is `vito/vorbis`; add `vorbis` to `BRIDGES` when needed.)
+- `vito/vito/time.odin`, `file.odin` and `dialog.odin` cover timing, assets and
+  system dialogs.
+- Window and events: the Vita has one fixed window; `poll_events` handles the
+  system (power button, PS-button exit) and frees the temp arena.
+- Done when: the demo's input test and audio test run on the Vita, and `mb.print`
+  / the logger go through `vito`.
+
+**Phase V done when:** the Phase B cube and transparent quad scene runs on
+Vita3K and on real hardware, `vita_build.bat` works from a clean checkout
+without `psp2cgc`, and the PC and 3DS scenes still draw.
+
+---
+
 ## Phase D: textures and assets
 
 **D1. `Texture` as its own resource.**
@@ -312,6 +727,9 @@ Citra and on real hardware, and the old 2D demo still draws.
   `rows`.
 - Missing means PPU 1 and one frame.
 - 3DS: the build copies `.meta` files into romfs next to the `.t3x`.
+- Vita: `assets/` is packed into the `.vpk` as `app0:/assets/...`, so the PNG
+  and its `.meta` travel together. The Vita uses the full-size shared sheet
+  (textures up to 4096px), so it needs no third output.
 
 **D3. Sheet-packing tool** (in `tools/`, like `tritex`).
 - Packs a folder of frames (natural sort) into one grid PNG and writes the
@@ -320,9 +738,10 @@ Citra and on real hardware, and the old 2D demo still draws.
 - Done when: shia-test's 169 256px frames become a PC sheet (13x13, 3328px)
   and a 3DS sheet at 64px (832px, which fits in 1024).
 
-**D4. Subfolder asset names on the 3DS.** The build flattens files to their
+**D4. Subfolder asset names on the 3DS** (the Vita keeps real paths, so only
+the 3DS flattening matters). The build flattens files to their
 basename, while `get_asset` uses the relative path. Pick one rule and apply it
-in both `build.bat` and `get_asset`.
+in both `3ds_build.bat` and `get_asset`.
 
 ---
 
@@ -377,9 +796,11 @@ in both `build.bat` and `get_asset`.
 **E7. Acceptance test: port shia-test.**
 - PC first, with y flipped to +Y up and positions in units.
 - Then the 3DS with the downscaled sheet; layout changes there are expected.
+- Then the Vita with the full-size sheet; the 960x544 surface should show it
+  the same as the PC at 1x.
 
-**Phase E done when:** a 2D test scene (the mockup scene) looks the same on PC
-and the 3DS under letterbox, and shia-test plays on PC.
+**Phase E done when:** a 2D test scene (the mockup scene) looks the same on PC,
+the 3DS and the Vita under letterbox, and shia-test plays on PC.
 
 ---
 
@@ -396,8 +817,10 @@ and the 3DS under letterbox, and shia-test plays on PC.
 - PC: `stb_truetype` (vendor) to bake the atlas.
 - 3DS: the system font (`fontGetSystemFont`, which is what citro2d text uses),
   or a pre-baked atlas built with the asset tools.
-- Decide which before starting. The pre-baked atlas is identical on both
-  targets.
+- Vita: the same baked atlas (the Vita has its own `vita2d`/`gfx` text, but
+  it is pixel-space and doesn't use the camera).
+- Decide which before starting. The pre-baked atlas is identical on all three
+  targets, which is the argument for it.
 
 **F3. Input to world.**
 - Mouse: invert the fit and camera.
@@ -405,14 +828,19 @@ and the 3DS under letterbox, and shia-test plays on PC.
   - Perspective: a ray from the camera.
 - Points in the bars report as outside.
 - 3DS touch maps to the bottom screen's camera (F4).
+- Vita front touch (and the rear panel) report in the panel's own coordinate
+  range, not screen pixels; scale them to 960x544 first, then treat as mouse.
+  Check the range on hardware.
 
 **F4. 3DS bottom screen** as a second surface (320x240) with its own camera.
 - On PC: render it stacked below the top screen, as an overlay, or not at all.
   The game chooses.
-- Leave Vita behaviour until Phase H.
+- Vita: one 960x544 screen plus touch panels; the game gets the main surface,
+  and the front touch panel maps to it (F3). No second screen exists, so
+  bottom-screen content is drawn as an overlay or hidden, like the PC choice.
 
 **2D milestone done when:**
-- shia-test runs on PC and the 3DS (positions tuned for the 3DS).
+- shia-test runs on PC, the 3DS and the Vita (positions tuned for the 3DS).
 - A HUD stays anchored under every fit policy.
 - Text is crisp on both targets.
 
@@ -420,19 +848,23 @@ and the 3DS under letterbox, and shia-test plays on PC.
 
 ## Phase G: 3D games (3D milestone)
 
-**G1. Models.**
+**G1. Models** (all three targets).
 - glTF on PC: port main's `gltf2` parsing, but not its GPU code.
 - 3DS: a **build-time** converter from glTF to a compact binary
-  (positions/uv/normals/indices, 16-bit indices, textures through tritex). No
-  JSON parsing on the device.
+  (positions/uv/normals/indices, 16-bit indices, textures through tritex).
+  With the 3DS runtime (A0), parsing glTF on the device is now *possible*, but
+  the converter is still the better choice: no JSON parse time or heap spike
+  at load, and smaller files in romfs. The Vita can read the same converted
+  binary from `assets/`; GPU buffers there come from `gfx.alloc`.
 
 **G2. Lighting.**
 - Directional plus ambient to start. Add `normal` to the vertex format.
 - PC: per-pixel in HLSL.
 - 3DS: PICA hardware fragment lighting (`C3D_LightEnv`, `C3D_Light`) or
   per-vertex in the shader.
-- Keep the shared API to what the 3DS can do. Anything PC-only is marked as
-  such.
+- Vita: per-pixel in Cg is feasible (it has a real programmable pipeline).
+- Keep the shared API to what the 3DS can do. Anything PC- or Vita-only is
+  marked as such.
 
 **G3. 3D cameras.** Port main's first-person, third-person and orbit helpers
 onto `Camera`.
@@ -442,7 +874,8 @@ reuse E1.
 
 **G5. Render targets.**
 - Render to a texture: `C3D_RenderTargetCreateFromTex` on the 3DS, an RTV plus
-  shader resource view (SRV) on PC.
+  shader resource view (SRV) on PC, and `gfx.create_target` /
+  `gfx.begin_target` on the Vita (offscreen targets are not multisampled).
 - This also enables an opt-in pixel-perfect 2D mode: render at the design size,
   then upscale.
 
@@ -452,40 +885,29 @@ reuse E1.
   Measure before choosing.
 
 **3D milestone done when:** a small third-person scene (a model, lighting, a
-camera rig, and a HUD) runs on PC and the 3DS.
+camera rig, and a HUD) runs on PC, the 3DS and the Vita.
 
 ---
 
-## Phase H: Vita (after 3D)
-
-- 3D needs the Vita GPU (GXM) directly. vita2d has no camera or depth, so it
-  can't run this renderer.
-- Prerequisites in vito:
-  - `sceGxm` bindings
-  - display queue
-  - memory blocks
-  - a way to compile shaders to `.gxp`
-- **Research the shader compiler's availability first.** It decides whether
-  this phase is feasible.
-- Fit: 960x544 is just another surface for A4, so nothing new is needed.
-- Touch: the front panel's coordinate range differs from the screen pixels.
-  Check on hardware and map it in F3's input code.
-
----
-
-## Phase I: hard-float on the 3DS (later: when performance is the focus)
+## Phase H: hard-float on the handhelds (later: when performance is the focus)
 
 Not part of the main milestones. Do it after the main parts of Matchbox are
 complete, when performance becomes the next concern.
 
-**Why:** with soft-float calls, every float crossing into C goes through a
-bridge, matrix and trig maths need hand-written or bridged versions, and
-citro3d's own optimised maths can't be called directly.
+**Why (revised 2026-11-14):** correctness is no longer the reason, because
+Odin's libm calls are fixed at link time (see "3DS float rules"). What
+hard-float still removes:
+- every float parameter crossing into citro3d / citro2d / libctru goes through
+  a `uint32_t` bridge, so each new binding needs a bridge function;
+- the `objcopy --redefine-syms` step and the `o3dx/libm` wrappers (an extra
+  call layer on every `sinf`, `fmaf` and conversion);
+- citro3d's own optimised maths can't be called directly with floats.
+So this is a performance and simplicity phase, as originally planned.
 
 **Root cause (found 2026-11-12):** Odin dev-2026-11 already has hard-float
 (AAPCS-VFP) argument lowering for arm32, float structs included. But it emits
 the target triple `arm-none-eabihf` without normalising it, so LLVM appears
-to fall back to soft-float. That's also why `build.bat` appends
+to fall back to soft-float. That's also why `3ds_build.bat` appends
 `.eabi_attribute 28, 1` by hand.
 
 **Plan:** Farlite installs an Odin compiler built with the fix, so the
@@ -493,7 +915,9 @@ to fall back to soft-float. That's also why `build.bat` appends
 1. Confirm with a small test that `proc(a: f32, b: f32)` passes `b` in `s1`
    and that the object is tagged "VFP registers"
    (`arm-none-eabi-readelf -A`).
-2. Remove the `.eabi_attribute 28, 1` append from `build.bat`.
+2. Remove the `.eabi_attribute 28, 1` append, the `objcopy --redefine-syms`
+   step and `o3dx/libm` from `3ds_build.bat`. (The Vita has the same pair in
+   `vito/libm`; the Farlite compiler would remove it there too.)
 3. **In the same change**, rework every o3dx binding with float parameters:
    - Real functions in citro2d/citro3d/libctru: declare them directly with
      `f32`, drop the `link_name`, delete the bridge.
@@ -501,9 +925,8 @@ to fall back to soft-float. That's also why `build.bat` appends
      wrapper with `float` parameters and no `u2f`/`f2u`.
    - Bridges whose Odin declaration already uses `u32` keep working, so they
      can go later.
-4. Drop the "3DS float rules": `core:math`, `linalg` and the matrix `*`
-   operator become correct, though `fmaf` stays a slow library call on VFPv2.
-   Keep `mat4_mul` for speed.
+4. Drop the "3DS float rules" section. `fmaf` stays a slow library call on
+   VFPv2 even then, so keep `mat4_mul` for speed.
 5. Done when: the demo, shia-test and the Phase G scene run unchanged on
    hardware, and no `u2f`/`f2u` bridge remains for a non-inline function.
 
@@ -529,13 +952,21 @@ above all the same.
 | `render_triangle_points` (pixel-space) | World-space shapes | E4 |
 | `get_window_size()` as the game's coordinate space | `get_visible_rect()` + camera | F1 |
 | citro2d link entirely | Own text (F2) | F2, if citro2d isn't used for text |
-| `u2f`/`f2u` bridges, `.eabi_attribute 28, 1` append, 3DS float rules | Hard-float Odin from Farlite | Phase I |
+| `u2f`/`f2u` bridges, `.eabi_attribute 28, 1` append / `.ARM.attributes` removal, `objcopy` libm rename + `o3dx/libm` + `vito/libm`, 3DS float rules | Hard-float Odin from Farlite | Phase H |
+| `c3d.sinf`, `cosf`, ... `u32` bridges (added 2026-11-12) | `math.sin` etc. via the libm rename | When nothing calls them |
+| Fixed-buffer `get_asset` / `print` in `util_3ds_*.odin` | Same code as the PC versions (A0 runtime) | After A0, when convenient |
+| `vito/gfx` `draw2d.odin` pixel batcher (as the Vita's 2D path; not part of Matchbox yet) | Matchbox's render queue (V7) | V7; keep it as a reference until then |
+| `vita2d` bindings (`vito/vita2d`) | Not used by Matchbox, which draws through GXM | Never needed by Matchbox; leave it in `vito` |
 
 ## Risks to watch
 
-1. **Silent libm calls on the 3DS** (A1 onward): any `matrix *`, `linalg`
-   or `math.sin` that slips into 3DS code builds fine and returns garbage.
-   The build check in "3DS float rules" is what catches it.
+1. **The libm rename step** (A0/A1 onward): float maths is correct on the 3DS
+   only while `3ds_build.bat` keeps running the `objcopy` rename and
+   `-microarch:mpcore`. If either is dropped, the same code returns garbage
+   without an error. The `nm -u` check in "3DS float rules" catches it. Also
+   watch for **slow** matrix `*` in per-draw code on the 3DS.
+1b. **The runtime is off until A0:** `make`, `append`, maps and `fmt.tprintf`
+   silently do nothing on the 3DS until the entry point calls `o3dx.init()`.
 2. **HLSL matrix packing** (B4): a transposed matrix looks like a wrong
    rotation. Check with the x = +1 test before anything else.
 3. **PICA shader authoring** (C0): new language and toolchain. Start from a
@@ -551,12 +982,34 @@ above all the same.
 8. **Text on the 3DS** (F2): if citro2d is dropped, text must be your own.
    Decide before E1 removes citro2d sprites, or keep citro2d linked for text
    only.
+9. **Target selection** (A0b): the `when VITA` mechanism relies on each target's
+   imports type-checking in the other target's build. If `foreign import`
+   libraries from the unused target leak into a link, the build fails with
+   missing stubs. A0b's two checks and two builds are the test.
+10. **Vita GPU memory** (V6, V7): GPU buffers and textures come from a separate
+   budget (CDRAM and mapped memory) and are never freed while in flight. Use
+   a ring of 3 for dynamic vertex data and `gfx.finish()` before freeing.
+11. **Vita shader toolchain** (V1): `psp2cgc` isn't in the repo. Commit the
+   compiled `.gxp` and make recompiling optional, or the build breaks on any
+   machine without it.
+12. **Cg multiply order and winding** (V3, V4): a mirrored or empty frame is
+   nearly always `mul(v, M)` vs `mul(M, v)` or the front-face setting, not the
+   matrix. Test one triangle both ways before anything else.
+13. **Three screens, one design** (A4, F1): 400x240, 960x544 and any PC window
+   have different aspects. Decide the default design aspect and policy by
+   looking at all three, not PC alone.
 
 ## Decisions to make (and record here with dates)
 
 - [x] Up axis and handedness: right-handed, +Y up, camera looks down -Z, everywhere including 2D (decided 2026-11-12). Screen/HUD pixel space stays top-left, y-down.
-- [x] 3DS FPU: `-microarch:mpcore` in `build.bat` (2026-11-12, runs in the emulator).
-- [x] 3DS float calls: stay soft-float with bridges for now; hard-float via a Farlite-built Odin in Phase I (2026-11-12).
+- [x] 3DS FPU: `-microarch:mpcore` in `3ds_build.bat` (2026-11-12, runs in the emulator).
+- [x] 3DS float calls: stay soft-float; hard-float via a Farlite-built Odin in Phase H (2026-11-12). Odin's own libm calls are fixed at link time by `o3dx/libm` (2026-11-14); calls into citro3d / ctru with float parameters still use `u32` bridges.
+- [x] 3DS runtime: o3dx provides the allocator, temp arena, logger and assertion handler (2026-11-14). Switched on in A0.
+- [x] Vita is a core target, in the renderer core with PC and 3DS (decided 2026-11-14). Its specifics are settled in "The three targets", A0b and Phase V.
+- [x] Target selection: `-define:MATCHBOX_VITA` with `when` blocks, since `odin check` can't see the microarch (chosen 2026-11-14; verify in A0b that each target's imports type-check in the other's build).
+- [ ] Vita emulator: Vita3K vs hardware as the per-step check (decide before V0).
+- [ ] Vita MSAA: off, or 4x (decide at V8).
+- [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).
 - [ ] Sprite pivot convention (recommended: `{0.5, 0.5}` = centre).
 - [ ] Sprites default to cut-out or blended (recommended: cut-out).
 - [ ] Default fit policy and the overscan cap (at F1).

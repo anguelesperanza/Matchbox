@@ -163,10 +163,6 @@ arm-none-eabi-gcc -c "%LIB%\ctru\bridge.c" -o "%BUILD%\ctru_bridge.o" ^
     -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft ^
     -I"%DEVKITPRO%\libctru\include" -D__3DS__
 if errorlevel 1 goto :fail
-arm-none-eabi-gcc -c "%LIB%\c2d\bridge.c" -o "%BUILD%\c2d_bridge.o" ^
-    -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft ^
-    -I"%DEVKITPRO%\libctru\include" -D__3DS__
-if errorlevel 1 goto :fail
 arm-none-eabi-gcc -c "%LIB%\c3d\bridge.c" -o "%BUILD%\c3d_bridge.o" ^
     -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft ^
     -I"%DEVKITPRO%\libctru\include" -D__3DS__
@@ -183,7 +179,7 @@ echo.
 echo Linking ELF...
 arm-none-eabi-gcc -o "app.elf" %OBJ% ^
     -L"%DEVKITPRO%\libctru\lib" ^
-    -lcitro2d -lcitro3d -lctru -lm ^
+    -lcitro3d -lctru -lm ^
     -specs=3dsx.specs ^
     -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 if errorlevel 1 goto :fail

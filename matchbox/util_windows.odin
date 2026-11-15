@@ -89,6 +89,5 @@ get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
 /*Procedure group that will call the appropiate
 destroy procedure based on arugment passed*/
 destroy :: proc {
-	destroy_sprite,
 	destroy_audio,
 }

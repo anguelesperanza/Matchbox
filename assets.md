@@ -94,6 +94,6 @@ Both work as the build pipeline will start with the shared assets folder, then w
 Given the above approach to loading assets, to load an asset you just need to provide the filename for the asset you want to load,
 and the call the correct procedure to load it.
 
-Using sprites as an example
+Using textures as an example
 
-`mb.create_sprite("meme.png")` => Matchbox will take care of finding `meme.png` inside of the asset folders and grab the proper asset
+`mb.create_texture("meme.png")` => Matchbox will take care of finding `meme.png` inside of the asset folders and grab the proper asset

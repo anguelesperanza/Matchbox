@@ -117,6 +117,8 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
+
+	free_all(context.allocator)
 	
 	// Before processing messages clear the input for keys pressed
 	mbi.keys_pressed = {}

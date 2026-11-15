@@ -17,7 +17,6 @@ import win "core:sys/windows"
 // Vendor
 import "vendor:directx/d3d11"
 import "vendor:directx/dxgi"
-import "vendor:directx/d3d_compiler"
 import "vendor:directx/d3d_common"
 import gi "vendor:windows/GameInput"
 
@@ -86,27 +85,26 @@ Matchbox_Info :: struct {
 	dxgi_adapter:^dxgi.IAdapter,
 	dxgi_desc:^dxgi.ADAPTER_DESC,
 	framebuffer:^d3d11.ITexture2D,
+	depth_texture:^d3d11.ITexture2D,
+	depth_view:^d3d11.IDepthStencilView,
 	framebuffer_view: ^d3d11.IRenderTargetView,
 	sampler:^d3d11.ISamplerState,
 	white_texture:^d3d11.ITexture2D,
 	blend_state:^d3d11.IBlendState,
 
-	// Shaders
+	white_texture_view:^d3d11.IShaderResourceView,
+
+	// 3D Pipeline | shaders/mesh.hlsl
 	shader_src:[]u8,
 	vertex_shader:^d3d11.IVertexShader,
 	vertex_shader_blob: ^d3d11.IBlob,
-	compile_errors:^d3d11.IBlob, // Resused for vertex and pixel shader
 	pixel_shader:^d3d11.IPixelShader,
 	pixel_shader_blob:^d3d11.IBlob,
-	input_layout:^d3d11.IInputLayout, // The layout of the input struct VS_Input in the shader
-	vertex_buffer:^d3d11.IBuffer,
-	constant_buffer:^d3d11.IBuffer,
-	white_texture_view:^d3d11.IShaderResourceView,
-	
-	// Shapes
-	vertex_count:u32,
-	vertex_stride:u32,
-	vertex_offset:u32,
+	input_layout:^d3d11.IInputLayout,
+	rasterizer_state:^d3d11.IRasterizerState,
+	test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
+	frame_constants:^d3d11.IBuffer,
+	draw_constants:^d3d11.IBuffer,
 }
 
 mbi:Matchbox_Info
@@ -261,142 +259,6 @@ init :: proc(title:string, width:i32, height:i32) {
 		res = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
 	}
 
-	mbi.shader_src = #load("shaders/shaders.hlsl")
-
-	{
-		res := d3d_compiler.Compile(
-			pSrcData = raw_data(mbi.shader_src),
-			SrcDataSize = uint(len(mbi.shader_src)),
-			pSourceName = "shaders/shaders.hlsl", // For debug messages -- not required
-			pDefines = nil,
-			pInclude = nil,
-			pEntrypoint = "vertex_main",
-			pTarget = "vs_5_0",
-			Flags1 = 0,
-			Flags2 = 0,
-			ppCode = &mbi.vertex_shader_blob,
-			ppErrorMsgs = &mbi.compile_errors,
-		)
-
-		if win.FAILED(res) {
-			if mbi.compile_errors != nil {
-				error_str := mbi.compile_errors->GetBufferPointer()
-				mbi.compile_errors->Release()
-			}
-
-			ensure(win.SUCCEEDED(res), "Vertex shader compilation failed")
-		}
-
-		res = mbi.device->CreateVertexShader(
-			pShaderBytecode = mbi.vertex_shader_blob->GetBufferPointer(),
-			BytecodeLength = mbi.vertex_shader_blob->GetBufferSize(),
-			pClassLinkage = nil,
-			ppVertexShader = &mbi.vertex_shader,
-		)
-		ensure(win.SUCCEEDED(res), "Vertex shader creation failed")
-	}
-
-	// Create Pixel Shader
-	{
-		res := d3d_compiler.Compile(
-			pSrcData = raw_data(mbi.shader_src),
-			SrcDataSize = uint(len(mbi.shader_src)),
-			pSourceName = "shaders/shaders.hlsl", // For debug messages -- not required
-			pDefines = nil,
-			pInclude = nil,
-			pEntrypoint = "pixel_main",
-			pTarget = "ps_5_0",
-			Flags1 = 0,
-			Flags2 = 0,
-			ppCode = &mbi.pixel_shader_blob,
-			ppErrorMsgs = &mbi.compile_errors,
-		)
-
-		if win.FAILED(res) {
-			if mbi.compile_errors != nil {
-				error_str := mbi.compile_errors->GetBufferPointer()
-				mbi.compile_errors->Release()
-			}
-
-			ensure(win.SUCCEEDED(res), "Pixel shader compilation failed")
-		}
-
-
-		res = mbi.device->CreatePixelShader(
-			pShaderBytecode = mbi.pixel_shader_blob->GetBufferPointer(),
-			BytecodeLength = mbi.pixel_shader_blob->GetBufferSize(),
-			pClassLinkage = nil,
-			ppPixelShader = &mbi.pixel_shader,
-		)
-		ensure(win.SUCCEEDED(res), "Pixel shader creation failed")
-	}
-
-	// Create input layout
-	{
-		input_element_descs := []d3d11.INPUT_ELEMENT_DESC {
-			{
-				SemanticName = "position",
-				SemanticIndex = 0,
-				Format = .R32G32_FLOAT,
-				InputSlot = 0,
-				AlignedByteOffset = 0,
-				InputSlotClass = .VERTEX_DATA,
-				InstanceDataStepRate = 0,
-			},
-			{
-
-				SemanticName = "color",
-				SemanticIndex = 0,
-				Format = .R32G32B32A32_FLOAT,
-				InputSlot = 0,
-				AlignedByteOffset = d3d11.APPEND_ALIGNED_ELEMENT,
-				InputSlotClass = .VERTEX_DATA,
-				InstanceDataStepRate = 0,
-			},
-			{
-				SemanticName = "texcoord",
-				SemanticIndex = 0,
-				Format = .R32G32_FLOAT,
-				InputSlot = 0,
-				AlignedByteOffset = d3d11.APPEND_ALIGNED_ELEMENT,
-				InputSlotClass = .VERTEX_DATA,
-				InstanceDataStepRate = 0,
-			},
-		}
-
-
-        res := mbi.device->CreateInputLayout(
-                pInputElementDescs                = raw_data(input_element_descs),
-                NumElements                       = u32(len(input_element_descs)),
-                pShaderBytecodeWithInputSignature = mbi.vertex_shader_blob->GetBufferPointer(),
-                BytecodeLength                    = mbi.vertex_shader_blob->GetBufferSize(),
-                ppInputLayout                     = &mbi.input_layout
-        )
-        ensure(win.SUCCEEDED(res), "Input layout creation failed")
-	}
-
-	{
-		vertex_buffer_desc := d3d11.BUFFER_DESC {
-			ByteWidth = MAX_BATCH_VERTICIES * size_of(Vertex),
-			Usage = .DYNAMIC,
-			BindFlags = {.VERTEX_BUFFER},
-			CPUAccessFlags = {.WRITE},
-		}
-
-		res := mbi.device->CreateBuffer(
-			pDesc = &vertex_buffer_desc,
-			pInitialData = nil,
-			ppBuffer = &batch.gpu_buffer,
-		)
-
-		ensure(win.SUCCEEDED(res), "Create VertexBuffer Failed")
-
-
-
-		// TODO: What reserve does and how it works "You also reserve(&batch.vertices, MAX_BATCH_VERTICES) so appending never reallocates."
-
-	}
-	
 	{
 		sampler_desc := d3d11.SAMPLER_DESC {
 			Filter = .MIN_MAG_MIP_POINT,
@@ -409,6 +271,9 @@ init :: proc(title:string, width:i32, height:i32) {
 
 		res := mbi.device->CreateSamplerState(&sampler_desc, &mbi.sampler)
 		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
+
+		create_depth_buffer()
+		create_pipeline()
 	}
 
 
@@ -448,27 +313,8 @@ init :: proc(title:string, width:i32, height:i32) {
 		res = mbi.device->CreateShaderResourceView(mbi.white_texture, nil, &mbi.white_texture_view)
 		ensure(win.SUCCEEDED(res), "Create white texture view failed")
 
-		batch.current_texture_view = mbi.white_texture_view
 	}	
 	
-	{
-		constant_buffer_desc := d3d11.BUFFER_DESC {
-			ByteWidth = size_of(Constants),
-			Usage = .DYNAMIC,
-			BindFlags = {.CONSTANT_BUFFER},
-			CPUAccessFlags = {.WRITE},
-		}
-
-		res := mbi.device->CreateBuffer(
-			pDesc = &constant_buffer_desc,
-			pInitialData = nil,
-			ppBuffer = &mbi.constant_buffer,
-		)
-
-		ensure(win.SUCCEEDED(res), "Create ConstantBuffer Failed")
-
-	}
-
 	// Setup the initial frequency and counter for delta time
 	win.QueryPerformanceFrequency(&timestamp.frequency)
 	win.QueryPerformanceCounter(&timestamp.last_time)
@@ -511,16 +357,12 @@ cleanup :: proc() {
 	if mbi.input != nil do mbi.input->Release() // -> Left commented out as something causes this to wait for 8 seconds and not sure what
 
 	// D3D11
+	destroy_pipeline()
 	mbi.blend_state->Release()
 	mbi.white_texture_view->Release()
 	mbi.white_texture->Release()
-	mbi.constant_buffer->Release()
 	mbi.sampler->Release()
-	mbi.input_layout->Release()
-	mbi.pixel_shader_blob->Release()
-	mbi.pixel_shader->Release()
-	mbi.vertex_shader_blob->Release()
-	mbi.vertex_shader->Release()
+	destroy_depth_buffer()
 	mbi.framebuffer->Release()
 	mbi.framebuffer_view->Release()
 	mbi.dxgi_adapter->Release()

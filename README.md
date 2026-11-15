@@ -9,9 +9,10 @@ PC Backend: `DirectX 11 (D3D11)`
 ## Unified API
 
 In order to develop for both targets the way I want to, I need to create a unified API. This is a a series of procedures,
-structs, enums, etc, that will compile to both PC and the 3DS.
+structs, enums, etc, that will compile to PC, 3DS and the PS Vita.
 
-For example `matchbox.draw_sprite(...)` -> should call 3D311 on PC to handle it, but should call `Citro2D....` when compiling to the 3DS
+For example `matchbox.render_mesh(...)` -> should call D3D11 on PC to handle it, but should call citro3d when compiling to the 3DS
+and VitaSDK when compilling to the Ps Vita
 
 As this is still in very early stages of development the implementation details are still being worked out.
 
@@ -20,25 +21,20 @@ Some changes may be made as I see fit; some proc names may stay the same -- the 
 will be different due to the different backends and the D3D11 backend this rewrite does over the SDL3/SDL3_GPU
 backend main uses
 
+## Current Task
+
+Implementing 3D into Matchbox
+
 ## Milestones
 
-Before Matchbox is considered `complete` there are a series of milestones that need to be hit. These milestones are
-constantly changing until a good path is made for it but loosly, there are the milestones
+There are no specific milestone goals (there was but they were removed).
+This is due to api changes constently happnening and underlying functionality changing.
+
+As such; what's listed here are major points of matchbox that were achieved.
+
+A more milestone like plan can be found in `render_plan.md`
 
 [x] POC
-
-[-] Renderer core: 3D pipeline on PC and 3DS       (Phases A, B, C)
-
-[ ] 2D: 2D as an orthographic projection           (Phases D, E, F)
-
-[ ] 3D: 3D games                                   (Phase G)
-
-[ ] Improved build system                          (shader step lands in Phase C)
-
-[ ] Vita target                                    (Phase H, after 3D)
-
-[ ] 3DS hard-float (performance)                   (Phase I, via Farlite, late)
-
 
 Research into the Vita Target has concluded and Odin can compile into the PS Vita. Those bindings will be developed
 futher when the Vita target milestone comes into play.

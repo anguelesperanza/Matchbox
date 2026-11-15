@@ -9,14 +9,12 @@ package matchbox
 	This file handles the window creation events
 
 	On the 3DS this sets the intial Ctru and Citro3D Defaults
-	-- Citro2D is built on top of Citro3D so don't need to set Citro2D defaults
-
+	
 */
 
 // Core
 import "o3dx/ctru"
 import "o3dx/c3d"
-import "o3dx/c2d"
 
 
 // Constants
@@ -47,20 +45,6 @@ Matchbox_Info :: struct {
 	gamepad_pressed:u32,
 	gamepad_held:u32,
 	gamepad_released:u32,
-	active_renderer:Renderer,
-	vbo_cursor:u32, // vertices arlready written to the vbo_data this frame
-
-	// Shaders
-	shader_buffer:rawptr,
-	prog:ctru.shaderProgram_s,
-	dvlb:^ctru.DVLB_s,
-
-	// Vertex
-	vbo_data:rawptr,
-    projection: c3d.Mtx,
-	uloc_proj:i32,
-	vertices:[MAX_BATCH_VERTICES]Vertex,
-	vertex_count:u32,
 }
 
 mbi:Matchbox_Info
@@ -81,8 +65,6 @@ init :: proc(title:string, width:i32, height:i32) {
     
     ctru.gfxInitDefault()
     c3d.Init(c3d.DEFAULT_CMDBUF_SIZE)
-    c2d.Init(c2d.DEFAULT_MAX_OBJECTS)
-    c2d.Prepare()
     ctru.consoleInit(ctru.GFX_BOTTOM, nil)
 
 	mbi.window_size[0] = 240
@@ -102,61 +84,6 @@ init :: proc(title:string, width:i32, height:i32) {
 		side = ctru.GFX_LEFT,
 		transferFlags = DISPLAY_TRANSFER_FLAGS
 	)
-
-
-	// load in default shaders
-    sf := ctru.fopen("romfs:/vshader.shbin", "rb")
-    ctru.fseek(sf, 0, ctru.SEEK_END)
-    sh_size := ctru.ftell(sf)
-    ctru.fseek(sf, 0, ctru.SEEK_SET)
-    mbi.shader_buffer = ctru.malloc(uint(sh_size))
-    ctru.fread(mbi.shader_buffer, 1, uint(sh_size), sf)
-    ctru.fclose(sf)
-
-    // Parse the binary.  sh_buf must stay valid while dvlb is in use.
-    mbi.dvlb = ctru.DVLB_ParseFile(cast(^u32)mbi.shader_buffer, u32(sh_size))
-
-    // Create, link, and bind the shader program.
-    // prog: ctru.shaderProgram_s
-    ctru.shaderProgramInit(&mbi.prog)
-    ctru.shaderProgramSetVsh(&mbi.prog, mbi.dvlb.DVLE) // dvlb.DVLE points to DVLE[0]
-    // c3d.BindProgram(&mbi.prog)
-
-    // Look up the projection uniform register index.
-    mbi.uloc_proj = i32(ctru.shaderInstanceGetUniformLocation(mbi.prog.vertexShader, "projection"))
-    
-	// attr_info := c3d.GetAttrInfo()
- //    c3d.AttrInfo_Init(attr_info)
- //    c3d.AttrInfo_AddLoader(attr_info, 0, .FLOAT, 3) // v0 = position (xyz)
- //    c3d.AttrInfo_AddLoader(attr_info, 1, .FLOAT, 4) // v1 = colour   (rgba)
-
-
-    // The GPU DMA engine requires vertex data in the 3DS linear heap.
-	vbo_size := uint(VBO_VERTEX_CAPACITY * size_of(Vertex))
-    // vbo_size := uint(MAX_BATCH_VERTICES * size_of(Vertex))
-    mbi.vbo_data = ctru.linearAlloc(vbo_size)
-    // ctru.memcpy(mbi.vbo_data, &vertex_list, vbo_size)
-
-    // buf_info := c3d.C3D_GetBufInfo()
-    // c3d.BufInfo_Init(buf_info)
-    // c3d.BufInfo_Add(buf_info, mbi.vbo_data, size_of(Vertex), 2, 0x10)
-
-	
-    // env := c3d.C3D_GetTexEnv(0)
-    // c3d.TexEnvInit(env)
-    // c3d.TexEnvSrc(env, c3d.C3D_Both,.PRIMARY_COLOR, .PRIMARY_COLOR, .PRIMARY_COLOR)
-    // c3d.TexEnvFunc(env, c3d.C3D_Both, .REPLACE)
-
-    mbi.projection.r[0] = c3d.FVec{ 1.0, 0.0, -2.0 / cast(f32) mbi.window_size[0] , 0.0} // Row 0 – screen-Y → GPU-X:  C(w,z,y,x) = ( 1,  0, -2/240,  0)
-    mbi.projection.r[1] = c3d.FVec{ 1.0, 0.0, 0.0, -2.0 / cast(f32)mbi.window_size[1]} // Row 1 – screen-X → GPU-Y:  C(w,z,y,x) = ( 1,  0,  0, −2/400)
-    mbi.projection.r[2] = c3d.FVec{-1.0, 1.0, 0.0, 0.0} // Row 2 – Z transform:        C(w,z,y,x) = (−1,  1,  0,  0)
-    mbi.projection.r[3] = c3d.FVec{ 1.0, 0.0, 0.0, 0.0} // Row 3 – homogeneous W:      C(w,z,y,x) = ( 1,  0,  0,  0)
-    r00 := transmute(u32)(mbi.projection.r[0].x)
-    r01 := transmute(u32)(mbi.projection.r[0].y)
-
-    // c3d.DepthTest(false, .ALWAYS, .ALL)
-    // c3d.CullFace(.NONE)
-
 
 
 	// Delta time
@@ -184,12 +111,7 @@ get_delta_time :: proc() -> (dt:f32) {
 /*Cleans up resources created by Matchbox*/
 cleanup :: proc() {
 
-    ctru.linearFree(mbi.vbo_data)
-    ctru.shaderProgramFree(&mbi.prog)
-    ctru.DVLB_Free(mbi.dvlb)
-    ctru.free(mbi.shader_buffer)
     c3d.Fini()
-    c2d.Fini()
     ctru.gfxExit()
     ctru.romfsExit()
 	

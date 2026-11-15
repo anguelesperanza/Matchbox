@@ -77,6 +77,5 @@ get_asset :: proc(buf: []u8, filename: string, asset_type: Asset_Type) -> (path:
 /*Procedure group that will call the appropiate
 destroy procedure based on arugment passed*/
 destroy :: proc {
-	destroy_sprite,
 	destroy_audio,
 }

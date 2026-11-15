@@ -19,6 +19,8 @@ import "o3dx/ctru"
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
 
+	free_all(context.temp_allocator)
+
 	left_thumbstick:ctru.circlePosition
 	right_thumbstick:ctru.circlePosition
 	

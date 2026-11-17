@@ -1,0 +1,93 @@
+#+build windows
+
+package matchbox
+
+/*
+	Sprite
+	======
+	A textured quad in world space.
+	Position is in world units with +Y up
+	z is the layer -- Drawn through the same queue as meshes.
+*/
+
+import "core:math/linalg"
+
+Sprite :: struct {
+	texture:Texture,
+	position:[3]f32,
+	rotation:f32, // radians, counter-clockwise about Z
+	scale:[2]f32,
+	tint:[4]f32,
+	pivot:[2]f32, // the point of the image that sits at `position`: {0,0} bottom left, {1,1} top right
+	flip_x:bool,
+	flip_y:bool,
+	pixels_per_unit:f32, // how many image pixels make one world unit
+	source:[4]f32, // x, y, width, height in pixels from the image's top left; all zero = whole image
+}
+
+Sprite_Mode :: enum {
+	CUTOUT, // anything under 50% alpha is discarded
+	BLENDED, // smooth see-through sorted by z
+}
+
+create_sprite :: proc(texture:Texture, position:[3]f32 = {}, pixels_per_unit:f32 = 100) -> Sprite {
+	return Sprite {
+		texture = texture,
+		position = position,
+		scale = {1, 1},
+		tint = {1, 1, 1, 1},
+		pivot = {0.5, 0.5},
+		pixels_per_unit = pixels_per_unit,
+	}
+}
+
+/*Queues a sprite to be drawn at camera_end. Sprites are see-through by default*/
+render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
+	ensure(sprite.texture.view != nil, "Sprite has no texture")
+	ensure(sprite.pixels_per_unit > 0, "Sprite pixels_per_unit must be above zero")
+
+	// Which part of the image to show, in pixels
+	source := sprite.source
+	if source[2] <= 0 || source[3] <= 0 {
+		source = {0, 0, f32(sprite.texture.width), f32(sprite.texture.height)}
+	}
+
+	// As 0..1 texture coordinates. v = 0 is the top of the image
+	u0 := source[0] / f32(sprite.texture.width)
+	v0 := source[1] / f32(sprite.texture.height)
+	u1 := (source[0] + source[2]) / f32(sprite.texture.width)
+	v1 := (source[1] + source[3]) / f32(sprite.texture.height)
+
+	// Flipping is just reading the region backwards
+	if sprite.flip_x == true do u0, u1 = u1, u0
+	if sprite.flip_y == true do v0, v1 = v1, v0
+
+	// World size: pixels -> units, then the user's scale
+	size := [2]f32{source[2], source[3]} / sprite.pixels_per_unit * sprite.scale
+
+	// The shared quad is 1x1 and centred on its origin. Shift it so the pivot
+	// is at the origin, then scale, rotate and move. Rotation turns about the pivot
+	rotation := create_rotation_axis_angle({0, 0, 1}, sprite.rotation)
+	model := create_model_matrix(sprite.position, rotation, {size.x, size.y, 1}) *
+		linalg.matrix4_translate_f32({0.5 - sprite.pivot.x, 0.5 - sprite.pivot.y, 0})
+
+	// Pixel snapping: put the four edges on whole screen pixels. Rotated sprites are left as they are
+	if mbi.pixel_scale > 0 && sprite.rotation == 0 {
+		left := snap_to_pixel(sprite.position.x - sprite.pivot.x * size.x, mbi.pixel_scale)
+		right := snap_to_pixel(sprite.position.x + (1 - sprite.pivot.x) * size.x, mbi.pixel_scale)
+		bottom := snap_to_pixel(sprite.position.y - sprite.pivot.y * size.y, mbi.pixel_scale)
+		top := snap_to_pixel(sprite.position.y + (1 - sprite.pivot.y) * size.y, mbi.pixel_scale)
+
+		centre := [3]f32{(left + right) * 0.5, (bottom + top) * 0.5, sprite.position.z}
+		model = create_model_matrix(centre, linalg.QUATERNIONF32_IDENTITY, {right - left, top - bottom, 1})
+	}
+
+	blend := Blend_Mode.NONE
+	alpha_cutoff:f32 = 0.5
+	if mode == .BLENDED {
+		blend = .ALPHA
+		alpha_cutoff = 0
+	}
+
+	queue_draw(mbi.sprite_mesh, model, sprite.tint, blend, .NONE, sprite.texture, {u0, v0, u1, v1}, alpha_cutoff)
+}

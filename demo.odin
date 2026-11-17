@@ -2,6 +2,7 @@ package demo
 import mb "matchbox"
 
 import "core:fmt"
+import "core:math"
 
 main :: proc() {
 	mb.init("Demo Window", 400, 400)
@@ -12,30 +13,23 @@ main :: proc() {
 	mb.print("Hello", "World", 10)
 	mb.print(fmt.tprintf("%v", 1.5))
 
+	camera := mb.create_camera_2d(6)
+	camera.pixel_snap = true
 
-	camera := mb.Camera {
-		position = {0, 0, 3},
-		target = {0, 0, 0},
-		up = {0, 1, 0},
-		fov_y = 60,
-		near = 0.1,
-		far = 100,
-		projection = .PERSPECTIVE,
-	}
+	// POINT = hard pixels, the filter for pixel art
+	cat_texture := mb.create_texture("meme_cat.png", .POINT)
 
-	// camera := mb.create_camera_2d(3)
-	camera.fov_y = 90
-	
-	cube_vertices, cube_indices := mb.mesh_cube()
-	cube := mb.create_mesh(cube_vertices, cube_indices) // pass args as pointers to free inside create_mesh?
-	cat := mb.create_texture("meme_cat.png")
+	// 16 image pixels per world unit, so a 64 pixel crop is 4 units wide
+	face := mb.create_sprite(cat_texture, {0, 0, 0}, 16)
+	face.source = {150, 150, 64, 64}
 
+	// A small sprite drifting slowly, so it sits on fractional pixel positions
+	mover := mb.create_sprite(cat_texture, {0, 0, 1}, 16)
+	mover.source = {234, 234, 32, 32}
 
-	quad_vertices, quad_indices := mb.mesh_quad()
-	quad := mb.create_mesh(quad_vertices, quad_indices)
-	delete(cube_vertices)
-	delete(cube_indices)
-
+	scale := 4
+	fractional := false
+	follow_target := [2]f32{0, 0}
 	angle:f32
 
 	for mb.is_running() {
@@ -52,31 +46,41 @@ main :: proc() {
 
 		angle += dt
 
+		if mb.is_key_pressed(.TAB) do camera.pixel_snap = camera.pixel_snap == false
+		if mb.is_key_pressed(.Q) do fractional = fractional == false
 
+		// Wheel changes the whole-number scale (screen pixels per image pixel)
+		wheel := mb.get_mouse_wheel_value()
+		if wheel > 0 do scale += 1
+		if wheel < 0 do scale -= 1
+		scale = clamp(scale, 1, 8)
+
+		pixel_scale := f32(scale)
+		if fractional == true do pixel_scale += 0.5
+		mb.camera_set_pixel_scale(&camera, 16, pixel_scale, f32(mb.get_window_size()[1]))
+
+		// Left click moves the camera there; it glides, so it sits on fractional positions
+		if mb.is_mouse_pressed(.LEFT) {
+			follow_target = mb.get_mouse_world_pos(camera)
+		}
+		mb.camera_follow(&camera, follow_target, 3, dt)
+
+		mover.position = {math.cos(angle * 0.3) * 2.5, math.sin(angle * 0.4) * 1.5, 1}
 
 		mb.render_start()
 		mb.clear_background(color = {0, 0.4, 0.6, 1})
 
-
 			mb.camera_start(camera)
 
-			near_quad := mb.create_model_matrix(position = {0, 0, 0.8}, scale = {1.8, 1.8, 1})
-			mb.render_mesh(quad, near_quad, {1, 1, 1, 0.5}, .ALPHA, .NONE)
-
-			far_quad := mb.create_model_matrix(position = {0.3, 0.3, -0.8}, scale = {1.8, 1.8, 1})
-			mb.render_mesh(quad, far_quad, {1, 0.4, 0.4, 0.5}, .ALPHA, .NONE)
-
-			spin := mb.create_model_matrix(rotation = mb.create_rotation_euler(pitch = angle * 0.5, yaw = angle))
-			mb.render_mesh(cube, spin, texture = cat)
+			mb.render_sprite(face)
+			mb.render_sprite(mover)
 
 			mb.camera_end()
 
 		mb.render_end()
 	}
 
-	mb.destroy(cat)
-	mb.destroy_mesh(quad)
-	mb.destroy_mesh(cube)
+	mb.destroy_texture(cat_texture)
 	mb.destroy(jump_sound) // TODO: Audio not implemeted yet
 
 	mb.cleanup()

@@ -9,6 +9,8 @@ cbuffer Frame : register(b0){
 cbuffer Draw : register(b1) {
     float4x4 model;
     float4 tint;
+    float4 uv_rect;
+    float alpha_cutoff;
 };
 
 struct VS_Input {
@@ -31,10 +33,12 @@ V2P vertex_main(VS_Input input) {
     float4 world = mul(model, float4(input.position, 1.0));
     output.position = mul(view_projection, world);
     output.color = input.color * tint;
-    output.uv = input.uv;
+    output.uv = lerp(uv_rect.xy, uv_rect.zw, input.uv);
     return output;
 }
 
 float4 pixel_main(V2P input) : SV_TARGET {
-    return tex.Sample(smp, input.uv) * input.color;
+    float4 color = tex.Sample(smp, input.uv) * input.color;
+    if (color.a < alpha_cutoff) discard;
+    return color;
 }

@@ -221,3 +221,10 @@ is_mouse_released :: proc(mouse:Mouse) -> bool {
 set_mouse_capture :: proc(){
 	win.SetCapture(mbi.window)
 }
+
+/*Where the mouse is pointing in world units, as seen by `cam`. Use for clicking things in the world*/
+get_mouse_world_pos :: proc(cam:Camera) -> [2]f32 {
+	mouse := get_mouse_position()
+	size := get_window_size()
+	return screen_to_world_2d(cam, {f32(mouse.x), f32(mouse.y)}, {f32(size[0]), f32(size[1])})
+}

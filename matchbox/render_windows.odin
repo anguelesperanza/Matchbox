@@ -26,6 +26,9 @@ Frame_Constants :: struct {
 Draw_Constants :: struct {
 	model:matrix[4,4]f32,
 	tint:[4]f32,
+	uv_rect:[4]f32,
+	alpha_cutoff:f32,
+	_pad:[3]f32
 }
 
 // D3D constant buffers must be a multiple of 16 bytes
@@ -70,6 +73,8 @@ Draw_Item :: struct {
 	cull:Cull_Mode,
 	depth:f32,
 	texture:Texture,
+	uv_rect:[4]f32,
+	alpha_cutoff:f32,
 }
 
 /*Copies vertices and indices to the GPU. The slices can be freed afterwards*/
@@ -106,11 +111,17 @@ destroy_mesh :: proc(mesh:Mesh) {
 	if mesh.vertex_buffer != nil do mesh.vertex_buffer->Release()
 }
 
-
 render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1},blend:Blend_Mode = .NONE, cull:Cull_Mode = .BACK, texture:Texture = {}) {
+
+	queue_draw(mesh, model, tint, blend, cull, texture, {0,0, 1,1}, 0)
+}
+
+@(private)
+queue_draw :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rect:[4]f32, alpha_cutoff:f32) {
+
 	ensure(mbi.camera_active, "render_mesh must be called between camera_start and camera_end")
 
-	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture}
+	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
 
 	switch blend {
 	case .NONE:
@@ -126,10 +137,11 @@ render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTIT
 }
 
 
+
 @(private)
 draw_item :: proc(item:Draw_Item) {
 
-	set_draw_constants(item.model, item.tint)
+	set_draw_constants(item.model, item.tint, item.uv_rect, item.alpha_cutoff)
 
 	vertex_buffer := item.mesh.vertex_buffer
 	stride:u32 = size_of(Vertex)
@@ -144,6 +156,10 @@ draw_item :: proc(item:Draw_Item) {
 
 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
 	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
+
+	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
+	mbi.device_context->PSSetConstantBuffers(0, 2, &constant_buffers[0])
+	
 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
 
 	texture_view := item.texture.view
@@ -317,8 +333,8 @@ set_view_projection :: proc(view_projection:matrix[4, 4]f32) {
 }
 
 /*Sets the model matrix and tint used by the next draw*/
-set_draw_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32) {
-	constants := Draw_Constants{model = model, tint = tint}
+set_draw_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32, uv_rect:[4]f32, alpha_cutoff:f32) {
+	constants := Draw_Constants{model = model, tint = tint, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
 	update_buffer(mbi.draw_constants, &constants, size_of(Draw_Constants))
 }
 
@@ -501,17 +517,37 @@ create_pipeline :: proc() {
 camera_start :: proc(cam:Camera) {
 	ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
+
+	window := [2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
+
 	aspect:f32 = 1
-	if mbi.window_size[1] > 0 {
-		aspect = f32(mbi.window_size[0]) / f32(mbi.window_size[1])
+	if window.y > 0 {
+		aspect = window.x / window.y
 	}
 
-	mbi.view = camera_view_matrix(cam) // render_mesh needs it to sort transparent items
+	// With pixel_snap, draw through a copy moved onto the pixel grid. render_sprite reads
+	// pixel_scale to snap sprite edges the same way
+	used := camera_snapped(cam, window)
+	mbi.pixel_scale = camera_snap_scale(cam, window.y)
+
+	mbi.view = camera_view_matrix(used) // render_mesh needs it to sort transparent items
 	mbi.camera_active = true
 
 	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
-	view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(cam, aspect) * mbi.view
+	view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(used, aspect) * mbi.view
 	set_frame_constants(view_projection)
+
+	// aspect:f32 = 1
+	// if mbi.window_size[1] > 0 {
+	// 	aspect = f32(mbi.window_size[0]) / f32(mbi.window_size[1])
+	// }
+
+	// mbi.view = camera_view_matrix(cam) // render_mesh needs it to sort transparent items
+	// mbi.camera_active = true
+
+	// // linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
+	// view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(cam, aspect) * mbi.view
+	// set_frame_constants(view_projection)
 }
 
 /*Sorts and draws everything queued since camera_start*/

@@ -1,5 +1,7 @@
 package matchbox
 
+import "core:math"
+
 
 /*Vertex used by every mesh*/
 Vertex :: struct {
@@ -81,5 +83,44 @@ mesh_quad :: proc(size:f32 = 1, color:[4]f32 = {1, 1, 1, 1}, allocator := contex
 	indices[0], indices[1], indices[2] = 0, 1, 2
 	indices[3], indices[4], indices[5] = 0, 2, 3
 
+	return
+}
+
+/*A right triangle with corners (0,0), (1,0) and (0,1). render_triangle maps it onto any three points*/
+mesh_triangle :: proc(allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+	vertices = make([]Vertex, 3, allocator)
+	indices = make([]u16, 3, allocator)
+
+	white := [4]f32{1, 1, 1, 1}
+	vertices[0] = {position = {0, 0, 0}, uv = {0, 1}, color = white}
+	vertices[1] = {position = {1, 0, 0}, uv = {1, 1}, color = white}
+	vertices[2] = {position = {0, 1, 0}, uv = {0, 0}, color = white}
+
+	indices[0], indices[1], indices[2] = 0, 1, 2
+	return
+}
+
+/*A circle of radius 1 centred on the origin, as a fan of `segments` triangles*/
+mesh_circle :: proc(segments:int = 48, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+	assert(segments >= 3 && segments <= 65534, "A circle needs 3 to 65534 segments")
+
+	vertices = make([]Vertex, segments + 1, allocator)
+	indices = make([]u16, segments * 3, allocator)
+
+	white := [4]f32{1, 1, 1, 1}
+	vertices[0] = {position = {0, 0, 0}, uv = {0.5, 0.5}, color = white} // centre
+
+	for i in 0..<segments {
+		angle := f32(i) / f32(segments) * 2 * math.PI
+		x := math.cos(angle)
+		y := math.sin(angle)
+
+		vertices[i + 1] = {position = {x, y, 0}, uv = {x * 0.5 + 0.5, 0.5 - y * 0.5}, color = white}
+
+		next := (i + 1) % segments
+		indices[i * 3 + 0] = 0
+		indices[i * 3 + 1] = u16(i + 1)
+		indices[i * 3 + 2] = u16(next + 1)
+	}
 	return
 }

@@ -108,9 +108,16 @@ Matchbox_Info :: struct {
 	pixel_shader:^d3d11.IPixelShader,
 	pixel_shader_blob:^d3d11.IBlob,
 	input_layout:^d3d11.IInputLayout,
-	test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
+	// test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
 	frame_constants:^d3d11.IBuffer,
 	draw_constants:^d3d11.IBuffer,
+	
+
+	// Sprites
+	sprite_mesh:Mesh,
+	triangle_mesh:Mesh,
+	circle_mesh:Mesh,
+	pixel_scale:f32,
 	
 }
 
@@ -269,27 +276,23 @@ init :: proc(title:string, width:i32, height:i32) {
 	{
 		create_depth_buffer()
 		create_pipeline()
+
+		sprite_vertices, sprite_indices := mesh_quad()
+		mbi.sprite_mesh = create_mesh(sprite_vertices, sprite_indices)
+		delete(sprite_vertices)
+		delete(sprite_indices)
+
+
+		triangle_vertices, triangle_indices := mesh_triangle()
+		mbi.triangle_mesh = create_mesh(triangle_vertices, triangle_indices)
+		delete(triangle_vertices)
+		delete(triangle_indices)
+
+		circle_vertices, circle_indices := mesh_circle()
+		mbi.circle_mesh = create_mesh(circle_vertices, circle_indices)
+		delete(circle_vertices)
+		delete(circle_indices)		
 	}
-
-
-	// {
-	// 	blend_desc:d3d11.BLEND_DESC
-
-	// 	blend_desc.RenderTarget[0] = {
-	// 		BlendEnable = true,
-	// 		SrcBlend = .SRC_ALPHA,
-	// 		DestBlend = .INV_SRC_ALPHA,
-	// 		BlendOp = .ADD,
-	// 		SrcBlendAlpha = .ONE,
-	// 		DestBlendAlpha = .INV_SRC_ALPHA,
-	// 		BlendOpAlpha = .ADD,
-	// 		RenderTargetWriteMask = 0xF // R | G | B | A
-	// 	}
-
-	// 	res := mbi.device->CreateBlendState(&blend_desc, &mbi.blend_state)
-	// 	ensure(win.SUCCEEDED(res), "Create BlendState Failed")
-		
-	// }
 
 	{
 		pixel := [4]u8{255, 255, 255, 255}
@@ -352,6 +355,10 @@ cleanup :: proc() {
 	if mbi.input != nil do mbi.input->Release() // -> Left commented out as something causes this to wait for 8 seconds and not sure what
 
 	// D3D11
+
+	destroy_mesh(mbi.triangle_mesh)
+	destroy_mesh(mbi.circle_mesh)
+	destroy_mesh(mbi.sprite_mesh)
 	destroy_pipeline()
 	// mbi.blend_state->Release()
 	mbi.white_texture_view->Release()

@@ -19,8 +19,6 @@ import "core:slice"
 import "vendor:directx/d3d11"
 import "vendor:directx/d3d_compiler"
 
-
-
 Frame_Constants :: struct {
 	view_projection:matrix[4,4]f32,
 }
@@ -42,7 +40,6 @@ GL_TO_D3D_DEPTH :: matrix[4, 4]f32 {
 	0, 0, 0,   1,
 }
 
-
 Depth_Mode :: enum {
 	OPAQUE,
 	TRANSPARENT,
@@ -59,7 +56,6 @@ Cull_Mode :: enum {
 	NONE, // Draws all triangles of a sprite and two-sided quads
 }
 
-
 // Geometry on the GPU. `create_mesh` makes one, `destroy_mesh` frees it.
 Mesh :: struct {
 	vertex_buffer:^d3d11.IBuffer,
@@ -73,6 +69,7 @@ Draw_Item :: struct {
 	tint:[4]f32,
 	cull:Cull_Mode,
 	depth:f32,
+	texture:Texture,
 }
 
 /*Copies vertices and indices to the GPU. The slices can be freed afterwards*/
@@ -110,10 +107,10 @@ destroy_mesh :: proc(mesh:Mesh) {
 }
 
 
-render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1},blend:Blend_Mode = .NONE, cull:Cull_Mode = .BACK) {
+render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1},blend:Blend_Mode = .NONE, cull:Cull_Mode = .BACK, texture:Texture = {}) {
 	ensure(mbi.camera_active, "render_mesh must be called between camera_start and camera_end")
 
-	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull}
+	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture}
 
 	switch blend {
 	case .NONE:
@@ -148,36 +145,16 @@ draw_item :: proc(item:Draw_Item) {
 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
 	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-	mbi.device_context->PSSetShaderResources(0, 1, &mbi.white_texture_view)
-	mbi.device_context->PSSetSamplers(0, 1, &mbi.sampler)
+
+	texture_view := item.texture.view
+	if texture_view == nil do texture_view = mbi.white_texture_view
+
+	mbi.device_context->PSSetShaderResources(0, 1, &texture_view)
+	mbi.device_context->PSSetSamplers(0, 1, &mbi.samplers[item.texture.filter])
+	
 
 	mbi.device_context->DrawIndexed(item.mesh.index_count, 0, 0)
 }
-
-/*Draws a mesh with the current render state. `model` places it in the world*/
-// render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1}) {
-
-// 	set_draw_constants(model, tint)
-
-// 	vertex_buffer := mesh.vertex_buffer
-// 	stride:u32 = size_of(Vertex)
-// 	offset:u32 = 0
-
-// 	constant_buffers := [2]^d3d11.IBuffer{mbi.frame_constants, mbi.draw_constants}
-
-// 	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
-// 	mbi.device_context->IASetInputLayout(mbi.input_layout)
-// 	mbi.device_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset)
-// 	mbi.device_context->IASetIndexBuffer(mesh.index_buffer, .R16_UINT, 0)
-
-// 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-// 	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
-// 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-// 	mbi.device_context->PSSetShaderResources(0, 1, &mbi.white_texture_view)
-// 	mbi.device_context->PSSetSamplers(0, 1, &mbi.sampler)
-
-// 	mbi.device_context->DrawIndexed(mesh.index_count, 0, 0)
-// }
 
 create_states :: proc() {
 	stencil_op := d3d11.DEPTH_STENCILOP_DESC {
@@ -266,6 +243,30 @@ create_states :: proc() {
 		res := mbi.device->CreateRasterizerState(&desc, &mbi.rasterizer_states[mode])
 		ensure(win.SUCCEEDED(res), "Create RasterizerState Failed")
 	}
+
+	sampler_descs := [Filter_Mode]d3d11.SAMPLER_DESC {
+		.POINT = {
+			Filter = .MIN_MAG_MIP_POINT,
+			AddressU = .CLAMP,
+			AddressV = .CLAMP,
+			AddressW = .CLAMP,
+			ComparisonFunc = .NEVER,
+			MaxLOD = d3d11.FLOAT32_MAX,
+		},
+		.LINEAR = {
+			Filter = .MIN_MAG_MIP_LINEAR,
+			AddressU = .CLAMP,
+			AddressV = .CLAMP,
+			AddressW = .CLAMP,
+			ComparisonFunc = .NEVER,
+			MaxLOD = d3d11.FLOAT32_MAX,
+		},
+	}
+
+	for &desc, mode in sampler_descs {
+		res := mbi.device->CreateSamplerState(&desc, &mbi.samplers[mode])
+		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
+	}	
 }
 
 
@@ -273,6 +274,7 @@ destroy_states :: proc() {
 	for state in mbi.depth_states do state->Release()
 	for state in mbi.blend_states do state->Release()
 	for state in mbi.rasterizer_states do state->Release()
+	for state in mbi.samplers do state->Release()
 }
 
 @(private)
@@ -519,6 +521,9 @@ camera_end :: proc() {
 	// Opaque items: group them by mesh so the same buffers are bound back to back.
 	// A stable sort keeps submission order for equal items
 	slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Draw_Item) -> bool {
+		if a.texture.view != b.texture.view {
+			return uintptr(a.texture.view) < uintptr(b.texture.view)
+		}
 		return uintptr(a.mesh.vertex_buffer) < uintptr(b.mesh.vertex_buffer)
 	})
 

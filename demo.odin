@@ -28,6 +28,8 @@ main :: proc() {
 	
 	cube_vertices, cube_indices := mb.mesh_cube()
 	cube := mb.create_mesh(cube_vertices, cube_indices) // pass args as pointers to free inside create_mesh?
+	cat := mb.create_texture("meme_cat.png")
+
 
 	quad_vertices, quad_indices := mb.mesh_quad()
 	quad := mb.create_mesh(quad_vertices, quad_indices)
@@ -65,13 +67,14 @@ main :: proc() {
 			mb.render_mesh(quad, far_quad, {1, 0.4, 0.4, 0.5}, .ALPHA, .NONE)
 
 			spin := mb.create_model_matrix(rotation = mb.create_rotation_euler(pitch = angle * 0.5, yaw = angle))
-			mb.render_mesh(cube, spin)
+			mb.render_mesh(cube, spin, texture = cat)
 
 			mb.camera_end()
 
 		mb.render_end()
 	}
 
+	mb.destroy(cat)
 	mb.destroy_mesh(quad)
 	mb.destroy_mesh(cube)
 	mb.destroy(jump_sound) // TODO: Audio not implemeted yet

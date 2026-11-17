@@ -17,7 +17,6 @@ import win "core:sys/windows"
 // Vendor
 import "vendor:directx/d3d11"
 import "vendor:directx/dxgi"
-import "vendor:directx/d3d_common"
 import gi "vendor:windows/GameInput"
 
 
@@ -88,13 +87,13 @@ Matchbox_Info :: struct {
 	depth_texture:^d3d11.ITexture2D,
 	depth_view:^d3d11.IDepthStencilView,
 	framebuffer_view: ^d3d11.IRenderTargetView,
-	sampler:^d3d11.ISamplerState,
 	white_texture:^d3d11.ITexture2D,
 
 	// Pipeline states; one is chosen per draw with set_render_state
 	depth_states:[Depth_Mode]^d3d11.IDepthStencilState,
 	blend_states:[Blend_Mode]^d3d11.IBlendState,
 	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
+	samplers:[Filter_Mode]^d3d11.ISamplerState,
 	view:matrix[4,4]f32,
 	camera_active:bool,
 	opaque_items:[dynamic]Draw_Item,
@@ -268,18 +267,6 @@ init :: proc(title:string, width:i32, height:i32) {
 	}
 
 	{
-		sampler_desc := d3d11.SAMPLER_DESC {
-			Filter = .MIN_MAG_MIP_POINT,
-			AddressU = .BORDER,
-			AddressV = .BORDER,
-			AddressW = .BORDER,
-			ComparisonFunc = .NEVER,
-			BorderColor = {1, 1,1, 0},
-		}
-
-		res := mbi.device->CreateSamplerState(&sampler_desc, &mbi.sampler)
-		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
-
 		create_depth_buffer()
 		create_pipeline()
 	}
@@ -369,7 +356,6 @@ cleanup :: proc() {
 	// mbi.blend_state->Release()
 	mbi.white_texture_view->Release()
 	mbi.white_texture->Release()
-	mbi.sampler->Release()
 	destroy_depth_buffer()
 	mbi.framebuffer->Release()
 	mbi.framebuffer_view->Release()

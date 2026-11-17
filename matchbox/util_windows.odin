@@ -46,14 +46,6 @@ get_window_size :: proc() -> [4]i32 {
 
 /*
 	Find the correct asset path and returns it
-	Checks shared assets first, then checks target specific
-
-	The last one found is the one returned
-*/
-
-
-/*
-	Find the correct asset path and returns it
 	Checks target specific assets first, then shared assets
 
 	The caller owns the returned string and should delete it
@@ -91,4 +83,5 @@ destroy procedure based on arugment passed*/
 destroy :: proc {
 	destroy_audio,
 	destroy_mesh,
+	destroy_texture,
 }

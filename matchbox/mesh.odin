@@ -11,7 +11,7 @@ Vertex :: struct {
 
 /*A cube centred on the origin, `size` units on each side. Each face has its own colour.
 The caller frees both slices (after create_mesh has copied them to the GPU)*/
-mesh_cube :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
 
 	// A face is described by its outward normal, and two axes along it:
 	// `u` points right and `v` points up as seen from outside. u x v == normal.
@@ -52,6 +52,9 @@ mesh_cube :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]V
 
 		for corner, c in corners {
 			vertices[first + c] = {position = corner * half, uv = uvs[c], color = face.color}
+
+			color:[4]f32 = face.color
+			if colored == false do color = {1,1,1,1}
 		}
 
 		for index, k in quad_indices {

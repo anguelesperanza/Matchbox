@@ -222,7 +222,8 @@ them at the top of the shared math file.
 [-] Renderer core: 3D pipeline on PC, 3DS, Vita    (Phases A, B, C, V)
 [ ] 2D: 2D as an orthographic projection           (Phases D, E, F; all three targets)
 [ ] 3D: 3D games                                   (Phase G; all three targets)
-[ ] Improved build system                          (shader steps land in Phases C and V)
+[ ] Shader language: one source, three targets     (Phase S; PC first, handheld backends with C and V)
+[ ] Improved build system                          (shader steps land in Phases C, V and S)
 [ ] Hard-float on the handhelds (performance)      (Phase H, via Farlite, late)
 ```
 
@@ -449,7 +450,7 @@ all three columns are:
 
 | What | PC (B) | 3DS (C) | Vita (V) |
 |---|---|---|---|
-| Shader toolchain | (HLSL is in the source) | C0 | V1 |
+| Shader toolchain | (HLSL is in the source; Phase S replaces it) | C0 (Phase S: S5, S6) | V1 (Phase S: S4) |
 | Depth buffer | B1 | C1 | V2 |
 | Vertex format and layout | B2 | C0 | V3 |
 | Constants / uniforms | B3 | C0 | V3 |
@@ -586,7 +587,8 @@ aspect, and letterbox and expand both behave as in the mockups.
 **C0. Shader toolchain.**
 - Only `romfs/vshader.shbin` (a compiled binary) is in the repo; its source
   isn't.
-- Add `matchbox/shaders/vshader.v.pica`.
+- Add `matchbox/shaders/vshader.v.pica`. (Hand-written. Phase S later generates
+  it from the shader language; keep this one as the reference output.)
 - Add a step to `3ds_build.bat` that runs `picasso` (part of devkitPro) on it
   and outputs to `romfs/`. (The Vita's Cg shader step is V1.)
 - New shader inputs: position (v0), uv (v1), color (v2).
@@ -658,6 +660,8 @@ rules that apply throughout are in "The three targets". Files are
   `mb.print` shows the init result.
 
 **V1. Shader toolchain.**
+- (Phase S4 later generates these from the shader language; keep the
+  hand-written ones as the reference output.)
 - New sources in `matchbox/shaders/vita/`: `mesh_v.cg` and `mesh_f.cg`.
   `vito/gfx/shaders/sprite_v.cg` is the model (position, uv, colour in; uniform
   `float4x4`; `mul(vector, matrix)`).
@@ -858,6 +862,177 @@ in both `3ds_build.bat` and `get_asset`.
 
 **Phase E done when:** a 2D test scene (the mockup scene) looks the same on PC,
 the 3DS and the Vita under letterbox, and shia-test plays on PC.
+
+---
+
+## Phase S: Matchbox shader language (added 2026-11-17)
+
+**Why.** A custom shader today means HLSL (PC), Cg (Vita) and PICA assembly
+(3DS): up to three times the work for one effect. The goal is one shader
+language with Odin-like syntax, compiled to each target's own format.
+
+**What each target takes** (from `vito/README.md` and `vito/docs/roadmap.md`,
+the picasso manual, and `o3dx/README.md`):
+
+| | PC | Vita | 3DS |
+|---|---|---|---|
+| Programmable stages | vertex and pixel | vertex and fragment | **vertex only** |
+| Source format | HLSL (`mesh.hlsl`, compiled at startup by `d3d_compiler`) | Cg, `NAME_v.cg` / `NAME_f.cg` | PICA200 assembly, `.v.pica` |
+| Compiler | already in Windows | Sony's `psp2cgc.exe` (proprietary, git-ignored, supplied by the owner) -> `.gxp` | `picasso` (devkitPro) -> `.shbin` |
+| Fragment stage | the shader | the shader | **fixed function**: TexEnv combiners, lighting unit, fog and alpha test, all set by citro3d calls |
+| Matrix use | `mul(M, v)`, column-major | `mul(v, M)`, Odin matrix passed as is | `dp4` of each matrix row (`c3d` matrix order is reversed) |
+| Clip space | depth 0..1 | OpenGL, -1..1 | reverse-Z, clips to `[-w, 0]` |
+
+**What this means for the design**
+- **The 3DS fragment stage can't run a program.** A shader language that lets
+  `fragment_main` do anything can't compile for the 3DS. So the fragment side
+  has a small "portable" subset (texture sample, vertex colour, uniform colour,
+  and combine operations: multiply, add, mix) that maps onto TexEnv stages. A
+  shader outside that subset is a compile error for the 3DS, naming the line,
+  and still builds for PC and Vita.
+- **The 3DS vertex ISA is small.** picasso lists add, dp3, dp4, dph, dst, mul,
+  mad, max, min, ex2, lg2, litp, flr, rcp, rsq, mov, mova, sge, slt and cmp, plus
+  loops and `if`. It has no `sin`, `cos`, `sqrt`, `pow` or divide, so those
+  either lower to a sequence (divide = `rcp` then `mul`) or are errors on the
+  3DS. 96 float uniforms, 16 inputs, 16 outputs, 16 temporaries (picasso manual).
+- **Known PICA quirks** (O3DX's Lighting-Example and the picasso manual) that
+  the backend must produce correctly: constants are only allowed as the first
+  source operand; a `dp4` group writing a temp leaves components in reversed
+  order, so write each result straight to its destination; two consecutive
+  `mova` instructions hang the GPU; only one distinct input register may be
+  used across an operand's sources.
+- **Nobody has done this before for PICA.** I found assemblers (picasso,
+  nihstro) but no high-level compiler for the PICA200, so the 3DS backend is
+  ours to write. Vita direct `.gxp` writing is not needed now (see S8).
+
+**The language (a draft; decide in S0).** An Odin subset, so `.odin` tooling
+mostly works and the syntax is the one you know. Matrices use `*` as in Odin
+(`matrix * vector`); the backend picks `mul` order. A draft of today's
+`mesh.hlsl`:
+
+```odin
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv:       [2]f32 `attr:"texcoord"`,
+	color:    [4]f32 `attr:"color"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv:       [2]f32,
+	color:    [4]f32 `out:"color"`,
+}
+
+Frame :: struct { view_projection: matrix[4, 4]f32 }
+Draw  :: struct { model: matrix[4, 4]f32, tint, uv_rect: [4]f32, alpha_cutoff: f32 }
+
+@(uniform = 0) frame: Frame
+@(uniform = 1) draw:  Draw
+@(texture = 0) tex:   Texture2D
+
+vertex_main :: proc(in: Vertex_In) -> Varying {
+	out: Varying
+	world := draw.model * [4]f32{in.position.x, in.position.y, in.position.z, 1}
+	out.position = frame.view_projection * world
+	out.color = in.color * draw.tint
+	out.uv = lerp(draw.uv_rect.xy, draw.uv_rect.zw, in.uv)
+	return out
+}
+
+fragment_main :: proc(v: Varying) -> [4]f32 {
+	color := sample(tex, v.uv) * v.color
+	if color.a < draw.alpha_cutoff do discard()
+	return color
+}
+```
+
+On the 3DS the `discard` becomes the PICA alpha test state (see E3), and the
+fragment multiply becomes one TexEnv stage.
+
+Per-target variants use Odin's own `when TARGET == .PICA { ... } else { ... }`,
+so a shader can provide a fallback where a target can't do something.
+
+**Where it runs.** A build-time tool, `tools/shaderc.odin` (like `tritex`),
+not code in the game. Inputs: a shader file and `-target`. Outputs:
+- PC: `name.hlsl`
+- Vita: `name_v.cg` and `name_f.cg`, then runs `psp2cgc` if `tools/psp2cgc.exe`
+  exists; otherwise the committed `.gxp` is used (vito's rule, kept)
+- 3DS: `name.v.pica` then `picasso` -> `.shbin`, plus a TexEnv table
+  (`name.tev`) for the fragment stage
+- All: a small reflection file listing the attributes, uniforms and textures
+  each stage actually uses (Vita removes unused ones; the 3DS assigns registers)
+
+**S0. Specify the language** (write `docs/shader_language.md`).
+- Types, built-in functions, entry points, uniforms and textures, and a table
+  of what compiles on which target. Settle the decisions below first.
+- Done when: the draft above is a complete spec, and every built-in is marked
+  PC / Vita / 3DS.
+
+**S1. Front end** (`tools/shaderc.odin`).
+- Parse the shader (try `core:odin/parser` first), type-check the subset,
+  build an intermediate form, report errors with file and line.
+- Done when: the draft above parses and type-checks, and a deliberate mistake
+  gives a clear message. Golden-file tests.
+
+**S2. PC backend: HLSL.**
+- Emit HLSL from the intermediate form. Port `mesh.hlsl` to the language.
+- Done when: the demo looks identical with the generated HLSL, including the
+  alpha cut-off and the `uv_rect` sprites.
+
+**S3. Bindings and reflection.**
+- Engine-owned slots (`frame`, `draw`) bind the same way on every target, and
+  the reflection file tells each backend what to look up.
+- Done when: the PC runtime reads the reflection output instead of hard-coding
+  slots.
+
+**S4. Vita backend: Cg.**
+- Emit `_v.cg` and `_f.cg` with the Vita rules: `mul(vector, matrix)`, attribute
+  names the runtime can find with `gfx.attribute`, OpenGL clip space.
+- Hook `psp2cgc` as an optional step; commit the `.gxp` outputs.
+- Done when: the language's mesh shader replaces the hand-written V1 one and
+  the V3 triangle draws on the Vita.
+
+**S5. 3DS backend: vertex (PICA assembly).**
+- Lower the vertex subset to PICA instructions: matrix transform as four `dp4`
+  groups straight into outputs, `mad`, `rcp` / `rsq` for divide and inverse
+  root, `min` / `max`, `ex2` / `lg2`, `flr`. Allocate the 16 temporaries.
+- Generate the quirk-safe forms listed above. Run `picasso`.
+- Done when: the generated shader draws the same as O3DX's `SpinningCube`
+  vertex shader.
+
+**S6. 3DS backend: fragment (TexEnv).**
+- Map the portable fragment subset onto TexEnv stages and emit the table;
+  the runtime applies it with `C3D_TexEnv*`. Alpha cut-off becomes
+  `C3D_AlphaTest`.
+- Done when: the textured, tinted cube and the cut-out sprite look the same as
+  PC.
+
+**S7. Capabilities and fallbacks.**
+- The `when TARGET` blocks, per-target errors, and `shaderc --check` that
+  reports what compiles where.
+
+**S8. Later, only if needed:** write `.gxp` directly (vito's
+`docs/gxp-format.md` has a staged plan: disassemble, assemble, a small
+subset, then widen) or `.shbin` directly, to drop `psp2cgc` or `picasso`.
+
+**Order.** S0 to S3 need only PC, so they can start once the PC side is stable
+(after Phase E) and before the handheld work. C0 and V1 then take generated
+shaders instead of hand-written ones; until S4 and S5 exist the hand-written
+ones stay, and become the reference the backends are compared against.
+
+**Phase S done when:** one shader file builds for PC, Vita and 3DS and the
+Phase B cube scene looks the same on all three (the 3DS within the fragment
+subset).
+
+**Risks.**
+- The 3DS fragment subset is much smaller than the vertex one; most effects
+  that need a real pixel shader won't exist there.
+- `psp2cgc` can't be redistributed, so the Vita route depends on a copy
+  the owner has, and on committed `.gxp` files.
+- PICA floats are 24-bit, so results won't be bit-identical to PC.
+- S5 and S6 are the real work: the front end and PC backend are ordinary
+  compiler tasks; PICA code generation and TexEnv mapping have no reference
+  implementation to follow.
 
 ---
 
@@ -1066,6 +1241,10 @@ above all the same.
 - [x] Vita is a core target, in the renderer core with PC and 3DS (decided 2026-11-14). Its specifics are settled in "The three targets", A0b and Phase V.
 - [x] Target selection: `-define:MATCHBOX_VITA` with `when` blocks, since `odin check` can't see the microarch (chosen 2026-11-14; verify in A0b that each target's imports type-check in the other's build).
 - [x] PC first, with `core:math/linalg` (2026-11-14): no shared `math.odin` for now; performance work waits until PC, 3DS and Vita all run. D3D needs the GL-to-D3D depth remap (`z' = 0.5z + 0.5w`) on `linalg` projections. A1's shared file moves over when a handheld needs it.
+- [ ] Shader language syntax (S0): an Odin subset parsed with `core:odin/parser` (recommended), or a small custom parser.
+- [ ] Shader file extension and location (S0), for example `matchbox/shaders/*.shader`.
+- [ ] 3DS fragment policy (S0): portable subset that maps to TexEnv, with a compile error for anything else (recommended).
+- [ ] Generated shader output (S2 to S6): commit it, or generate at build. Vita `.gxp` stays committed (vito's rule, 2026-11-13).
 - [ ] Vita emulator: Vita3K vs hardware as the per-step check (decide before V0).
 - [ ] Vita MSAA: off, or 4x (decide at V8).
 - [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).

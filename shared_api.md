@@ -51,3 +51,12 @@ a messey to handle.
 
 The new approach is to make everything 3D and place everything in a 3D world -- results are not far enough along yet
 to determine if this is the correct approach or not. 
+
+
+# Shader language (planned)
+
+Not started. Matchbox will get its own shading language, compiled to HLSL (PC), Cg (PS Vita) and PICA200 assembly (3DS).
+The plan is Phase S in `render_plan.md`.
+
+`examples/shader-language/hit_flash.shader` is a **fake** shading language, used only as an example of what a shader in the
+future language might look like. It does nothing, nothing compiles it, and its syntax is a draft that will change.

@@ -25,6 +25,14 @@ backend main uses
 
 Implementing 3D into Matchbox
 
+## Shader language (planned)
+
+Matchbox will get its own shading language: one shader source, compiled to HLSL on PC, Cg on the PS Vita and
+PICA200 assembly on the 3DS. It is not written yet. The plan is Phase S in `render_plan.md`.
+
+`examples/shader-language/hit_flash.shader` is a **fake** shading language, made up only as an example of what a shader
+in the future language might look like. It does nothing, nothing compiles it, and its syntax is a draft that will change.
+
 ## Milestones
 
 There are no specific milestone goals (there was but they were removed).

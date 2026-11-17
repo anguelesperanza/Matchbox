@@ -8,7 +8,10 @@ package matchbox
 	Handles the rendering
 
 	PC (D3D11). Everything drawn is 3D; 2D is an orthographic camera.
-	The 3D path is added in Phase B (see render_plan.md).
+
+	Drawing is queued: render_mesh (and render_sprite / the shapes) only record
+	a Draw_Item between camera_start and camera_end. camera_end sorts the queue
+	and issues the draw calls. See render_plan.md.
 */
 
 import win "core:sys/windows"
@@ -111,15 +114,23 @@ destroy_mesh :: proc(mesh:Mesh) {
 	if mesh.vertex_buffer != nil do mesh.vertex_buffer->Release()
 }
 
-render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1},blend:Blend_Mode = .NONE, cull:Cull_Mode = .BACK, texture:Texture = {}) {
-
-	queue_draw(mesh, model, tint, blend, cull, texture, {0,0, 1,1}, 0)
+/*Queues a mesh to be drawn at camera_end. `model` places it in the world.
+Use blend = .ALPHA for see-through things; Matchbox draws them after the opaque ones, farthest first*/
+render_mesh :: proc(
+	mesh:Mesh,
+	model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY,
+	tint:[4]f32 = {1, 1, 1, 1},
+	blend:Blend_Mode = .NONE,
+	cull:Cull_Mode = .BACK,
+	texture:Texture = {},
+) {
+	queue_draw(mesh, model, tint, blend, cull, texture, {0, 0, 1, 1}, 0)
 }
 
+/*Records one draw. Shared by render_mesh, render_sprite and the shapes*/
 @(private)
 queue_draw :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rect:[4]f32, alpha_cutoff:f32) {
-
-	ensure(mbi.camera_active, "render_mesh must be called between camera_start and camera_end")
+	ensure(mbi.camera_active == true, "Drawing must happen between camera_start and camera_end")
 
 	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
 
@@ -136,11 +147,9 @@ queue_draw :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mod
 	}
 }
 
-
-
+/*Issues the draw call for one queued item. The render state is already set*/
 @(private)
 draw_item :: proc(item:Draw_Item) {
-
 	set_draw_constants(item.model, item.tint, item.uv_rect, item.alpha_cutoff)
 
 	vertex_buffer := item.mesh.vertex_buffer
@@ -167,11 +176,12 @@ draw_item :: proc(item:Draw_Item) {
 
 	mbi.device_context->PSSetShaderResources(0, 1, &texture_view)
 	mbi.device_context->PSSetSamplers(0, 1, &mbi.samplers[item.texture.filter])
-	
 
 	mbi.device_context->DrawIndexed(item.mesh.index_count, 0, 0)
 }
 
+/*Creates every depth, blend, rasterizer and sampler state once. set_render_state picks between them*/
+@(private)
 create_states :: proc() {
 	stencil_op := d3d11.DEPTH_STENCILOP_DESC {
 		StencilFailOp = .KEEP,
@@ -282,10 +292,10 @@ create_states :: proc() {
 	for &desc, mode in sampler_descs {
 		res := mbi.device->CreateSamplerState(&desc, &mbi.samplers[mode])
 		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
-	}	
+	}
 }
 
-
+@(private)
 destroy_states :: proc() {
 	for state in mbi.depth_states do state->Release()
 	for state in mbi.blend_states do state->Release()
@@ -298,12 +308,11 @@ set_render_state :: proc(depth:Depth_Mode, blend:Blend_Mode, cull:Cull_Mode) {
 	blend_factor := [4]f32{0, 0, 0, 0}
 
 	mbi.device_context->OMSetDepthStencilState(mbi.depth_states[depth], 0)
-	mbi.device_context->OMSetBlendState(mbi.blend_states[blend], &blend_factor,	0xFFFFFFFF)
+	mbi.device_context->OMSetBlendState(mbi.blend_states[blend], &blend_factor, 0xFFFFFFFF)
 	mbi.device_context->RSSetState(mbi.rasterizer_states[cull])
-
 }
 
-
+@(private)
 create_constant_buffer :: proc(size:u32) -> (buffer:^d3d11.IBuffer) {
 	desc := d3d11.BUFFER_DESC {
 		ByteWidth = size,
@@ -318,6 +327,7 @@ create_constant_buffer :: proc(size:u32) -> (buffer:^d3d11.IBuffer) {
 }
 
 /*Copies data into a dynamic buffer*/
+@(private)
 update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 	mapped:d3d11.MAPPED_SUBRESOURCE
 	res := mbi.device_context->Map(buffer, 0, .WRITE_DISCARD, {}, &mapped)
@@ -327,20 +337,22 @@ update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 }
 
 /*Sets the combined view * projection matrix used by everything drawn until it is called again*/
-set_view_projection :: proc(view_projection:matrix[4, 4]f32) {
+@(private)
+set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
 	constants := Frame_Constants{view_projection = view_projection}
 	update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
 }
 
-/*Sets the model matrix and tint used by the next draw*/
+/*Sets the model matrix, tint, texture region and alpha cut-off used by the next draw*/
+@(private)
 set_draw_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32, uv_rect:[4]f32, alpha_cutoff:f32) {
 	constants := Draw_Constants{model = model, tint = tint, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
 	update_buffer(mbi.draw_constants, &constants, size_of(Draw_Constants))
 }
 
+/*Starts a frame. Call once per frame before drawing anything*/
 render_start :: proc() {
 	if mbi.did_resize {
-		
 		mbi.device_context->OMSetRenderTargets(0, nil, nil)
 		mbi.framebuffer_view->Release()
 		mbi.framebuffer->Release()
@@ -368,11 +380,7 @@ render_start :: proc() {
 		MaxDepth = 1,
 	}
 
-	// blend_factor := [4]f32{0, 0, 0, 0}
-	// mbi.device_context->OMSetBlendState(mbi.blend_state, &blend_factor, 0xFFFFFFFF)
-
 	mbi.device_context->RSSetViewports(1, &viewport)
-	// mbi.device_context->RSSetState(mbi.rasterizer_state)
 	mbi.device_context->OMSetRenderTargets(1, &mbi.framebuffer_view, mbi.depth_view)
 	mbi.device_context->ClearDepthStencilView(mbi.depth_view, {.DEPTH}, 1.0, 0)
 
@@ -381,16 +389,17 @@ render_start :: proc() {
 
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
-	ensure(mbi.camera_active == false, "end was not called before render_end")
+	ensure(mbi.camera_active == false, "camera_end was not called before render_end")
 	mbi.swapchain->Present(1, {})
 }
 
+/*Fills the whole window with `color`*/
 clear_background :: proc(color:[4]f32) {
 	color := color
 	mbi.device_context->ClearRenderTargetView(mbi.framebuffer_view, &color)
 }
 
-
+@(private)
 create_depth_buffer :: proc() {
 	framebuffer_desc:d3d11.TEXTURE2D_DESC
 	mbi.framebuffer->GetDesc(&framebuffer_desc)
@@ -412,14 +421,15 @@ create_depth_buffer :: proc() {
 
 	res = mbi.device->CreateDepthStencilView(mbi.depth_texture, nil, &mbi.depth_view)
 	ensure(win.SUCCEEDED(res), "Create DepthStencilView failed")
-	
 }
 
+@(private)
 destroy_depth_buffer :: proc() {
 	mbi.depth_view->Release()
 	mbi.depth_texture->Release()
 }
 
+@(private)
 compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) {
 	errors: ^d3d11.IBlob
 
@@ -442,10 +452,11 @@ compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) 
 		errors->Release()
 	}
 
-
 	ensure(win.SUCCEEDED(res), "Shader Compilation failed")
 }
 
+/*Compiles the shaders and creates the input layout, constant buffers and render states*/
+@(private)
 create_pipeline :: proc() {
 	mbi.shader_src = #load("shaders/mesh.hlsl")
 
@@ -460,7 +471,6 @@ create_pipeline :: proc() {
 	)
 
 	ensure(win.SUCCEEDED(res), "Vertex shader creation failed")
-
 
 	res = mbi.device->CreatePixelShader(
 		pShaderBytecode = mbi.pixel_shader_blob->GetBufferPointer(),
@@ -501,24 +511,17 @@ create_pipeline :: proc() {
 
 	ensure(win.SUCCEEDED(res), "Input layout creation failed")
 
-
 	mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
 	mbi.draw_constants = create_constant_buffer(size_of(Draw_Constants))
 
 	create_states()
-	
 }
-
-
-/*Everything drawn until camera_end is seen through this camera*/
-
 
 /*Everything drawn until camera_end is seen through this camera*/
 camera_start :: proc(cam:Camera) {
 	ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
-
-	window := [2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
+	window :=[2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
 
 	aspect:f32 = 1
 	if window.y > 0 {
@@ -536,18 +539,6 @@ camera_start :: proc(cam:Camera) {
 	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
 	view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(used, aspect) * mbi.view
 	set_frame_constants(view_projection)
-
-	// aspect:f32 = 1
-	// if mbi.window_size[1] > 0 {
-	// 	aspect = f32(mbi.window_size[0]) / f32(mbi.window_size[1])
-	// }
-
-	// mbi.view = camera_view_matrix(cam) // render_mesh needs it to sort transparent items
-	// mbi.camera_active = true
-
-	// // linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
-	// view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(cam, aspect) * mbi.view
-	// set_frame_constants(view_projection)
 }
 
 /*Sorts and draws everything queued since camera_start*/
@@ -583,27 +574,19 @@ camera_end :: proc() {
 	mbi.camera_active = false
 }
 
+@(private)
 destroy_pipeline :: proc() {
-
 	delete(mbi.opaque_items)
 	delete(mbi.transparent_items)
 
 	mbi.draw_constants->Release()
 	mbi.frame_constants->Release()
-	
+
 	destroy_states()
 
-	
 	mbi.input_layout->Release()
 	mbi.pixel_shader_blob->Release()
 	mbi.pixel_shader->Release()
 	mbi.vertex_shader_blob->Release()
 	mbi.vertex_shader->Release()
-}
-
-// Private fields
-@(private)
-set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
-	constants := Frame_Constants{view_projection = view_projection}
-	update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
 }

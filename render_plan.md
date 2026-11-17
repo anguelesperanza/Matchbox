@@ -1,4 +1,3 @@
-
 # Matchbox: 3D-first rendering plan
 
 Status: proposed 2026-11-12, branch `full-rewrite`. Updated 2026-11-12 with
@@ -241,11 +240,12 @@ models or skinning.
 - **Hammer out each target's specifics at the step that first touches them,**
   not later. That is why the Vita's build, entry point and depth rules are in
   Phase A, before any rendering.
-- **Keep the demo running.**
-  - The new path is added beside the old one (`render_mesh` beside
-    `render_sprite`).
-  - Each old piece is removed only when its replacement works on both targets.
-  - See the removal checklist at the end.
+- **No legacy 2D path is kept (decided 2026-11-14).** The old pixel-space 2D
+  renderer is deleted from a target at the start of that target's core phase
+  (B0 for PC, C0 for the 3DS, V0 for the Vita), not after its replacement
+  works. Until the new path draws, the demo only opens a window and clears.
+  There is no depth-off state, `viewport_size` constant or old sprite batch
+  left to keep alive. The removal checklist at the end lists what goes.
 - **Pure maths in shared files, with tests.**
   - Files have no target suffix, and `odin test` runs on PC.
   - Main's `display_test.odin` is the model.
@@ -392,13 +392,26 @@ A1 procs (translate × rotate × scale).
   order.
 
 **A3. `Camera`** (shared, description only):
-- `projection: enum {PERSPECTIVE, ORTHOGRAPHIC}`
-- `position`, `rotation` (or `target`)
-- `fov_y` (perspective), `view_height` (orthographic), `near`, `far`
-- `fit: Fit_Policy`, `integer_scale: bool`, `overscan_cap: f32`
+Names follow raylib where they fit (`Camera3D` becomes `Camera`; `BeginMode3D` /
+`EndMode3D` become `camera_start` / `camera_end`, matching `render_start` /
+`render_end`). Decided 2026-11-16.
+- `Projection :: enum {PERSPECTIVE, ORTHOGRAPHIC}` and `projection`
+- `position`, `target`, `up` (raylib style; a `rotation` form can be added for
+  3D cameras in G3)
+- `fov_y` in degrees (perspective), `view_height` in world units
+  (orthographic), `near`, `far`
+- `fit: Fit_Policy`, `integer_scale: bool`, `overscan_cap: f32` (added in B8)
 
-Helpers: `camera_view_matrix(cam)` and `camera_create_2d(view_height)`, which
-returns an ortho camera at z = +10 looking down -Z.
+Helpers: `camera_view_matrix(cam)`, `camera_projection_gl(cam, aspect)` (shared,
+OpenGL clip space; each backend adapts the depth range) and
+`camera_create_2d(view_height)`, which returns an ortho camera at z = +10
+looking down -Z.
+
+Public API: `camera_start(cam)` / `camera_end()`, called between `render_start`
+and `render_end`. The game never builds a projection matrix or computes the
+aspect; the backend does. Picking helpers come later: `world_to_screen`,
+`get_mouse_ray(cam)`, `get_mouse_world_pos(cam)` (F2) and `camera_update`
+(G3).
 - Done when: the view matrix moves the world opposite to the camera, which is
   covered by a test.
 
@@ -455,6 +468,28 @@ backends only execute them.
 
 ## Phase B: PC 3D core (D3D11)
 
+**B0. Rip out the old 2D path (PC).** Do this first.
+- Delete `matchbox/sprite_windows.odin` and `matchbox/shapes.odin` (`Sprite`,
+  `Batch`, `batch`, `Rectangle`, `Triangle`, `create_triangle`).
+- In `render_windows.odin` delete `MAX_BATCH_VERTICIES`, the old `Vertex` and
+  `Constants` (with `viewport_size`), `flush`, `render_triangle_points`,
+  `render_triangle_shape`, `render_triangle`, `corner`, `render_sprite`, and the
+  constant-buffer upload in `render_start`. Keep `render_start`,
+  `render_end` (without the `flush()` call), `clear_background` and the resize
+  handling.
+- In `window_windows.odin` delete the vertex buffer creation (`batch.gpu_buffer`),
+  the `batch.current_texture_view` line, the pixel-space input layout, the
+  `Constants` constant buffer, and the fields `vertex_buffer`, `vertex_count`,
+  `vertex_stride`, `vertex_offset`, `constant_buffer`.
+- Delete the old `shaders/shaders.hlsl` and its two compile blocks; B4 brings the
+  new shader.
+- Remove the sprite and triangle code from `demo.odin`.
+- Keep: window, events, input, audio, util and logger; the device, swapchain,
+  render target; the sampler, blend state and 1x1 white texture (the 3D path
+  uses them); the image-loading code, which becomes `Texture` in D1.
+- Done when: the demo opens a window and clears to a colour, and nothing in
+  `matchbox` mentions a sprite, batch, `viewport_size` or pixel-space vertex.
+
 **B1. Depth buffer.**
 - Add a `D32_FLOAT` depth texture and its depth-stencil view (DSV).
 - Recreate it in the `did_resize` block, next to the render target view (RTV).
@@ -498,8 +533,27 @@ layout.
   (A0) they can `make` the slices, taking the allocator as a parameter
   (default `context.allocator`); the caller frees them after `create_mesh`.
 
+**B6.5. Camera** (added 2026-11-16, so the API names are settled before B7).
+- Shared `camera.odin`: `Projection`, `Camera`, `camera_view_matrix`,
+  `camera_projection_gl`, `camera_create_2d` (see A3).
+- PC: `camera_start(cam)` builds `GL_TO_D3D_DEPTH * projection * view` from the
+  window aspect and uploads it to the frame constants; `camera_end()` does
+  nothing yet (B7 flushes the queue there).
+- Remove the public `perspective_projection` and `set_view_projection`.
+  `set_frame_constants` is private.
+- Done when: the demo calls only `render_start`, `camera_start(camera)`, draws,
+  `camera_end`, `render_end`, builds no matrices, and looks the same. An
+  orthographic camera built with `camera_create_2d` shows the cube flat.
+
 **B7. Render queue** (shared logic, backend execution). This replaces the
-immediate batch.
+immediate batch. `camera_end` is where the draws queued since `camera_start`
+are sorted and flushed, so a frame with several cameras (world then HUD) just
+flushes once per camera. PC first, as it is written (2026-11-16): the queue
+is two persistent `[dynamic]Draw_Item` arrays in `mbi` (opaque and
+transparent) that are `clear`ed each flush, not temp-arena arrays, and the
+code lives in `render_windows.odin`. It moves to shared code at C4 once
+`Mesh` exists on the 3DS. `render_mesh` takes `blend` and `cull`; the queue
+derives the depth mode, and `set_render_state` is private.
 - `render_mesh(mesh, transform, texture, tint)` and later `render_sprite(...)`
   push items, and `render_end` sorts and draws them:
   - **Opaque and cut-out:** sorted by texture, then mesh, to reduce state
@@ -514,14 +568,16 @@ immediate batch.
   not yet run there). It is shared code, so C4 is only the 3DS executor. The
   queue is freed with the temp arena each frame (A0).
 
-**B8. Viewport and scissor from A4.**
+**B8. Viewport and scissor from A4.** DEFERRED (2026-11-17): not a priority. The
+default is "expand": the camera shows more or less world as the window changes
+shape, with no bars. Come back only if a game needs letterbox, integer scale or
+a width cap (likely with pixel art in Phase E). Not part of the Phase B gate.
 - `RSSetViewports` and `RSSetScissorRects` from the fit result.
 - Clear the full window to the bar colour first, then the content.
 
 **Phase B done when:** a textured, spinning cube is drawn with a perspective
 camera, plus a half-transparent quad passing through it. Resizing keeps the
-aspect, letterbox and expand both behave as in the mockups, and the old 2D demo
-still draws.
+aspect, and letterbox and expand both behave as in the mockups.
 
 ---
 
@@ -573,7 +629,8 @@ still draws.
 - The queue is drawn once per eye.
 
 **Phase C done when:** the Phase B cube and transparent quad scene runs on
-Citra and on real hardware, and the old 2D demo still draws.
+Citra and on real hardware. (C0 first deletes the old 2D sprite and triangle
+path from the 3DS backend, as B0 did on PC.)
 
 ---
 
@@ -807,7 +864,8 @@ the 3DS and the Vita under letterbox, and shia-test plays on PC.
 ## Phase F: screen space, text, input (2D milestone, part 2)
 
 **F1. HUD camera.**
-- `begin_screen()` / `end_screen()` switch the queue to a screen ortho camera
+- `screen_start()` / `screen_end()` (a second orthographic camera, same
+  `_start` / `_end` naming as `camera_start`) switch the queue to screen space
   in design units, with depth off.
 - Add `get_visible_rect()` and `anchor_position(anchor, offset)`.
 - Choose the default fit policy here, and the overscan cap value.
@@ -1007,6 +1065,7 @@ above all the same.
 - [x] 3DS runtime: o3dx provides the allocator, temp arena, logger and assertion handler (2026-11-14). Switched on in A0.
 - [x] Vita is a core target, in the renderer core with PC and 3DS (decided 2026-11-14). Its specifics are settled in "The three targets", A0b and Phase V.
 - [x] Target selection: `-define:MATCHBOX_VITA` with `when` blocks, since `odin check` can't see the microarch (chosen 2026-11-14; verify in A0b that each target's imports type-check in the other's build).
+- [x] PC first, with `core:math/linalg` (2026-11-14): no shared `math.odin` for now; performance work waits until PC, 3DS and Vita all run. D3D needs the GL-to-D3D depth remap (`z' = 0.5z + 0.5w`) on `linalg` projections. A1's shared file moves over when a handheld needs it.
 - [ ] Vita emulator: Vita3K vs hardware as the per-step check (decide before V0).
 - [ ] Vita MSAA: off, or 4x (decide at V8).
 - [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).

@@ -165,3 +165,16 @@ XNA: https://github.com/FNA-XNA/FNA (XNA itself is gone and has been for years, 
 Kha: https://github.com/Kode/Kha | https://kha.tech/
 
 HaxeFlixel: https://haxeflixel.com/
+
+
+# Third-party code
+
+## glTF2 (`matchbox/gltf2`)
+
+The glTF parser in `matchbox/gltf2` is based on the work of Pawel82S: https://github.com/Pawel82S/glTF2 (MIT license, the original `LICENSE` is kept in that folder).
+
+It is vendored into Matchbox with changes:
+- The package is named `gltf` instead of `gltf2`.
+- Fixes needed to load files from tools like VRoid and Blender (embedded base64 data, sparse accessors, and morph targets being skipped). Each one is marked `MATCHBOX PATCH` in the source.
+
+See `matchbox/gltf2/README.md` for the full list.

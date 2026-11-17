@@ -14,16 +14,12 @@ package matchbox
 import win "core:sys/windows"
 import "core:mem"
 import "core:math/linalg"
+import "core:slice"
 
 import "vendor:directx/d3d11"
 import "vendor:directx/d3d_compiler"
 
 
-Vertex :: struct {
-	position:[3]f32,
-	uv:[2]f32,
-	color:[4]f32,
-}
 
 Frame_Constants :: struct {
 	view_projection:matrix[4,4]f32,
@@ -46,10 +42,249 @@ GL_TO_D3D_DEPTH :: matrix[4, 4]f32 {
 	0, 0, 0,   1,
 }
 
-/*Perspective projection for D3D (right-handed, looks down -Z, depth 0..1). fov_y is in radians*/
-perspective_projection :: proc(fov_y, aspect, near, far:f32) -> matrix[4, 4]f32 {
-	return GL_TO_D3D_DEPTH * linalg.matrix4_perspective_f32(fov_y, aspect, near, far)
+
+Depth_Mode :: enum {
+	OPAQUE,
+	TRANSPARENT,
+	DISABLED,
 }
+
+Blend_Mode :: enum {
+	NONE,
+	ALPHA,
+}
+
+Cull_Mode :: enum {
+	BACK, // Skips triangles not facing the camera
+	NONE, // Draws all triangles of a sprite and two-sided quads
+}
+
+
+// Geometry on the GPU. `create_mesh` makes one, `destroy_mesh` frees it.
+Mesh :: struct {
+	vertex_buffer:^d3d11.IBuffer,
+	index_buffer:^d3d11.IBuffer,
+	index_count:u32,
+}
+
+Draw_Item :: struct {
+	mesh:Mesh,
+	model:matrix[4,4]f32,
+	tint:[4]f32,
+	cull:Cull_Mode,
+	depth:f32,
+}
+
+/*Copies vertices and indices to the GPU. The slices can be freed afterwards*/
+create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
+	assert(len(vertices) > 0 && len(indices) > 0, "A mesh needs vertices and indices")
+	assert(len(vertices) <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
+
+	vertex_desc := d3d11.BUFFER_DESC {
+		ByteWidth = u32(len(vertices) * size_of(Vertex)),
+		Usage = .IMMUTABLE,
+		BindFlags = {.VERTEX_BUFFER},
+	}
+	vertex_data := d3d11.SUBRESOURCE_DATA{pSysMem = raw_data(vertices)}
+
+	res := mbi.device->CreateBuffer(&vertex_desc, &vertex_data, &mesh.vertex_buffer)
+	ensure(win.SUCCEEDED(res), "Create mesh vertex buffer failed")
+
+	index_desc := d3d11.BUFFER_DESC {
+		ByteWidth = u32(len(indices) * size_of(u16)),
+		Usage = .IMMUTABLE,
+		BindFlags = {.INDEX_BUFFER},
+	}
+	index_data := d3d11.SUBRESOURCE_DATA{pSysMem = raw_data(indices)}
+
+	res = mbi.device->CreateBuffer(&index_desc, &index_data, &mesh.index_buffer)
+	ensure(win.SUCCEEDED(res), "Create mesh index buffer failed")
+
+	mesh.index_count = u32(len(indices))
+	return
+}
+
+destroy_mesh :: proc(mesh:Mesh) {
+	if mesh.index_buffer != nil do mesh.index_buffer->Release()
+	if mesh.vertex_buffer != nil do mesh.vertex_buffer->Release()
+}
+
+
+render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1},blend:Blend_Mode = .NONE, cull:Cull_Mode = .BACK) {
+	ensure(mbi.camera_active, "render_mesh must be called between camera_start and camera_end")
+
+	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull}
+
+	switch blend {
+	case .NONE:
+		append(&mbi.opaque_items, item)
+
+	case .ALPHA:
+		// Where the model's origin is in view space. The camera looks down -Z,
+		// so things in front of it have a negative z; flip it so bigger = farther
+		view_position := mbi.view * model * [4]f32{0, 0, 0, 1}
+		item.depth = -view_position.z
+		append(&mbi.transparent_items, item)
+	}
+}
+
+
+@(private)
+draw_item :: proc(item:Draw_Item) {
+
+	set_draw_constants(item.model, item.tint)
+
+	vertex_buffer := item.mesh.vertex_buffer
+	stride:u32 = size_of(Vertex)
+	offset:u32 = 0
+
+	constant_buffers := [2]^d3d11.IBuffer{mbi.frame_constants, mbi.draw_constants}
+
+	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
+	mbi.device_context->IASetInputLayout(mbi.input_layout)
+	mbi.device_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset)
+	mbi.device_context->IASetIndexBuffer(item.mesh.index_buffer, .R16_UINT, 0)
+
+	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
+	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
+	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
+	mbi.device_context->PSSetShaderResources(0, 1, &mbi.white_texture_view)
+	mbi.device_context->PSSetSamplers(0, 1, &mbi.sampler)
+
+	mbi.device_context->DrawIndexed(item.mesh.index_count, 0, 0)
+}
+
+/*Draws a mesh with the current render state. `model` places it in the world*/
+// render_mesh :: proc(mesh:Mesh, model:matrix[4, 4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1}) {
+
+// 	set_draw_constants(model, tint)
+
+// 	vertex_buffer := mesh.vertex_buffer
+// 	stride:u32 = size_of(Vertex)
+// 	offset:u32 = 0
+
+// 	constant_buffers := [2]^d3d11.IBuffer{mbi.frame_constants, mbi.draw_constants}
+
+// 	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
+// 	mbi.device_context->IASetInputLayout(mbi.input_layout)
+// 	mbi.device_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset)
+// 	mbi.device_context->IASetIndexBuffer(mesh.index_buffer, .R16_UINT, 0)
+
+// 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
+// 	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
+// 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
+// 	mbi.device_context->PSSetShaderResources(0, 1, &mbi.white_texture_view)
+// 	mbi.device_context->PSSetSamplers(0, 1, &mbi.sampler)
+
+// 	mbi.device_context->DrawIndexed(mesh.index_count, 0, 0)
+// }
+
+create_states :: proc() {
+	stencil_op := d3d11.DEPTH_STENCILOP_DESC {
+		StencilFailOp = .KEEP,
+		StencilDepthFailOp = .KEEP,
+		StencilPassOp = .KEEP,
+		StencilFunc = .ALWAYS,
+	}
+
+	depth_descs := [Depth_Mode]d3d11.DEPTH_STENCIL_DESC {
+		.OPAQUE = {
+			DepthEnable = true,
+			DepthWriteMask = .ALL,
+			DepthFunc = .LESS,
+			FrontFace = stencil_op,
+			BackFace = stencil_op,
+		},
+		.TRANSPARENT = {
+			DepthEnable = true,
+			DepthWriteMask = .ZERO,
+			DepthFunc = .LESS,
+			FrontFace = stencil_op,
+			BackFace = stencil_op,
+		},
+		.DISABLED = {
+			DepthEnable = false,
+			DepthWriteMask = .ZERO,
+			DepthFunc = .ALWAYS,
+			FrontFace = stencil_op,
+			BackFace = stencil_op,
+		},
+	}
+
+	for &desc, mode in depth_descs {
+		res := mbi.device->CreateDepthStencilState(&desc, &mbi.depth_states[mode])
+		ensure(win.SUCCEEDED(res), "Create DepthStencilState Failed")
+	}
+
+	// Blend
+	blend_descs: [Blend_Mode]d3d11.BLEND_DESC
+
+	blend_descs[.NONE].RenderTarget[0] = {
+		BlendEnable = false,
+		SrcBlend = .ONE,
+		DestBlend = .ZERO,
+		BlendOp = .ADD,
+		SrcBlendAlpha = .ONE,
+		DestBlendAlpha = .ZERO,
+		BlendOpAlpha = .ADD,
+		RenderTargetWriteMask = 0xF, // R | G | B | A
+	}
+
+	blend_descs[.ALPHA].RenderTarget[0] = {
+		BlendEnable = true,
+		SrcBlend = .SRC_ALPHA,
+		DestBlend = .INV_SRC_ALPHA,
+		BlendOp = .ADD,
+		SrcBlendAlpha = .ONE,
+		DestBlendAlpha = .INV_SRC_ALPHA,
+		BlendOpAlpha = .ADD,
+		RenderTargetWriteMask = 0xF,
+	}
+
+	for &desc, mode in blend_descs {
+		res := mbi.device->CreateBlendState(&desc, &mbi.blend_states[mode])
+		ensure(win.SUCCEEDED(res), "Create BlendState Failed")
+	}
+
+	rasterizer_descs := [Cull_Mode]d3d11.RASTERIZER_DESC {
+		.BACK = {
+			FillMode = .SOLID,
+			CullMode = .BACK,
+			FrontCounterClockwise = true,
+			DepthClipEnable = true,
+		},
+
+		.NONE = {
+			FillMode = .SOLID,
+			CullMode = .NONE,
+			FrontCounterClockwise = true,
+			DepthClipEnable = true,
+		},
+	}
+
+	for &desc, mode in rasterizer_descs {
+		res := mbi.device->CreateRasterizerState(&desc, &mbi.rasterizer_states[mode])
+		ensure(win.SUCCEEDED(res), "Create RasterizerState Failed")
+	}
+}
+
+
+destroy_states :: proc() {
+	for state in mbi.depth_states do state->Release()
+	for state in mbi.blend_states do state->Release()
+	for state in mbi.rasterizer_states do state->Release()
+}
+
+@(private)
+set_render_state :: proc(depth:Depth_Mode, blend:Blend_Mode, cull:Cull_Mode) {
+	blend_factor := [4]f32{0, 0, 0, 0}
+
+	mbi.device_context->OMSetDepthStencilState(mbi.depth_states[depth], 0)
+	mbi.device_context->OMSetBlendState(mbi.blend_states[blend], &blend_factor,	0xFFFFFFFF)
+	mbi.device_context->RSSetState(mbi.rasterizer_states[cull])
+
+}
+
 
 create_constant_buffer :: proc(size:u32) -> (buffer:^d3d11.IBuffer) {
 	desc := d3d11.BUFFER_DESC {
@@ -115,17 +350,20 @@ render_start :: proc() {
 		MaxDepth = 1,
 	}
 
-	blend_factor := [4]f32{0, 0, 0, 0}
-	mbi.device_context->OMSetBlendState(mbi.blend_state, &blend_factor, 0xFFFFFFFF)
+	// blend_factor := [4]f32{0, 0, 0, 0}
+	// mbi.device_context->OMSetBlendState(mbi.blend_state, &blend_factor, 0xFFFFFFFF)
 
 	mbi.device_context->RSSetViewports(1, &viewport)
-	mbi.device_context->RSSetState(mbi.rasterizer_state)
+	// mbi.device_context->RSSetState(mbi.rasterizer_state)
 	mbi.device_context->OMSetRenderTargets(1, &mbi.framebuffer_view, mbi.depth_view)
 	mbi.device_context->ClearDepthStencilView(mbi.depth_view, {.DEPTH}, 1.0, 0)
+
+	set_render_state(.OPAQUE, .NONE, .BACK)
 }
 
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
+	ensure(mbi.camera_active == false, "end was not called before render_end")
 	mbi.swapchain->Present(1, {})
 }
 
@@ -249,29 +487,71 @@ create_pipeline :: proc() {
 	mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
 	mbi.draw_constants = create_constant_buffer(size_of(Draw_Constants))
 
+	create_states()
 	
-	rasterizer_desc := d3d11.RASTERIZER_DESC {
-		FillMode = .SOLID,
-		CullMode = .BACK,
-		FrontCounterClockwise = true,
-		DepthClipEnable = true,
+}
+
+
+/*Everything drawn until camera_end is seen through this camera*/
+
+
+/*Everything drawn until camera_end is seen through this camera*/
+camera_start :: proc(cam:Camera) {
+	ensure(mbi.camera_active == false, "camera_start called again before camera_end")
+
+	aspect:f32 = 1
+	if mbi.window_size[1] > 0 {
+		aspect = f32(mbi.window_size[0]) / f32(mbi.window_size[1])
 	}
 
-	res = mbi.device->CreateRasterizerState(&rasterizer_desc, &mbi.rasterizer_state)
-	ensure(win.SUCCEEDED(res), "Create RasterizerState Failed")
+	mbi.view = camera_view_matrix(cam) // render_mesh needs it to sort transparent items
+	mbi.camera_active = true
 
+	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
+	view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(cam, aspect) * mbi.view
+	set_frame_constants(view_projection)
+}
 
-	create_test_triangle() // TEMPORARY
+/*Sorts and draws everything queued since camera_start*/
+camera_end :: proc() {
+	ensure(mbi.camera_active == true, "camera_end called without camera_start")
 
+	// Opaque items: group them by mesh so the same buffers are bound back to back.
+	// A stable sort keeps submission order for equal items
+	slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Draw_Item) -> bool {
+		return uintptr(a.mesh.vertex_buffer) < uintptr(b.mesh.vertex_buffer)
+	})
+
+	// Transparent items: farthest first, so nearer ones blend over farther ones
+	slice.stable_sort_by(mbi.transparent_items[:], proc(a, b:Draw_Item) -> bool {
+		return a.depth > b.depth
+	})
+
+	for item in mbi.opaque_items {
+		set_render_state(.OPAQUE, .NONE, item.cull)
+		draw_item(item)
+	}
+
+	for item in mbi.transparent_items {
+		set_render_state(.TRANSPARENT, .ALPHA, item.cull)
+		draw_item(item)
+	}
+
+	clear(&mbi.opaque_items)
+	clear(&mbi.transparent_items)
+	mbi.camera_active = false
 }
 
 destroy_pipeline :: proc() {
 
+	delete(mbi.opaque_items)
+	delete(mbi.transparent_items)
+
 	mbi.draw_constants->Release()
 	mbi.frame_constants->Release()
 	
-	mbi.test_vertex_buffer->Release() // temporary
-	mbi.rasterizer_state->Release()
+	destroy_states()
+
 	
 	mbi.input_layout->Release()
 	mbi.pixel_shader_blob->Release()
@@ -280,46 +560,9 @@ destroy_pipeline :: proc() {
 	mbi.vertex_shader->Release()
 }
 
-
-// TEMPORARY test geometry, to prove the pipeline works. Replaced by Mesh in B6.
-create_test_triangle :: proc() {
-	// Counter-clockwise as seen from the front: top, bottom-left, bottom-right.
-	// For now these are clip-space positions: x and y from -1 to 1, depth from 0 to 1.
-	vertices := [3]Vertex {
-		{position = { 0,  1, 0}, uv = {0.5, 0}, color = {1, 0, 0, 1}}, // top, red
-		{position = {-1, -1, 0}, uv = {0, 1},   color = {0, 1, 0, 1}}, // bottom left, green
-		{position = { 1, -1, 0}, uv = {1, 1},   color = {0, 0, 1, 1}}, // bottom right, blue
-	}	
-
-	desc := d3d11.BUFFER_DESC {
-		ByteWidth = size_of(vertices),
-		Usage = .IMMUTABLE,
-		BindFlags = {.VERTEX_BUFFER},
-	}
-	data := d3d11.SUBRESOURCE_DATA{pSysMem = &vertices}
-
-	res := mbi.device->CreateBuffer(&desc, &data, &mbi.test_vertex_buffer)
-	ensure(win.SUCCEEDED(res), "Create test vertex buffer failed")
-}
-
-render_test_triangle :: proc(model:matrix[4,4]f32 = linalg.MATRIX4F32_IDENTITY, tint:[4]f32 = {1, 1, 1, 1}) {
-
-	set_draw_constants(model, tint)
-	
-	stride:u32 = size_of(Vertex)
-	offset:u32 = 0
-
-	constant_buffers := [2]^d3d11.IBuffer{mbi.frame_constants, mbi.draw_constants}
-
-	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
-	mbi.device_context->IASetInputLayout(mbi.input_layout)
-	mbi.device_context->IASetVertexBuffers(0, 1, &mbi.test_vertex_buffer, &stride, &offset)
-	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
-	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
-	mbi.device_context->PSSetShaderResources(0, 1, &mbi.white_texture_view)
-	mbi.device_context->PSSetSamplers(0, 1, &mbi.sampler)
-
-	mbi.device_context->Draw(3, 0)
+// Private fields
+@(private)
+set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
+	constants := Frame_Constants{view_projection = view_projection}
+	update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
 }

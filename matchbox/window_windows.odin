@@ -90,7 +90,15 @@ Matchbox_Info :: struct {
 	framebuffer_view: ^d3d11.IRenderTargetView,
 	sampler:^d3d11.ISamplerState,
 	white_texture:^d3d11.ITexture2D,
-	blend_state:^d3d11.IBlendState,
+
+	// Pipeline states; one is chosen per draw with set_render_state
+	depth_states:[Depth_Mode]^d3d11.IDepthStencilState,
+	blend_states:[Blend_Mode]^d3d11.IBlendState,
+	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
+	view:matrix[4,4]f32,
+	camera_active:bool,
+	opaque_items:[dynamic]Draw_Item,
+	transparent_items:[dynamic]Draw_Item,
 
 	white_texture_view:^d3d11.IShaderResourceView,
 
@@ -101,10 +109,10 @@ Matchbox_Info :: struct {
 	pixel_shader:^d3d11.IPixelShader,
 	pixel_shader_blob:^d3d11.IBlob,
 	input_layout:^d3d11.IInputLayout,
-	rasterizer_state:^d3d11.IRasterizerState,
 	test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
 	frame_constants:^d3d11.IBuffer,
 	draw_constants:^d3d11.IBuffer,
+	
 }
 
 mbi:Matchbox_Info
@@ -277,24 +285,24 @@ init :: proc(title:string, width:i32, height:i32) {
 	}
 
 
-	{
-		blend_desc:d3d11.BLEND_DESC
+	// {
+	// 	blend_desc:d3d11.BLEND_DESC
 
-		blend_desc.RenderTarget[0] = {
-			BlendEnable = true,
-			SrcBlend = .SRC_ALPHA,
-			DestBlend = .INV_SRC_ALPHA,
-			BlendOp = .ADD,
-			SrcBlendAlpha = .ONE,
-			DestBlendAlpha = .INV_SRC_ALPHA,
-			BlendOpAlpha = .ADD,
-			RenderTargetWriteMask = 0xF // R | G | B | A
-		}
+	// 	blend_desc.RenderTarget[0] = {
+	// 		BlendEnable = true,
+	// 		SrcBlend = .SRC_ALPHA,
+	// 		DestBlend = .INV_SRC_ALPHA,
+	// 		BlendOp = .ADD,
+	// 		SrcBlendAlpha = .ONE,
+	// 		DestBlendAlpha = .INV_SRC_ALPHA,
+	// 		BlendOpAlpha = .ADD,
+	// 		RenderTargetWriteMask = 0xF // R | G | B | A
+	// 	}
 
-		res := mbi.device->CreateBlendState(&blend_desc, &mbi.blend_state)
-		ensure(win.SUCCEEDED(res), "Create BlendState Failed")
+	// 	res := mbi.device->CreateBlendState(&blend_desc, &mbi.blend_state)
+	// 	ensure(win.SUCCEEDED(res), "Create BlendState Failed")
 		
-	}
+	// }
 
 	{
 		pixel := [4]u8{255, 255, 255, 255}
@@ -358,7 +366,7 @@ cleanup :: proc() {
 
 	// D3D11
 	destroy_pipeline()
-	mbi.blend_state->Release()
+	// mbi.blend_state->Release()
 	mbi.white_texture_view->Release()
 	mbi.white_texture->Release()
 	mbi.sampler->Release()

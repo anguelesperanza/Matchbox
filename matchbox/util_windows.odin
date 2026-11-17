@@ -90,4 +90,5 @@ get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
 destroy procedure based on arugment passed*/
 destroy :: proc {
 	destroy_audio,
+	destroy_mesh,
 }

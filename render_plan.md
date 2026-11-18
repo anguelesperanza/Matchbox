@@ -1063,7 +1063,18 @@ points, not two (decided 2026-11-18).
 - Known limit: in a screen pass cut-out items are drawn before blended ones, so
   a blended panel is always on top of a cut-out icon, whatever the submission order.
 
-**F2. Text.**
+**F2. Text.** Decided 2026-11-18: port the font code from `main` (`font.odin`,
+`text.odin`) and rework it onto this branch, for PC first. It bakes with
+`stb_truetype` (`vendor:stb/truetype`), as on main. **This may change: the
+`stb` dependency might be removed later** (a different baker, or a build-time
+atlas from an asset tool). Keep the stb calls inside `create_font` and the glyph
+loop of `draw_text_string`, and keep `Font` free of stb types where it can be, so
+that swap does not touch games.
+- Rework, not a copy: main draws glyphs through its own pipeline and shader; here
+  each glyph is a blended `Sprite` through the existing queue (no new shader), in
+  world units with +Y up, so text works in a world pass and in `screen_start`.
+- Leave behind from main for now: the size cache (`get_font`), the UI scale
+  (`sharp_face`) and the pixel-space `draw_text_ui`; the HUD pass replaces it.
 - Rasterise glyphs at final pixel size into a texture atlas, drawn as quads.
 - PC: `stb_truetype` (vendor) to bake the atlas.
 - 3DS: the system font (`fontGetSystemFont`, which is what citro2d text uses),

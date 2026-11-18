@@ -46,6 +46,10 @@ main :: proc() {
 	corner.source = {150, 150, 32, 32}
 	middle := corner
 
+	// Text: baked at 32 pixels, and the HUD is 400 / 12 screen pixels to the unit, so the
+	// glyphs are drawn at about the size they were baked at
+	font := mb.create_font(mb.DEFAULT_FONT_BYTES, 32, f32(mb.get_window_size()[1]) / 12)
+
 	scale := 4
 	fractional := false
 	follow_target := [2]f32{0, 0}
@@ -128,6 +132,10 @@ main :: proc() {
 			mb.screen_start()
 			mb.render_sprite(corner)
 			mb.render_sprite(middle)
+
+			top_left := mb.anchor_position(.TOP_LEFT, {3, -0.3})
+			mb.draw_text_wrapped(font, "Text in the HUD. It wraps at a width in world units.", top_left, 7)
+			mb.draw_text(font, 1 / dt, mb.anchor_position(.BOTTOM_LEFT, {0.5, 0.5}), {1, 1, 0, 1}) // frames per second
 			mb.screen_end()
 
 		mb.render_end()
@@ -135,6 +143,7 @@ main :: proc() {
 
 	mb.destroy_texture(cat_texture)
 	mb.destroy_animation_clip(sheet)
+	mb.destroy_font(font)
 	mb.destroy(jump_sound) // TODO: Audio not implemeted yet
 
 	mb.cleanup()

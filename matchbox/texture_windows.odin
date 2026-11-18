@@ -47,31 +47,7 @@ create_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (textur
 	ensure(img.depth == 8 && img.channels == 4, "Texutres must be 8 bits per channel")
 	
 
-	desc := d3d11.TEXTURE2D_DESC {
-		Width = cast(u32)img.width,
-		Height = cast(u32)img.height,
-		MipLevels = 1,
-		ArraySize = 1,
-		Format = .R8G8B8A8_UNORM,
-		Usage = .IMMUTABLE,
-		BindFlags = {.SHADER_RESOURCE},
-		SampleDesc = {Count = 1},
-	}
-
-	data := d3d11.SUBRESOURCE_DATA {
-		pSysMem = raw_data(img.pixels),
-		SysMemPitch = u32(img.width * 4), // bytes in one row
-	}
-
-	res := mbi.device->CreateTexture2D(&desc, &data, &texture.texture)
-	ensure(win.SUCCEEDED(res), "Create texture failed")
-
-	res = mbi.device->CreateShaderResourceView(texture.texture, nil, &texture.view)
-	ensure(win.SUCCEEDED(res), "Create texture view failed")
-
-	texture.filter = filter
-	texture.width = i32(img.width)
-	texture.height = i32(img.height)
+	texture = create_texture_from_pixels(raw_data(img.pixels), i32(img.width), i32(img.height), filter)
 
 	texture.pixels_per_unit = meta.pixels_per_unit
 	texture.columns = meta.columns
@@ -85,6 +61,47 @@ create_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (textur
 
 	return
 	
+}
+
+/*
+	Puts RGBA pixels (8 bits per channel, `width * 4` bytes a row) on the GPU.
+
+	For pictures made at run time, like a font atlas. There is no file, so no .meta:
+	one frame, one pixel per unit. The caller owns `pixels` and can free them afterwards.
+*/
+create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
+	desc := d3d11.TEXTURE2D_DESC {
+		Width = cast(u32)width,
+		Height = cast(u32)height,
+		MipLevels = 1,
+		ArraySize = 1,
+		Format = .R8G8B8A8_UNORM,
+		Usage = .IMMUTABLE,
+		BindFlags = {.SHADER_RESOURCE},
+		SampleDesc = {Count = 1},
+	}
+
+	data := d3d11.SUBRESOURCE_DATA {
+		pSysMem = pixels,
+		SysMemPitch = u32(width * 4), // bytes in one row
+	}
+
+	res := mbi.device->CreateTexture2D(&desc, &data, &texture.texture)
+	ensure(win.SUCCEEDED(res), "Create texture failed")
+
+	res = mbi.device->CreateShaderResourceView(texture.texture, nil, &texture.view)
+	ensure(win.SUCCEEDED(res), "Create texture view failed")
+
+	texture.filter = filter
+	texture.width = width
+	texture.height = height
+
+	meta := default_texture_meta()
+	texture.pixels_per_unit = meta.pixels_per_unit
+	texture.columns = meta.columns
+	texture.rows = meta.rows
+	texture.frame_count = meta.frame_count
+	return
 }
 
 /*Reads `name.meta` from next to the image. No file means the defaults: ppu 1, one frame*/

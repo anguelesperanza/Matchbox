@@ -186,3 +186,7 @@ It is vendored into Matchbox with changes:
 - Fixes needed to load files from tools like VRoid and Blender (embedded base64 data, sparse accessors, and morph targets being skipped). Each one is marked `MATCHBOX PATCH` in the source.
 
 See `matchbox/gltf2/README.md` for the full list.
+
+## Bitrimus font (`matchbox/fonts/Bitrimus.ttf`)
+
+The default font is Bitrimus by GGBotNet (CC0, public domain: no attribution is required). It is made for 16, 32, 64, 128 and 256 pixels, and it is embedded in the Matchbox executable with `#load`.

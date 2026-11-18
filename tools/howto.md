@@ -150,3 +150,43 @@ if errorlevel 1 goto :fail
 | ETC1 / ETC1A4 | ✅ | Not supported |
 | Cubemaps / skyboxes | ✅ | Not supported |
 | Windows / Linux / macOS | ✅ | Build with Odin for your host |
+
+
+---
+
+# sheetpack
+
+**sheetpack** packs a folder of same-sized frame images into one sprite sheet and writes the `.meta` file
+that Matchbox reads (pixels per unit, columns, rows). It can also write smaller sheets for the 3DS and the Vita
+with the same grid, so a frame number means the same frame on every target.
+
+## Building
+
+```bat
+odin build tools/sheetpack.odin -file -out:tools/sheetpack.exe -o:speed
+```
+
+## Usage
+
+```bat
+sheetpack -o assets/images/shia.png -ppu 256 -3ds assets/3ds/images/shia.png -3ds-frame 64 -list path\to\frames
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o file.png` | PC sheet to write (required). `file.meta` is written next to it |
+| `-ppu N` | Image pixels per world unit, written to the `.meta` (default 1) |
+| `-columns N` | Frames per row (default: `ceil(sqrt(frames))`) |
+| `-3ds file.png` | Also write a 3DS sheet. Needs `-3ds-frame` |
+| `-3ds-frame N` | Height in pixels of one frame on the 3DS. The 3DS `.meta` gets `ppu` scaled by the same ratio |
+| `-vita file.png` | Also write a Vita sheet. Needs `-vita-frame` |
+| `-vita-frame N` | Height in pixels of one frame on the Vita. Its `.meta` gets `ppu` scaled the same way |
+| `-list` | Print each frame's number and file name |
+| `-h` | Show help |
+
+- The Vita can also use the full-size PC sheet (up to 4096 pixels). `-vita` is for when its GPU memory gets tight.
+- Frames are the `.png` files in the folder, in natural order (`walk2` before `walk10`).
+- Every frame must be the same size and an 8-bit PNG.
+- The PC sheet can be at most 16384 pixels on a side, and the 3DS sheet at most 1024, and the Vita sheet at most 4096.
+- Do not write the output sheet into the frames folder, or the next run will pack it as a frame.
+- With the `LINEAR` filter, the edge of a frame can pick up a sliver of its neighbour. `POINT` does not.

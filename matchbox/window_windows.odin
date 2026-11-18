@@ -96,6 +96,8 @@ Matchbox_Info :: struct {
 	samplers:[Filter_Mode]^d3d11.ISamplerState,
 	view:matrix[4,4]f32,
 	camera_active:bool,
+	screen_pass:bool,
+	screen_height:f32,
 	opaque_items:[dynamic]Draw_Item,
 	transparent_items:[dynamic]Draw_Item,
 
@@ -136,6 +138,7 @@ init :: proc(title:string, width:i32, height:i32) {
 	mbi.window_size = {width, height, 0, 0}
 
 	rect:win.RECT = {left = 0, top = 0, right = width, bottom = height}
+	mbi.screen_height = DEFAULT_SCREEN_HEIGHT
 
 	// Create a handle to the instance of the application - The thing the OS uses to ID the executable
 	instance := win.HINSTANCE(win.GetModuleHandleW(nil)) // Create Instance

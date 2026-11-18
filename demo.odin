@@ -5,7 +5,7 @@ import "core:fmt"
 import "core:math"
 
 main :: proc() {
-	mb.init("Demo Window", 400, 400)
+	mb.init("Demo Window", 800, 800)
 
 	// TODO
 	jump_sound:mb.Audio = mb.load_audio(filepath = "path-to-audio")
@@ -40,6 +40,11 @@ main :: proc() {
 
 	shia := mb.create_animated_sprite_from_clip(idle, 1, true, 128)
 	shia.position = {2, -1.5, 2}
+
+	// HUD: 12 units tall at 16 pixels per unit, pinned to the corners of whatever shape the window is
+	corner := mb.create_sprite(cat_texture, {}, 16)
+	corner.source = {150, 150, 32, 32}
+	middle := corner
 
 	scale := 4
 	fractional := false
@@ -103,6 +108,10 @@ main :: proc() {
 			shia.tint = {1, 1, 1, 1}
 		}
 
+		// The HUD follows the window: top left, bottom right and top centre
+		corner.position = mb.anchor_position(.TOP_LEFT, {1.5, -1.5})
+		middle.position = mb.anchor_position(.BOTTOM_RIGHT, {-1.5, 1.5})
+
 		mover.position = {math.cos(angle * 0.3) * 2.5, math.sin(angle * 0.4) * 1.5, 1}
 
 		mb.render_start()
@@ -115,6 +124,11 @@ main :: proc() {
 			mb.render_animated_sprite(shia)
 
 			mb.camera_end()
+
+			mb.screen_start()
+			mb.render_sprite(corner)
+			mb.render_sprite(middle)
+			mb.screen_end()
 
 		mb.render_end()
 	}

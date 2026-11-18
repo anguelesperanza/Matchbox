@@ -10,6 +10,8 @@ Updated 2026-11-14 (later): **the Vita is now a core target.** Targets are PC
 specifics are settled up front (section "The three targets", step A0b, and the
 new Phase V), and every later step is "done" only when it works on all three.
 The old Phase H (Vita, late) is gone; the hard-float phase is now Phase H.
+Updated 2026-11-18: D1 to D3, E1 to E7 (PC) and F1 are done on PC. The handheld
+halves of D4, E7 and F1 wait for the handheld phases (A0/A0b, C, V).
 
 ## The decision
 
@@ -777,25 +779,28 @@ without `psp2cgc`, and the PC and 3DS scenes still draw.
 
 ## Phase D: textures and assets
 
-**D1. `Texture` as its own resource.**
+**D1. `Texture` as its own resource.** DONE on PC.
 - `create_texture(filename) -> Texture` and `destroy_texture`.
 - A filter per texture: point or linear. This is the old roadmap item 1.5.
 - 3DS: keep the heap-allocated `^c3d.Tex`, because the address must stay
   stable.
 
-**D2. Sidecar metadata.**
+**D2. Sidecar metadata.** DONE on PC.
 - A small text file next to an image: `name.meta` with `ppu`, `columns`,
   `rows`.
 - Missing means PPU 1 and one frame.
 - 3DS: the build copies `.meta` files into romfs next to the `.t3x`.
 - Vita: `assets/` is packed into the `.vpk` as `app0:/assets/...`, so the PNG
-  and its `.meta` travel together. The Vita uses the full-size shared sheet
-  (textures up to 4096px), so it needs no third output.
+  and its `.meta` travel together. The Vita can use the full-size shared sheet
+  (textures up to 4096px), or a smaller one of its own (see D3).
 
-**D3. Sheet-packing tool** (in `tools/`, like `tritex`).
+**D3. Sheet-packing tool** (in `tools/`, like `tritex`). DONE on PC.
 - Packs a folder of frames (natural sort) into one grid PNG and writes the
   `.meta`.
-- With a flag, also writes a downscaled copy into `assets/3ds/images/`.
+- With `-3ds` / `-3ds-frame`, also writes a downscaled copy into
+  `assets/3ds/images/` (limit 1024px); with `-vita` / `-vita-frame`, one into
+  `assets/vita/images/` (limit 4096px). Each smaller sheet gets its own `.meta`
+  with a scaled `ppu`, so a sprite is the same world size on every target.
 - Done when: shia-test's 169 256px frames become a PC sheet (13x13, 3328px)
   and a 3DS sheet at 64px (832px, which fits in 1024).
 
@@ -808,7 +813,7 @@ in both `3ds_build.bat` and `get_asset`.
 
 ## Phase E: 2D as a projection (2D milestone, part 1)
 
-**E1. New `Sprite`.**
+**E1. New `Sprite`.** DONE on PC.
 - A texture, a frame index (or an internal source rect), and
   `position: [3]f32`. 2D helpers set x and y; z is the layer.
 - `rotation` (radians, about Z), `scale`, `tint`, `flip_x`, `flip_y`, `pivot`.
@@ -816,13 +821,13 @@ in both `3ds_build.bat` and `get_asset`.
 - `render_sprite` pushes a quad into the queue.
 - On the 3DS, citro2d is no longer used for sprites.
 
-**E2. 2D camera.**
+**E2. 2D camera.** DONE on PC.
 - `camera_create_2d(view_height)` with `position.xy` and `zoom`, where zoom
   scales `view_height`.
 - Port `camera_follow` and `get_mouse_world_pos` from main, adapted to the
   camera.
 
-**E3. Layers and sorting rule** (write this down in the docs).
+**E3. Layers and sorting rule** (write this down in the docs). DONE on PC.
 - Opaque and cut-out sprites use depth.
 - Semi-transparent sprites sort by z, then by submission order.
 - Cut-out means the shader does `discard` below alpha 0.5. The 3DS uses the
@@ -830,17 +835,17 @@ in both `3ds_build.bat` and `get_asset`.
 - Recommend cut-out as the default for sprites, because it is cheap and
   sort-free.
 
-**E4. Shapes as world geometry.**
+**E4. Shapes as world geometry.** DONE on PC.
 - `render_triangle`, `render_rectangle`, `render_line` (thickness in units)
   and `render_circle` produce quads or triangles into the queue.
 - Delete the pixel-space `render_triangle_points`.
 
-**E5. Pixel snapping** (ortho only, opt-in).
+**E5. Pixel snapping** (ortho only, opt-in). DONE on PC.
 - Snap the camera position and quad corners to whole screen pixels at the
   current scale.
 - Combined with `integer_scale`, this gives clean pixel art at 4x and 2x.
 
-**E6. Animation port.**
+**E6. Animation port.** DONE on PC.
 - Implement the shia-test minimum set on the new `Sprite`, with frames by
   index:
   - `animation_range`, inclusive
@@ -852,9 +857,13 @@ in both `3ds_build.bat` and `get_asset`.
   - `flip_x`
   - one destroy for the sheet
 - Fix the flip bug from main's `seat_first_frame`.
-- Leave out `offset`, `replay`, progress, frame-passed and `sprite_set_frame`.
+- `Animation_Clip.offset` (image pixels, mirrored by `flip_x` / `flip_y`) was
+  left out at first and added after E7: some of shia-test's attack frames are
+  drawn off the character's feet, and the offset puts them back.
+- Still left out: `replay`, progress, frame-passed and `sprite_set_frame`.
 
-**E7. Acceptance test: port shia-test.**
+**E7. Acceptance test: port shia-test.** PC half DONE (`examples/shia-test`, run with
+`odin run examples/shia-test`); the 3DS and Vita halves wait for their phases.
 - PC first, with y flipped to +Y up and positions in units.
 - Then the 3DS with the downscaled sheet; layout changes there are expected.
 - Then the Vita with the full-size sheet; the 960x544 surface should show it
@@ -1038,12 +1047,21 @@ subset).
 
 ## Phase F: screen space, text, input (2D milestone, part 2)
 
-**F1. HUD camera.**
-- `screen_start()` / `screen_end()` (a second orthographic camera, same
-  `_start` / `_end` naming as `camera_start`) switch the queue to screen space
-  in design units, with depth off.
-- Add `get_visible_rect()` and `anchor_position(anchor, offset)`.
-- Choose the default fit policy here, and the overscan cap value.
+**F1. HUD camera.** DONE on PC (2026-11-18). Built as a screen camera that goes
+through the one `camera_start` / `camera_end` pair, with `screen_start()` /
+`screen_end()` as one-line wrappers, so each handheld ports one pair of entry
+points, not two (decided 2026-11-18).
+- `Camera.screen` and `create_screen_camera(view_height)`. A screen camera draws
+  with depth off, in submission order (the opaque texture sort is skipped).
+- `set_screen_height(units)` (default 12, a placeholder), `get_visible_rect()`
+  and `anchor_position(anchor, offset)`, on top of the shared pure maths
+  `camera_visible_rect` and `camera_anchor_position`, which have tests.
+- A second HUD (the 3DS bottom screen, F4) is another screen camera passed to
+  `camera_start`.
+- Not decided yet: the default fit policy and the overscan cap. F1 shipped
+  without them: the HUD fills the window and follows its shape. They come with B8.
+- Known limit: in a screen pass cut-out items are drawn before blended ones, so
+  a blended panel is always on top of a cut-out icon, whatever the submission order.
 
 **F2. Text.**
 - Rasterise glyphs at final pixel size into a texture atlas, drawn as quads.
@@ -1250,6 +1268,6 @@ above all the same.
 - [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).
 - [ ] Sprite pivot convention (recommended: `{0.5, 0.5}` = centre).
 - [ ] Sprites default to cut-out or blended (recommended: cut-out).
-- [ ] Default fit policy and the overscan cap (at F1).
+- [ ] Default fit policy and the overscan cap (F1 shipped without them; decide with B8).
 - [ ] Text approach on the 3DS (before E1).
 - [ ] Bottom screen on PC (at F4).

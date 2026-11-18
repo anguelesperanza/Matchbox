@@ -522,11 +522,7 @@ camera_start :: proc(cam:Camera) {
 	ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
 	window :=[2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
-
-	aspect:f32 = 1
-	if window.y > 0 {
-		aspect = window.x / window.y
-	}
+	aspect := get_window_aspect()
 
 	// With pixel_snap, draw through a copy moved onto the pixel grid. render_sprite reads
 	// pixel_scale to snap sprite edges the same way
@@ -535,6 +531,7 @@ camera_start :: proc(cam:Camera) {
 
 	mbi.view = camera_view_matrix(used) // render_mesh needs it to sort transparent items
 	mbi.camera_active = true
+	mbi.screen_pass = cam.screen
 
 	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
 	view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(used, aspect) * mbi.view
@@ -545,14 +542,25 @@ camera_start :: proc(cam:Camera) {
 camera_end :: proc() {
 	ensure(mbi.camera_active == true, "camera_end called without camera_start")
 
+	// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
+	depth_opaque := Depth_Mode.OPAQUE
+	depth_transparent := Depth_Mode.TRANSPARENT
+	if mbi.screen_pass == true {
+		depth_opaque = .DISABLED
+		depth_transparent = .DISABLED
+	}
+
 	// Opaque items: group them by mesh so the same buffers are bound back to back.
-	// A stable sort keeps submission order for equal items
-	slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Draw_Item) -> bool {
-		if a.texture.view != b.texture.view {
-			return uintptr(a.texture.view) < uintptr(b.texture.view)
-		}
-		return uintptr(a.mesh.vertex_buffer) < uintptr(b.mesh.vertex_buffer)
-	})
+	// A stable sort keeps submission order for equal items. A screen pass skips it:
+	// with depth off, submission order is the paint order
+	if mbi.screen_pass == false {
+		slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Draw_Item) -> bool {
+			if a.texture.view != b.texture.view {
+				return uintptr(a.texture.view) < uintptr(b.texture.view)
+			}
+			return uintptr(a.mesh.vertex_buffer) < uintptr(b.mesh.vertex_buffer)
+		})
+	}
 
 	// Transparent items: farthest first, so nearer ones blend over farther ones
 	slice.stable_sort_by(mbi.transparent_items[:], proc(a, b:Draw_Item) -> bool {
@@ -560,18 +568,19 @@ camera_end :: proc() {
 	})
 
 	for item in mbi.opaque_items {
-		set_render_state(.OPAQUE, .NONE, item.cull)
+		set_render_state(depth_opaque, .NONE, item.cull)
 		draw_item(item)
 	}
 
 	for item in mbi.transparent_items {
-		set_render_state(.TRANSPARENT, .ALPHA, item.cull)
+		set_render_state(depth_transparent, .ALPHA, item.cull)
 		draw_item(item)
 	}
 
 	clear(&mbi.opaque_items)
 	clear(&mbi.transparent_items)
 	mbi.camera_active = false
+	mbi.screen_pass = false
 }
 
 @(private)

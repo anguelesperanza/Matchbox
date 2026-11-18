@@ -35,7 +35,10 @@ Camera :: struct {
 	// orthographic
 	near:f32,
 	far:f32,
-	projection:Projection, 
+	projection:Projection,
+
+	// HUD
+	screen:bool,
 }
 
 
@@ -170,4 +173,63 @@ camera_snapped :: proc(camera:Camera, window:[2]f32) -> Camera {
 camera_set_pixel_scale :: proc(cam:^Camera, pixels_per_unit:f32, scale:f32, window_height:f32) {
 	cam.zoom = 1
 	cam.view_height = window_height / (pixels_per_unit * scale)
+}
+
+/*A HUD camera: like a 2D camera, `view_height` units tall, but drawn with depth off.
+Use it through screen_start, or pass it to camera_start*/
+create_screen_camera :: proc(view_height:f32) -> Camera {
+	cam := create_camera_2d(view_height)
+	cam.screen = true
+	return cam
+}
+
+/*Where on the visible rectangle something is pinned*/
+Anchor :: enum {
+	TOP_LEFT,
+	TOP,
+	TOP_RIGHT,
+	LEFT,
+	CENTER,
+	RIGHT,
+	BOTTOM_LEFT,
+	BOTTOM,
+	BOTTOM_RIGHT,
+}
+
+/*The corners of what an orthographic camera sees, in world units, for a window `aspect` (width / height) wide.
+`min` is the bottom left corner and `max` the top right*/
+camera_visible_rect :: proc(cam:Camera, aspect:f32) -> (min, max:[2]f32) {
+	half_height := camera_view_height(cam) / 2
+	half_width := half_height * aspect
+
+	min = {cam.position.x - half_width, cam.position.y - half_height}
+	max = {cam.position.x + half_width, cam.position.y + half_height}
+	return
+}
+
+/*A point on the camera's visible rectangle, pinned to `anchor` and then moved by `offset`
+(plain addition, +Y up, so a TOP_LEFT offset of {1, -1} sits one unit in from the corner).
+z is 0; set it afterwards to put things in front of or behind each other*/
+camera_anchor_position :: proc(cam:Camera, aspect:f32, anchor:Anchor, offset:[2]f32 = {}) -> [3]f32 {
+	min, max := camera_visible_rect(cam, aspect)
+
+	// How far across (x) and up (y) the rectangle the anchor sits, 0 to 1
+	fraction:[2]f32
+	switch anchor {
+	case .TOP_LEFT:     fraction = {0, 1}
+	case .TOP:          fraction = {0.5, 1}
+	case .TOP_RIGHT:    fraction = {1, 1}
+	case .LEFT:         fraction = {0, 0.5}
+	case .CENTER:       fraction = {0.5, 0.5}
+	case .RIGHT:        fraction = {1, 0.5}
+	case .BOTTOM_LEFT:  fraction = {0, 0}
+	case .BOTTOM:       fraction = {0.5, 0}
+	case .BOTTOM_RIGHT: fraction = {1, 0}
+	}
+
+	return {
+		min.x + (max.x - min.x) * fraction.x + offset.x,
+		min.y + (max.y - min.y) * fraction.y + offset.y,
+		0,
+	}
 }

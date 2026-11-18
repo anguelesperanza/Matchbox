@@ -22,7 +22,8 @@ Sprite :: struct {
 	flip_x:bool,
 	flip_y:bool,
 	pixels_per_unit:f32, // how many image pixels make one world unit
-	source:[4]f32, // x, y, width, height in pixels from the image's top left; all zero = whole image
+	frame:int, // which frame of the texture to show (see the texture's .meta file). 0 for a plain image
+	source:[4]f32, // x, y, width, height in pixels from the image's top left. All zero = use `frame`
 }
 
 Sprite_Mode :: enum {
@@ -30,14 +31,15 @@ Sprite_Mode :: enum {
 	BLENDED, // smooth see-through sorted by z
 }
 
-create_sprite :: proc(texture:Texture, position:[3]f32 = {}, pixels_per_unit:f32 = 100) -> Sprite {
+/*`pixels_per_unit` of 0 uses the texture's own (from its .meta file, or 1 without one)*/
+create_sprite :: proc(texture:Texture, position:[3]f32 = {}, pixels_per_unit:f32 = 0) -> Sprite {
 	return Sprite {
 		texture = texture,
 		position = position,
 		scale = {1, 1},
 		tint = {1, 1, 1, 1},
 		pivot = {0.5, 0.5},
-		pixels_per_unit = pixels_per_unit,
+		pixels_per_unit = pixels_per_unit if pixels_per_unit > 0 else texture.pixels_per_unit,
 	}
 }
 
@@ -49,7 +51,7 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 	// Which part of the image to show, in pixels
 	source := sprite.source
 	if source[2] <= 0 || source[3] <= 0 {
-		source = {0, 0, f32(sprite.texture.width), f32(sprite.texture.height)}
+		source = texture_frame_rect(sprite.texture, sprite.frame)
 	}
 
 	// As 0..1 texture coordinates. v = 0 is the top of the image

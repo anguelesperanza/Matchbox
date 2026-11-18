@@ -42,3 +42,9 @@ assets/*
 romfs/*
 3ds_adv_prog_man.html
 *.exe
+
+# The shia-test sprite sheets (made by tools/sheetpack from the frames). Hundreds of
+# megabytes of art in total, so they stay out of git. Regenerate them with sheetpack.
+shia.png
+shia.meta
+shaia-complete/

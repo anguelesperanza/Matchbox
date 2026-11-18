@@ -27,6 +27,20 @@ main :: proc() {
 	mover := mb.create_sprite(cat_texture, {0, 0, 1}, 16)
 	mover.source = {234, 234, 32, 32}
 
+	// The shia sheet from tools/sheetpack. Its shia.meta gives 169 frames and 256 pixels per unit,
+	// so a frame is 1 unit wide. Asking for 128 below makes it 2 units wide
+	shia_texture := mb.create_texture("shia.png", .POINT)
+	sheet := mb.create_animation_clip(shia_texture, 0.1)
+
+	// Frame numbers from shia-test's anim_list.txt
+	idle := mb.animation_range(sheet, 67, 74)
+	walk := mb.animation_range(sheet, 95, 106)
+	run := mb.animation_range(sheet, 113, 118, 0.07)
+	attack := mb.animation_range(sheet, 0, 5)
+
+	shia := mb.create_animated_sprite_from_clip(idle, 1, true, 128)
+	shia.position = {2, -1.5, 2}
+
 	scale := 4
 	fractional := false
 	follow_target := [2]f32{0, 0}
@@ -65,6 +79,30 @@ main :: proc() {
 		}
 		mb.camera_follow(&camera, follow_target, 3, dt)
 
+		// 1 idle, 2 walk, 3 run: switching every frame is safe, it only restarts on a change
+		if mb.is_key_pressed(._1) do mb.switch_animation(&shia, idle)
+		if mb.is_key_pressed(._2) do mb.switch_animation(&shia, walk)
+		if mb.is_key_pressed(._3) do mb.switch_animation(&shia, run)
+
+		// 4 plays the attack once, then goes back to idle by itself
+		if mb.is_key_pressed(._4) {
+			mb.switch_animation(&shia, attack, looping = false)
+			mb.queue_animation(&shia, idle, true)
+		}
+
+		// F flips, P pauses
+		if mb.is_key_pressed(.F) do shia.flip_x = shia.flip_x == false
+		if mb.is_key_pressed(.P) do shia.playing = shia.playing == false
+
+		mb.update_animation(&shia, dt)
+
+		// Frames 1 to 3 of the attack are its "cancel window"
+		if mb.is_animation_in_window(shia, 1, 3) && shia.clip.frame_start == attack.frame_start {
+			shia.tint = {1, 0.6, 0.6, 1}
+		} else {
+			shia.tint = {1, 1, 1, 1}
+		}
+
 		mover.position = {math.cos(angle * 0.3) * 2.5, math.sin(angle * 0.4) * 1.5, 1}
 
 		mb.render_start()
@@ -74,6 +112,7 @@ main :: proc() {
 
 			mb.render_sprite(face)
 			mb.render_sprite(mover)
+			mb.render_animated_sprite(shia)
 
 			mb.camera_end()
 
@@ -81,6 +120,7 @@ main :: proc() {
 	}
 
 	mb.destroy_texture(cat_texture)
+	mb.destroy_animation_clip(sheet)
 	mb.destroy(jump_sound) // TODO: Audio not implemeted yet
 
 	mb.cleanup()

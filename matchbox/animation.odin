@@ -42,6 +42,12 @@ Animation_Clip :: struct {
 	frame_start:int, // first frame of the clip
 	frame_count:int, // how many frames, at least 1
 	seconds_per_frame:f32, // 0 = frozen on the first frame
+
+	// Moves the drawing, not the sprite: image pixels, +x right and +y up, in the
+	// sheet's own pixels, so it scales with the sprite. For art that is drawn off
+	// its anchor -- a crouch attack whose frames sit 33 pixels left of the crouch
+	// it returns to would jump back when it ends. Mirrored with `flip_x`
+	offset:[2]f32,
 }
 
 // A clip waiting its turn, with the `looping` it should start under. They travel
@@ -152,6 +158,7 @@ switch_animation :: proc(sprite:^Animated_Sprite, clip:Animation_Clip, looping :
 
 	if same == true {
 		sprite.clip.seconds_per_frame = clip.seconds_per_frame
+		sprite.clip.offset = clip.offset
 		sprite.looping = looping
 		return
 	}
@@ -267,8 +274,24 @@ is_animation_in_window :: proc(sprite:Animated_Sprite, first, last:int) -> bool 
 	return frame >= first && frame <= last
 }
 
+/*How far the clip's `offset` moves the drawing, in world units. The offset is in
+image pixels, so it scales with `scale`; a mirrored sprite is moved the other way,
+because the art it describes is mirrored too*/
+animation_draw_offset :: proc(sprite:Animated_Sprite) -> [2]f32 {
+	if sprite.pixels_per_unit <= 0 do return {}
+
+	shift := sprite.clip.offset / sprite.pixels_per_unit * sprite.scale
+	if sprite.flip_x == true do shift.x = -shift.x
+	if sprite.flip_y == true do shift.y = -shift.y
+	return shift
+}
+
 /*Draws an animated sprite. Same as render_sprite; the flip is read at draw time, so
-it takes effect on the very next draw*/
+it takes effect on the very next draw. The clip's `offset` is applied here*/
 render_animated_sprite :: proc(sprite:Animated_Sprite, mode:Sprite_Mode = .CUTOUT) {
-	render_sprite(sprite.sprite, mode)
+	draw := sprite.sprite
+	shift := animation_draw_offset(sprite)
+	draw.position.x += shift.x
+	draw.position.y += shift.y
+	render_sprite(draw, mode)
 }

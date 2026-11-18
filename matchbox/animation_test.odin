@@ -153,6 +153,39 @@ frozen_clip_does_not_move :: proc(t:^testing.T) {
 }
 
 @(test)
+offset_scales_with_the_sprite_and_mirrors_with_flip :: proc(t:^testing.T) {
+	clip := animation_range(test_sheet(), 0, 3)
+	clip.offset = {32, 8}
+	sprite := create_animated_sprite_from_clip(clip, 2, true, 64) // 64 pixels per unit, twice as big
+
+	shift := animation_draw_offset(sprite)
+	testing.expect_value(t, shift.x, 1) // 32 pixels = half a unit, doubled by the scale
+	testing.expect_value(t, shift.y, 0.25)
+
+	sprite.flip_x = true
+	shift = animation_draw_offset(sprite)
+	testing.expect_value(t, shift.x, -1)
+	testing.expect_value(t, shift.y, 0.25)
+}
+
+@(test)
+no_offset_moves_nothing :: proc(t:^testing.T) {
+	sprite := create_animated_sprite_from_clip(test_sheet())
+	testing.expect_value(t, animation_draw_offset(sprite), [2]f32{0, 0})
+}
+
+@(test)
+switching_to_the_same_clip_updates_the_offset :: proc(t:^testing.T) {
+	clip := animation_range(test_sheet(), 4, 8)
+	sprite := create_animated_sprite_from_clip(clip)
+
+	nudged := clip
+	nudged.offset = {5, 0}
+	switch_animation(&sprite, nudged)
+	testing.expect_value(t, sprite.clip.offset, [2]f32{5, 0})
+}
+
+@(test)
 window_is_relative_to_the_clip :: proc(t:^testing.T) {
 	sprite := create_animated_sprite_from_clip(animation_range(test_sheet(), 10, 15))
 	update_animation(&sprite, 0.25) // frame 12, which is frame 2 of the clip

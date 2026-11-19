@@ -1,0 +1,11 @@
+error[MBS-E7]: the loop bound is not a constant
+  --> e07_loop_bound.mbs:27:15
+   |
+27 |     for i in 0..<n {
+   |                  ^ not known when the shader is built
+   |
+   = note: a loop runs a count that is known when mbsc runs: a constant, or an integer uniform
+   = help: use a constant (`4`, or `COUNT :: 4`), or declare `@(uniform) count: i32`
+   = more: docs/shader_errors.md#mbs-e7
+
+mbsc: e07_loop_bound.mbs: 1 error(s)

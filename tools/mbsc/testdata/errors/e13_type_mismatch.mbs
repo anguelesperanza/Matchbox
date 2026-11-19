@@ -1,0 +1,32 @@
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv:       [2]f32 `attr:"texcoord"`,
+	color:    [4]f32 `attr:"color"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv:       [2]f32 `out:"texcoord0"`,
+	color:    [4]f32 `out:"color"`,
+}
+
+@(uniform = .FRAME) frame: struct { view_projection: matrix[4, 4]f32 }
+@(uniform = .DRAW) draw: struct {
+	model:        matrix[4, 4]f32,
+	tint:         [4]f32,
+	uv_rect:      [4]f32,
+	alpha_cutoff: f32,
+}
+
+@(texture = 0) tex: Texture2D
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	output.position = frame.view_projection * draw.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.uv = input.position
+	return output
+}
+
+fragment_main :: proc(v: Varying) -> [4]f32 {
+	return sample(tex, v.uv) * v.color
+}

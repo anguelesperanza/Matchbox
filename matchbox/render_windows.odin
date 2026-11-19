@@ -18,12 +18,15 @@ import win "core:sys/windows"
 import "core:mem"
 import "core:math/linalg"
 import "core:slice"
+import "core:strings"
 
 import "vendor:directx/d3d11"
 import "vendor:directx/d3d_compiler"
 
 Frame_Constants :: struct {
 	view_projection:matrix[4,4]f32,
+	time:f32, // seconds; the shader language's frame.time. Not filled in yet, so it is 0
+	_pad:[3]f32,
 }
 
 Draw_Constants :: struct {
@@ -156,7 +159,7 @@ draw_item :: proc(item:Draw_Item) {
 	stride:u32 = size_of(Vertex)
 	offset:u32 = 0
 
-	constant_buffers := [2]^d3d11.IBuffer{mbi.frame_constants, mbi.draw_constants}
+	upload_game_constants()
 
 	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
 	mbi.device_context->IASetInputLayout(mbi.input_layout)
@@ -164,18 +167,27 @@ draw_item :: proc(item:Draw_Item) {
 	mbi.device_context->IASetIndexBuffer(item.mesh.index_buffer, .R16_UINT, 0)
 
 	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
-
-	mbi.device_context->VSSetConstantBuffers(0, 2, &constant_buffers[0])
-	mbi.device_context->PSSetConstantBuffers(0, 2, &constant_buffers[0])
-	
 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
 
-	texture_view := item.texture.view
-	if texture_view == nil do texture_view = mbi.white_texture_view
+	// Each constant buffer goes to the register the shader's reflection file names
+	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .DRAW = mbi.draw_constants, .GAME = mbi.game_constants}
+	for block, kind in mbi.reflection.blocks {
+		if block.present == false do continue
+		buffer := buffers[kind]
+		mbi.device_context->VSSetConstantBuffers(u32(block.register), 1, &buffer)
+		mbi.device_context->PSSetConstantBuffers(u32(block.register), 1, &buffer)
+	}
 
-	mbi.device_context->PSSetShaderResources(0, 1, &texture_view)
-	mbi.device_context->PSSetSamplers(0, 1, &mbi.samplers[item.texture.filter])
+	// The draw's texture goes to the first texture the shader declares; any others get plain white, which leaves
+	// the colour as it is when it is multiplied in
+	for texture, index in mbi.reflection.textures {
+		texture_view := item.texture.view if index == 0 else nil
+		if texture_view == nil do texture_view = mbi.white_texture_view
+		mbi.device_context->PSSetShaderResources(u32(texture.slot), 1, &texture_view)
+	}
+	if mbi.reflection.has_sampler {
+		mbi.device_context->PSSetSamplers(u32(mbi.reflection.sampler), 1, &mbi.samplers[item.texture.filter])
+	}
 
 	mbi.device_context->DrawIndexed(item.mesh.index_count, 0, 0)
 }
@@ -339,15 +351,36 @@ update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 /*Sets the combined view * projection matrix used by everything drawn until it is called again*/
 @(private)
 set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
-	constants := Frame_Constants{view_projection = view_projection}
-	update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
+	now:win.LARGE_INTEGER
+	win.QueryPerformanceCounter(&now)
+	seconds := f32(f64(now - timestamp.start_counter) / f64(timestamp.frequency))
+
+	constants := Frame_Constants{view_projection = view_projection, time = seconds}
+	if mbi.frame_constants != nil do update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
+}
+
+/*Sets a uniform the shader declares with `@(uniform)`, by its name. The value stays until it is set again.
+`value` has the uniform's type: 0.5 for an f32, a [3]f32 for a [3]f32, a matrix[4, 4]f32 for a matrix, and a slice or
+array with every element for an array uniform. A struct's field is named as in the shader: "key_light.strength"*/
+set_shader_value :: proc(name:string, value:any) {
+	ok, message := write_shader_value(&mbi.reflection, mbi.game_shadow, name, value)
+	ensure(ok, message)
+	mbi.game_dirty = true
+}
+
+/*Copies the game's uniforms to the GPU if one was set since the last draw*/
+@(private)
+upload_game_constants :: proc() {
+	if mbi.game_dirty == false do return
+	update_buffer(mbi.game_constants, raw_data(mbi.game_shadow), len(mbi.game_shadow))
+	mbi.game_dirty = false
 }
 
 /*Sets the model matrix, tint, texture region and alpha cut-off used by the next draw*/
 @(private)
 set_draw_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32, uv_rect:[4]f32, alpha_cutoff:f32) {
 	constants := Draw_Constants{model = model, tint = tint, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
-	update_buffer(mbi.draw_constants, &constants, size_of(Draw_Constants))
+	if mbi.draw_constants != nil do update_buffer(mbi.draw_constants, &constants, size_of(Draw_Constants))
 }
 
 /*Starts a frame. Call once per frame before drawing anything*/
@@ -436,7 +469,7 @@ compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) 
 	res := d3d_compiler.Compile(
 		pSrcData = raw_data(mbi.shader_src),
 		SrcDataSize = uint(len(mbi.shader_src)),
-		pSourceName = "shaders/mesh.hlsl", // for debug messages
+		pSourceName = "shaders/mesh.pc.hlsl", // for debug messages
 		pDefines = nil,
 		pInclude = nil,
 		pEntrypoint = entry_point,
@@ -458,10 +491,19 @@ compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) 
 /*Compiles the shaders and creates the input layout, constant buffers and render states*/
 @(private)
 create_pipeline :: proc() {
-	mbi.shader_src = #load("shaders/mesh.hlsl")
+	// Generated by mbsc from shaders/mesh.mbs; see tools/mbsc and docs/shader_hlsl.md
+	mbi.shader_src = #load("shaders/mesh.pc.hlsl")
+
+	// ...together with its reflection file, which says where everything the shader needs is bound
+	reflection_ok:bool
+	reflection_message:string
+	mbi.reflection, reflection_ok, reflection_message = parse_reflection(#load("shaders/mesh.pc.refl", string))
+	ensure(reflection_ok, reflection_message)
+	check_message := check_engine_blocks(&mbi.reflection)
+	ensure(check_message == "", check_message)
 
 	compile_shader("vertex_main", "vs_5_0", &mbi.vertex_shader_blob)
-	compile_shader("pixel_main", "ps_5_0", &mbi.pixel_shader_blob)
+	compile_shader("fragment_main", "ps_5_0", &mbi.pixel_shader_blob)
 
 	res := mbi.device->CreateVertexShader(
 		pShaderBytecode = mbi.vertex_shader_blob->GetBufferPointer(),
@@ -480,25 +522,17 @@ create_pipeline :: proc() {
 	)
 	ensure(win.SUCCEEDED(res), "Pixel shader creation failed")
 
-	input_element_descs := []d3d11.INPUT_ELEMENT_DESC {
-		{
-			SemanticName = "position",
-			Format = .R32G32B32_FLOAT,
-			AlignedByteOffset = 0,
+	// The input layout is what the shader reads, each attribute found in the engine's Vertex
+	input_element_descs := make([]d3d11.INPUT_ELEMENT_DESC, len(mbi.reflection.attributes), context.temp_allocator)
+	for attribute, index in mbi.reflection.attributes {
+		found, message := find_vertex_attribute(attribute)
+		ensure(message == "", message)
+		input_element_descs[index] = {
+			SemanticName = strings.clone_to_cstring(attribute.name, context.temp_allocator),
+			Format = found.format,
+			AlignedByteOffset = found.offset,
 			InputSlotClass = .VERTEX_DATA,
-		},
-		{
-			SemanticName = "texcoord",
-			Format = .R32G32_FLOAT,
-			AlignedByteOffset = d3d11.APPEND_ALIGNED_ELEMENT,
-			InputSlotClass = .VERTEX_DATA,
-		},
-		{
-			SemanticName = "color",
-			Format = .R32G32B32A32_FLOAT,
-			AlignedByteOffset = d3d11.APPEND_ALIGNED_ELEMENT,
-			InputSlotClass = .VERTEX_DATA,
-		},
+		}
 	}
 
 	res = mbi.device->CreateInputLayout(
@@ -511,8 +545,15 @@ create_pipeline :: proc() {
 
 	ensure(win.SUCCEEDED(res), "Input layout creation failed")
 
-	mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
-	mbi.draw_constants = create_constant_buffer(size_of(Draw_Constants))
+	// The engine's blocks are the size of its structs (check_engine_blocks made sure the shader agrees); the game's
+	// block is as big as the shader says, and starts out as zeros
+	if mbi.reflection.blocks[.FRAME].present do mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
+	if mbi.reflection.blocks[.DRAW].present do mbi.draw_constants = create_constant_buffer(size_of(Draw_Constants))
+	if mbi.reflection.blocks[.GAME].present {
+		mbi.game_shadow = make([]byte, mbi.reflection.blocks[.GAME].size)
+		mbi.game_constants = create_constant_buffer(u32(len(mbi.game_shadow)))
+		mbi.game_dirty = true
+	}
 
 	create_states()
 }
@@ -598,8 +639,11 @@ destroy_pipeline :: proc() {
 	delete(mbi.opaque_items)
 	delete(mbi.transparent_items)
 
-	mbi.draw_constants->Release()
-	mbi.frame_constants->Release()
+	if mbi.game_constants != nil do mbi.game_constants->Release()
+	if mbi.draw_constants != nil do mbi.draw_constants->Release()
+	if mbi.frame_constants != nil do mbi.frame_constants->Release()
+	delete(mbi.game_shadow)
+	destroy_reflection(&mbi.reflection)
 
 	destroy_states()
 

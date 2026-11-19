@@ -1,0 +1,11 @@
+error[MBS-E12]: this `discard` isn't an alpha test
+  --> e12_discard.mbs:34:3
+   |
+34 |         discard()
+   |         ^^^^^^^^^ not an alpha test
+   |
+   = note: on the 3DS `discard` is the hardware alpha test: one comparison of the returned colour's alpha with one reference, as the last statement before `return`
+   = help: write `if color.a < reference { discard() }` straight before `return color`, with a number or an `f32` uniform as the reference
+   = more: docs/shader_errors.md#mbs-e12
+
+mbsc: e12_discard.mbs: 1 error(s)

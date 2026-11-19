@@ -1,0 +1,11 @@
+error[MBS-E17]: `fade` calls itself
+  --> e17_recursion.mbs:24:9
+   |
+24 |     return fade(x - 1.0)
+   |            ^^^^^^^^^^^^^ recursive call
+   |
+   = note: mbsc inlines every procedure, and the GPUs have no call stack for it to use otherwise
+   = help: use a `for` loop over a constant range
+   = more: docs/shader_errors.md#mbs-e17
+
+mbsc: e17_recursion.mbs: 1 error(s)

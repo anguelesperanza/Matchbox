@@ -1,0 +1,11 @@
+error[MBS-E8]: `sample` reads a texture in a vertex shader, which the 3DS can't do
+  --> e08_sample_in_vertex.mbs:28:17
+   |
+28 |     output.color = sample(tex, input.uv)
+   |                    ^^^^^^^^^^^^^^^^^^^^^ texture read in the vertex stage
+   |
+   = note: it is used in `vertex_main`, and the PICA200 vertex unit can't read textures
+   = help: sample in `fragment_main`, pass the data in a uniform, or put the lookup in a `when TARGET != .PICA200` branch
+   = more: docs/shader_errors.md#mbs-e8
+
+mbsc: e08_sample_in_vertex.mbs: 1 error(s)

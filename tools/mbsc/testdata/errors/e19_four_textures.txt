@@ -1,0 +1,11 @@
+error[MBS-E19]: this fragment shader samples 4 textures; the 3DS has 3 texture units
+  --> e19_four_textures.mbs:35:81
+   |
+35 |     return sample(tex, v.uv) * sample(second, v.uv) * sample(third, v.uv) * sample(fourth, v.uv)
+   |                                                                                    ^^^^^^ texture 4
+   |
+   = note: each texture takes one of TEXTURE0, TEXTURE1 and TEXTURE2
+   = help: combine textures into one before the game uses them (the sprite packer can bake this)
+   = more: docs/shader_errors.md#mbs-e19
+
+mbsc: e19_four_textures.mbs: 1 error(s)

@@ -28,6 +28,7 @@ Timestamp :: struct {
 	last_time: win.LARGE_INTEGER,
 	frequency: win.LARGE_INTEGER,
 	counter: win.LARGE_INTEGER,
+	start_counter: win.LARGE_INTEGER, // when the window was created; frame.time counts from here
 }
 timestamp:Timestamp
 
@@ -105,7 +106,7 @@ Matchbox_Info :: struct {
 
 	white_texture_view:^d3d11.IShaderResourceView,
 
-	// 3D Pipeline | shaders/mesh.hlsl
+	// 3D Pipeline | shaders/mesh.pc.hlsl (generated from shaders/mesh.mbs)
 	shader_src:[]u8,
 	vertex_shader:^d3d11.IVertexShader,
 	vertex_shader_blob: ^d3d11.IBlob,
@@ -115,6 +116,10 @@ Matchbox_Info :: struct {
 	// test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
 	frame_constants:^d3d11.IBuffer,
 	draw_constants:^d3d11.IBuffer,
+	game_constants:^d3d11.IBuffer, // the game's own uniforms, set by name with set_shader_value
+	game_shadow:[]byte, // what game_constants holds, kept on the CPU so one value can change
+	game_dirty:bool,
+	reflection:Shader_Reflection, // what the shader needs, from shaders/mesh.pc.refl
 	
 
 	// Sprites
@@ -321,6 +326,7 @@ init :: proc(title:string, width:i32, height:i32) {
 	// Setup the initial frequency and counter for delta time
 	win.QueryPerformanceFrequency(&timestamp.frequency)
 	win.QueryPerformanceCounter(&timestamp.last_time)
+	timestamp.start_counter = timestamp.last_time
 
 
 	result := gi.Create(&mbi.input)

@@ -1,0 +1,10 @@
+error[MBS-E22]: expected ')', got 'return'
+  --> e22_syntax_error.mbs:27:2
+   |
+27 |     return output
+   |     ^^^^^^ Odin's parser stopped here
+   |
+   = note: mbsc reads a shader with Odin's own parser, and this is the message the parser gives
+   = more: docs/shader_errors.md#mbs-e22
+
+mbsc: e22_syntax_error.mbs: 1 error(s)

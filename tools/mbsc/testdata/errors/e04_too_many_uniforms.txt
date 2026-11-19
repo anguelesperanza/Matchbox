@@ -1,0 +1,11 @@
+error[MBS-E4]: this shader uses 131 uniform registers; the 3DS has 96
+  --> e04_too_many_uniforms.mbs:22:12
+   |
+22 | @(uniform) palette: [30]matrix[4, 4]f32
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the largest, 120 registers
+   |
+   = note: a `matrix[4, 4]f32` takes 4, a `[4]f32` takes 1 and an `f32` takes 1; `palette` uses 120, `draw` uses 7, `frame` uses 4
+   = help: `palette` is the largest; lower its length, or compute part of it on the CPU
+   = more: docs/shader_errors.md#mbs-e4
+
+mbsc: e04_too_many_uniforms.mbs: 1 error(s)

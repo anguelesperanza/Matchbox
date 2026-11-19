@@ -961,11 +961,12 @@ fragment multiply becomes one TexEnv stage.
 Per-target variants use Odin's own `when TARGET == .PICA { ... } else { ... }`,
 so a shader can provide a fallback where a target can't do something.
 
-**Where it runs.** A build-time tool, `tools/shaderc.odin` (like `tritex`),
-not code in the game. Inputs: a shader file and `-target`. Outputs:
+**Where it runs.** A build-time tool, `tools/mbsc.odin` (**mbsc**, the Matchbox
+Shader Compiler; like `tritex`), not code in the game. Inputs: a shader file and `-target`. Outputs:
 - PC: `name.hlsl`
-- Vita: `name_v.cg` and `name_f.cg`, then runs `psp2cgc` if `tools/psp2cgc.exe`
-  exists; otherwise the committed `.gxp` is used (vito's rule, kept)
+- Vita: `name_v.cg` and `name_f.cg`. mbsc stops at Cg: turning that into `.gxp` is
+  vito's job (`tools/build_shaders.py` with `psp2cgc.exe` today, vito's own Odin
+  compiler later). The `.gxp` outputs stay committed (vito's rule, kept)
 - 3DS: `name.v.pica` then `picasso` -> `.shbin`, plus a TexEnv table
   (`name.tev`) for the fragment stage
 - All: a small reflection file listing the attributes, uniforms and textures
@@ -974,10 +975,20 @@ not code in the game. Inputs: a shader file and `-target`. Outputs:
 **S0. Specify the language** (write `docs/shader_language.md`).
 - Types, built-in functions, entry points, uniforms and textures, and a table
   of what compiles on which target. Settle the decisions below first.
+- Decided 2026-11-18: no silent approximation. A built-in a target can't do is a
+  compile error that says how to do it instead; `sin_approx` and `cos_approx` are
+  explicit built-ins that state their error. Errors are numbered `MBS-E<n>` and
+  explained in `docs/shader_errors.md`, in the style of rustc: what, where, why,
+  and a fix. The 3DS fragment spec assumes `DOT3_RGBA` will be in the o3dx
+  bindings.
+- Built-in support is measured, not read from manuals: `tools/mbsc_probe.odin`
+  compiles one tiny shader per built-in with d3dcompiler, `psp2cgc` and `picasso`
+  and writes the table (picasso checks the 3DS instruction lowering, so a pass
+  means it assembles, not that it computes the right number).
 - Done when: the draft above is a complete spec, and every built-in is marked
   PC / Vita / 3DS.
 
-**S1. Front end** (`tools/shaderc.odin`).
+**S1. Front end** (`tools/mbsc.odin`).
 - Parse the shader (try `core:odin/parser` first), type-check the subset,
   build an intermediate form, report errors with file and line.
 - Done when: the draft above parses and type-checks, and a deliberate mistake
@@ -1017,7 +1028,7 @@ not code in the game. Inputs: a shader file and `-target`. Outputs:
   PC.
 
 **S7. Capabilities and fallbacks.**
-- The `when TARGET` blocks, per-target errors, and `shaderc --check` that
+- The `when TARGET` blocks, per-target errors, and `mbsc --check` that
   reports what compiles where.
 
 **S8. Later, only if needed:** write `.gxp` directly (vito's
@@ -1290,10 +1301,10 @@ above all the same.
 - [x] Vita is a core target, in the renderer core with PC and 3DS (decided 2026-11-14). Its specifics are settled in "The three targets", A0b and Phase V.
 - [x] Target selection: `-define:MATCHBOX_VITA` with `when` blocks, since `odin check` can't see the microarch (chosen 2026-11-14; verify in A0b that each target's imports type-check in the other's build).
 - [x] PC first, with `core:math/linalg` (2026-11-14): no shared `math.odin` for now; performance work waits until PC, 3DS and Vita all run. D3D needs the GL-to-D3D depth remap (`z' = 0.5z + 0.5w`) on `linalg` projections. A1's shared file moves over when a handheld needs it.
-- [ ] Shader language syntax (S0): an Odin subset parsed with `core:odin/parser` (recommended), or a small custom parser.
-- [ ] Shader file extension and location (S0), for example `matchbox/shaders/*.shader`.
-- [ ] 3DS fragment policy (S0): portable subset that maps to TexEnv, with a compile error for anything else (recommended).
-- [ ] Generated shader output (S2 to S6): commit it, or generate at build. Vita `.gxp` stays committed (vito's rule, 2026-11-13).
+- [x] Shader language syntax (S0): an Odin subset parsed with `core:odin/parser` (decided 2026-11-19).
+- [x] Shader file extension and location: `.mbs`, under `matchbox/shaders/` (decided 2026-11-18). Compiler: `mbsc`.
+- [x] 3DS fragment policy: portable subset that maps to TexEnv, a compile error naming the line and the fix for anything else (decided 2026-11-18).
+- [x] Generated shader output: generate at build on PC; Vita `.gxp` stays committed (vito's rule, 2026-11-13); 3DS output decided at S5 (decided 2026-11-18).
 - [ ] Vita emulator: Vita3K vs hardware as the per-step check (decide before V0).
 - [ ] Vita MSAA: off, or 4x (decide at V8).
 - [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).

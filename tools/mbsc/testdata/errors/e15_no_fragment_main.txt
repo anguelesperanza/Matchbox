@@ -1,0 +1,11 @@
+error[MBS-E15]: `fragment_main` is missing
+ --> e15_no_fragment_main.mbs:1:1
+  |
+1 | Vertex_In :: struct {
+  | ^ this shader has no `fragment_main`
+  |
+  = note: a shader needs a `vertex_main` and a `fragment_main`
+  = help: add `fragment_main :: proc(v: Varying) -> [4]f32 { ... }`
+  = more: docs/shader_errors.md#mbs-e15
+
+mbsc: e15_no_fragment_main.mbs: 1 error(s)

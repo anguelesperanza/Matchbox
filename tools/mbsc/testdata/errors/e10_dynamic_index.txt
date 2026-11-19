@@ -1,0 +1,11 @@
+error[MBS-E10]: this index is not a constant or a loop counter
+  --> e10_dynamic_index.mbs:29:39
+   |
+29 |     output.color = input.color * weights[i32(input.uv.x)]
+   |                                          ^^^^^^^^^^^^^^^ not known when the shader is built
+   |
+   = note: the PICA200 can index with a constant, a `for` counter or one of two address registers, nothing computed
+   = help: loop over the array with `for i in 0..<N`, or index with a constant
+   = more: docs/shader_errors.md#mbs-e10
+
+mbsc: e10_dynamic_index.mbs: 1 error(s)

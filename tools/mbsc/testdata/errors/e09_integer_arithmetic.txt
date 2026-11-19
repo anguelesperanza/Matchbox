@@ -1,0 +1,11 @@
+error[MBS-E9]: whole-number arithmetic is not available in 3DS vertex shaders
+  --> e09_integer_arithmetic.mbs:29:35
+   |
+29 |     output.color = input.color * f32(count + 1)
+   |                                      ^^^^^^^^^ arithmetic on whole numbers
+   |
+   = note: the PICA200 vertex unit has no integer ALU; a whole number is only a loop counter or an index
+   = help: use `f32`, or keep the number as a loop counter and index only
+   = more: docs/shader_errors.md#mbs-e9
+
+mbsc: e09_integer_arithmetic.mbs: 1 error(s)

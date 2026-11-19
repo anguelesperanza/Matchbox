@@ -1,0 +1,68 @@
+// Every kind of game uniform, in an order that makes HLSL's packing do something different each time.
+// tools/mbsc checks the offsets it computes against d3dcompiler's own, and the engine's tests read the result.
+
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv:       [2]f32 `attr:"texcoord"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv:       [2]f32 `out:"texcoord0"`,
+}
+
+Light :: struct {
+	direction: [3]f32,
+	strength:  f32,
+	color:     [3]f32,
+}
+
+Rig :: struct {
+	key:   Light,
+	scale: f32,
+	fill:  Light,
+}
+
+@(uniform = .FRAME) frame: struct { view_projection: matrix[4, 4]f32 }
+@(uniform = .DRAW) draw: struct {
+	model:   matrix[4, 4]f32,
+	tint:    [4]f32,
+	uv_rect: [4]f32,
+}
+
+@(uniform) flash: f32
+@(uniform) offset: [3]f32
+@(uniform) amount: f32
+@(uniform) pair: [2]f32
+@(uniform) triple: [3]f32
+@(uniform) wide: [4]f32
+@(uniform) count: i32
+@(uniform) enabled: bool
+@(uniform) steps: [3]i32
+@(uniform) rotation: matrix[3, 3]f32
+@(uniform) small: matrix[2, 2]f32
+@(uniform) skew: matrix[3, 4]f32
+@(uniform) tall: matrix[4, 3]f32
+@(uniform) weights: [5]f32
+@(uniform) directions: [3][3]f32
+@(uniform) palette: [4][4]f32
+@(uniform) bones: [2]matrix[4, 4]f32
+@(uniform) key_light: Light
+@(uniform) trailing: f32
+@(uniform) rig: Rig
+@(uniform) lights: [2]Light
+@(uniform) last: [2]f32
+
+@(texture = 0) albedo: Texture2D
+@(texture = 1) mask: Texture2D
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	output.position = frame.view_projection * draw.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.uv = input.uv
+	return output
+}
+
+fragment_main :: proc(v: Varying) -> [4]f32 {
+	return sample(albedo, v.uv) * sample(mask, v.uv).x * draw.tint * flash
+}

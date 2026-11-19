@@ -1,0 +1,11 @@
+error[MBS-E6]: `normal` has no hardware output on the 3DS
+  --> e06_untagged_varying.mbs:11:2
+   |
+11 |     normal:   [3]f32,
+   |     ^^^^^^ a varying with no tag
+   |
+   = note: the PICA200 passes only position, colour and up to three texture coordinates from the vertex stage to the fragment stage
+   = help: tag it `out:"texcoord0"` (to `"texcoord2"`) or `out:"color"`, or remove it and compute it in `fragment_main`
+   = more: docs/shader_errors.md#mbs-e6
+
+mbsc: e06_untagged_varying.mbs: 1 error(s)

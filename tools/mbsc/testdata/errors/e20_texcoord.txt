@@ -1,0 +1,11 @@
+error[MBS-E20]: this texture coordinate is not a plain `texcoord` varying
+  --> e20_texcoord.mbs:32:21
+   |
+32 |     return sample(tex, v.uv * 2.0) * v.color
+   |                        ^^^^^^^^^^ computed, or not a texcoord
+   |
+   = note: the 3DS reads a texture with the coordinate the vertex stage wrote to `texcoord0`, `texcoord1` or `texcoord2`, unchanged
+   = help: do the arithmetic on the coordinate in `vertex_main` and pass the result as a `texcoord`
+   = more: docs/shader_errors.md#mbs-e20
+
+mbsc: e20_texcoord.mbs: 1 error(s)

@@ -1,0 +1,11 @@
+error[MBS-E24]: unknown attribute `unifrom`
+  --> e24_unknown_attribute.mbs:22:3
+   |
+22 | @(unifrom) strength: f32
+   |   ^^^^^^^ not an attribute of the shader language
+   |
+   = note: a variable at the top level of a shader is a uniform or a texture
+   = help: did you mean `uniform`?
+   = more: docs/shader_errors.md#mbs-e24
+
+mbsc: e24_unknown_attribute.mbs: 1 error(s)

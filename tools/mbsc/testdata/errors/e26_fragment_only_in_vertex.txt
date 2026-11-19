@@ -1,0 +1,11 @@
+error[MBS-E26]: `discard` is only available in the fragment stage
+  --> e26_fragment_only_in_vertex.mbs:27:2
+   |
+27 |     discard()
+   |     ^^^^^^^^^ not in the vertex stage
+   |
+   = note: it is used in `vertex_main`, and the vertex stage has no pixel to discard
+   = help: do this in `fragment_main`, or pass the value through a varying
+   = more: docs/shader_errors.md#mbs-e26
+
+mbsc: e26_fragment_only_in_vertex.mbs: 1 error(s)

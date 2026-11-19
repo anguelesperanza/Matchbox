@@ -1,0 +1,11 @@
+error[MBS-E11]: this condition has 3 comparisons; the 3DS can hold 2
+  --> e11_condition.mbs:28:5
+   |
+28 |     if input.uv.x > 0.0 && input.uv.y > 0.0 && input.uv.x < 1.0 {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ too many comparisons
+   |
+   = note: the PICA200 has two condition flags (`cmp.x` and `cmp.y`), set by one comparison, and a condition can combine those two
+   = help: nest `if`s, or use `lerp` and `step` for a result with no branch
+   = more: docs/shader_errors.md#mbs-e11
+
+mbsc: e11_condition.mbs: 1 error(s)

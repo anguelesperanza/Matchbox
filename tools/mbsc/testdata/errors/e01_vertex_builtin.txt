@@ -1,0 +1,11 @@
+error[MBS-E1]: `sin` is not available in 3DS vertex shaders
+  --> e01_vertex_builtin.mbs:28:31
+   |
+28 |     output.color = input.color * sin(input.position.x)
+   |                                  ^^^^^^^^^^^^^^^^^^^^^ no instruction for this on the target
+   |
+   = note: it is used in `vertex_main`; the PICA200 vertex unit has no instruction for it, and mbsc doesn't swap in a close one
+   = help: use `sin_approx(x)`, which states its error
+   = more: docs/shader_errors.md#mbs-e1
+
+mbsc: e01_vertex_builtin.mbs: 1 error(s)

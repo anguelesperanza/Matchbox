@@ -1,0 +1,77 @@
+// hit_flash.mbs
+//
+// An example of a Matchbox shader. It checks with the real compiler:
+//
+//     mbsc examples/shader-language/hit_flash.mbs -target:pc
+//
+// (use -target:vita and -target:3ds for the other targets; `--dump-ir` shows what the compiler understood).
+// mbsc does not generate code yet, so nothing runs this on a GPU until the backends exist.
+//
+// What it does: draws a textured, tinted sprite or mesh, and can flash it toward white (the "I just got hit"
+// effect). `flash` is 0 for normal and 1 for solid white, and it pulses a little.
+
+// What a vertex looks like coming from the mesh. The tags say which vertex attribute each field reads from; they
+// match Matchbox's Vertex struct.
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv:       [2]f32 `attr:"texcoord"`,
+	color:    [4]f32 `attr:"color"`,
+}
+
+// What the vertex stage hands to the fragment stage.
+Varying :: struct {
+	position: [4]f32 `out:"position"`, // clip-space position (required)
+	uv:       [2]f32 `out:"texcoord0"`,
+	color:    [4]f32 `out:"color"`,
+}
+
+// ---- Values the engine fills in. A shader just declares the ones it uses. ----
+
+@(uniform = .FRAME) frame: struct {
+	view_projection: matrix[4, 4]f32,
+	time:            f32, // seconds
+}
+
+@(uniform = .DRAW) draw: struct {
+	model: matrix[4, 4]f32,
+	tint:  [4]f32,
+}
+
+// ---- Values the game sets: mb.set_shader_value(shader, "flash", 0.5) ----
+
+@(uniform) flash: f32 // 0 = normal, 1 = solid white
+
+@(texture = 0) albedo: Texture2D
+
+// A helper procedure. Plain Odin-style code, with one rule: numbers never convert on their own, so it is `1.0`
+// and not `1` wherever an f32 is wanted.
+//
+// The 3DS has no sin(), so there the pulse is a constant instead.
+pulse :: proc(time: f32) -> f32 {
+	when TARGET == .PICA200 {
+		return 1.0
+	} else {
+		return 0.75 + 0.25 * sin(time * 8.0)
+	}
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+
+	position := [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.position = frame.view_projection * (draw.model * position)
+
+	output.uv = input.uv
+	output.color = input.color * draw.tint
+	return output
+}
+
+fragment_main :: proc(v: Varying) -> [4]f32 {
+	texel := sample(albedo, v.uv)
+	color := texel * v.color
+
+	// Move the colour toward white by `flash`. The alpha is left alone.
+	color.rgb = lerp(color.rgb, [3]f32{1.0, 1.0, 1.0}, flash * pulse(frame.time))
+
+	return color
+}

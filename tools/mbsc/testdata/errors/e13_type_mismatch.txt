@@ -1,0 +1,10 @@
+error[MBS-E13]: expected `[2]f32`, found `[3]f32`
+  --> e13_type_mismatch.mbs:26:14
+   |
+26 |     output.uv = input.position
+   |                 ^^^^^^^^^^^^^^ this is `[3]f32`
+   |
+   = note: numbers never convert on their own, and the two types must be the same
+   = more: docs/shader_errors.md#mbs-e13
+
+mbsc: e13_type_mismatch.mbs: 1 error(s)

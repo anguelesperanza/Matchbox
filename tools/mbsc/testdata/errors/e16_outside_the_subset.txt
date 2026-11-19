@@ -1,0 +1,11 @@
+error[MBS-E16]: `switch` is not available in shaders
+  --> e16_outside_the_subset.mbs:27:2
+   |
+27 |     switch input.uv.x {
+   |     ^^^^^^ shaders use `if` chains
+   |
+   = note: the PICA200 has no jump table, and an `if` chain works on all three targets
+   = help: use `if mode == 0 { ... } else if mode == 1 { ... }`
+   = more: docs/shader_errors.md#mbs-e16
+
+mbsc: e16_outside_the_subset.mbs: 1 error(s)

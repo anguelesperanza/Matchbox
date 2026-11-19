@@ -1,0 +1,130 @@
+package mbsc
+
+import "core:fmt"
+import "core:strings"
+import "core:testing"
+
+// The reflection file: a golden file for the spec's shader, one for a shader with every kind of game uniform, the
+// committed copy the engine loads, and the layout rules on small cases.
+
+// build_ir runs the front end on a shader for the PC and returns its intermediate form; `message` says what stopped it.
+// The intermediate form points into the parsed shader, so the caller keeps `parsed` until it is done with `ir` and
+// then calls destroy_parsed.
+build_ir :: proc(source: string) -> (ir: ^IR_Module, parsed: ^Parsed, message: string) {
+	parsed = parse_shader("test.mbs", source)
+	if parsed.has_syntax_errors == false {
+		check_subset(parsed)
+	}
+	module: ^Module
+	if len(parsed.diagnostics) == 0 {
+		module = build_module(parsed, .PC)
+	}
+	if len(parsed.diagnostics) > 0 {
+		return nil, parsed, fmt.aprintf("%s %s (line %d)", parsed.diagnostics[0].code, parsed.diagnostics[0].title, parsed.diagnostics[0].label.line, allocator = context.temp_allocator)
+	}
+	return lower_module(module), parsed, ""
+}
+
+@(private = "file")
+no_carriage_returns :: proc(text: string) -> string {
+	result, _ := strings.replace_all(text, "\r\n", "\n", context.temp_allocator)
+	return result
+}
+
+@(private = "file")
+reflect :: proc(t: ^testing.T, source: string) -> string {
+	ir, parsed, message := build_ir(source)
+	defer destroy_parsed(parsed)
+	if message != "" {
+		testing.expectf(t, false, "the shader should check: %s", message)
+		return ""
+	}
+	text, problems := generate_reflection(ir, context.temp_allocator)
+	testing.expect_value(t, len(problems), 0)
+	return text
+}
+
+@(test)
+the_spec_shader_gives_the_golden_reflection :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	text := reflect(t, no_carriage_returns(#load("testdata/mesh.mbs", string)))
+	want := no_carriage_returns(#load("testdata/mesh_pc.refl", string))
+	testing.expect(t, text == want, "the reflection of testdata/mesh.mbs differs from testdata/mesh_pc.refl")
+	if text != want {
+		fmt.eprintfln("--- got ---\n%s--- want ---\n%s", text, want)
+	}
+}
+
+@(test)
+every_kind_of_game_uniform_gives_the_golden_reflection :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	text := reflect(t, no_carriage_returns(#load("testdata/uniforms.mbs", string)))
+	want := no_carriage_returns(#load("testdata/uniforms_pc.refl", string))
+	testing.expect(t, text == want, "the reflection of testdata/uniforms.mbs differs from testdata/uniforms_pc.refl")
+	if text != want {
+		fmt.eprintfln("--- got ---\n%s--- want ---\n%s", text, want)
+	}
+}
+
+@(test)
+the_committed_mesh_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	// matchbox/shaders/mesh.pc.refl is generated from mesh.mbs and committed next to the HLSL. When the shader or the
+	// compiler changes, run:
+	//     mbsc matchbox/shaders/mesh.mbs -target:pc --emit-reflection -o:matchbox/shaders/mesh.pc.refl
+	text := reflect(t, no_carriage_returns(#load("../../matchbox/shaders/mesh.mbs", string)))
+	committed := no_carriage_returns(#load("../../matchbox/shaders/mesh.pc.refl", string))
+	testing.expect(t, text == committed, "matchbox/shaders/mesh.pc.refl is out of date; generate it again (see the comment in this test)")
+}
+
+@(test)
+the_engine_blocks_have_the_sizes_of_the_engines_structs :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	// Frame_Constants and Draw_Constants in render_windows.odin are 80 and 112 bytes, and the engine checks its own
+	// offsets against this file when it starts
+	text := reflect(t, no_carriage_returns(#load("testdata/mesh.mbs", string)))
+	testing.expect(t, strings.contains(text, "block frame 0 80\n"), text)
+	testing.expect(t, strings.contains(text, "block draw 1 112\n"), text)
+	testing.expect(t, strings.contains(text, "value frame time f32 64 4 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value draw alpha_cutoff f32 96 4 0 0\n"), text)
+}
+
+@(private = "file")
+small_shader :: proc(uniforms: string) -> string {
+	return strings.concatenate(
+		{
+			uniforms,
+			"\nVertex_In :: struct {\n\tposition: [3]f32 `attr:\"position\"`,\n}\n\nVarying :: struct {\n\tposition: [4]f32 `out:\"position\"`,\n}\n\n",
+			"vertex_main :: proc(input: Vertex_In) -> Varying {\n\toutput: Varying\n\toutput.position = [4]f32{input.position.x, input.position.y, 0.0, 1.0}\n\treturn output\n}\n\n",
+			"fragment_main :: proc(v: Varying) -> [4]f32 {\n\treturn [4]f32{0.0, 0.0, 0.0, 1.0}\n}\n",
+		},
+		context.temp_allocator,
+	)
+}
+
+@(test)
+a_vector_that_would_cross_a_register_starts_the_next_one :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	text := reflect(t, small_shader("@(uniform) a: f32\n@(uniform) b: [4]f32\n@(uniform) c: [3]f32\n@(uniform) d: f32\n"))
+	// b can't start at 4 without crossing byte 16, so it goes to 16; c fits after it at 32; d fills the register c leaves
+	testing.expect(t, strings.contains(text, "value game a f32 0 4 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value game b [4]f32 16 16 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value game c [3]f32 32 12 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value game d f32 44 4 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "block game 2 48\n"), text)
+}
+
+@(test)
+a_struct_written_inline_is_listed_instead_of_guessed :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	// found while the declarations are read (MBS-E28), before any backend runs
+	_, parsed, message := build_ir(small_shader("@(uniform) light: struct { strength: f32 }\n"))
+	defer destroy_parsed(parsed)
+	testing.expect(t, strings.contains(message, "MBS-E28 the uniform `light` is a struct written inline"), message)
+}

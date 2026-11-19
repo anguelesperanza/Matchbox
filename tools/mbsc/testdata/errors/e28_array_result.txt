@@ -1,0 +1,11 @@
+error[MBS-E28]: `five` returns an array, which the PC backend can't write
+  --> e28_array_result.mbs:23:1
+   |
+23 | five :: proc() -> [5]f32 {
+   | ^ returns an array
+   |
+   = note: HLSL has no array result, so the generated shader would not compile
+   = help: return a struct that holds the values, or fill an array the caller declared
+   = more: docs/shader_errors.md#mbs-e28
+
+mbsc: e28_array_result.mbs: 1 error(s)

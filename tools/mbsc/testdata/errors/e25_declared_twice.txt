@@ -1,0 +1,11 @@
+error[MBS-E25]: texture slot 0 is used twice
+  --> e25_declared_twice.mbs:22:16
+   |
+22 | @(texture = 0) other: Texture2D
+   |                ^^^^^^^^^^^^^^^^ `tex` and `other` share slot 0
+   |
+   = note: a slot is one texture unit, and it holds one texture
+   = help: give each texture its own slot
+   = more: docs/shader_errors.md#mbs-e25
+
+mbsc: e25_declared_twice.mbs: 1 error(s)

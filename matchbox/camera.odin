@@ -81,6 +81,12 @@ create_camera_2d:: proc(view_height:f32) -> Camera {
 }
 
 
+/*Whether `point` is inside the rectangle from `min` (bottom left) to `max` (top right), the edges
+included. For clicking buttons and panels: `is_point_in_rect(get_mouse_screen_pos(), min, max)`*/
+is_point_in_rect :: proc(point, min, max:[2]f32) -> bool {
+	return point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
+}
+
 create_model_matrix :: proc(
 	position:[3]f32 = {0, 0, 0},
 	rotation:quaternion128 = linalg.QUATERNIONF32_IDENTITY,

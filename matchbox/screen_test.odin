@@ -48,3 +48,14 @@ screen_camera_is_marked :: proc(t:^testing.T) {
 	testing.expect_value(t, create_screen_camera(10).screen, true)
 	testing.expect_value(t, create_camera_2d(10).screen, false)
 }
+
+@(test)
+mouse_at_a_window_corner_is_that_anchor :: proc(t:^testing.T) {
+	// 512 units tall in a 512 pixel tall window: one unit is one pixel, so the sums are exact
+	cam := create_screen_camera(512)
+	window := [2]f32{1024, 512}
+
+	testing.expect_value(t, screen_to_world_2d(cam, {0, 0}, window), camera_anchor_position(cam, 2, .TOP_LEFT).xy)
+	testing.expect_value(t, screen_to_world_2d(cam, window, window), camera_anchor_position(cam, 2, .BOTTOM_RIGHT).xy)
+	testing.expect_value(t, screen_to_world_2d(cam, window / 2, window), camera_anchor_position(cam, 2, .CENTER).xy)
+}

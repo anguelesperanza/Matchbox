@@ -43,16 +43,36 @@ create_sprite :: proc(texture:Texture, position:[3]f32 = {}, pixels_per_unit:f32
 	}
 }
 
+// The part of the image a sprite shows, in pixels {x, y, width, height}: `source` if set, else its frame
+@(private)
+get_sprite_source :: proc(sprite:Sprite) -> [4]f32 {
+	if sprite.source[2] > 0 && sprite.source[3] > 0 {
+		return sprite.source
+	}
+	return texture_frame_rect(sprite.texture, sprite.frame)
+}
+
+/*The rectangle a sprite covers, in world units: `min` bottom left, `max` top right. Pair it
+with `is_point_in_rect` to find out whether the mouse is over a sprite.
+
+Rotation is not counted: a rotated sprite gets the rectangle it would have unrotated.
+Pixel snapping is not either, so the edges can be up to half a screen pixel off*/
+get_sprite_bounds :: proc(sprite:Sprite) -> (min, max:[2]f32) {
+	source := get_sprite_source(sprite)
+	size := [2]f32{source[2], source[3]} / sprite.pixels_per_unit * sprite.scale
+
+	min = {sprite.position.x - sprite.pivot.x * size.x, sprite.position.y - sprite.pivot.y * size.y}
+	max = min + size
+	return
+}
+
 /*Queues a sprite to be drawn at camera_end. Sprites are see-through by default*/
 render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 	ensure(sprite.texture.view != nil, "Sprite has no texture")
 	ensure(sprite.pixels_per_unit > 0, "Sprite pixels_per_unit must be above zero")
 
 	// Which part of the image to show, in pixels
-	source := sprite.source
-	if source[2] <= 0 || source[3] <= 0 {
-		source = texture_frame_rect(sprite.texture, sprite.frame)
-	}
+	source := get_sprite_source(sprite)
 
 	// As 0..1 texture coordinates. v = 0 is the top of the image
 	u0 := source[0] / f32(sprite.texture.width)

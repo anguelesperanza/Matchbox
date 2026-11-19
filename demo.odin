@@ -82,8 +82,27 @@ main :: proc() {
 		if fractional == true do pixel_scale += 0.5
 		mb.camera_set_pixel_scale(&camera, 16, pixel_scale, f32(mb.get_window_size()[1]))
 
-		// Left click moves the camera there; it glides, so it sits on fractional positions
-		if mb.is_mouse_pressed(.LEFT) {
+		// The HUD follows the window: top left and bottom right
+		corner.position = mb.anchor_position(.TOP_LEFT, {1.5, -1.5})
+		middle.position = mb.anchor_position(.BOTTOM_RIGHT, {-1.5, 1.5})
+
+		// The HUD gets the mouse first. A face under the mouse lights up, and a click on
+		// one must not also move the world camera
+		mouse_on_hud := mb.get_mouse_screen_pos()
+		corner_min, corner_max := mb.get_sprite_bounds(corner)
+		middle_min, middle_max := mb.get_sprite_bounds(middle)
+		over_corner := mb.is_point_in_rect(mouse_on_hud, corner_min, corner_max)
+		over_middle := mb.is_point_in_rect(mouse_on_hud, middle_min, middle_max)
+
+		corner.tint = {1, 0.6, 0.6, 1} if over_corner else {1, 1, 1, 1}
+		middle.tint = {1, 0.6, 0.6, 1} if over_middle else {1, 1, 1, 1}
+
+		// The bottom right face is a button: it flips shia
+		if over_middle == true && mb.is_mouse_pressed(.LEFT) do shia.flip_x = shia.flip_x == false
+
+		// Left click moves the camera there; it glides, so it sits on fractional positions.
+		// Not when the click landed on the HUD
+		if mb.is_mouse_pressed(.LEFT) && over_corner == false && over_middle == false {
 			follow_target = mb.get_mouse_world_pos(camera)
 		}
 		mb.camera_follow(&camera, follow_target, 3, dt)
@@ -111,10 +130,6 @@ main :: proc() {
 		} else {
 			shia.tint = {1, 1, 1, 1}
 		}
-
-		// The HUD follows the window: top left, bottom right and top centre
-		corner.position = mb.anchor_position(.TOP_LEFT, {1.5, -1.5})
-		middle.position = mb.anchor_position(.BOTTOM_RIGHT, {-1.5, 1.5})
 
 		mover.position = {math.cos(angle * 0.3) * 2.5, math.sin(angle * 0.4) * 1.5, 1}
 

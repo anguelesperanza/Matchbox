@@ -6,6 +6,42 @@ PC Backend: `DirectX 11 (D3D11)`
 
 3DS Backend: `O3DX`
 
+
+# AI Usage
+
+Most of Matchbox's API and rendering were written by hand. The general setup of the Shared API was done by hand.
+The POC and the main setup for the 3DS target were all done by hand (not o3dx but the o3dx calls Matchbox makes).
+
+Claude is utilized with caution in this repository due to the mistakes I ended up in the last time I used claude for Matchbox (see History below for more details).
+
+However, the rendering portion of Matchbox has reached a point where it's a lot of little things, like HUD Rendering, porting features
+like the font rendering from main into the the `full-rewrite` branch, mouse to world/screen space, projections and such.
+
+As such, Claude has been used to generate the code for these, and others, to speed up a lot of the little things that take up a lot of time.
+
+For the Matchbox api, this accounts for rendering only.
+
+The audio work has not started yet and that portion of the API still needs to be designed and tested by hand first before claude is given free reigns to make changes;
+exactly like how the rendering worked.
+
+Font was done by Claude but I plan on pulling that out and redoing it by hand to support multiple different font types instead of just .TTF, but for now, the font rendering
+on main was brought over and altered by claude to use a new font that is cc0, just so I can have something to work with. 
+
+Claude will also be used in the creation of the custom shader langauge for Matchbox. This is due to my lack of knoweldge on PC/3DS/Vita shader languages and GPU quirks.
+
+Each target handles shaders differently, whether at the compilation step, the language used, or the features supported.
+
+Especially with the 3DS where it only has a programmable vertex shader and not a programmable pixel shader. The shader language needs to be
+designed around the quirks and gaps of each target, while remaining reasonably simple to use, and reasonably feature complete.
+
+This is a hard balance to hit for me as I do not have the techincal knowledge to reason about this on a deep level.
+The solution would be to set time aside and learn HLSL (PC), CG (Vita), Picasso (3DS), however it's difficult to find documentation for CG and Picasso,
+even more so, documentation that's easy to read.
+
+I'd reather leave it up to claude to reason about this.
+
+I'd rather review what it does, learn the shading langauges as I go along, then spend weeks to months piecing things together in my free time.
+
 ## Unified API
 
 In order to develop for both targets the way I want to, I need to create a unified API. This is a a series of procedures,

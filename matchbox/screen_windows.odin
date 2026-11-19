@@ -62,3 +62,9 @@ get_visible_rect :: proc() -> (min, max:[2]f32) {
 anchor_position :: proc(anchor:Anchor, offset:[2]f32 = {}) -> [3]f32 {
 	return camera_anchor_position(get_screen_camera(), get_window_aspect(), anchor, offset)
 }
+
+/*Where the mouse is on the HUD, in HUD units (+Y up, the same space as anchor_position).
+Use it to click things drawn between screen_start and screen_end*/
+get_mouse_screen_pos :: proc() -> [2]f32 {
+	return get_mouse_world_pos(get_screen_camera())
+}

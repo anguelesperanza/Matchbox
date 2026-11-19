@@ -113,3 +113,8 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 
 	queue_draw(mbi.sprite_mesh, model, sprite.tint, blend, .NONE, sprite.texture, {u0, v0, u1, v1}, alpha_cutoff)
 }
+
+/*Destroys the sprite -- calls destory_texture under the hood as sprite as the texture*/
+destroy_sprite :: proc(sprite:Sprite) {
+	destroy_texture(sprite.texture)
+}

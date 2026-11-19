@@ -84,4 +84,5 @@ destroy :: proc {
 	destroy_audio,
 	destroy_mesh,
 	destroy_texture,
+	destroy_sprite,
 }

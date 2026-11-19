@@ -169,6 +169,10 @@ init :: proc(title:string, width:i32, height:i32) {
 	win.RegisterClassExW(&window_class)
 	win.AdjustWindowRect(lpRect = &rect, dwStyle = win.WS_OVERLAPPEDWINDOW, bMenu = win.FALSE) // Adjust window
 
+
+	// Non Breaking issue: CreateWindowExW will immediate call the wm.ShowWindow(...) proc to present the window to the screen, if the `Y` is `win.CW_USEDEFUALT`
+	// My problem is that this will happen before d3d11 is even initialzed, let alone setup. Thus, the window is white before it's set by `clear_background`
+	// I'd like to find a way to solve this cause setting Y to 0 and moving manually showing the window at the end of `init` has the same issue
 	mbi.window = win.CreateWindowExW(
 		dwExStyle = 0,
 		lpClassName = window_class.lpszClassName,
@@ -332,6 +336,10 @@ init :: proc(title:string, width:i32, height:i32) {
 	result := gi.Create(&mbi.input)
 	if win.SUCCEEDED(result) == false {
 	}
+
+
+
+	// win.ShowWindow(mbi.window, win.SW_SHOW)
 
 }
 

@@ -46,6 +46,9 @@ main :: proc() {
 	corner.source = {150, 150, 32, 32}
 	middle := corner
 
+	// The bottom screen: B (or Start) swaps to it, and its face swaps back
+	back := corner
+
 	// Text: baked at 32 pixels, and the HUD is 400 / 12 screen pixels to the unit, so the
 	// glyphs are drawn at about the size they were baked at
 	font := mb.create_font(mb.DEFAULT_FONT_BYTES, 32, f32(mb.get_window_size()[1]) / 12)
@@ -86,13 +89,31 @@ main :: proc() {
 		corner.position = mb.anchor_position(.TOP_LEFT, {1.5, -1.5})
 		middle.position = mb.anchor_position(.BOTTOM_RIGHT, {-1.5, 1.5})
 
+		// B or Start swaps between the world and the bottom screen, like opening a menu
+		if mb.is_key_pressed(.B) || mb.is_gamepad_pressed(.START) {
+			if mb.is_bottom_screen_visible() == true {
+				mb.set_bottom_screen(.HIDDEN)
+			} else {
+				mb.set_bottom_screen(.FULLSCREEN)
+			}
+		}
+		bottom_visible := mb.is_bottom_screen_visible()
+
 		// The HUD gets the mouse first. A face under the mouse lights up, and a click on
-		// one must not also move the world camera
+		// one must not also move the world camera. With the bottom screen up, the world and HUD are not shown
 		mouse_on_hud := mb.get_mouse_screen_pos()
 		corner_min, corner_max := mb.get_sprite_bounds(corner)
 		middle_min, middle_max := mb.get_sprite_bounds(middle)
-		over_corner := mb.is_point_in_rect(mouse_on_hud, corner_min, corner_max)
-		over_middle := mb.is_point_in_rect(mouse_on_hud, middle_min, middle_max)
+		over_corner := bottom_visible == false && mb.is_point_in_rect(mouse_on_hud, corner_min, corner_max)
+		over_middle := bottom_visible == false && mb.is_point_in_rect(mouse_on_hud, middle_min, middle_max)
+
+		// The bottom screen has its own mouse position, as touch would be on a 3DS
+		back.position = mb.bottom_screen_anchor_position(.BOTTOM, {0, 2})
+		mouse_on_bottom, on_bottom_screen := mb.get_mouse_bottom_screen_pos()
+		back_min, back_max := mb.get_sprite_bounds(back)
+		over_back := on_bottom_screen == true && mb.is_point_in_rect(mouse_on_bottom, back_min, back_max)
+		back.tint = {1, 0.6, 0.6, 1} if over_back else {1, 1, 1, 1}
+		if over_back == true && mb.is_mouse_pressed(.LEFT) do mb.set_bottom_screen(.HIDDEN)
 
 		corner.tint = {1, 0.6, 0.6, 1} if over_corner else {1, 1, 1, 1}
 		middle.tint = {1, 0.6, 0.6, 1} if over_middle else {1, 1, 1, 1}
@@ -102,7 +123,7 @@ main :: proc() {
 
 		// Left click moves the camera there; it glides, so it sits on fractional positions.
 		// Not when the click landed on the HUD
-		if mb.is_mouse_pressed(.LEFT) && over_corner == false && over_middle == false {
+		if mb.is_mouse_pressed(.LEFT) && bottom_visible == false && over_corner == false && over_middle == false {
 			follow_target = mb.get_mouse_world_pos(camera)
 		}
 		mb.camera_follow(&camera, follow_target, 3, dt)
@@ -134,24 +155,32 @@ main :: proc() {
 		mover.position = {math.cos(angle * 0.3) * 2.5, math.sin(angle * 0.4) * 1.5, 1}
 
 		mb.render_start()
-		mb.clear_background(color = {0, 0.4, 0.6, 1})
+		mb.clear_background(color = {0, 0, 0, 1})
 
-			mb.camera_start(camera)
+			if bottom_visible == true {
+				// The bottom screen fills the window, laid out with anchors so it fits any shape
+				mb.bottom_screen_start()
+				mb.render_sprite(back)
+				mb.draw_text_wrapped(font, "The bottom screen. Click the face, or press B, to go back.", mb.bottom_screen_anchor_position(.TOP_LEFT, {1, -1}), 10)
+				mb.bottom_screen_end()
+			} else {
+				mb.camera_start(camera)
 
-			mb.render_sprite(face)
-			mb.render_sprite(mover)
-			mb.render_animated_sprite(shia)
+				mb.render_sprite(face)
+				mb.render_sprite(mover)
+				mb.render_animated_sprite(shia)
 
-			mb.camera_end()
+				mb.camera_end()
 
-			mb.screen_start()
-			mb.render_sprite(corner)
-			mb.render_sprite(middle)
+				mb.screen_start()
+				mb.render_sprite(corner)
+				mb.render_sprite(middle)
 
-			top_left := mb.anchor_position(.TOP_LEFT, {3, -0.3})
-			mb.draw_text_wrapped(font, "Text in the HUD. It wraps at a width in world units.", top_left, 7)
-			mb.draw_text(font, 1 / dt, mb.anchor_position(.BOTTOM_LEFT, {0.5, 0.5}), {1, 1, 0, 1}) // frames per second
-			mb.screen_end()
+				top_left := mb.anchor_position(.TOP_LEFT, {3, -0.3})
+				mb.draw_text_wrapped(font, "Text in the HUD. It wraps at a width in world units.", top_left, 7)
+				mb.draw_text(font, 1 / dt, mb.anchor_position(.BOTTOM_LEFT, {0.5, 0.5}), {1, 1, 0, 1}) // frames per second
+				mb.screen_end()
+			}
 
 		mb.render_end()
 	}

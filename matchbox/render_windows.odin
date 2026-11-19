@@ -542,6 +542,16 @@ camera_start :: proc(cam:Camera) {
 camera_end :: proc() {
 	ensure(mbi.camera_active == true, "camera_end called without camera_start")
 
+	// A hidden pass was queued but is never drawn
+	if mbi.discard_pass == true {
+		clear(&mbi.opaque_items)
+		clear(&mbi.transparent_items)
+		mbi.camera_active = false
+		mbi.screen_pass = false
+		mbi.discard_pass = false
+		return
+	}
+
 	// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
 	depth_opaque := Depth_Mode.OPAQUE
 	depth_transparent := Depth_Mode.TRANSPARENT

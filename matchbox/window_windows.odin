@@ -98,6 +98,8 @@ Matchbox_Info :: struct {
 	camera_active:bool,
 	screen_pass:bool,
 	screen_height:f32,
+	bottom_screen_layout:Bottom_Screen_Layout, // HIDDEN until the game asks; see set_bottom_screen
+	discard_pass:bool, // the pass in progress is the hidden bottom screen: queued, never drawn
 	opaque_items:[dynamic]Draw_Item,
 	transparent_items:[dynamic]Draw_Item,
 

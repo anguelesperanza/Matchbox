@@ -10,7 +10,7 @@ Updated 2026-11-14 (later): **the Vita is now a core target.** Targets are PC
 specifics are settled up front (section "The three targets", step A0b, and the
 new Phase V), and every later step is "done" only when it works on all three.
 The old Phase H (Vita, late) is gone; the hard-float phase is now Phase H.
-Updated 2026-11-18: D1 to D3, E1 to E7 (PC) and F1 are done on PC. The handheld
+Updated 2026-11-18: D1 to D3, E1 to E7 (PC), F1 to F4 are done on PC. The handheld
 halves of D4, E7 and F1 wait for the handheld phases (A0/A0b, C, V).
 
 ## The decision
@@ -1084,19 +1084,39 @@ that swap does not touch games.
 - Decide which before starting. The pre-baked atlas is identical on all three
   targets, which is the argument for it.
 
-**F3. Input to world.**
-- Mouse: invert the fit and camera.
-  - Ortho: a direct inverse.
-  - Perspective: a ray from the camera.
-- Points in the bars report as outside.
+**F3. Input to world.** DONE on PC for orthographic cameras (2026-11-18).
+- Mouse, ortho: `get_mouse_world_pos(camera)` (from E2) already inverts any
+  `create_camera_2d` camera, and a screen camera is one, so it works for the
+  HUD too. New: `get_mouse_screen_pos()`, the mouse in HUD units, the same space
+  as `anchor_position`. A test checks that a window corner gives that anchor.
+- Hit-testing: `is_point_in_rect(point, min, max)` and `get_sprite_bounds(sprite)`.
+  The bounds ignore rotation and pixel snapping.
+- Still open:
+  - Perspective: a ray from the camera (Phase G).
+  - Points in the bars report as outside: needs B8. With no bars, every point
+    in the window is inside.
 - 3DS touch maps to the bottom screen's camera (F4).
 - Vita front touch (and the rear panel) report in the panel's own coordinate
   range, not screen pixels; scale them to 960x544 first, then treat as mouse.
   Check the range on hardware.
 
 **F4. 3DS bottom screen** as a second surface (320x240) with its own camera.
-- On PC: render it stacked below the top screen, as an overlay, or not at all.
-  The game chooses.
+DONE on PC (2026-11-18).
+- On PC: `set_bottom_screen(.HIDDEN)` (the default) or `(.FULLSCREEN)`. The game
+  chooses. HIDDEN queues the drawing and throws it away; ask
+  `is_bottom_screen_visible()` to skip the work. FULLSCREEN fills the window, and
+  the game draws only the bottom screen until it switches back (the demo uses B or
+  Start). No letterbox: the view is as tall as the HUD (`set_screen_height`), its
+  width follows the window, and in a window narrower than 4:3 it grows taller
+  instead so the 320x240 shape is never cut off. Lay it out with
+  `bottom_screen_anchor_position`.
+- `bottom_screen_start` / `bottom_screen_end` draw it, `get_mouse_bottom_screen_pos()`
+  is the touch stand-in (position plus `inside`, false while hidden).
+- Left out at this time: an overlay (both screens at once) and a stacked layout. The
+  overlay needs a per-camera viewport and scissor; stacked also needs the top
+  screen in a sub-rectangle (B8). Add them when a game needs both screens at once.
+- The test hardware is a New 3DS LL: same 400x240 and 320x240 screens as the
+  original, so nothing here depends on the model.
 - Vita: one 960x544 screen plus touch panels; the game gets the main surface,
   and the front touch panel maps to it (F3). No second screen exists, so
   bottom-screen content is drawn as an overlay or hidden, like the PC choice.
@@ -1281,4 +1301,4 @@ above all the same.
 - [ ] Sprites default to cut-out or blended (recommended: cut-out).
 - [ ] Default fit policy and the overscan cap (F1 shipped without them; decide with B8).
 - [ ] Text approach on the 3DS (before E1).
-- [ ] Bottom screen on PC (at F4).
+- [x] Bottom screen on PC: hidden or fullscreen, no overlay or stacked layout for now (decided 2026-11-18).

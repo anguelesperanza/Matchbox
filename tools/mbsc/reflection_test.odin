@@ -11,13 +11,18 @@ import "core:testing"
 // The intermediate form points into the parsed shader, so the caller keeps `parsed` until it is done with `ir` and
 // then calls destroy_parsed.
 build_ir :: proc(source: string) -> (ir: ^IR_Module, parsed: ^Parsed, message: string) {
+	return build_ir_for(source, .PC)
+}
+
+// build_ir_for is build_ir for another target.
+build_ir_for :: proc(source: string, target: Target) -> (ir: ^IR_Module, parsed: ^Parsed, message: string) {
 	parsed = parse_shader("test.mbs", source)
 	if parsed.has_syntax_errors == false {
 		check_subset(parsed)
 	}
 	module: ^Module
 	if len(parsed.diagnostics) == 0 {
-		module = build_module(parsed, .PC)
+		module = build_module(parsed, target)
 	}
 	if len(parsed.diagnostics) > 0 {
 		return nil, parsed, fmt.aprintf("%s %s (line %d)", parsed.diagnostics[0].code, parsed.diagnostics[0].title, parsed.diagnostics[0].label.line, allocator = context.temp_allocator)

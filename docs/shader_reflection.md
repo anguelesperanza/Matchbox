@@ -10,8 +10,7 @@ mbsc shader.mbs -target:pc --emit-reflection -o:shader.pc.refl
 ```
 
 The engine's own copy is `matchbox/shaders/mesh.pc.refl`, made from `matchbox/shaders/mesh.mbs` and committed next to
-`mesh.pc.hlsl`. A test fails when either is out of date. For the Vita and the 3DS, `--emit-reflection` comes with
-their backends (S4 to S6); the format is the same, with the registers of that target.
+`mesh.pc.hlsl`. A test fails when either is out of date. For the Vita, `-target:vita --emit-reflection` writes a shorter form (see the end of this file and `docs/shader_cg.md`). The 3DS form comes with its backend (S5).
 
 ## Format
 
@@ -77,3 +76,17 @@ lines when it starts and stops with a message if they disagree.
 
 PC lists every uniform and texture the shader declares, used or not, because HLSL's layout doesn't drop an unused one.
 The Vita and the 3DS drop what is unused, and their files will list only what remains.
+
+## Vita form
+
+The Vita has no constant buffers, so there are no `block`, `value` or `sampler` lines:
+
+```
+mbs-reflection 1
+target vita
+attribute <name> <type>
+uniform <name> <type> <count>
+texture <name> <slot>
+```
+
+`<name>` is the Cg global: `<block>_<field>` for engine fields (`frame_view_projection`) or the game uniform's own name, with dotted/indexed leaves for structs and arrays (`key_light.strength`). `<count>` is 0 for a single value and the length for an array.

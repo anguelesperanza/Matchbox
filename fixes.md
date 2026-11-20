@@ -8,3 +8,4 @@ These are a list of fixes I'd like to make to matchbox after using it to make a 
 
 ## texutres are loaded, they aren't created. Will need to rename the procs to they reflect that. The style guide in the main branch has the specific rules for this
 
+## Update comments for Matchbox API to give rundown as to what they do

@@ -1,0 +1,15 @@
+mbs-reflection 1
+target vita
+
+attribute position [3]f32
+attribute texcoord [2]f32
+attribute color [4]f32
+
+uniform frame_view_projection matrix[4,4]f32 0
+uniform frame_time f32 0
+uniform draw_model matrix[4,4]f32 0
+uniform draw_tint [4]f32 0
+uniform draw_uv_rect [4]f32 0
+uniform draw_alpha_cutoff f32 0
+
+texture tex 0

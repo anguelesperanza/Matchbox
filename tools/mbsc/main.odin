@@ -8,7 +8,7 @@ import "core:strings"
 /*
 	mbsc: the Matchbox Shader Compiler.
 
-	mbsc <file.mbs> -target:pc|vita|3ds [--check] [--dump-ir] [--emit-hlsl | --emit-reflection] [-o:<file>]
+	mbsc <file.mbs> -target:pc|vita|3ds [--check] [--dump-ir] [--emit-hlsl | --emit-cg | --emit-pica | --emit-reflection] [-o:<file>]
 	mbsc --explain MBS-E<n>
 
 	The language is in docs/shader_language.md and the errors in docs/shader_errors.md.
@@ -24,7 +24,7 @@ Target :: enum {
 USAGE :: `mbsc: the Matchbox Shader Compiler
 
 usage:
-  mbsc <file.mbs> -target:pc|vita|3ds [--check] [--dump-ir] [--emit-hlsl | --emit-reflection] [-o:<file>]
+  mbsc <file.mbs> -target:pc|vita|3ds [--check] [--dump-ir] [--emit-hlsl | --emit-cg | --emit-pica | --emit-reflection] [-o:<file>]
   mbsc --explain MBS-E<n>
 
 options:
@@ -33,7 +33,12 @@ options:
                      and 3ds and reports what compiles where
   --dump-ir          check the shader, then print its intermediate form
   --emit-hlsl        check the shader, then print it as HLSL (only for -target:pc)
-  --emit-reflection  check the shader, then print its reflection file (only for -target:pc)
+  --emit-cg          check the shader, then print it as Cg: a vertex and a fragment program (only for -target:vita).
+                     -o:<name> writes <name>_v.cg and <name>_f.cg
+  --emit-pica        check the shader, then print its vertex program as PICA200 assembly and its
+                     fragment plan as a TexEnv table (only for -target:3ds).
+                     -o:<name> writes <name>.v.pica and <name>.tev (the fragment plan)
+  --emit-reflection  check the shader, then print its reflection file
   -o:<file>          write the HLSL or the reflection to this file instead of printing it
   --explain <code>   explain an error, for example MBS-E12
   --help             show this text
@@ -55,6 +60,8 @@ Options :: struct {
 	check:    bool,
 	dump_ir:  bool,
 	emit_hlsl: bool,
+	emit_cg: bool,
+	emit_pica: bool,
 	emit_reflection: bool,
 	output:   string,
 	explain:  string,
@@ -91,8 +98,8 @@ run :: proc(args: []string) -> int {
 	defer delete(data)
 
 	if options.has_target == false {
-		if options.dump_ir || options.emit_hlsl || options.emit_reflection || len(options.output) > 0 {
-			fmt.eprintln("mbsc: --dump-ir, --emit-hlsl, --emit-reflection and -o: need a -target:")
+		if options.dump_ir || options.emit_hlsl || options.emit_cg || options.emit_pica || options.emit_reflection || len(options.output) > 0 {
+			fmt.eprintln("mbsc: --dump-ir, --emit-hlsl, --emit-cg, --emit-pica, --emit-reflection and -o: need a -target:")
 			return EXIT_USAGE
 		}
 		report, passed := check_report(options.file, string(data))
@@ -104,25 +111,34 @@ run :: proc(args: []string) -> int {
 		fmt.fprint(os.stderr, report)
 		return EXIT_ERRORS
 	}
-	if (options.emit_hlsl || options.emit_reflection) && options.target != .PC {
-		fmt.eprintln("mbsc: --emit-hlsl and --emit-reflection are for -target:pc; the Vita takes Cg and the 3DS takes PICA assembly")
+	if options.emit_hlsl && options.target != .PC {
+		fmt.eprintln("mbsc: --emit-hlsl is for -target:pc; the Vita takes Cg (--emit-cg) and the 3DS takes PICA assembly")
 		return EXIT_USAGE
 	}
-	if options.emit_hlsl && options.emit_reflection {
-		fmt.eprintln("mbsc: write the HLSL and the reflection one at a time")
+	if options.emit_cg && options.target != .VITA {
+		fmt.eprintln("mbsc: --emit-cg is for -target:vita; the PC takes HLSL (--emit-hlsl) and the 3DS takes PICA assembly")
 		return EXIT_USAGE
 	}
-	if len(options.output) > 0 && options.emit_hlsl == false && options.emit_reflection == false {
-		fmt.eprintln("mbsc: -o: is for --emit-hlsl and --emit-reflection; there is nothing else to write yet")
+	if options.emit_pica && options.target != .PICA200 {
+		fmt.eprintln("mbsc: --emit-pica is for -target:3ds; the PC takes HLSL (--emit-hlsl) and the Vita takes Cg (--emit-cg)")
 		return EXIT_USAGE
 	}
-	return check_shader(options.file, string(data), options.target, options.dump_ir, options.emit_hlsl, options.output, options.emit_reflection)
+	emits := int(options.emit_hlsl) + int(options.emit_cg) + int(options.emit_pica) + int(options.emit_reflection)
+	if emits > 1 {
+		fmt.eprintln("mbsc: write the HLSL, the Cg, the PICA assembly or the reflection one at a time")
+		return EXIT_USAGE
+	}
+	if len(options.output) > 0 && emits == 0 {
+		fmt.eprintln("mbsc: -o: is for --emit-hlsl, --emit-cg, --emit-pica and --emit-reflection; there is nothing else to write yet")
+		return EXIT_USAGE
+	}
+	return check_shader(options.file, string(data), options.target, options.dump_ir, options.emit_hlsl, options.output, options.emit_reflection, options.emit_cg, options.emit_pica)
 }
 
 // check_shader reads the shader and prints what is wrong with it. It checks that the file parses, stays inside
 // the subset, declares its structs, uniforms, textures and entry points correctly, and that the insides of
 // procedures type-check. A shader that passes is lowered to the intermediate form, which --dump-ir prints.
-check_shader :: proc(file: string, source: string, target: Target, dump := false, emit_hlsl := false, output := "", emit_reflection := false) -> int {
+check_shader :: proc(file: string, source: string, target: Target, dump := false, emit_hlsl := false, output := "", emit_reflection := false, emit_cg := false, emit_pica := false) -> int {
 	parsed := parse_shader(file, source)
 	defer destroy_parsed(parsed)
 
@@ -154,8 +170,56 @@ check_shader :: proc(file: string, source: string, target: Target, dump := false
 			}
 			return write_output(text, output)
 		}
+		if emit_cg {
+			programs, problems := generate_cg(ir)
+			defer delete(programs.vertex)
+			defer delete(programs.fragment)
+			defer delete(problems)
+			if len(problems) > 0 {
+				for problem in problems {
+					fmt.eprintfln("mbsc: %s: the Cg backend can't write this shader yet: %s", file, problem)
+				}
+				return EXIT_ERRORS
+			}
+			return write_cg(programs, output)
+		}
+		if emit_pica {
+			program, problems := generate_pica(ir)
+			defer delete(program.vertex)
+			defer delete(problems)
+			plan, tev_problems := generate_tev(ir)
+			defer delete(tev_problems)
+			if len(problems) > 0 || len(tev_problems) > 0 {
+				for problem in problems {
+					fmt.eprintfln("mbsc: %s: the PICA backend can't write this shader yet: %s", file, problem)
+				}
+				for problem in tev_problems {
+					fmt.eprintfln("mbsc: %s: the 3DS fragment stage can't be written: %s", file, problem)
+				}
+				return EXIT_ERRORS
+			}
+			table := format_tev(plan)
+			defer delete(table)
+			if len(output) == 0 {
+				fmt.printfln("; ---- vertex program (.v.pica) ----\n%s\n; ---- fragment plan (.tev) ----\n%s", program.vertex, table)
+				return EXIT_OK
+			}
+			if code := write_output(program.vertex, strings.concatenate({output, ".v.pica"}, context.temp_allocator)); code != EXIT_OK {
+				return code
+			}
+			return write_output(table, strings.concatenate({output, ".tev"}, context.temp_allocator))
+		}
 		if emit_reflection {
-			text, problems := generate_reflection(ir)
+			text: string
+			problems: []string
+			switch target {
+			case .PC:
+				text, problems = generate_reflection(ir)
+			case .VITA:
+				text, problems = generate_reflection_vita(ir)
+			case .PICA200:
+				text, problems = generate_reflection_pica(ir)
+			}
 			defer delete(text)
 			defer delete(problems)
 			if len(problems) > 0 {
@@ -174,6 +238,20 @@ check_shader :: proc(file: string, source: string, target: Target, dump := false
 	defer delete(text)
 	fmt.fprint(os.stderr, text)
 	return EXIT_ERRORS
+}
+
+// write_cg writes the two programs to <name>_v.cg and <name>_f.cg, or prints both when no name is given.
+write_cg :: proc(programs: Cg_Output, name: string) -> int {
+	if len(name) == 0 {
+		fmt.printfln("// ---- vertex program (_v.cg) ----\n%s\n// ---- fragment program (_f.cg) ----\n%s", programs.vertex, programs.fragment)
+		return EXIT_OK
+	}
+	vertex_file := strings.concatenate({name, "_v.cg"}, context.temp_allocator)
+	fragment_file := strings.concatenate({name, "_f.cg"}, context.temp_allocator)
+	if code := write_output(programs.vertex, vertex_file); code != EXIT_OK {
+		return code
+	}
+	return write_output(programs.fragment, fragment_file)
 }
 
 // write_output prints text, or writes it to the file named by -o:.
@@ -226,6 +304,10 @@ parse_arguments :: proc(args: []string) -> (options: Options, ok: bool) {
 			options.dump_ir = true
 		case argument == "--emit-hlsl":
 			options.emit_hlsl = true
+		case argument == "--emit-cg":
+			options.emit_cg = true
+		case argument == "--emit-pica":
+			options.emit_pica = true
 		case argument == "--emit-reflection":
 			options.emit_reflection = true
 		case argument == "--explain":

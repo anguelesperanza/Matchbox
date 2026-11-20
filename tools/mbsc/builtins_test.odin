@@ -7,13 +7,11 @@ import "core:testing"
 // Every built-in, written as HLSL and handed to the real compiler. The table below must have a case for each entry
 // of BUILTINS, so adding a built-in without a case fails a test.
 
-@(private = "file")
 Builtin_Case :: struct {
 	name: string,
 	body: string, // statements that leave an f32 in `r`; the inputs are the uniforms in INPUTS
 }
 
-@(private = "file")
 INPUTS :: `@(uniform) a: f32
 @(uniform) b: f32
 @(uniform) c: f32
@@ -29,7 +27,6 @@ INPUTS :: `@(uniform) a: f32
 @(texture = 0) tex: Texture2D
 `
 
-@(private = "file")
 CASES := [?]Builtin_Case {
 	{"abs", "r = abs(a) + abs(v3).x"},
 	{"sign", "r = sign(a) + sign(v4).w"},
@@ -92,7 +89,6 @@ CASES := [?]Builtin_Case {
 	{"discard", "if a < 0.0 {\n\t\tdiscard()\n\t}"},
 }
 
-@(private = "file")
 in_stage :: proc(case_: Builtin_Case, vertex: bool) -> string {
 	body := case_.body
 	if vertex {
@@ -190,6 +186,34 @@ every_builtin_is_written_as_hlsl_that_compiles :: proc(t: ^testing.T) {
 			text, ok := generate_for(t, in_stage(case_, vertex), case_.name)
 			if ok {
 				expect_compiles(t, text)
+			}
+		}
+	}
+}
+
+@(test)
+every_builtin_is_written_as_cg_that_compiles :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	for case_ in CASES {
+		fragment_only := false
+		for builtin in BUILTINS {
+			if builtin.name == case_.name {
+				fragment_only = builtin.fragment_only
+			}
+		}
+		for vertex in ([2]bool{false, true}) {
+			if vertex && fragment_only {
+				continue
+			}
+			programs, ok := generate_cg_text(t, in_stage(case_, vertex), case_.name)
+			if ok {
+				// only the stage the built-in is in is worth compiling: the other one is the plain wrapper
+				message, ran := compile_cg(programs.vertex if vertex else programs.fragment, vertex)
+				if ran && message != "" {
+					fmt.eprintfln("--- %s (%s) ---\n%s", case_.name, "vertex" if vertex else "fragment", message)
+					testing.expectf(t, false, "psp2cgc rejected `%s` in the %s program", case_.name, "vertex" if vertex else "fragment")
+				}
 			}
 		}
 	}

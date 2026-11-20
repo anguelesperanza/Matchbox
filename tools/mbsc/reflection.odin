@@ -125,3 +125,99 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	}
 	return strings.clone(strings.to_string(builder), allocator), kept_problems
 }
+
+// generate_reflection_vita writes the reflection file for a module built for the Vita. There are no constant buffers
+// there: the runtime sets a uniform by the name of its parameter in the `.gxp` program (`gfx.set_uniform`), so the
+// file lists the names, and the vertex attributes and texture units. A program drops a uniform it doesn't read, so a
+// name the runtime can't find in one of the two programs is not a mistake.
+generate_reflection_vita :: proc(ir: ^IR_Module, allocator := context.allocator) -> (text: string, problems: []string) {
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	context.allocator = virtual.arena_allocator(&scratch)
+
+	found_problems := make([dynamic]string)
+	builder := strings.builder_make()
+	fmt.sbprintfln(&builder, "mbs-reflection %d", REFLECTION_VERSION)
+	fmt.sbprintln(&builder, "target vita")
+
+	fmt.sbprintln(&builder)
+	if ir.vertex_main != nil && len(ir.vertex_main.params) > 0 {
+		for field in struct_fields(ir, ir.vertex_main.params[0].type) {
+			if field.attr != "" {
+				fmt.sbprintfln(&builder, "attribute %s %s", field.attr, reflection_type(field.type))
+			}
+		}
+	}
+
+	fmt.sbprintln(&builder)
+	for uniform in ir.uniforms {
+		if uniform.kind == .GAME {
+			continue
+		}
+		for entry in engine_layout(ir, uniform.kind).entries {
+			fmt.sbprintfln(&builder, "uniform %s_%s %s %d", uniform.name, entry.name, reflection_type(entry.type), entry.count)
+		}
+	}
+	for uniform in ir.uniforms {
+		if uniform.kind == .GAME && uniform.type.kind == .STRUCT && uniform.type.info.name == "" {
+			append(&found_problems, fmt.aprintf("the uniform `%s` is a struct written inline; declare the struct with a name first", uniform.name))
+		}
+	}
+	for entry in game_layout(ir).entries {
+		fmt.sbprintfln(&builder, "uniform %s %s %d", entry.name, reflection_type(entry.type), entry.count)
+	}
+
+	if len(ir.textures) > 0 {
+		fmt.sbprintln(&builder)
+		for texture in ir.textures {
+			fmt.sbprintfln(&builder, "texture %s %d", texture.name, texture.slot)
+		}
+	}
+
+	kept_problems := make([]string, len(found_problems), allocator)
+	for problem, index in found_problems {
+		kept_problems[index] = strings.clone(problem, allocator)
+	}
+	return strings.clone(strings.to_string(builder), allocator), kept_problems
+}
+
+// generate_reflection_pica writes the reflection file for a module built for the 3DS. A vertex attribute is the
+// register `v<n>` it arrives in, and a uniform is the name it has in the `.shbin` (the runtime finds its register with
+// `shaderInstanceGetUniformLocation`), with how many registers it takes. Only the uniforms the vertex program reads are
+// listed. A matrix takes one register per row, a row being what `dp4` reads.
+generate_reflection_pica :: proc(ir: ^IR_Module, allocator := context.allocator) -> (text: string, problems: []string) {
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	context.allocator = virtual.arena_allocator(&scratch)
+
+	program, found_problems := generate_pica(ir)
+	builder := strings.builder_make()
+	fmt.sbprintfln(&builder, "mbs-reflection %d", REFLECTION_VERSION)
+	fmt.sbprintln(&builder, "target 3ds")
+
+	fmt.sbprintln(&builder)
+	if ir.vertex_main != nil && len(ir.vertex_main.params) > 0 {
+		for field, index in struct_fields(ir, ir.vertex_main.params[0].type) {
+			if field.attr != "" {
+				fmt.sbprintfln(&builder, "attribute %s %s %d", field.attr, reflection_type(field.type), index)
+			}
+		}
+	}
+
+	fmt.sbprintln(&builder)
+	for uniform in program.uniforms {
+		if uniform.is_bool {
+			fmt.sbprintfln(&builder, "bool %s", uniform.name)
+		} else {
+			fmt.sbprintfln(&builder, "uniform %s %s %d", uniform.name, reflection_type(uniform.type), uniform.registers)
+		}
+	}
+
+	kept_problems := make([]string, len(found_problems), allocator)
+	for problem, index in found_problems {
+		kept_problems[index] = strings.clone(problem, allocator)
+	}
+	return strings.clone(strings.to_string(builder), allocator), kept_problems
+}

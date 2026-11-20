@@ -85,4 +85,5 @@ destroy :: proc {
 	destroy_mesh,
 	destroy_texture,
 	destroy_sprite,
+	destroy_animation_clip,
 }

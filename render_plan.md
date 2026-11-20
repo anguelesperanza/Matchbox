@@ -1031,9 +1031,36 @@ Shader Compiler; like `tritex`), not code in the game. Inputs: a shader file and
 - The `when TARGET` blocks, per-target errors, and `mbsc --check` that
   reports what compiles where.
 
-**S8. Later, only if needed:** write `.gxp` directly (vito's
-`docs/gxp-format.md` has a staged plan: disassemble, assemble, a small
-subset, then widen) or `.shbin` directly, to drop `psp2cgc` or `picasso`.
+**S8. Later: write `.shbin` and `.gxp` directly.**
+
+*S8a. `.shbin` (3DS).* Start only after the generated PICA assembly has been
+tested on real 3DS hardware (S5/S6 were checked on Azahar only).
+- Add an `mbsc` option that writes `.shbin` itself (DVLB / DVLP / DVLE:
+  instruction words, the shared operand-descriptor table with its 128-entry
+  limit, flow-control encoding, constant, uniform and output-map tables,
+  symbols). `--emit-pica` stays; the `.v.pica` output is not removed.
+- Check it against `picasso`: assemble the same program both ways, decode both
+  files and compare instructions, descriptors and tables, then run in Azahar and
+  on the 3DS.
+- Done when: every shader the PICA tests cover builds to a `.shbin` that
+  matches `picasso`'s in behaviour, without `picasso` installed.
+
+*S8b. `.gxp` (Vita).* Separate and later than S8a; much larger, because the
+GPU's instruction encoding is only partly public. Check what is documented
+before scheduling it.
+- Vito plans to replace `psp2cgc` with its own compiler (vito's
+  `docs/gxp-format.md` has a staged plan: disassemble, assemble, a small
+  subset, then widen). The shared piece is the back end, not Cg parsing:
+  one `gxp` package in its own repo that takes a small, stable low-level IR
+  and writes `.gxp`. It knows nothing about Cg or mbs.
+- Vito's compiler parses Cg, lowers it to that IR and calls the package.
+- mbs first emits Cg and calls vito's compiler (`--emit-cg` stays as the
+  debuggable path). Later it may lower its own IR straight to the shared IR,
+  skipping the text round trip. mbs's internal IR is not the shared interface.
+- Keep `psp2cgc` as the reference while this is built: compile the same shaders
+  both ways and compare in Vita3K, then on a Vita.
+- Done when: mbs and vito both produce `.gxp` through the shared package, and
+  the Vita shaders draw the same as with `psp2cgc`.
 
 **Order.** S0 to S3 need only PC, so they can start once the PC side is stable
 (after Phase E) and before the handheld work. C0 and V1 then take generated

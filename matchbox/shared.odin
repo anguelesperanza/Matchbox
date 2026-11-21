@@ -37,16 +37,19 @@ get_screen_bounds :: proc(scale_factor:f32 = 1) -> (min, max:[2]f32) {
 
 	Parallax is an array of the exact same sprite. They all move at the same time, at the same speed, but are positions one after the other.
 */
-parallax_set_sprites :: proc(sprite:Sprite, amount:int = 3, scale_factor:f32 = 1, layer:f32 = 0) -> (parallax:[dynamic]Sprite) {
+create_parallax_sprites :: proc(filename:string, amount:int = 3, scale_factor:f32 = 1, layer:f32 = 0) -> (parallax:[dynamic]Sprite) {
+
+	parallax[0] = create_sprite(create_texture(filename))
+	
 	min, _ := get_screen_bounds(scale_factor)
 
-	lo, hi := get_sprite_bounds(sprite)
+	lo, hi := get_sprite_bounds(parallax[0])
 	width := hi.x - lo.x
 
 	for i in 0..<amount {
-		tile := sprite
+		tile := parallax[0]
 		// first tile's left edge on the screen's left edge, then one width further each
-		tile.position = {min.x + width / 2 + f32(i) * width, sprite.position.y, layer}
+		tile.position = {min.x + width / 2 + f32(i) * width, parallax[0].position.y, layer}
 		append(&parallax, tile)
 	}
 	return

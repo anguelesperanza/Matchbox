@@ -39,7 +39,9 @@ get_screen_bounds :: proc(scale_factor:f32 = 1) -> (min, max:[2]f32) {
 */
 create_parallax_sprites :: proc(filename:string, amount:int = 3, scale_factor:f32 = 1, layer:f32 = 0) -> (parallax:[dynamic]Sprite) {
 
-	parallax[0] = create_sprite(create_texture(filename))
+	// parallax[0] = create_sprite(create_texture(filename))
+
+	append(&parallax, create_sprite(create_texture(filename)))
 	
 	min, _ := get_screen_bounds(scale_factor)
 

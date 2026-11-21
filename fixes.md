@@ -52,6 +52,8 @@ example: assets/images/sprites/meme.png => mb.create_sprite("sprites/meme.png") 
 
 Make a parallax struct that contains a `[dynamic]Sprite` to make some of the values like scale consistant across other create_* procs. May not do this though as it's not a crazy thing.
 
+## Review cooldown.odin file. It's awkward to use and needs rework
+
 ## create_sprite calls create_texture under the hood
 Right now, creating a sprite requires a texture. Really, calling create_sprite should create the texture it needs. Will look into feasibility of this
 

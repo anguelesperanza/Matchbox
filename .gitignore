@@ -1,50 +1,28 @@
-# SDL3 is taken from the Odin installation by copy_sdl.bat / copy_sdl.sh rather
-# than kept here. A committed copy goes stale without saying so -- this repo
-# carried SDL 3.3.0 while vendor:sdl3's bindings were generated against 3.4.2.
-SDL3.dll
-libSDL3.so
+# Assets. The folder layout is committed (a .gitkeep holds each one open, since git
+# does not track empty folders) so a fresh clone shows where a game's images and
+# audio go: shared ones in assets/, per-target ones in assets/<target>/. The art
+# and sound inside are the game's, not Matchbox's, and stay local.
+assets/**
+!assets/**/
+!assets/**/.gitkeep
 
-# Android. Everything under matchbox/android/libs is fetched or cross-compiled
-# by matchbox/android_sdl.bat and matchbox/android.bat, so none of it is
-# committed -- same reasoning as SDL3.dll above, and libSDL3.so is already
-# covered by the rule at the top. They live inside matchbox so that dropping the
-# folder into a project brings its Android support with it.
-matchbox/android/libs/*.a
-matchbox/android/libs/SDL3-classes.jar
-
-# Build output, and the self-signed debug key android_apk.bat makes on demand.
-# The key is regenerated if missing; a lost one only means the next install has
-# to be an uninstall first, since Android will not replace an apk signed by a
-# different key.
-build/
-matchbox/android/debug.keystore
-*.apk
-
-# The animation-layers example's two assets: a VRoid character and the clip
-# library retargeted onto it. Tens of megabytes each, and both are somebody
-# else's art rather than this repository's -- see that example's own doc
-# comment for what to put at each path to run it locally.
-examples/animation-layers/assets/
-
-# What pressing F5 in examples/walk-level writes, to compare against the level
-# it loaded. A local experiment, not part of the example.
-examples/walk-level/levels/yard_saved.level
-
-
-*.pdb
-*.pdb.rdi
-*.smdh
-*.3dsx
-*.elf
-odin_asm/
-cheatsheet.md
-assets/*
-romfs/*
-3ds_adv_prog_man.html
+# Executables. Every tool in tools/ is built from the .odin file beside it
+# (see tools/howto.md), so a committed .exe is only a stale copy of its source.
 *.exe
 
-# The shia-test sprite sheets (made by tools/sheetpack from the frames). Hundreds of
-# megabytes of art in total, so they stay out of git. Regenerate them with sheetpack.
-shia.png
-shia.meta
-shaia-complete/
+# Debug files the Odin compiler writes next to an executable.
+*.pdb
+*.rdi
+*.ilk
+
+# Build output. 3ds_build.bat writes romfs/ (converted images and audio),
+# odin_asm/ (the assembly it links) and the .elf / .smdh / .3dsx it packages.
+build/
+romfs/
+odin_asm/
+*.elf
+*.smdh
+*.3dsx
+
+# Local reference material, not the repository's to share.
+3ds_adv_prog_man.html

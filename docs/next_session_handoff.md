@@ -113,8 +113,8 @@ what the code does); cut-out vs blended default (code defaults to cut-out); the 
 
 Open items (see the file for the user's wording and legend):
 - Rename `create_*` texture loaders to `load_*` (marked `[c]`: Claude does it; the rule is in `CLAUDE.md`: `create_x` makes one, `load_x` imports something that already exists whole).
-- `create_sprite` should create its texture; `.meta` best guess when no `.meta` exists (a sheet without one draws as one
-  frame); `sheetpack` should accept a single file; asset subfolders work only by writing them in the name
+- `create_sprite` should create its texture (`.meta` best guess when no `.meta` exists: done, `calculate_guessed_texture_meta`, used by `create_animation_clip` only);
+  `sheetpack` should accept a single file; asset subfolders work only by writing them in the name
   (`"sprites/meme.png"`), nothing scans nested folders; positioning around `(0,0,0)` is tedious; move procs for sprites.
 - Parallax was written with the user's first test game (the Flappy clone): `create_parallax_layer(filename, amount, direction, scale_factor, layer)`,
   `parallax_move(&layer, dt, speed)`, `render_parallax`, `destroy_parallax` in `matchbox/shared.odin`, using one shared

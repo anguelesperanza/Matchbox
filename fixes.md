@@ -11,9 +11,10 @@ Legend
 
 ## See Comment above CreateWindowExW in init proc
 
-## Assets folder + target folders need to be included in the repository upstream, just not contents of target folders
+## [x] Assets folder + target folders need to be included in the repository upstream, just not contents of target folders
 
-## [c] texutres are loaded, they aren't created. Will need to rename the procs to they reflect that. The style guide in the main branch has the specific rules for this
+## [x] texutres are loaded, they aren't created. Will need to rename the procs to they reflect that. The style guide in the main branch has the specific rules for this
+
 Will have claude do this change since it's just nameing refactoring
 
 ## [-] Update comments for Matchbox API to give rundown as to what they do
@@ -22,7 +23,7 @@ Will have claude do this change since it's just nameing refactoring
 
 ## Center is (0, 0, 0) which makes positioning things tedious -- need a way to position them more seamlessly. Might have to use procs like Citro does it but would like to avoid if possible.
 
-## when no .meta is present, the code should make assumptions on how the sprite sheet works
+## [x] when no .meta is present, the code should make assumptions on how the sprite sheet works
 
 Right now, if we try and animate a sprite with no .meta file, it doesnt' work. I need a way for the code to make a "best guess"
 as to what that information is and use that instead when there is no .meta file present.

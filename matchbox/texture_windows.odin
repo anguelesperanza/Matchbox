@@ -35,12 +35,18 @@ Texture :: struct {
 	columns:i32, // frames across
 	rows:i32, // frames down
 	frame_count:i32,
+
+	// For an image with no .meta file: a best guess at its frames, worked out from
+	// its pixels when it is loaded, since they are gone from the CPU after that.
+	// create_animation_clip uses it; plain drawing never does (see
+	// calculate_guessed_texture_meta). All zero when there was a .meta file.
+	guessed_meta:Texture_Meta,
 }
 
 load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
 
 	path := get_asset(filename, .IMAGE)
-	meta := load_texture_meta(path)
+	meta, meta_found := load_texture_meta(path)
 
 	loaded_image, err := image.load_from_file(path, options = {.alpha_add_if_missing})
 	ensure(err == nil, "Failed to load image") // Might change to a checkered pattern if no image is loaded
@@ -53,6 +59,9 @@ load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:
 	texture.columns = meta.columns
 	texture.rows = meta.rows
 	texture.frame_count = meta.frame_count
+	if meta_found == false {
+		texture.guessed_meta = calculate_guessed_texture_meta(loaded_image.pixels[:], texture.width, texture.height)
+	}
 
 	ensure(texture.width % texture.columns == 0 && texture.height % texture.rows == 0, "Texture size must divide evenly into its columns and rows")
 
@@ -104,31 +113,33 @@ create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filt
 	return
 }
 
-/*Reads `name.meta` from next to the image. No file means the defaults: ppu 1, one frame*/
+/*Reads `name.meta` from next to the image. No file means the defaults (ppu 1, one frame) and `found` false*/
 @(private)
-load_texture_meta :: proc(image_path:string) -> Texture_Meta {
+load_texture_meta :: proc(image_path:string) -> (meta:Texture_Meta, found:bool) {
 	extension_start := strings.last_index_byte(image_path, '.')
 	if extension_start < 0 {
-		return default_texture_meta()
+		return default_texture_meta(), false
 	}
 
 	meta_path := strings.concatenate({image_path[:extension_start], ".meta"})
 	defer delete(meta_path)
 
 	if os.is_file(meta_path) == false {
-		return default_texture_meta()
+		return default_texture_meta(), false
 	}
 
 	bytes, read_err := os.read_entire_file(meta_path, context.allocator)
 	ensure(read_err == nil, "Could not read the .meta file")
 	defer delete(bytes)
 
-	meta, error, line := parse_texture_meta(string(bytes))
+	error:string
+	line:int
+	meta, error, line = parse_texture_meta(string(bytes))
 	if error != "" {
 		print(meta_path, "line", line, ":", error)
 		panic("Bad .meta file")
 	}
-	return meta
+	return meta, true
 }
 
 /*The pixel rectangle {x, y, width, height} of one frame. Frame 0 is the top left,

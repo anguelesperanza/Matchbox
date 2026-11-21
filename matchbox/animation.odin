@@ -8,7 +8,9 @@ package matchbox
 	Plays frames of a sprite sheet, in order, on a `Sprite`.
 
 	A sheet is a Texture with a .meta file (made by tools/sheetpack), so frames
-	are numbered 0, 1, 2 ... left to right, then down. A *clip* is a stretch of
+	are numbered 0, 1, 2 ... left to right, then down. A sheet with no .meta is
+	cut along a best guess at its frames (calculate_guessed_texture_meta) -- write
+	a .meta when the guess is wrong. A *clip* is a stretch of
 	those frames plus how fast to play them:
 
 		sheet := mb.create_animation_clip(sheet_texture, 0.1) // every frame, 0.1s each
@@ -73,12 +75,24 @@ Animated_Sprite :: struct {
 	queue_len:int,
 }
 
-/*A clip of the whole sheet, every frame. Cut pieces from it with `animation_range`*/
+/*A clip of the whole sheet, every frame. Cut pieces from it with `animation_range`.
+A sheet with no .meta file is cut along a best guess at its frames*/
 create_animation_clip :: proc(texture:Texture, seconds_per_frame:f32) -> Animation_Clip {
+	sheet := texture
+
+	// The guess is put on the clip's own copy, not on `texture`: the same texture
+	// drawn as a plain sprite stays one whole picture (see calculate_guessed_texture_meta)
+	if sheet.guessed_meta.columns > 0 {
+		sheet.pixels_per_unit = sheet.guessed_meta.pixels_per_unit
+		sheet.columns = sheet.guessed_meta.columns
+		sheet.rows = sheet.guessed_meta.rows
+		sheet.frame_count = sheet.guessed_meta.frame_count
+	}
+
 	return Animation_Clip {
-		texture = texture,
+		texture = sheet,
 		frame_start = 0,
-		frame_count = max(int(texture.frame_count), 1),
+		frame_count = max(int(sheet.frame_count), 1),
 		seconds_per_frame = seconds_per_frame,
 	}
 }

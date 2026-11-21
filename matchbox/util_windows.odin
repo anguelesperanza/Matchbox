@@ -86,4 +86,5 @@ destroy :: proc {
 	destroy_texture,
 	destroy_sprite,
 	destroy_animation_clip,
+	destroy_parallax,
 }

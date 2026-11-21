@@ -92,3 +92,20 @@ parallax_move :: proc(parallax:[]Sprite, dt:f32, speed:f32 = 10, scale_factor:f3
 		}
 	}
 }
+
+/*Renders the parallax sprites*/
+render_parallax :: proc(parallax:[]Sprite) {
+	for sprite in parallax {
+		render_sprite(sprite)
+	}
+}
+
+
+/*
+	Frees up the resources used by the parallax sprites
+	All sprites in parallax reference the first one (parallax[0])
+	so only the first sprite is freed
+*/
+destroy_parallax :: proc(parallax:[]Sprite) {
+	destroy_sprite(parallax[0])
+}

@@ -6,12 +6,24 @@ package matchbox
 	A series of procedures / structs / enums / data shared accross all targets
 */
 
+import "core:math"
+
 Parallax_Direction :: enum {
 	LEFT_TO_RIGHT,
 	RIGHT_TO_LEFT,
 	TOP_TO_BUTTOM,
 	BOTTOM_TO_TOP,
 }
+
+Parallax_Layer :: struct {
+	sprites:   [dynamic]Sprite,
+	direction: Parallax_Direction,
+	origin:    [2]f32, // where tile 0 sits when offset is 0
+	tile_size: [2]f32, // world size of one tile
+	offset:    f32,    // how far the strip has scrolled: 0 ..< tile_size along the moving axis
+}
+
+
 
 /*
 	gets the screen bounds of a world
@@ -24,90 +36,95 @@ get_screen_bounds :: proc(scale_factor:f32 = 1) -> (min, max:[2]f32) {
 	return -half, half   // camera at the origin
 }
 
+parallax_axis_and_sign :: proc(direction:Parallax_Direction) -> (axis:int, sign:f32) {
+	switch direction {
+	case .LEFT_TO_RIGHT: return 0,  1
+	case .RIGHT_TO_LEFT: return 0, -1
+	case .BOTTOM_TO_TOP: return 1,  1
+	case .TOP_TO_BUTTOM: return 1, -1
+	}
+	return 0, 1
+}
+
 /*
-	Sets up the positions of the parallax for the sprites
-	sprite: The sprite to use for the parallax effect
-	amount: The number of duplicates of the sprites that the parallax will have
-	direction: controls which way the parallax moves
-		- Default: LEFT_TO_RIGHT
-	scale_factor: the value used to scale the sprites
-		- Default: 1 (no scalling, use native image size)
-	layer: How far on the z axis the sprite is rendered
+	Loads `filename` and lays copies of it out in a row, ready to scroll
+	filename: the image, looked up like create_texture does. Drawn with POINT filtering
+	amount: the least number of tiles. More are added until the strip covers the screen plus one spare
 		- Default: 1
+	direction: which way the tiles travel (used by parallax_move)
+		- Default: RIGHT_TO_LEFT
+	scale_factor: the camera zoom the layer is made for (the screen size is divided by it)
+		- Default: 1 (no scaling)
+	layer: the z every tile is drawn at. A bigger z is nearer the camera
+		- Default: 0
 
-	Parallax is an array of the exact same sprite. They all move at the same time, at the same speed, but are positions one after the other.
+	All tiles share one texture. Free it and the list with destroy_parallax
 */
-create_parallax_sprites :: proc(filename:string, amount:int = 3, scale_factor:f32 = 1, layer:f32 = 0) -> (parallax:[dynamic]Sprite) {
+create_parallax_sprites :: proc(filename:string, amount:i32 = 1, direction:Parallax_Direction = .RIGHT_TO_LEFT, scale_factor:f32 = 1, layer:i32 = 0) -> (parallax:Parallax_Layer) {
+	template := create_sprite(create_texture(filename, .POINT))
+	screen_min, screen_max := get_screen_bounds(scale_factor)
 
-	// parallax[0] = create_sprite(create_texture(filename))
+	lo, hi := get_sprite_bounds(template)
+	parallax.direction = direction
+	parallax.tile_size = hi - lo
 
-	append(&parallax, create_sprite(create_texture(filename)))
-	
-	min, _ := get_screen_bounds(scale_factor)
+	axis, _ := parallax_axis_and_sign(direction)
 
-	lo, hi := get_sprite_bounds(parallax[0])
-	width := hi.x - lo.x
+	// Enough tiles to cover the screen plus one spare, whatever `amount` says
+	visible := screen_max[axis] - screen_min[axis]
+	needed := int(math.ceil(visible / parallax.tile_size[axis])) + 1
+	count := max(int(amount), needed)
 
-	for i in 0..<amount {
-		tile := parallax[0]
-		// first tile's left edge on the screen's left edge, then one width further each
-		tile.position = {min.x + width / 2 + f32(i) * width, parallax[0].position.y, layer}
-		append(&parallax, tile)
+	// Tile 0's near edge on the screen edge. Uses the sprite's own bounds, so any pivot works
+	parallax.origin = {template.position.x, template.position.y}
+	parallax.origin[axis] += screen_min[axis] - lo[axis]
+
+	for i in 0..<count {
+		tile := template
+		tile.position = {parallax.origin.x, parallax.origin.y, f32(layer)}
+		tile.position[axis] += f32(i) * parallax.tile_size[axis]
+		append(&parallax.sprites, tile)
 	}
 	return
 }
 
 /*
-	Moves the parallax based on direction and moves them to create a seamless transition
-	parallax: slice made from a parallax (parallax[:])
-	speed = How fast the parallax scrolls
+	Scrolls the layer. Every tile is placed from one shared offset, so they stay exactly one
+	tile apart however long it runs
+	parallax: the layer from create_parallax_sprites
+	dt: delta time
+	speed: world units per second
 		- Default: 10
-	dt = delta time
-	scale_factor: what the sprites are scaled at
-		- Default: 1 (no scaling)
 */
-parallax_move :: proc(parallax:[]Sprite, dt:f32, speed:f32 = 10, scale_factor:f32 = 1, direction:Parallax_Direction = .RIGHT_TO_LEFT) {
-	if len(parallax) == 0 do return
+parallax_move :: proc(parallax:^Parallax_Layer, dt:f32, speed:f32 = 10) {
+	if len(parallax.sprites) == 0 do return
 
-	min, max := get_screen_bounds(scale_factor)
-	lo, hi := get_sprite_bounds(parallax[0])
-	strip := (hi - lo) * f32(len(parallax))   // whole strip, per axis
+	axis, sign := parallax_axis_and_sign(parallax.direction)
+	size := parallax.tile_size[axis]
 
-	for &bg in parallax {
-		switch direction {
-		case .LEFT_TO_RIGHT:
-			bg.position.x += speed * dt
-			tile_lo, _ := get_sprite_bounds(bg)
-			if tile_lo.x > max.x do bg.position.x -= strip.x
-		case .RIGHT_TO_LEFT:
-			bg.position.x -= speed * dt
-			_, tile_hi := get_sprite_bounds(bg)
-			if tile_hi.x < min.x do bg.position.x += strip.x
-		case .BOTTOM_TO_TOP:
-			bg.position.y += speed * dt
-			tile_lo, _ := get_sprite_bounds(bg)
-			if tile_lo.y > max.y do bg.position.y -= strip.y
-		case .TOP_TO_BUTTOM:
-			bg.position.y -= speed * dt
-			_, tile_hi := get_sprite_bounds(bg)
-			if tile_hi.y < min.y do bg.position.y += strip.y
-		}
+	// The strip repeats every tile, so wrapping the offset is the whole wrap logic
+	parallax.offset = math.mod(parallax.offset - sign * speed * dt, size)
+	if parallax.offset < 0 do parallax.offset += size
+
+	for &tile, i in parallax.sprites {
+		tile.position[axis] = parallax.origin[axis] + f32(i) * size - parallax.offset
 	}
 }
 
 /*Renders the parallax sprites*/
-render_parallax :: proc(parallax:[]Sprite) {
-	for sprite in parallax {
+render_parallax :: proc(parallax:Parallax_Layer) {
+	for sprite in parallax.sprites {
 		render_sprite(sprite)
 	}
 }
 
-
 /*
-	Frees up the resources used by the parallax sprites
-	All sprites in parallax reference the first one (parallax[0])
-	so only the first sprite is freed
+	Frees up the resources used by the parallax
+	All the sprites share one texture, so it is destroyed once
 */
-destroy_parallax :: proc(parallax:[]Sprite) {
-	destroy_sprite(parallax[0])
+destroy_parallax :: proc(parallax:Parallax_Layer) {
+	if len(parallax.sprites) > 0 {
+		destroy_sprite(parallax.sprites[0])
+	}
+	delete(parallax.sprites)
 }

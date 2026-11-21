@@ -66,8 +66,17 @@ camera_projection_gl :: proc(cam:Camera, aspect:f32) -> matrix[4, 4]f32 {
 	return linalg.MATRIX4F32_IDENTITY
 }
 
-/*A 2D camera: orthographic, `view_height` world units tall, looking at the origin from z = +10*/
-create_camera_2d:: proc(view_height:f32) -> Camera {
+/*
+	A 2D camera: orthographic
+	view_height: is how many world unit (arbitruary number) the camera can see
+	If a view_height is not provided, it defaults to 0 which will set the view height to the height of the window 
+*/
+create_camera_2d:: proc(view_height:f32 = 0) -> Camera {
+
+	vh:f32 = view_height
+
+	if view_height == 0 do vh = cast(f32)get_window_size()[1]
+	
 	return Camera {
 		position = {0, 0, 10},
 		target = {0, 0, 0},

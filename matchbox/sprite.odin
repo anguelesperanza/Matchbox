@@ -17,6 +17,8 @@ Sprite :: struct {
 	position:[3]f32,
 	rotation:f32, // radians, counter-clockwise about Z
 	scale:[2]f32,
+	velocity:f32,
+	jump_force:f32,
 	tint:[4]f32,
 	pivot:[2]f32, // the point of the image that sits at `position`: {0,0} bottom left, {1,1} top right
 	flip_x:bool,

@@ -92,18 +92,18 @@ Player :: struct {
 	crouch_phase: Crouch_Phase,
 
 	// Seconds left on a quick attack burst (see apply_attack_burst) -- while
-	// this counts down, velocity.x decays to 0 instead of being carried
+	// this counts down, velocity_xy.x decays to 0 instead of being carried
 	// indefinitely, so a standing-combo swing gets a brief push rather than
 	// dragging the character the whole animation. Left at 0 for chains that
-	// should keep whatever velocity.x already was for as long as they play
+	// should keep whatever velocity_xy.x already was for as long as they play
 	// (run_kick's sprint carry, jump's momentum carry).
 	atk_burst_timer: f32,
 
-	// Used to come from Body, which Sprite no longer has. All in world units
-	// (+Y up), per second, with `position` coming from the Sprite
-	velocity: [2]f32,
+	// All in world units (+Y up), per second, with `position` coming from the
+	// Sprite. Not named `velocity`: Sprite's Body has a scalar `velocity`, and
+	// through `using animated` the two would collide. `jump_force` is the Body's.
+	velocity_xy: [2]f32,
 	speed: f32,
-	jump_force: f32,
 	on_ground: bool,
 }
 
@@ -202,30 +202,30 @@ attack_chain :: proc(player: ^Player, dt: f32) {
 	}
 
 	// A burst chain (see apply_attack_burst) decays to a stop; anything else
-	// (run_kick, a walk/run carried into Knee) keeps whatever velocity.x
+	// (run_kick, a walk/run carried into Knee) keeps whatever velocity_xy.x
 	// already was for as long as it plays, same as jump_update.
 	if player.atk_burst_timer > 0 {
 		player.atk_burst_timer -= dt
 		if player.atk_burst_timer <= 0 {
 			player.atk_burst_timer = 0
-			player.velocity.x      = 0
+			player.velocity_xy.x      = 0
 		}
 	}
-	player.position.x += player.velocity.x * dt
+	player.position.x += player.velocity_xy.x * dt
 
 	matchbox.update_animation(player, dt)
 }
 
 // A small, short-lived forward push -- the standing combo's per-hit feel is
 // a quick step, not the sustained carry a run or a jump gets. Signed by
-// flip_x rather than any existing velocity.x, so it's the same size and
+// flip_x rather than any existing velocity_xy.x, so it's the same size and
 // duration whether this swing started from a standstill or mid-walk.
 apply_attack_burst :: proc(player: ^Player) {
 	burst := player.speed * 0.5
 	if player.flip_x {
-		player.velocity.x = -burst
+		player.velocity_xy.x = -burst
 	} else {
-		player.velocity.x = burst
+		player.velocity_xy.x = burst
 	}
 	player.atk_burst_timer = 0.1
 }
@@ -251,7 +251,7 @@ jump_update :: proc(player: ^Player, dt: f32) {
 		if !player.playing {
 			player.jump_phase = .UP
 			player.on_ground  = false
-			player.velocity.y = player.jump_force
+			player.velocity_xy.y = player.jump_force
 			matchbox.switch_animation(player, player.anim.jump_up, looping = false)
 		}
 	case .UP:
@@ -263,7 +263,7 @@ jump_update :: proc(player: ^Player, dt: f32) {
 		if attack_pressed {
 			player.jump_phase = .ATTACK
 			matchbox.switch_animation(player, player.anim.jump_attack, looping = false)
-		} else if player.velocity.y <= 0 {
+		} else if player.velocity_xy.y <= 0 {
 			player.jump_phase = .FALL
 			matchbox.switch_animation(player, player.anim.jump_fall)
 		}
@@ -273,7 +273,7 @@ jump_update :: proc(player: ^Player, dt: f32) {
 			matchbox.switch_animation(player, player.anim.jump_attack, looping = false)
 		} else if player.position.y <= player.ground_y {
 			player.position.y = player.ground_y
-			player.velocity.y = 0
+			player.velocity_xy.y = 0
 			player.on_ground  = true
 			player.jump_phase = .LAND
 			matchbox.switch_animation(player, player.anim.jump_land, looping = false)
@@ -283,12 +283,12 @@ jump_update :: proc(player: ^Player, dt: f32) {
 		// in the air -- so touching ground can happen mid-swing too.
 		if player.position.y <= player.ground_y {
 			player.position.y = player.ground_y
-			player.velocity.y = 0
+			player.velocity_xy.y = 0
 			player.on_ground  = true
 			player.jump_phase = .LAND
 			matchbox.switch_animation(player, player.anim.jump_land, looping = false)
 		} else if !player.playing {
-			if player.velocity.y > 0 {
+			if player.velocity_xy.y > 0 {
 				player.jump_phase = .RISE
 				matchbox.switch_animation(player, player.anim.jump_rise)
 			} else {
@@ -303,13 +303,13 @@ jump_update :: proc(player: ^Player, dt: f32) {
 	}
 
 	if !player.on_ground {
-		player.velocity.y -= player.gravity * dt
-		player.position.y += player.velocity.y * dt
+		player.velocity_xy.y -= player.gravity * dt
+		player.position.y += player.velocity_xy.y * dt
 
 		// Carries whatever horizontal speed was already set (see movement's
 		// D/A-held blocks) unchanged through the whole jump -- no air
 		// control, no air friction, just the momentum you had at takeoff.
-		player.position.x += player.velocity.x * dt
+		player.position.x += player.velocity_xy.x * dt
 	}
 
 	matchbox.update_animation(player, dt)
@@ -408,7 +408,7 @@ crouch_update :: proc(player: ^Player, dt: f32) {
 start_crouch :: proc(player: ^Player, dt: f32) {
 	player.state        = .CROUCH
 	player.crouch_phase = .ENTER
-	player.velocity.x   = 0   // no crouch-walk -- don't let a run carry into a crouch-attack
+	player.velocity_xy.x   = 0   // no crouch-walk -- don't let a run carry into a crouch-attack
 	matchbox.switch_animation(player, player.anim.idle_to_crouch, looping = false)
 	crouch_update(player, dt)
 }
@@ -424,7 +424,7 @@ break_update :: proc(player: ^Player, dt: f32) {
 
 start_break :: proc(player: ^Player, dt: f32) {
 	player.state      = .BREAK
-	player.velocity.x = 0   // the run stopped -- don't let it carry into a post-break attack
+	player.velocity_xy.x = 0   // the run stopped -- don't let it carry into a post-break attack
 	matchbox.switch_animation(player, player.anim.break_anim, looping = false)
 	break_update(player, dt)
 }
@@ -470,7 +470,7 @@ movement :: proc(player:^Player, dt:f32) {
 		return
 	}
 
-	// Held. Sets velocity.x (not just position) so jump_update can carry
+	// Held. Sets velocity_xy.x (not just position) so jump_update can carry
 	// whatever horizontal speed was active the instant the jump starts.
 	if (matchbox.is_key_held(.D) || matchbox.is_gamepad_held(.DPAD_RIGHT)) && player.on_ground {
 
@@ -481,16 +481,16 @@ movement :: proc(player:^Player, dt:f32) {
 				player.state = .RUN
 			}
 
-			player.velocity.x = player.speed + player.run_speed
+			player.velocity_xy.x = player.speed + player.run_speed
 
 		} else {
 			if player.state != .WALK {
 				player.flip_x = false
 				player.state = .WALK
 			}
-			player.velocity.x = player.speed
+			player.velocity_xy.x = player.speed
 		}
-		player.position.x += player.velocity.x * dt
+		player.position.x += player.velocity_xy.x * dt
 	}
 
 	if (matchbox.is_key_held(.A) || matchbox.is_gamepad_held(.DPAD_LEFT)) && player.on_ground {
@@ -502,16 +502,16 @@ movement :: proc(player:^Player, dt:f32) {
 					player.state = .RUN
 				}
 
-				player.velocity.x = -(player.speed + player.run_speed)
+				player.velocity_xy.x = -(player.speed + player.run_speed)
 
 			} else {
 				if player.state != .WALK {
 					player.flip_x = true
 					player.state = .WALK
 			}
-			player.velocity.x = -player.speed
+			player.velocity_xy.x = -player.speed
 		}
-		player.position.x += player.velocity.x * dt
+		player.position.x += player.velocity_xy.x * dt
 	}
 
 
@@ -524,7 +524,7 @@ movement :: proc(player:^Player, dt:f32) {
 			return
 		}
 		player.state      = .IDLE
-		player.velocity.x = 0
+		player.velocity_xy.x = 0
 	}
 
 	if (matchbox.is_key_released(.A) || matchbox.is_gamepad_released(.DPAD_LEFT)) {
@@ -533,7 +533,7 @@ movement :: proc(player:^Player, dt:f32) {
 			return
 		}
 		player.state      = .IDLE
-		player.velocity.x = 0
+		player.velocity_xy.x = 0
 	}
 
 	// F/West starts the standing combo, or run_kick while running.
@@ -597,7 +597,7 @@ main :: proc() {
 
 	// The sheet is made by tools/sheetpack from the 169 frames, and its .meta
 	// gives the frame count and 256 pixels per unit
-	sheet_texture := matchbox.create_texture("shia.png", .POINT)
+	sheet_texture := matchbox.load_texture("shia.png", .POINT)
 
 	player:Player
 	player.anim.sheet = matchbox.create_animation_clip(sheet_texture, 0.1)

@@ -32,7 +32,7 @@ Varying :: struct {
 	time:            f32, // seconds
 }
 
-@(uniform = .DRAW) draw: struct {
+@(uniform = .RENDER) render: struct {
 	model: matrix[4, 4]f32,
 	tint:  [4]f32,
 }
@@ -59,10 +59,10 @@ vertex_main :: proc(input: Vertex_In) -> Varying {
 	output: Varying
 
 	position := [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
-	output.position = frame.view_projection * (draw.model * position)
+	output.position = frame.view_projection * (render.model * position)
 
 	output.uv = input.uv
-	output.color = input.color * draw.tint
+	output.color = input.color * render.tint
 	return output
 }
 

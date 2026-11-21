@@ -6,39 +6,39 @@ import "core:testing"
 
 @(test)
 visible_rect_follows_aspect :: proc(t:^testing.T) {
-	cam := create_screen_camera(10)
-	min, max := camera_visible_rect(cam, 2)
+	camera := create_screen_camera(10)
+	min, max := calculate_camera_visible_rectangle(camera, 2)
 	testing.expect_value(t, min, [2]f32{-10, -5})
 	testing.expect_value(t, max, [2]f32{10, 5})
 
-	min, max = camera_visible_rect(cam, 1) // narrower window, same height
+	min, max = calculate_camera_visible_rectangle(camera, 1) // narrower window, same height
 	testing.expect_value(t, min, [2]f32{-5, -5})
 	testing.expect_value(t, max, [2]f32{5, 5})
 }
 
 @(test)
 anchors_pin_to_the_corners :: proc(t:^testing.T) {
-	cam := create_screen_camera(10)
+	camera := create_screen_camera(10)
 
-	testing.expect_value(t, camera_anchor_position(cam, 2, .TOP_LEFT), [3]f32{-10, 5, 0})
-	testing.expect_value(t, camera_anchor_position(cam, 2, .BOTTOM_RIGHT), [3]f32{10, -5, 0})
-	testing.expect_value(t, camera_anchor_position(cam, 2, .CENTER), [3]f32{0, 0, 0})
-	testing.expect_value(t, camera_anchor_position(cam, 2, .TOP), [3]f32{0, 5, 0})
-	testing.expect_value(t, camera_anchor_position(cam, 2, .LEFT), [3]f32{-10, 0, 0})
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .TOP_LEFT), [3]f32{-10, 5, 0})
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .BOTTOM_RIGHT), [3]f32{10, -5, 0})
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .CENTER), [3]f32{0, 0, 0})
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .TOP), [3]f32{0, 5, 0})
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .LEFT), [3]f32{-10, 0, 0})
 }
 
 @(test)
 offset_is_plain_addition :: proc(t:^testing.T) {
-	cam := create_screen_camera(10)
-	testing.expect_value(t, camera_anchor_position(cam, 2, .TOP_LEFT, {1, -1}), [3]f32{-9, 4, 0})
-	testing.expect_value(t, camera_anchor_position(cam, 2, .BOTTOM_RIGHT, {-1, 1}), [3]f32{9, -4, 0})
+	camera := create_screen_camera(10)
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .TOP_LEFT, {1, -1}), [3]f32{-9, 4, 0})
+	testing.expect_value(t, calculate_camera_anchor_position(camera, 2, .BOTTOM_RIGHT, {-1, 1}), [3]f32{9, -4, 0})
 }
 
 @(test)
 anchors_follow_the_window_shape :: proc(t:^testing.T) {
-	cam := create_screen_camera(10)
-	wide := camera_anchor_position(cam, 2, .TOP_LEFT)
-	wider := camera_anchor_position(cam, 4, .TOP_LEFT)
+	camera := create_screen_camera(10)
+	wide := calculate_camera_anchor_position(camera, 2, .TOP_LEFT)
+	wider := calculate_camera_anchor_position(camera, 4, .TOP_LEFT)
 	testing.expect_value(t, wide.y, wider.y) // the same height
 	testing.expect(t, wider.x < wide.x)      // the corner moved outwards with the window
 }
@@ -52,10 +52,10 @@ screen_camera_is_marked :: proc(t:^testing.T) {
 @(test)
 mouse_at_a_window_corner_is_that_anchor :: proc(t:^testing.T) {
 	// 512 units tall in a 512 pixel tall window: one unit is one pixel, so the sums are exact
-	cam := create_screen_camera(512)
+	camera := create_screen_camera(512)
 	window := [2]f32{1024, 512}
 
-	testing.expect_value(t, screen_to_world_2d(cam, {0, 0}, window), camera_anchor_position(cam, 2, .TOP_LEFT).xy)
-	testing.expect_value(t, screen_to_world_2d(cam, window, window), camera_anchor_position(cam, 2, .BOTTOM_RIGHT).xy)
-	testing.expect_value(t, screen_to_world_2d(cam, window / 2, window), camera_anchor_position(cam, 2, .CENTER).xy)
+	testing.expect_value(t, calculate_screen_to_world_2d(camera, {0, 0}, window), calculate_camera_anchor_position(camera, 2, .TOP_LEFT).xy)
+	testing.expect_value(t, calculate_screen_to_world_2d(camera, window, window), calculate_camera_anchor_position(camera, 2, .BOTTOM_RIGHT).xy)
+	testing.expect_value(t, calculate_screen_to_world_2d(camera, window / 2, window), calculate_camera_anchor_position(camera, 2, .CENTER).xy)
 }

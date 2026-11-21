@@ -76,9 +76,9 @@ declarations_report_what_is_wrong :: proc(t: ^testing.T) {
 		{"bad field tag", "Vertex_In :: struct {\n\tposition: [3]f32 `attr`,\n}\n" + ENTRIES, "MBS-E24", 2, "can't be read"},
 
 		// engine uniforms
-		{"unknown engine field", STRUCTS + "@(uniform = .DRAW) draw: struct { tnt: [4]f32, tint: [4]f32 }\n" + ENTRIES, "MBS-E18", 10, "no field `tnt`"},
-		{"engine field of the wrong type", STRUCTS + "@(uniform = .DRAW) draw: struct { tint: [3]f32 }\n" + ENTRIES, "MBS-E13", 10, "wrong type"},
-		{"engine block that isn't a struct", STRUCTS + "@(uniform = .DRAW) draw: f32\n" + ENTRIES, "MBS-E13", 10, "must be a struct"},
+		{"unknown engine field", STRUCTS + "@(uniform = .RENDER) render: struct { tnt: [4]f32, tint: [4]f32 }\n" + ENTRIES, "MBS-E18", 10, "no field `tnt`"},
+		{"engine field of the wrong type", STRUCTS + "@(uniform = .RENDER) render: struct { tint: [3]f32 }\n" + ENTRIES, "MBS-E13", 10, "wrong type"},
+		{"engine block that isn't a struct", STRUCTS + "@(uniform = .RENDER) render: f32\n" + ENTRIES, "MBS-E13", 10, "must be a struct"},
 
 		// when
 		{"unknown target", STRUCTS + "when TARGET == .PICA2000 {\n\tK :: 1\n}\n" + ENTRIES, "MBS-E23", 10, "not a target"},
@@ -155,7 +155,7 @@ the_module_holds_what_the_shader_declares :: proc(t: ^testing.T) {
 	testing.expect_value(t, module.textures[0].name, "tex")
 	testing.expect_value(t, module.textures[0].slot, 0)
 	testing.expect_value(t, module.uniforms[0].kind, Uniform_Kind.FRAME)
-	testing.expect_value(t, module.uniforms[1].kind, Uniform_Kind.DRAW)
+	testing.expect_value(t, module.uniforms[1].kind, Uniform_Kind.RENDER)
 	testing.expect_value(t, len(module.uniforms[1].block.fields), 4)
 
 	if testing.expect(t, module.vertex_in != nil && module.varying != nil) {
@@ -253,11 +253,11 @@ tags_are_read :: proc(t: ^testing.T) {
 
 @(test)
 names_are_suggested_when_close :: proc(t: ^testing.T) {
-	suggestion, found := suggest_name("tnt", {"model", "tint", "uv_rect"})
+	suggestion, found := suggest_name("tnt", {"model", "tint", "uv_rectangle"})
 	testing.expect(t, found)
 	testing.expect_value(t, suggestion, "tint")
 
-	_, far := suggest_name("banana", {"model", "tint", "uv_rect"})
+	_, far := suggest_name("banana", {"model", "tint", "uv_rectangle"})
 	testing.expect(t, far == false)
 
 	key := type_key("matrix[4, 4]f32")

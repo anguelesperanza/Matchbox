@@ -16,8 +16,14 @@ package matchbox
 	(Seeing both screens at once, an overlay or a stacked layout, is not offered at this time.)
 */
 
-// The 3DS bottom screen's shape: 320 wide, 240 tall. The top screen is 400x240
-BOTTOM_SCREEN_ASPECT :: f32(320.0 / 240.0)
+/*
+	The HUD's and the bottom screen's fixed shapes. Lives in `mbi.screen_settings`, with its
+	values set where `mbi` is declared, so they hold under `odin test` too
+*/
+Screen_Settings :: struct {
+	default_height:f32, // HUD units tall until set_screen_height. A placeholder until the design aspect and fit policy are chosen (render_plan.md, B8)
+	bottom_screen_aspect:f32, // the 3DS bottom screen's shape: 320 wide, 240 tall. The top screen is 400x240
+}
 
 Bottom_Screen_Layout :: enum {
 	HIDDEN,
@@ -31,7 +37,7 @@ Bottom_Screen_Layout :: enum {
 	A window narrower than the 3DS's 4:3 would cut the sides off, so there the width is held
 	at 4:3 of `height` and the view grows taller instead
 */
-bottom_screen_view_height :: proc(height:f32, aspect:f32) -> f32 {
+calculate_bottom_screen_view_height :: proc(height:f32, aspect:f32) -> f32 {
 	if aspect <= 0 do return height
-	return max(height, height * BOTTOM_SCREEN_ASPECT / aspect)
+	return max(height, height * mbi.screen_settings.bottom_screen_aspect / aspect)
 }

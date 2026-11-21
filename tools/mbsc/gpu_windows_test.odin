@@ -7,7 +7,7 @@ import "vendor:directx/d3d_compiler"
 
 // A small renderer for the tests: it draws one mesh with a pair of HLSL entry points through Direct3D 11's software
 // device (WARP), so it needs no GPU, and gives back the pixels as floats. It follows the engine's pipeline:
-// the same input layout, constant buffers at b0 (frame), b1 (draw) and b2 (the game's uniforms), a texture at t0
+// the same input layout, constant buffers at b0 (frame), b1 (render) and b2 (the game's uniforms), a texture at t0
 // and a sampler at s0. Blending and depth are off, so the result is exactly what the pixel shader returns.
 
 // What the renderer puts in a pixel the shader never wrote (a `discard`, or outside every triangle). It can't be a

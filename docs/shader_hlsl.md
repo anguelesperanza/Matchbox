@@ -16,7 +16,7 @@ the errors and no HLSL. The Vita and the 3DS don't take HLSL, so `--emit-hlsl` w
 ```
 struct Vertex_In { ... };            the shader's structs, each after the ones it contains
 cbuffer frame_block : register(b0)   the engine's frame block
-cbuffer draw_block  : register(b1)   the engine's draw block
+cbuffer render_block  : register(b1)   the engine's render block
 cbuffer mbs_game    : register(b2)   the game's own uniforms, in the order they are declared
 Texture2D tex : register(t0);        one per @(texture = N), at register tN
 SamplerState mbs_sampler : register(s0);
@@ -31,8 +31,8 @@ still agree.
 
 | In the shader | In the HLSL |
 |---|---|
-| `frame.view_projection`, `draw.tint` | `frame_view_projection`, `draw_tint`: HLSL puts the fields of a constant buffer in the global scope, so each is named `<block>_<field>` |
-| the engine blocks | written with **every** engine field, in the engine's order, whichever fields the shader declared: the runtime fills one fixed layout (`Frame_Constants`, `Draw_Constants`), and the buffer must match it |
+| `frame.view_projection`, `render.tint` | `frame_view_projection`, `render_tint`: HLSL puts the fields of a constant buffer in the global scope, so each is named `<block>_<field>` |
+| the engine blocks | written with **every** engine field, in the engine's order, whichever fields the shader declared: the runtime fills one fixed layout (`Frame_Constants`, `Render_Constants`), and the buffer must match it |
 | `m * v`, `v * m`, `m * n` | `mul(m, v)`, `mul(v, m)`, `mul(m, n)`. The engine uploads Odin's matrix layout, which HLSL reads as column-major, so this is the same product. HLSL's own `*` works per element, so it is used only for `m * 2.0` and `m + n` |
 | `[4]f32`, `matrix[4, 4]f32`, `i32`, `u32` | `float4`, `float4x4`, `int`, `uint` |
 | `x: T` | `T x = (T)0;` |

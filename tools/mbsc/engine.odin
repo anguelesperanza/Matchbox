@@ -3,7 +3,7 @@ package mbsc
 import "core:strings"
 
 // What the engine provides to every shader. The reference is docs/shader_language.md, sections 4 and 5, and
-// the engine's own Frame_Constants and Draw_Constants in render_windows.odin.
+// the engine's own Frame_Constants and Render_Constants in render_windows.odin.
 
 Engine_Field :: struct {
 	name: string,
@@ -14,7 +14,7 @@ Engine_Field :: struct {
 FRAME_FIELDS := [?]Engine_Field{{"view_projection", "matrix[4,4]f32"}, {"time", "f32"}}
 
 @(rodata)
-DRAW_FIELDS := [?]Engine_Field{{"model", "matrix[4,4]f32"}, {"tint", "[4]f32"}, {"uv_rect", "[4]f32"}, {"alpha_cutoff", "f32"}}
+RENDER_FIELDS := [?]Engine_Field{{"model", "matrix[4,4]f32"}, {"tint", "[4]f32"}, {"uv_rectangle", "[4]f32"}, {"alpha_cutoff", "f32"}}
 
 // The vertex attributes the engine's mesh format has today. More come with the 3D work.
 @(rodata)

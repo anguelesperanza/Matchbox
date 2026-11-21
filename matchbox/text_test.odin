@@ -8,7 +8,7 @@ import "core:testing"
 // and one unit is 10 pixels, so a character is 1 unit wide
 test_font :: proc() -> Font {
 	font := Font {
-		atlas_size = FONT_ATLAS_MIN_SIZE,
+		atlas_size = mbi.font_settings.atlas_min_size,
 		size = 16,
 		pixels_per_unit = 10,
 		ascent = 12,
@@ -21,7 +21,7 @@ test_font :: proc() -> Font {
 @(test)
 measure_is_width_in_units :: proc(t:^testing.T) {
 	font := test_font()
-	size := measure_text(font, "hello")
+	size := calculate_text_size(font, "hello")
 	testing.expect_value(t, size.x, 5)
 	testing.expect_value(t, size.y, 1.6) // (12 + 4) / 10
 }
@@ -29,8 +29,8 @@ measure_is_width_in_units :: proc(t:^testing.T) {
 @(test)
 characters_outside_the_atlas_take_no_room :: proc(t:^testing.T) {
 	font := test_font()
-	testing.expect_value(t, measure_text(font, "a\tb").x, 2) // tab is not in the atlas
-	testing.expect_value(t, measure_text(font, "").x, 0)
+	testing.expect_value(t, calculate_text_size(font, "a\tb").x, 2) // tab is not in the atlas
+	testing.expect_value(t, calculate_text_size(font, "").x, 0)
 }
 
 @(test)
@@ -85,9 +85,9 @@ wrapped_line_never_starts_with_a_space :: proc(t:^testing.T) {
 @(test)
 block_height_counts_gaps_between_lines :: proc(t:^testing.T) {
 	font := test_font()
-	testing.expect_value(t, text_block_height(font, 0), 0)
-	testing.expect_value(t, text_block_height(font, 1), measure_text(font, "a").y)
-	testing.expect(t, text_block_height(font, 2) > 2 * measure_text(font, "a").y)
+	testing.expect_value(t, calculate_text_block_height(font, 0), 0)
+	testing.expect_value(t, calculate_text_block_height(font, 1), calculate_text_size(font, "a").y)
+	testing.expect(t, calculate_text_block_height(font, 2) > 2 * calculate_text_size(font, "a").y)
 }
 
 @(test)

@@ -23,10 +23,10 @@ Varying :: struct {
 }
 
 @(uniform = .FRAME) frame: struct { view_projection: matrix[4, 4]f32 }
-@(uniform = .DRAW) draw: struct {
+@(uniform = .RENDER) render: struct {
 	model:        matrix[4, 4]f32,
 	tint:         [4]f32,
-	uv_rect:      [4]f32,
+	uv_rectangle: [4]f32,
 	alpha_cutoff: f32,
 }
 @(uniform) count: i32
@@ -38,15 +38,15 @@ LIMIT :: 4
 
 @(private = "file")
 GOOD_VERTEX :: `	output.position = frame.view_projection * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
-	output.color = input.color * draw.tint
-	output.uv = lerp(draw.uv_rect.xy, draw.uv_rect.zw, input.uv)
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
 	return output`
 
 @(private = "file")
 FRAGMENT :: `
 fragment_main :: proc(v: Varying) -> [4]f32 {
 	color := sample(tex, v.uv) * v.color
-	if color.a < draw.alpha_cutoff do discard()
+	if color.a < render.alpha_cutoff do discard()
 	return color
 }
 `
@@ -89,12 +89,12 @@ the_type_checker_reports_what_is_wrong :: proc(t: ^testing.T) {
 		{"float plus int literal", shader(body("x := 1.0 + 2")), "MBS-E13", "cannot apply `+`"},
 		{"int plus float literal", shader(body("x := 1 + 2.0")), "MBS-E13", "cannot apply `+`"},
 		{"float times int variable", shader(body("n := 2\n\tx := 1.0 * n")), "MBS-E13", "cannot apply `*`"},
-		{"vector times int literal", shader(body("x := draw.tint * 2")), "MBS-E13", "cannot apply `*`"},
+		{"vector times int literal", shader(body("x := render.tint * 2")), "MBS-E13", "cannot apply `*`"},
 		{"declared f32 given an int", shader(body("x: f32 = 1")), "MBS-E13", "expected `f32`, found `i32`"},
 		{"literal element of the wrong type", shader(body("x := [4]f32{1.0, 0.0, 0.0, 1}")), "MBS-E13", "expected `f32`, found `i32`"},
 		{"too few values in a literal", shader(body("x := [4]f32{1.0, 0.0}")), "MBS-E13", "needs 4 values"},
 		{"bool arithmetic", shader(body("x := true + 1.0")), "MBS-E13", "cannot apply `+`"},
-		{"vector comparison", shader(body("x := draw.tint == draw.tint")), "MBS-E13", "cannot apply `==`"},
+		{"vector comparison", shader(body("x := render.tint == render.tint")), "MBS-E13", "cannot apply `==`"},
 		{"vectors of different length", shader(body("x := input.position + input.uv")), "MBS-E13", "cannot apply `+`"},
 		{"matrix times the wrong vector", shader(body("x := frame.view_projection * input.position")), "MBS-E13", "cannot apply `*`"},
 		{"if on a number", shader(body("if 1.0 {\n\t}")), "MBS-E13", "needs a `bool`"},
@@ -125,7 +125,7 @@ the_type_checker_reports_what_is_wrong :: proc(t: ^testing.T) {
 		{"unknown type", shader(body("x: Foo")), "MBS-E14", "cannot find the type"},
 		{"unknown literal field", shader(body("x := Varying{colr = input.color}")), "MBS-E14", "has no field"},
 		{"engine field the shader leaves out", shader(body("x := frame.time")), "MBS-E14", "doesn't declare `frame.time`"},
-		{"engine field that doesn't exist", shader(body("x := draw.tnt")), "MBS-E18", "no field `tnt`"},
+		{"engine field that doesn't exist", shader(body("x := render.tnt")), "MBS-E18", "no field `tnt`"},
 		{"TARGET outside a when", shader(body("if TARGET == .PC {\n\t}")), "MBS-E23", "only available in a `when`"},
 		{"redeclared local", shader(body("x := 1.0\n\tx := 2.0")), "MBS-E25", "declared twice"},
 
@@ -136,7 +136,7 @@ the_type_checker_reports_what_is_wrong :: proc(t: ^testing.T) {
 
 		// assignment
 		{"assign to a uniform", shader(body("count = 1")), "MBS-E27", "cannot assign to `count`"},
-		{"assign to a field of a uniform", shader(body("draw.tint = draw.tint")), "MBS-E27", "cannot assign to `draw`"},
+		{"assign to a field of a uniform", shader(body("render.tint = render.tint")), "MBS-E27", "cannot assign to `render`"},
 		{"assign to a parameter", shader(body("input = input")), "MBS-E27", "cannot assign to `input`"},
 		{"assign to a local constant", shader(body("K :: 1.0\n\tK = 2.0")), "MBS-E27", "cannot assign to `K`"},
 		{"assign to a repeated swizzle", shader(body("output.uv.xx = input.uv")), "MBS-E27", "twice"},
@@ -238,7 +238,7 @@ branch :: proc(x: f32) -> f32 {
 	n.xy = input.uv
 	s := shade(light, n) + shade(other, n) + shade(zero, n)
 	k := f32(count) + fold(palette[0]) + pulse(s) + branch(s)
-	m := frame.view_projection * draw.model
+	m := frame.view_projection * render.model
 	p := m * [4]f32{n.x, n.y, n.z, 1.0}
 	q := [4]f32{1.0, 0.0, 0.0, 1.0} * k
 	w := p.xyz * s + q.rgb
@@ -251,7 +251,7 @@ branch :: proc(x: f32) -> f32 {
 	e := transpose(m)
 	f := determinant(m)
 	output.position = p + q
-	output.color = input.color * draw.tint * t
+	output.color = input.color * render.tint * t
 	output.uv = input.uv
 	if b {
 		output.uv.x = d + f
@@ -303,7 +303,7 @@ every_expression_gets_a_type :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(parsed.diagnostics), 0)
 	testing.expect(t, len(module.types) > 20)
 
-	// The uv_rect swizzle is a [2]f32, and the lerp of two of them is too.
+	// The uv_rectangle swizzle is a [2]f32, and the lerp of two of them is too.
 	found_lerp := false
 	for expr, type in module.types {
 		if call, is_call := expr.derived.(^ast.Call_Expr); is_call {

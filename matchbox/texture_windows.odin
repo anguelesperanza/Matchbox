@@ -37,17 +37,17 @@ Texture :: struct {
 	frame_count:i32,
 }
 
-create_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
+load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
 
 	path := get_asset(filename, .IMAGE)
 	meta := load_texture_meta(path)
 
-	img, err := image.load_from_file(path, options = {.alpha_add_if_missing})
+	loaded_image, err := image.load_from_file(path, options = {.alpha_add_if_missing})
 	ensure(err == nil, "Failed to load image") // Might change to a checkered pattern if no image is loaded
-	ensure(img.depth == 8 && img.channels == 4, "Texutres must be 8 bits per channel")
+	ensure(loaded_image.depth == 8 && loaded_image.channels == 4, "Texutres must be 8 bits per channel")
 	
 
-	texture = create_texture_from_pixels(raw_data(img.pixels), i32(img.width), i32(img.height), filter)
+	texture = create_texture_from_pixels(raw_data(loaded_image.pixels), i32(loaded_image.width), i32(loaded_image.height), filter)
 
 	texture.pixels_per_unit = meta.pixels_per_unit
 	texture.columns = meta.columns
@@ -56,7 +56,7 @@ create_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (textur
 
 	ensure(texture.width % texture.columns == 0 && texture.height % texture.rows == 0, "Texture size must divide evenly into its columns and rows")
 
-	image.destroy(img)
+	image.destroy(loaded_image)
 	delete(path)
 
 	return
@@ -70,7 +70,7 @@ create_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (textur
 	one frame, one pixel per unit. The caller owns `pixels` and can free them afterwards.
 */
 create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
-	desc := d3d11.TEXTURE2D_DESC {
+	description := d3d11.TEXTURE2D_DESC {
 		Width = cast(u32)width,
 		Height = cast(u32)height,
 		MipLevels = 1,
@@ -86,11 +86,11 @@ create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filt
 		SysMemPitch = u32(width * 4), // bytes in one row
 	}
 
-	res := mbi.device->CreateTexture2D(&desc, &data, &texture.texture)
-	ensure(win.SUCCEEDED(res), "Create texture failed")
+	result := mbi.device->CreateTexture2D(&description, &data, &texture.texture)
+	ensure(win.SUCCEEDED(result), "Create texture failed")
 
-	res = mbi.device->CreateShaderResourceView(texture.texture, nil, &texture.view)
-	ensure(win.SUCCEEDED(res), "Create texture view failed")
+	result = mbi.device->CreateShaderResourceView(texture.texture, nil, &texture.view)
+	ensure(win.SUCCEEDED(result), "Create texture view failed")
 
 	texture.filter = filter
 	texture.width = width
@@ -133,7 +133,7 @@ load_texture_meta :: proc(image_path:string) -> Texture_Meta {
 
 /*The pixel rectangle {x, y, width, height} of one frame. Frame 0 is the top left,
 then left to right, then down*/
-texture_frame_rect :: proc(texture:Texture, frame:int) -> [4]f32 {
+calculate_texture_frame_rectangle :: proc(texture:Texture, frame:int) -> [4]f32 {
 	ensure(frame >= 0 && frame < int(texture.frame_count), "Texture frame is out of range")
 
 	frame_width := texture.width / texture.columns

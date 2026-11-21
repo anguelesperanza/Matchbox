@@ -154,8 +154,8 @@ engine_layout :: proc(ir: ^IR_Module, kind: Uniform_Kind) -> Layout {
 	layout: Layout
 	layout.entries = make([dynamic]Layout_Entry, 0, 16, context.temp_allocator)
 	fields: []Engine_Field = FRAME_FIELDS[:]
-	if kind == .DRAW {
-		fields = DRAW_FIELDS[:]
+	if kind == .RENDER {
+		fields = RENDER_FIELDS[:]
 	}
 	cursor := 0
 	for field in fields {

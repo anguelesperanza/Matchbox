@@ -11,10 +11,10 @@ Varying :: struct {
 }
 
 @(uniform = .FRAME) frame: struct { view_projection: matrix[4, 4]f32 }
-@(uniform = .DRAW) draw: struct {
+@(uniform = .RENDER) render: struct {
 	model:        matrix[4, 4]f32,
 	tint:         [4]f32,
-	uv_rect:      [4]f32,
+	uv_rectangle: [4]f32,
 	alpha_cutoff: f32,
 }
 
@@ -26,7 +26,7 @@ five :: proc() -> [5]f32 {
 
 vertex_main :: proc(input: Vertex_In) -> Varying {
 	output: Varying
-	output.position = frame.view_projection * (draw.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0})
+	output.position = frame.view_projection * (render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0})
 	output.uv = input.uv
 	output.color = input.color
 	output.color.x = five()[0]

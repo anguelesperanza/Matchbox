@@ -24,15 +24,22 @@ import stbtt "vendor:stb/truetype"
 // the executable. Use one of those sizes so its design pixels land on whole screen pixels
 DEFAULT_FONT_BYTES :: #load("fonts/Bitrimus.ttf")
 
-// The atlas is one square texture holding the printable ASCII glyphs. It starts at the
-// smaller size and doubles until they all fit, so a big pixel size gets a big atlas
-FONT_ATLAS_MIN_SIZE :: 256
-FONT_ATLAS_MAX_SIZE :: 4096
-FONT_FIRST_GLYPH :: 32
+// How many printable ASCII glyphs a font holds. A constant because it sizes `baked_chars`
 FONT_GLYPH_COUNT :: 95
 
-// The gap between lines, as a fraction of the line's height
-FONT_LINE_SPACING :: 0.15
+/*
+	The values every font is baked and laid out with. Lives in `mbi.font_settings`;
+	the values are set where `mbi` is declared, so they hold under `odin test` too,
+	where `init` never runs.
+*/
+Font_Settings :: struct {
+	// The atlas is one square texture holding the printable ASCII glyphs. It starts at the
+	// smaller size and doubles until they all fit, so a big pixel size gets a big atlas
+	atlas_min_size:i32,
+	atlas_max_size:i32,
+	first_glyph:rune, // the character of the first glyph baked: 32, the space
+	line_spacing:f32, // the gap between lines, as a fraction of the line's height
+}
 
 Font :: struct {
 	texture:Texture, // white RGB, with the glyph coverage in alpha
@@ -68,15 +75,15 @@ create_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0, filte
 	font.pixels_per_unit = pixels_per_unit if pixels_per_unit > 0 else pixel_size
 
 	// Every printable ASCII glyph, as a grayscale bitmap, in the smallest atlas they fit in
-	atlas := i32(FONT_ATLAS_MIN_SIZE)
+	atlas := i32(mbi.font_settings.atlas_min_size)
 	bitmap:[]u8
 	for {
 		bitmap = make([]u8, atlas * atlas)
 
-		rows_used := stbtt.BakeFontBitmap(raw_data(bytes), 0, pixel_size, raw_data(bitmap), atlas, atlas, FONT_FIRST_GLYPH, FONT_GLYPH_COUNT, raw_data(font.baked_chars[:]))
+		rows_used := stbtt.BakeFontBitmap(raw_data(bytes), 0, pixel_size, raw_data(bitmap), atlas, atlas, i32(mbi.font_settings.first_glyph), FONT_GLYPH_COUNT, raw_data(font.baked_chars[:]))
 		if rows_used > 0 do break
 
-		if atlas >= FONT_ATLAS_MAX_SIZE {
+		if atlas >= mbi.font_settings.atlas_max_size {
 			log.errorf("font at %v pixels does not fit in a %vx%v atlas, so the last glyphs are missing", pixel_size, atlas, atlas)
 			break
 		}

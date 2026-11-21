@@ -1,8 +1,8 @@
 error[MBS-E23]: this `when` condition can't be decided when mbsc runs
   --> e23_when_condition.mbs:26:7
    |
-26 |     when draw.alpha_cutoff > 0.5 {
-   |          ^^^^^^^^^^^^^^^^^^^^^^^ not a test of `TARGET`
+26 |     when render.alpha_cutoff > 0.5 {
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^ not a test of `TARGET`
    |
    = note: a `when` is settled before the shader is compiled, so it can only use `TARGET`, `==`, `!=`, `&&`, `||` and `!`
    = help: write `when TARGET == .PICA200 { ... }`

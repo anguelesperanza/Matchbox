@@ -24,7 +24,7 @@ render_end :: proc() {
 }
 
 /*Packs a 0..1 RGBA colour into 0xRRGGBBAA*/
-color_to_u32 :: proc(color:[4]f32) -> u32 {
+calculate_color_u32 :: proc(color:[4]f32) -> u32 {
 
 	r := u32(color.r * 255 + 0.5)
 	g := u32(color.g * 255 + 0.5)
@@ -35,6 +35,6 @@ color_to_u32 :: proc(color:[4]f32) -> u32 {
 }
 
 clear_background :: proc(color:[4]f32) {
-	cov_color := color_to_u32(color)
+	cov_color := calculate_color_u32(color)
 	c3d.RenderTargetClear(mbi.top_screen, c3d.CLEAR_ALL, cov_color, 0)
 }

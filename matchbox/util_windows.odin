@@ -87,4 +87,5 @@ destroy :: proc {
 	destroy_sprite,
 	destroy_animation_clip,
 	destroy_parallax,
+	destroy_font,
 }

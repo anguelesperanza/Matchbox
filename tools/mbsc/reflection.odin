@@ -74,10 +74,10 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 		}
 	}
 
-	has_frame, has_draw, has_game := false, false, false
+	has_frame, has_render, has_game := false, false, false
 	for uniform in ir.uniforms {
 		has_frame ||= uniform.kind == .FRAME
-		has_draw ||= uniform.kind == .DRAW
+		has_render ||= uniform.kind == .RENDER
 		if uniform.kind == .GAME {
 			has_game = true
 			if uniform.type.kind == .STRUCT && uniform.type.info.name == "" {
@@ -88,13 +88,13 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 
 	fmt.sbprintln(&builder)
 	frame := engine_layout(ir, .FRAME)
-	draw := engine_layout(ir, .DRAW)
+	draw := engine_layout(ir, .RENDER)
 	game := game_layout(ir)
 	if has_frame {
 		write_block(&builder, "frame", FRAME_REGISTER, frame)
 	}
-	if has_draw {
-		write_block(&builder, "draw", DRAW_REGISTER, draw)
+	if has_render {
+		write_block(&builder, "render", RENDER_REGISTER, draw)
 	}
 	if has_game {
 		write_block(&builder, "game", GAME_REGISTER, game)
@@ -104,8 +104,8 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	if has_frame {
 		write_values(&builder, "frame", frame)
 	}
-	if has_draw {
-		write_values(&builder, "draw", draw)
+	if has_render {
+		write_values(&builder, "render", draw)
 	}
 	if has_game {
 		write_values(&builder, "game", game)

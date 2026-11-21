@@ -11,7 +11,7 @@ import "core:math"
 Parallax_Direction :: enum {
 	LEFT_TO_RIGHT,
 	RIGHT_TO_LEFT,
-	TOP_TO_BUTTOM,
+	TOP_TO_BOTTOM,
 	BOTTOM_TO_TOP,
 }
 
@@ -30,25 +30,26 @@ Parallax_Layer :: struct {
 	scale_factor: value used to scale the world (cameara.zoom typically)
 		- Default Value: 1 (no scaling happening)
 */
-get_screen_bounds :: proc(scale_factor:f32 = 1) -> (min, max:[2]f32) {
+calculate_screen_bounds :: proc(scale_factor:f32 = 1) -> (min, max:[2]f32) {
 	size := get_window_size()
 	half := [2]f32{f32(size[0]), f32(size[1])} / scale_factor / 2
 	return -half, half   // camera at the origin
 }
 
+@(private)
 parallax_axis_and_sign :: proc(direction:Parallax_Direction) -> (axis:int, sign:f32) {
 	switch direction {
 	case .LEFT_TO_RIGHT: return 0,  1
 	case .RIGHT_TO_LEFT: return 0, -1
 	case .BOTTOM_TO_TOP: return 1,  1
-	case .TOP_TO_BUTTOM: return 1, -1
+	case .TOP_TO_BOTTOM: return 1, -1
 	}
 	return 0, 1
 }
 
 /*
 	Loads `filename` and lays copies of it out in a row, ready to scroll
-	filename: the image, looked up like create_texture does. Drawn with POINT filtering
+	filename: the image, looked up like load_texture does. Drawn with POINT filtering
 	amount: the least number of tiles. More are added until the strip covers the screen plus one spare
 		- Default: 1
 	direction: which way the tiles travel (used by parallax_move)
@@ -60,11 +61,11 @@ parallax_axis_and_sign :: proc(direction:Parallax_Direction) -> (axis:int, sign:
 
 	All tiles share one texture. Free it and the list with destroy_parallax
 */
-create_parallax_sprites :: proc(filename:string, amount:i32 = 1, direction:Parallax_Direction = .RIGHT_TO_LEFT, scale_factor:f32 = 1, layer:i32 = 0) -> (parallax:Parallax_Layer) {
-	template := create_sprite(create_texture(filename, .POINT))
-	screen_min, screen_max := get_screen_bounds(scale_factor)
+create_parallax_layer :: proc(filename:string, amount:i32 = 1, direction:Parallax_Direction = .RIGHT_TO_LEFT, scale_factor:f32 = 1, layer:i32 = 0) -> (parallax:Parallax_Layer) {
+	template := create_sprite(load_texture(filename, .POINT))
+	screen_min, screen_max := calculate_screen_bounds(scale_factor)
 
-	lo, hi := get_sprite_bounds(template)
+	lo, hi := calculate_sprite_bounds(template)
 	parallax.direction = direction
 	parallax.tile_size = hi - lo
 
@@ -91,19 +92,19 @@ create_parallax_sprites :: proc(filename:string, amount:i32 = 1, direction:Paral
 /*
 	Scrolls the layer. Every tile is placed from one shared offset, so they stay exactly one
 	tile apart however long it runs
-	parallax: the layer from create_parallax_sprites
-	dt: delta time
+	parallax: the layer from create_parallax_layer
+	delta_time: delta time
 	speed: world units per second
 		- Default: 10
 */
-parallax_move :: proc(parallax:^Parallax_Layer, dt:f32, speed:f32 = 10) {
+parallax_move :: proc(parallax:^Parallax_Layer, delta_time:f32, speed:f32 = 10) {
 	if len(parallax.sprites) == 0 do return
 
 	axis, sign := parallax_axis_and_sign(parallax.direction)
 	size := parallax.tile_size[axis]
 
 	// The strip repeats every tile, so wrapping the offset is the whole wrap logic
-	parallax.offset = math.mod(parallax.offset - sign * speed * dt, size)
+	parallax.offset = math.mod(parallax.offset - sign * speed * delta_time, size)
 	if parallax.offset < 0 do parallax.offset += size
 
 	for &tile, i in parallax.sprites {

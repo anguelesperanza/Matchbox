@@ -1,10 +1,10 @@
-error[MBS-E27]: cannot assign to `draw`
+error[MBS-E27]: cannot assign to `render`
   --> e27_assign_read_only.mbs:26:2
    |
-26 |     draw.tint = input.color
-   |     ^^^^^^^^^ read-only
+26 |     render.tint = input.color
+   |     ^^^^^^^^^^^ read-only
    |
-   = note: `draw` is a uniform, and uniforms are read-only in a shader
+   = note: `render` is a uniform, and uniforms are read-only in a shader
    = help: copy it into a local variable, change that, and use the copy
    = more: docs/shader_errors.md#mbs-e27
 

@@ -207,8 +207,8 @@ engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
 	#partial switch kind {
 	case .FRAME:
 		return FRAME_FIELDS[:]
-	case .DRAW:
-		return DRAW_FIELDS[:]
+	case .RENDER:
+		return RENDER_FIELDS[:]
 	}
 	return nil
 }

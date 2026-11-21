@@ -35,7 +35,7 @@ mbs_to_hlsl :: proc(source: string) -> (text: string, message: string) {
 @(private = "file")
 IDENTITY :: [16]f32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}
 
-// The engine's constant buffers, field by field (Frame_Constants and Draw_Constants in render_windows.odin).
+// The engine's constant buffers, field by field (Frame_Constants and Render_Constants in render_windows.odin).
 @(private = "file")
 frame_constants :: proc() -> []f32 {
 	// view_projection scales by 0.9, as a camera might; Odin lays a matrix out by columns
@@ -46,13 +46,13 @@ frame_constants :: proc() -> []f32 {
 }
 
 @(private = "file")
-draw_constants :: proc(tint_in: [4]f32, uv_rect_in: [4]f32, alpha_cutoff: f32) -> []f32 {
-	tint, uv_rect := tint_in, uv_rect_in
+render_constants :: proc(tint_in: [4]f32, uv_rectangle_in: [4]f32, alpha_cutoff: f32) -> []f32 {
+	tint, uv_rectangle := tint_in, uv_rectangle_in
 	values := make([]f32, 28, context.temp_allocator)
 	// model moves the quad by (0.1, -0.1)
 	copy(values, []f32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.1, -0.1, 0, 1})
 	copy(values[16:20], tint[:])
-	copy(values[20:24], uv_rect[:])
+	copy(values[20:24], uv_rectangle[:])
 	values[24] = alpha_cutoff
 	return values
 }
@@ -118,7 +118,7 @@ the_generated_mesh_shader_draws_what_the_hand_written_one_does :: proc(t: ^testi
 	Scene :: struct {
 		name:    string,
 		tint:    [4]f32,
-		uv_rect: [4]f32,
+		uv_rectangle: [4]f32,
 		cutoff:  f32,
 		linear:  bool,
 	}
@@ -133,7 +133,7 @@ the_generated_mesh_shader_draws_what_the_hand_written_one_does :: proc(t: ^testi
 
 	plain_written := 0
 	for scene in scenes {
-		draw := draw_constants(scene.tint, scene.uv_rect, scene.cutoff)
+		draw := render_constants(scene.tint, scene.uv_rectangle, scene.cutoff)
 		want, want_message := render_mesh(handwritten, "pixel_main", draw, scene.linear)
 		if want_message != "" {
 			testing.expectf(t, false, "%s, hand-written: %s", scene.name, want_message)

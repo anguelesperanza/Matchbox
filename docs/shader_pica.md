@@ -20,7 +20,7 @@ hardware; it is the TexEnv plan (S6).
   loop counters is settled while writing.
 - Uniforms: `.fvec name` (scalar or vector), `.fvec name[rows]` (matrix), `.fvec name[count]` (array). Struct fields
   are joined with `_` (`light_strength`), array-of-struct elements get their index (`lights_1_color`), engine fields are
-  `<block>_<field>` (`frame_view_projection`, `draw_tint`). `bool` uniforms are `.bool`. Only uniforms the shader reads
+  `<block>_<field>` (`frame_view_projection`, `render_tint`). `bool` uniforms are `.bool`. Only uniforms the shader reads
   are declared. A name that looks like a register (`v3`) gets `mbs_` in front.
 - Outputs are `.out mbs_out_<tag> <tag>` for each `out:` field. Attributes arrive in `v0`, `v1`, ... in the order of the
   fields of the vertex input.
@@ -71,7 +71,7 @@ alphatest <FUNC> <ref | uniform name>
 
 A source is `TEXTURE0..3`, `PRIMARY_COLOR`, `PREVIOUS` (the previous stage's result) or `CONSTANT`; a trailing `!` means
 "one minus" (the ONE_MINUS operand). Example, the shipped `mesh.mbs`: `stage 0 MODULATE TEXTURE0 PRIMARY_COLOR` and
-`alphatest GEQUAL uniform draw_alpha_cutoff`.
+`alphatest GEQUAL uniform render_alpha_cutoff`.
 
 Mapping: `*` MODULATE, `+` ADD, `-` SUBTRACT, `lerp(a, b, t)` INTERPOLATE (source0 = b, source1 = a, source2 = t),
 `1.0 - x` the ONE_MINUS operand, `a * b + c` MULTIPLY_ADD, `(a + b) * c` ADD_MULTIPLY, `saturate(x)` is `x` (stages clamp).

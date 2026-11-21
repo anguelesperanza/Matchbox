@@ -49,7 +49,7 @@ struct Varying
   position: [4]f32  out:position
   ...
 
-uniform draw: the engine's draw block
+uniform render: the engine's render block
   model: matrix[4, 4]f32
   ...
 texture tex: slot 0

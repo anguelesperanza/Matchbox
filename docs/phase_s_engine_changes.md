@@ -23,13 +23,13 @@ original breaks nothing.
 ### Checked without the demo
 
 `tools/mbsc/hlsl_pixels_windows_test.odin` draws a quad with the hand-written shader and with the generated one on
-Direct3D's software device, and compares the pixels: a tinted quad, a tint that changes alpha, a `uv_rect` sprite,
+Direct3D's software device, and compares the pixels: a tinted quad, a tint that changes alpha, a `uv_rectangle` sprite,
 linear filtering, and an alpha cut-off that drops some texels and one that drops all of them. They agree to
 within 1e-6 in every scene. That does not replace looking at the demo; it is why the demo should look the same.
 
 ### To check by running the demo
 
-Run it and confirm it looks the same as before, including a sprite that uses `uv_rect` and anything with the alpha
+Run it and confirm it looks the same as before, including a sprite that uses `uv_rectangle` and anything with the alpha
 cut-off.
 
 Regenerate the file after changing `mesh.mbs`:
@@ -47,11 +47,11 @@ The PC engine reads `shaders/mesh.pc.refl` (made by `mbsc --emit-reflection`, fo
 
 | File | Change | Why |
 |---|---|---|
-| `matchbox/reflection_windows.odin` (new) | parses the reflection file; checks the engine's `Frame_Constants` and `Draw_Constants` against it; maps the shader's vertex attributes to `Vertex`; writes a game value into a byte block by name (`write_shader_value`) | everything the renderer used to assume about the shader |
+| `matchbox/reflection_windows.odin` (new) | parses the reflection file; checks the engine's `Frame_Constants` and `Render_Constants` against it; maps the shader's vertex attributes to `Vertex`; writes a game value into a byte block by name (`write_shader_value`) | everything the renderer used to assume about the shader |
 | `matchbox/reflection_windows_test.odin` (new) | tests for all of the above, with no window or GPU | |
 | `matchbox/shaders/mesh.pc.refl` (new) | the reflection file for `mesh.mbs`, committed next to `mesh.pc.hlsl` | a test fails when it is out of date |
 | `matchbox/render_windows.odin`, `create_pipeline` | loads and checks the reflection file; the input layout is built from its `attribute` lines (semantic name and format from the file, offset from `Vertex`); the frame, draw and game buffers are created only if the shader declares them, the game one as big as the file says | before: three hard-coded input elements and two buffers |
-| `matchbox/render_windows.odin`, `draw_item` | each constant buffer is bound at the register from the file; the draw's texture goes to the first texture the shader declares, any other declared texture gets the white texture; the sampler goes to the file's sampler register | before: `0, 2` for the buffers and `0` for the texture and sampler |
+| `matchbox/render_windows.odin`, `render_item` | each constant buffer is bound at the register from the file; the draw's texture goes to the first texture the shader declares, any other declared texture gets the white texture; the sampler goes to the file's sampler register | before: `0, 2` for the buffers and `0` for the texture and sampler |
 | `matchbox/render_windows.odin`, `set_frame_constants` | fills `time` with the seconds since the window was created | `frame.time` is real now |
 | `matchbox/render_windows.odin`, new `set_shader_value(name, value)` and `upload_game_constants` | a game sets a `@(uniform)` by name; the value is kept in a byte copy and sent to the GPU before the next draw | the game-owned uniforms of the language. A wrong name or type stops with a message saying what the shader has |
 | `matchbox/render_windows.odin`, `destroy_pipeline` | frees the game buffer, its copy and the parsed file | |

@@ -26,7 +26,7 @@ attribute texcoord [2]f32
 attribute color [4]f32
 
 block frame 0 80
-block draw 1 112
+block render 1 112
 block game 2 64
 
 value frame view_projection matrix[4,4]f32 0 64 0 0
@@ -42,7 +42,7 @@ sampler 0
 | `mbs-reflection <version>` | always the first line; the version is 1 |
 | `target <name>` | `pc` |
 | `attribute <name> <type>` | a vertex attribute the vertex stage reads, in the order of the vertex input struct. `<name>` is the `attr:"name"` tag |
-| `block <name> <register> <size>` | a constant buffer: `frame`, `draw` or `game`, the register it is bound to (`b0` is register 0), and its size in bytes, a multiple of 16. Only the blocks the shader declares are listed |
+| `block <name> <register> <size>` | a constant buffer: `frame`, `render` or `game`, the register it is bound to (`b0` is register 0), and its size in bytes, a multiple of 16. Only the blocks the shader declares are listed |
 | `value <block> <name> <type> <offset> <size> <count> <stride>` | one value the runtime can set inside a block |
 | `texture <name> <slot>` | a texture and the slot it is bound to |
 | `sampler <register>` | the register of the one sampler every texture is read through |
@@ -50,7 +50,7 @@ sampler 0
 ### `value`
 
 - `<name>` is the uniform's name. A field of a struct is `key_light.strength`; an element of an array of structs is
-  `lights[1].strength`. The fields of `frame` and `draw` are named plainly: `time`, `tint`.
+  `lights[1].strength`. The fields of `frame` and `render` are named plainly: `time`, `tint`.
 - `<type>` is the value's type: `f32`, `i32`, `u32`, `bool`, `[2]f32` to `[4]f32`, `[2]i32` to `[4]i32` or
   `matrix[R,C]f32`. For an array of numbers, vectors or matrices it is the type of **one element**.
 - `<offset>` is where the value starts in the block, in bytes. `<size>` is the bytes it takes: for an array, all of
@@ -70,7 +70,7 @@ The offsets are what HLSL packs, and a test compares every one with d3dcompiler'
 - each array element starts on a 16-byte boundary
 - what comes after a matrix, array or struct may share its last 16 bytes if there is room
 
-The engine blocks list **every** field of the engine's own layout (`Frame_Constants`, `Draw_Constants`), whichever of
+The engine blocks list **every** field of the engine's own layout (`Frame_Constants`, `Render_Constants`), whichever of
 them the shader declared, because the runtime fills one fixed struct. The runtime checks its struct against these
 lines when it starts and stops with a message if they disagree.
 

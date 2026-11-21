@@ -28,8 +28,8 @@ dump_ir :: proc(ir: ^IR_Module, allocator := context.allocator) -> string {
 		switch uniform.kind {
 		case .FRAME:
 			fmt.sbprintfln(&builder, "uniform %s: the engine's frame block", uniform.name)
-		case .DRAW:
-			fmt.sbprintfln(&builder, "uniform %s: the engine's draw block", uniform.name)
+		case .RENDER:
+			fmt.sbprintfln(&builder, "uniform %s: the engine's render block", uniform.name)
 		case .GAME:
 			fmt.sbprintfln(&builder, "uniform %s: %s", uniform.name, type_name(uniform.type))
 		}

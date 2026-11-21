@@ -17,7 +17,7 @@ import "core:math/linalg"
 
 /*A matrix that sends the unit axes to x, y and z, and the origin to `origin`*/
 @(private)
-create_basis_matrix :: proc(x, y, z, origin:[3]f32) -> matrix[4, 4]f32 {
+calculate_basis_matrix :: proc(x, y, z, origin:[3]f32) -> matrix[4, 4]f32 {
 	return matrix[4, 4]f32 {
 		x.x, y.x, z.x, origin.x,
 		x.y, y.y, z.y, origin.y,
@@ -37,26 +37,26 @@ shape_blend :: proc(color:[4]f32) -> Blend_Mode {
 /*A filled rectangle. `pivot` is the point of the rectangle that sits at `position`
 and that `rotation` (radians, counter-clockwise) turns about*/
 render_rectangle :: proc(position:[3]f32, size:[2]f32, color:[4]f32, rotation:f32 = 0, pivot:[2]f32 = {0.5, 0.5}) {
-	turn := create_rotation_axis_angle({0, 0, 1}, rotation)
-	model := create_model_matrix(position, turn, {size.x, size.y, 1}) *
+	turn := calculate_rotation_axis_angle({0, 0, 1}, rotation)
+	model := calculate_model_matrix(position, turn, {size.x, size.y, 1}) *
 		linalg.matrix4_translate_f32({0.5 - pivot.x, 0.5 - pivot.y, 0})
 
-	queue_draw(mbi.sprite_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
+	queue_render(mbi.sprite_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
 }
 
 /*A filled circle centred on `position`*/
 render_circle :: proc(position:[3]f32, radius:f32, color:[4]f32) {
-	model := create_model_matrix(position, linalg.QUATERNIONF32_IDENTITY, {radius, radius, 1})
+	model := calculate_model_matrix(position, linalg.QUATERNIONF32_IDENTITY, {radius, radius, 1})
 
-	queue_draw(mbi.circle_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
+	queue_render(mbi.circle_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
 }
 
 /*A filled triangle through three points. Either winding works*/
 render_triangle :: proc(a, b, c:[3]f32, color:[4]f32) {
 	// The unit triangle's x axis becomes a->b and its y axis becomes a->c
-	model := create_basis_matrix(b - a, c - a, {0, 0, 1}, a)
+	model := calculate_basis_matrix(b - a, c - a, {0, 0, 1}, a)
 
-	queue_draw(mbi.triangle_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
+	queue_render(mbi.triangle_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
 }
 
 /*A line of `thickness` world units, with flat ends. Lies in the XY plane, facing the camera*/
@@ -71,7 +71,7 @@ render_line :: proc(start, end:[3]f32, thickness:f32, color:[4]f32) {
 	centre := (start + end) * 0.5
 
 	// The unit quad runs -0.5..0.5, so its axes are the full length and thickness
-	model := create_basis_matrix(direction, sideways, {0, 0, 1}, centre)
+	model := calculate_basis_matrix(direction, sideways, {0, 0, 1}, centre)
 
-	queue_draw(mbi.sprite_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
+	queue_render(mbi.sprite_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
 }

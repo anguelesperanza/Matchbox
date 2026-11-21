@@ -156,9 +156,9 @@ is_gamepad_released :: proc (button:Button, id:i32 = 0) -> bool {
 }
 
 /*Returns the x, y values on a range of -1-1 for a joystick*/
-get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
+get_thumbstick_value :: proc(thumbstick:Button) -> (axis:[2]f32) {
 
-	#partial switch thumstick {
+	#partial switch thumbstick {
 		case .LEFT_THUMBSTICK:
 			return mbi.left_thumbstick_axis
 		case .RIGHT_THUMBSTICK:
@@ -222,9 +222,9 @@ set_mouse_capture :: proc(){
 	win.SetCapture(mbi.window)
 }
 
-/*Where the mouse is pointing in world units, as seen by `cam`. Use for clicking things in the world*/
-get_mouse_world_pos :: proc(cam:Camera) -> [2]f32 {
+/*Where the mouse is pointing in world units, as seen by `camera`. Use for clicking things in the world*/
+calculate_mouse_world_position :: proc(camera:Camera) -> [2]f32 {
 	mouse := get_mouse_position()
 	size := get_window_size()
-	return screen_to_world_2d(cam, {f32(mouse.x), f32(mouse.y)}, {f32(size[0]), f32(size[1])})
+	return calculate_screen_to_world_2d(camera, {f32(mouse.x), f32(mouse.y)}, {f32(size[0]), f32(size[1])})
 }

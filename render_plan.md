@@ -43,7 +43,7 @@ free parallax.
   - Units, not pixels.
   - One axis fixed, plus a fit policy: letterbox, overscan (with a cap),
     expand, and an integer option.
-  - The visible rect plus `anchor_position` for the HUD.
+  - The visible rect plus `calculate_anchor_position` for the HUD.
   - Sprite size from pixels-per-unit (PPU) metadata.
   - Frames by index, not by pixel rect.
   - The shia-test minimum feature set for animation.
@@ -408,7 +408,7 @@ Names follow raylib where they fit (`Camera3D` becomes `Camera`; `BeginMode3D` /
   (orthographic), `near`, `far`
 - `fit: Fit_Policy`, `integer_scale: bool`, `overscan_cap: f32` (added in B8)
 
-Helpers: `camera_view_matrix(cam)`, `camera_projection_gl(cam, aspect)` (shared,
+Helpers: `calculate_camera_view_matrix(cam)`, `calculate_camera_projection_gl(cam, aspect)` (shared,
 OpenGL clip space; each backend adapts the depth range) and
 `camera_create_2d(view_height)`, which returns an ortho camera at z = +10
 looking down -Z.
@@ -416,7 +416,7 @@ looking down -Z.
 Public API: `camera_start(cam)` / `camera_end()`, called between `render_start`
 and `render_end`. The game never builds a projection matrix or computes the
 aspect; the backend does. Picking helpers come later: `world_to_screen`,
-`get_mouse_ray(cam)`, `get_mouse_world_pos(cam)` (F2) and `camera_update`
+`get_mouse_ray(cam)`, `calculate_mouse_world_position(cam)` (F2) and `camera_update`
 (G3).
 - Done when: the view matrix moves the world opposite to the camera, which is
   covered by a test.
@@ -540,8 +540,8 @@ layout.
   (default `context.allocator`); the caller frees them after `create_mesh`.
 
 **B6.5. Camera** (added 2026-11-16, so the API names are settled before B7).
-- Shared `camera.odin`: `Projection`, `Camera`, `camera_view_matrix`,
-  `camera_projection_gl`, `camera_create_2d` (see A3).
+- Shared `camera.odin`: `Projection`, `Camera`, `calculate_camera_view_matrix`,
+  `calculate_camera_projection_gl`, `camera_create_2d` (see A3).
 - PC: `camera_start(cam)` builds `GL_TO_D3D_DEPTH * projection * view` from the
   window aspect and uploads it to the frame constants; `camera_end()` does
   nothing yet (B7 flushes the queue there).
@@ -555,7 +555,7 @@ layout.
 immediate batch. `camera_end` is where the draws queued since `camera_start`
 are sorted and flushed, so a frame with several cameras (world then HUD) just
 flushes once per camera. PC first, as it is written (2026-11-16): the queue
-is two persistent `[dynamic]Draw_Item` arrays in `mbi` (opaque and
+is two persistent `[dynamic]Render_Item` arrays in `mbi` (opaque and
 transparent) that are `clear`ed each flush, not temp-arena arrays, and the
 code lives in `render_windows.odin`. It moves to shared code at C4 once
 `Mesh` exists on the 3DS. `render_mesh` takes `blend` and `cull`; the queue
@@ -783,7 +783,7 @@ without `psp2cgc`, and the PC and 3DS scenes still draw.
 ## Phase D: textures and assets
 
 **D1. `Texture` as its own resource.** DONE on PC.
-- `create_texture(filename) -> Texture` and `destroy_texture`.
+- `load_texture(filename) -> Texture` and `destroy_texture`.
 - A filter per texture: point or linear. This is the old roadmap item 1.5.
 - 3DS: keep the heap-allocated `^c3d.Tex`, because the address must stay
   stable.
@@ -827,7 +827,7 @@ in both `3ds_build.bat` and `get_asset`.
 **E2. 2D camera.** DONE on PC.
 - `camera_create_2d(view_height)` with `position.xy` and `zoom`, where zoom
   scales `view_height`.
-- Port `camera_follow` and `get_mouse_world_pos` from main, adapted to the
+- Port `camera_follow` and `calculate_mouse_world_position` from main, adapted to the
   camera.
 
 **E3. Layers and sorting rule** (write this down in the docs). DONE on PC.
@@ -936,7 +936,7 @@ Varying :: struct {
 }
 
 Frame :: struct { view_projection: matrix[4, 4]f32 }
-Draw  :: struct { model: matrix[4, 4]f32, tint, uv_rect: [4]f32, alpha_cutoff: f32 }
+Draw  :: struct { model: matrix[4, 4]f32, tint, uv_rectangle: [4]f32, alpha_cutoff: f32 }
 
 @(uniform = 0) frame: Frame
 @(uniform = 1) draw:  Draw
@@ -944,16 +944,16 @@ Draw  :: struct { model: matrix[4, 4]f32, tint, uv_rect: [4]f32, alpha_cutoff: f
 
 vertex_main :: proc(in: Vertex_In) -> Varying {
 	out: Varying
-	world := draw.model * [4]f32{in.position.x, in.position.y, in.position.z, 1}
+	world := render.model * [4]f32{in.position.x, in.position.y, in.position.z, 1}
 	out.position = frame.view_projection * world
-	out.color = in.color * draw.tint
-	out.uv = lerp(draw.uv_rect.xy, draw.uv_rect.zw, in.uv)
+	out.color = in.color * render.tint
+	out.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, in.uv)
 	return out
 }
 
 fragment_main :: proc(v: Varying) -> [4]f32 {
 	color := sample(tex, v.uv) * v.color
-	if color.a < draw.alpha_cutoff do discard()
+	if color.a < render.alpha_cutoff do discard()
 	return color
 }
 ```
@@ -1000,10 +1000,10 @@ Shader Compiler; like `tritex`), not code in the game. Inputs: a shader file and
 **S2. PC backend: HLSL.**
 - Emit HLSL from the intermediate form. Port `mesh.hlsl` to the language.
 - Done when: the demo looks identical with the generated HLSL, including the
-  alpha cut-off and the `uv_rect` sprites.
+  alpha cut-off and the `uv_rectangle` sprites.
 
 **S3. Bindings and reflection.**
-- Engine-owned slots (`frame`, `draw`) bind the same way on every target, and
+- Engine-owned slots (`frame`, `render`) bind the same way on every target, and
   the reflection file tells each backend what to look up.
 - Done when: the PC runtime reads the reflection output instead of hard-coding
   slots.
@@ -1094,9 +1094,9 @@ through the one `camera_start` / `camera_end` pair, with `screen_start()` /
 points, not two (decided 2026-11-18).
 - `Camera.screen` and `create_screen_camera(view_height)`. A screen camera draws
   with depth off, in submission order (the opaque texture sort is skipped).
-- `set_screen_height(units)` (default 12, a placeholder), `get_visible_rect()`
-  and `anchor_position(anchor, offset)`, on top of the shared pure maths
-  `camera_visible_rect` and `camera_anchor_position`, which have tests.
+- `set_screen_height(units)` (default 12, a placeholder), `calculate_visible_rectangle()`
+  and `calculate_anchor_position(anchor, offset)`, on top of the shared pure maths
+  `calculate_camera_visible_rectangle` and `calculate_camera_anchor_position`, which have tests.
 - A second HUD (the 3DS bottom screen, F4) is another screen camera passed to
   `camera_start`.
 - Not decided yet: the default fit policy and the overscan cap. F1 shipped
@@ -1109,7 +1109,7 @@ points, not two (decided 2026-11-18).
 `stb_truetype` (`vendor:stb/truetype`), as on main. **This may change: the
 `stb` dependency might be removed later** (a different baker, or a build-time
 atlas from an asset tool). Keep the stb calls inside `create_font` and the glyph
-loop of `draw_text_string`, and keep `Font` free of stb types where it can be, so
+loop of `render_text_string`, and keep `Font` free of stb types where it can be, so
 that swap does not touch games.
 - Rework, not a copy: main draws glyphs through its own pipeline and shader; here
   each glyph is a blended `Sprite` through the existing queue (no new shader), in
@@ -1126,11 +1126,11 @@ that swap does not touch games.
   targets, which is the argument for it.
 
 **F3. Input to world.** DONE on PC for orthographic cameras (2026-11-18).
-- Mouse, ortho: `get_mouse_world_pos(camera)` (from E2) already inverts any
+- Mouse, ortho: `calculate_mouse_world_position(camera)` (from E2) already inverts any
   `create_camera_2d` camera, and a screen camera is one, so it works for the
-  HUD too. New: `get_mouse_screen_pos()`, the mouse in HUD units, the same space
-  as `anchor_position`. A test checks that a window corner gives that anchor.
-- Hit-testing: `is_point_in_rect(point, min, max)` and `get_sprite_bounds(sprite)`.
+  HUD too. New: `calculate_mouse_screen_position()`, the mouse in HUD units, the same space
+  as `calculate_anchor_position`. A test checks that a window corner gives that anchor.
+- Hit-testing: `is_point_in_rectangle(point, min, max)` and `calculate_sprite_bounds(sprite)`.
   The bounds ignore rotation and pixel snapping.
 - Still open:
   - Perspective: a ray from the camera (Phase G).
@@ -1150,8 +1150,8 @@ DONE on PC (2026-11-18).
   Start). No letterbox: the view is as tall as the HUD (`set_screen_height`), its
   width follows the window, and in a window narrower than 4:3 it grows taller
   instead so the 320x240 shape is never cut off. Lay it out with
-  `bottom_screen_anchor_position`.
-- `bottom_screen_start` / `bottom_screen_end` draw it, `get_mouse_bottom_screen_pos()`
+  `calculate_bottom_screen_anchor_position`.
+- `bottom_screen_start` / `bottom_screen_end` draw it, `calculate_mouse_bottom_screen_position()`
   is the touch stand-in (position plus `inside`, false while hidden).
 - Left out at this time: an overlay (both screens at once) and a stacked layout. The
   overlay needs a per-camera viewport and scissor; stacked also needs the top
@@ -1273,7 +1273,7 @@ above all the same.
 | `Sprite.x/y` (pixels), `width/height`, pixel `source` | `position: [3]f32`, frame index, PPU | E1 |
 | citro2d sprite drawing (`DrawImageAtRotated`, sub-texture maths) | Quads in the queue | E1 |
 | `render_triangle_points` (pixel-space) | World-space shapes | E4 |
-| `get_window_size()` as the game's coordinate space | `get_visible_rect()` + camera | F1 |
+| `get_window_size()` as the game's coordinate space | `calculate_visible_rectangle()` + camera | F1 |
 | citro2d link entirely | Own text (F2) | F2, if citro2d isn't used for text |
 | `u2f`/`f2u` bridges, `.eabi_attribute 28, 1` append / `.ARM.attributes` removal, `objcopy` libm rename + `o3dx/libm` + `vito/libm`, 3DS float rules | Hard-float Odin from Farlite | Phase H |
 | `c3d.sinf`, `cosf`, ... `u32` bridges (added 2026-11-12) | `math.sin` etc. via the libm rename | When nothing calls them |

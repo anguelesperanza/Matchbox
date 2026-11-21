@@ -158,12 +158,12 @@ offset_scales_with_the_sprite_and_mirrors_with_flip :: proc(t:^testing.T) {
 	clip.offset = {32, 8}
 	sprite := create_animated_sprite_from_clip(clip, 2, true, 64) // 64 pixels per unit, twice as big
 
-	shift := animation_draw_offset(sprite)
+	shift := calculate_animation_render_offset(sprite)
 	testing.expect_value(t, shift.x, 1) // 32 pixels = half a unit, doubled by the scale
 	testing.expect_value(t, shift.y, 0.25)
 
 	sprite.flip_x = true
-	shift = animation_draw_offset(sprite)
+	shift = calculate_animation_render_offset(sprite)
 	testing.expect_value(t, shift.x, -1)
 	testing.expect_value(t, shift.y, 0.25)
 }
@@ -171,7 +171,7 @@ offset_scales_with_the_sprite_and_mirrors_with_flip :: proc(t:^testing.T) {
 @(test)
 no_offset_moves_nothing :: proc(t:^testing.T) {
 	sprite := create_animated_sprite_from_clip(test_sheet())
-	testing.expect_value(t, animation_draw_offset(sprite), [2]f32{0, 0})
+	testing.expect_value(t, calculate_animation_render_offset(sprite), [2]f32{0, 0})
 }
 
 @(test)
@@ -190,7 +190,7 @@ window_is_relative_to_the_clip :: proc(t:^testing.T) {
 	sprite := create_animated_sprite_from_clip(animation_range(test_sheet(), 10, 15))
 	update_animation(&sprite, 0.25) // frame 12, which is frame 2 of the clip
 
-	testing.expect_value(t, get_animation_frame(sprite), 2)
+	testing.expect_value(t, calculate_animation_frame(sprite), 2)
 	testing.expect_value(t, is_animation_in_window(sprite, 2, 4), true)
 	testing.expect_value(t, is_animation_in_window(sprite, 3, 5), false)
 	testing.expect_value(t, is_animation_in_window(sprite, 4, 1), false) // empty window

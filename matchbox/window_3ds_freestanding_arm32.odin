@@ -17,14 +17,15 @@ import "o3dx/ctru"
 import "o3dx/c3d"
 
 
-// Constants
-DISPLAY_TRANSFER_FLAGS :: u32(0x1000)
+// How the frame is copied to the screen. Lives in `mbi.display_settings`, set where `mbi` is declared
+Display_Settings :: struct {
+	transfer_flags:u32,
+}
 
 
 Timestamp :: struct {
 	last_time:u64,
 }
-timestamp:Timestamp
 
 
 Matchbox_Info :: struct {
@@ -45,9 +46,20 @@ Matchbox_Info :: struct {
 	gamepad_pressed:u32,
 	gamepad_held:u32,
 	gamepad_released:u32,
+
+	timestamp:Timestamp,
+	display_settings:Display_Settings,
+	screen_settings:Screen_Settings,
 }
 
-mbi:Matchbox_Info
+/*
+	The one global (CLAUDE.md). The settings are given their values here rather than in
+	`init` so they are right from the first line of the program, before `init` runs
+*/
+mbi := Matchbox_Info {
+	display_settings = {transfer_flags = 0x1000},
+	screen_settings = {default_height = 12, bottom_screen_aspect = 320.0 / 240.0},
+}
 
 
 /*Initialize the core of Matchbox for the target platform*/
@@ -82,12 +94,12 @@ init :: proc(title:string, width:i32, height:i32) {
 		target = mbi.top_screen,
 		screen = ctru.GFX_TOP,
 		side = ctru.GFX_LEFT,
-		transferFlags = DISPLAY_TRANSFER_FLAGS
+		transferFlags = mbi.display_settings.transfer_flags
 	)
 
 
 	// Delta time
-	timestamp.last_time = ctru.osGetTime()
+	mbi.timestamp.last_time = ctru.osGetTime()
 }
 
 /*Returns true if the window is running; other returns fale -> Almost always will return true*/
@@ -101,11 +113,11 @@ stop_running :: proc() {
 }
 
 /*Returns the delta time value*/
-get_delta_time :: proc() -> (dt:f32) {
+get_delta_time :: proc() -> (delta_time:f32) {
 	now := ctru.osGetTime() // u64, milliseconds
-	dt = f32(f64(now - timestamp.last_time) / 1000.0)
-	timestamp.last_time = now
-	return dt
+	delta_time = f32(f64(now - mbi.timestamp.last_time) / 1000.0)
+	mbi.timestamp.last_time = now
+	return delta_time
 }
 
 /*Cleans up resources created by Matchbox*/

@@ -53,7 +53,7 @@ identity_frame :: proc() -> []f32 {
 }
 
 @(private = "file")
-identity_draw :: proc() -> []f32 {
+identity_render :: proc() -> []f32 {
 	values := make([]f32, 28, context.temp_allocator)
 	copy(values, []f32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1})
 	return values
@@ -62,7 +62,7 @@ identity_draw :: proc() -> []f32 {
 // probe renders the uniforms shader with a fragment stage that returns `expression`.
 @(private = "file")
 probe :: proc(source: string, expression: string, setup: Probe_Setup) -> (result: [4]f32, message: string) {
-	replaced, _ := strings.replace(source, "return sample(albedo, v.uv) * sample(mask, v.uv).x * draw.tint * flash", strings.concatenate({"return ", expression}, context.temp_allocator), 1, context.temp_allocator)
+	replaced, _ := strings.replace(source, "return sample(albedo, v.uv) * sample(mask, v.uv).x * render.tint * flash", strings.concatenate({"return ", expression}, context.temp_allocator), 1, context.temp_allocator)
 	hlsl, hlsl_message := mbs_to_hlsl_for_probe(replaced)
 	if hlsl_message != "" {
 		return {}, hlsl_message
@@ -79,7 +79,7 @@ probe :: proc(source: string, expression: string, setup: Probe_Setup) -> (result
 			vertices = vertices[:],
 			indices = indices[:],
 			frame = identity_frame(),
-			draw = identity_draw(),
+			draw = identity_render(),
 			game = setup.values,
 		},
 	)

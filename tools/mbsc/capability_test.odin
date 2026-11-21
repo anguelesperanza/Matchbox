@@ -40,7 +40,7 @@ what_the_3ds_can_do_passes :: proc(t: ^testing.T) {
 		context.temp_allocator,
 	)
 	source, _ = strings.replace(source, "@(texture = 0) tex: Texture2D\n", "@(texture = 0) tex: Texture2D\n@(uniform) weights: [4]f32\n", 1, context.temp_allocator)
-	source, _ = strings.replace(source, "return sample(tex, v.uv) * v.color", "color := sample(tex, v.uv) * v.color\n\tif color.a < draw.alpha_cutoff {\n\t\tdiscard()\n\t}\n\treturn color", 1, context.temp_allocator)
+	source, _ = strings.replace(source, "return sample(tex, v.uv) * v.color", "color := sample(tex, v.uv) * v.color\n\tif color.a < render.alpha_cutoff {\n\t\tdiscard()\n\t}\n\treturn color", 1, context.temp_allocator)
 
 	for target in Target {
 		testing.expect_value(t, messages_for(source, target), "")

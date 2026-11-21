@@ -16,20 +16,20 @@ struct Varying {
 uniform float4x4 frame_view_projection;
 uniform float frame_time;
 
-// draw
-uniform float4x4 draw_model;
-uniform float4 draw_tint;
-uniform float4 draw_uv_rect;
-uniform float draw_alpha_cutoff;
+// render
+uniform float4x4 render_model;
+uniform float4 render_tint;
+uniform float4 render_uv_rectangle;
+uniform float render_alpha_cutoff;
 
 uniform sampler2D tex : TEXUNIT0;
 
 Varying vertex_main(Vertex_In input) {
     Varying output = (Varying)0;
-    float4 world = mul(float4(input.position.x, input.position.y, input.position.z, 1.0), draw_model);
+    float4 world = mul(float4(input.position.x, input.position.y, input.position.z, 1.0), render_model);
     output.position = mul(world, frame_view_projection);
-    output.color = input.color * draw_tint;
-    output.uv = lerp(draw_uv_rect.xy, draw_uv_rect.zw, input.uv);
+    output.color = input.color * render_tint;
+    output.uv = lerp(render_uv_rectangle.xy, render_uv_rectangle.zw, input.uv);
     return output;
 }
 

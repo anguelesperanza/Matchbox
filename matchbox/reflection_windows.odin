@@ -20,7 +20,7 @@ import "vendor:directx/dxgi"
 
 Block_Kind :: enum {
 	FRAME,
-	DRAW,
+	RENDER,
 	GAME,
 }
 
@@ -60,7 +60,14 @@ Shader_Reflection :: struct {
 	has_sampler:bool,
 }
 
-REFLECTION_VERSION :: 1
+/*
+	What the engine expects of a compiled shader. Lives in `mbi.shader_format`, with its values
+	set where `mbi` is declared
+*/
+Shader_Format :: struct {
+	reflection_version:int, // the .refl file version this engine reads; mbsc writes the same number
+	vertex_attributes:[3]Vertex_Attribute, // what a Vertex has. A shader may read any of these, in any order, and leave some out
+}
 
 @(private)
 destroy_reflection :: proc(reflection:^Shader_Reflection) {
@@ -74,7 +81,7 @@ destroy_reflection :: proc(reflection:^Shader_Reflection) {
 parse_block_kind :: proc(word:string) -> (kind:Block_Kind, ok:bool) {
 	switch word {
 	case "frame": return .FRAME, true
-	case "draw": return .DRAW, true
+	case "render": return .RENDER, true
 	case "game": return .GAME, true
 	}
 	return {}, false
@@ -108,8 +115,8 @@ parse_reflection :: proc(text:string) -> (reflection:Shader_Reflection, ok:bool,
 				return reflection_failed(&reflection, line_number, "the first line must be `mbs-reflection <version>`")
 			}
 			version, version_ok := parse_number(words[1])
-			if version_ok == false || version != REFLECTION_VERSION {
-				return reflection_failed(&reflection, line_number, fmt.tprintf("version %s isn't one this engine reads (it reads %d); build the shader again", words[1], REFLECTION_VERSION))
+			if version_ok == false || version != mbi.shader_format.reflection_version {
+				return reflection_failed(&reflection, line_number, fmt.tprintf("version %s isn't one this engine reads (it reads %d); build the shader again", words[1], mbi.shader_format.reflection_version))
 			}
 			seen_header = true
 			continue
@@ -170,7 +177,7 @@ parse_reflection :: proc(text:string) -> (reflection:Shader_Reflection, ok:bool,
 
 // ---- the engine's own blocks ------------------------------------------------------------------------------------
 
-/*Checks that the engine's Frame_Constants and Draw_Constants have the layout the shader was built for.
+/*Checks that the engine's Frame_Constants and Render_Constants have the layout the shader was built for.
 Returns "" when they do, otherwise what differs*/
 @(private)
 check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
@@ -183,7 +190,7 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 	}
 
 	if message := check_block(reflection, .FRAME, "frame", size_of(Frame_Constants)); message != "" do return message
-	if message := check_block(reflection, .DRAW, "draw", size_of(Draw_Constants)); message != "" do return message
+	if message := check_block(reflection, .RENDER, "render", size_of(Render_Constants)); message != "" do return message
 
 	for value in reflection.values {
 		expected := -1
@@ -193,12 +200,12 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 			case "view_projection": expected = int(offset_of(Frame_Constants, view_projection))
 			case "time": expected = int(offset_of(Frame_Constants, time))
 			}
-		case .DRAW:
+		case .RENDER:
 			switch value.name {
-			case "model": expected = int(offset_of(Draw_Constants, model))
-			case "tint": expected = int(offset_of(Draw_Constants, tint))
-			case "uv_rect": expected = int(offset_of(Draw_Constants, uv_rect))
-			case "alpha_cutoff": expected = int(offset_of(Draw_Constants, alpha_cutoff))
+			case "model": expected = int(offset_of(Render_Constants, model))
+			case "tint": expected = int(offset_of(Render_Constants, tint))
+			case "uv_rectangle": expected = int(offset_of(Render_Constants, uv_rectangle))
+			case "alpha_cutoff": expected = int(offset_of(Render_Constants, alpha_cutoff))
 			}
 		case .GAME:
 			continue
@@ -223,18 +230,10 @@ Vertex_Attribute :: struct {
 	offset:u32,
 }
 
-// What a Vertex has. A shader may read any of these, in any order, and leave some out
-@(private)
-VERTEX_ATTRIBUTES := [?]Vertex_Attribute {
-	{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position))},
-	{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv))},
-	{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color))},
-}
-
 /*Finds the engine's vertex attribute a shader asks for. `message` says what is wrong when it isn't there*/
 @(private)
 find_vertex_attribute :: proc(attribute:Reflected_Attribute) -> (found:Vertex_Attribute, message:string) {
-	for candidate in VERTEX_ATTRIBUTES {
+	for candidate in mbi.shader_format.vertex_attributes {
 		if candidate.name == attribute.name {
 			if candidate.type != attribute.type {
 				return {}, fmt.tprintf("the shader reads `%s` as %s and the engine's vertices have it as %s", attribute.name, attribute.type, candidate.type)

@@ -173,9 +173,9 @@ is_gamepad_released :: proc (button:Button, id:i32 = 0) -> bool {
 	
 }
 /*Returns the x, y values on a range of 0-1 for a joystick*/
-get_thumbstick_value :: proc(thumstick:Button) -> (axis:[2]f32) {
+get_thumbstick_value :: proc(thumbstick:Button) -> (axis:[2]f32) {
 
-	#partial switch thumstick {
+	#partial switch thumbstick {
 		case .LEFT_THUMBSTICK:
 			return mbi.left_thumbstick_axis
 		case .RIGHT_THUMBSTICK:

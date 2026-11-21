@@ -17,11 +17,11 @@ cbuffer frame_block : register(b0) {
     float frame_time;
 };
 
-cbuffer draw_block : register(b1) {
-    float4x4 draw_model;
-    float4 draw_tint;
-    float4 draw_uv_rect;
-    float draw_alpha_cutoff;
+cbuffer render_block : register(b1) {
+    float4x4 render_model;
+    float4 render_tint;
+    float4 render_uv_rectangle;
+    float render_alpha_cutoff;
 };
 
 Texture2D tex : register(t0);
@@ -29,16 +29,16 @@ SamplerState mbs_sampler : register(s0);
 
 Varying vertex_main(Vertex_In input) {
     Varying output = (Varying)0;
-    float4 world = mul(draw_model, float4(input.position.x, input.position.y, input.position.z, 1.0));
+    float4 world = mul(render_model, float4(input.position.x, input.position.y, input.position.z, 1.0));
     output.position = mul(frame_view_projection, world);
-    output.color = input.color * draw_tint;
-    output.uv = lerp(draw_uv_rect.xy, draw_uv_rect.zw, input.uv);
+    output.color = input.color * render_tint;
+    output.uv = lerp(render_uv_rectangle.xy, render_uv_rectangle.zw, input.uv);
     return output;
 }
 
 float4 fragment_main(Varying v) : SV_TARGET {
     float4 color = tex.Sample(mbs_sampler, v.uv) * v.color;
-    if (color.w < draw_alpha_cutoff) {
+    if (color.w < render_alpha_cutoff) {
         discard;
     }
     return color;

@@ -60,8 +60,8 @@ uniforms_are_globals_named_like_their_hlsl_fields :: proc(t: ^testing.T) {
 	}
 	expect_has(t, programs.vertex, "uniform float4x4 frame_view_projection;")
 	expect_has(t, programs.vertex, "uniform float frame_time;")
-	expect_has(t, programs.vertex, "uniform float4 draw_tint;")
-	expect_has(t, programs.vertex, "uniform float draw_alpha_cutoff;")
+	expect_has(t, programs.vertex, "uniform float4 render_tint;")
+	expect_has(t, programs.vertex, "uniform float render_alpha_cutoff;")
 	expect_lacks(t, programs.vertex, "cbuffer")
 }
 
@@ -74,7 +74,7 @@ matrices_multiply_the_other_way_round :: proc(t: ^testing.T) {
 	if ok == false {
 		return
 	}
-	expect_has(t, programs.vertex, "mul(float4(input.position.x, input.position.y, input.position.z, 1.0), draw_model)")
+	expect_has(t, programs.vertex, "mul(float4(input.position.x, input.position.y, input.position.z, 1.0), render_model)")
 	expect_has(t, programs.vertex, "output.position = mul(world, frame_view_projection);")
 }
 
@@ -102,7 +102,7 @@ a_matrix_written_out_is_written_transposed :: proc(t: ^testing.T) {
 
 	// the language writes a matrix row by row; Cg's version of it is the transpose, so the elements swap places
 	source := no_carriage_returns(#load("testdata/uniforms.mbs", string))
-	source, _ = strings.replace(source, "return sample(albedo, v.uv) * sample(mask, v.uv).x * draw.tint * flash", "m := matrix[2, 3]f32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}\n\treturn [4]f32{(m * [3]f32{1.0, 0.0, 0.0}).x, 0.0, 0.0, 1.0}", 1, context.temp_allocator)
+	source, _ = strings.replace(source, "return sample(albedo, v.uv) * sample(mask, v.uv).x * render.tint * flash", "m := matrix[2, 3]f32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}\n\treturn [4]f32{(m * [3]f32{1.0, 0.0, 0.0}).x, 0.0, 0.0, 1.0}", 1, context.temp_allocator)
 	programs, ok := generate_cg_text(t, source, "uniforms.mbs")
 	if ok == false {
 		return
@@ -116,7 +116,7 @@ round_goes_to_the_even_neighbour_like_hlsl :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
 	source := no_carriage_returns(#load("testdata/uniforms.mbs", string))
-	source, _ = strings.replace(source, "return sample(albedo, v.uv) * sample(mask, v.uv).x * draw.tint * flash", "return [4]f32{round(flash), round(wide).y, 0.0, 1.0}", 1, context.temp_allocator)
+	source, _ = strings.replace(source, "return sample(albedo, v.uv) * sample(mask, v.uv).x * render.tint * flash", "return [4]f32{round(flash), round(wide).y, 0.0, 1.0}", 1, context.temp_allocator)
 	programs, ok := generate_cg_text(t, source, "uniforms.mbs")
 	if ok == false {
 		return
@@ -210,7 +210,7 @@ the_vita_reflection_names_the_parameters_of_the_programs :: proc(t: ^testing.T) 
 	expect_has(t, text, "target vita\n")
 	expect_has(t, text, "attribute position [3]f32\n")
 	expect_has(t, text, "uniform frame_view_projection matrix[4,4]f32 0\n")
-	expect_has(t, text, "uniform draw_alpha_cutoff f32 0\n")
+	expect_has(t, text, "uniform render_alpha_cutoff f32 0\n")
 	// a number, a vector, a matrix, an array, a field of a struct, an element of an array of structs: the names the
 	// compiled programs list for them (checked with gxp_info.py on the compiled uniforms shader)
 	expect_has(t, text, "uniform flash f32 0\n")

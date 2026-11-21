@@ -20,9 +20,6 @@ package matchbox
 	between render_start and render_end, not nested.
 */
 
-// Placeholder until the design aspect and fit policy are chosen (render_plan.md, B8)
-DEFAULT_SCREEN_HEIGHT :: 12
-
 /*How many world units tall the HUD is. 12 units at 16 pixels per unit is 192 pixels, say.
 Everything in the screen pass is measured in these units, whatever the window size is*/
 set_screen_height :: proc(units:f32) {
@@ -38,7 +35,7 @@ get_screen_camera :: proc() -> Camera {
 
 /*Window width over height, 1 when the window has no height yet (it is minimised)*/
 @(private)
-get_window_aspect :: proc() -> f32 {
+calculate_window_aspect :: proc() -> f32 {
 	if mbi.window_size[1] <= 0 do return 1
 	return f32(mbi.window_size[0]) / f32(mbi.window_size[1])
 }
@@ -54,17 +51,17 @@ screen_end :: proc() {
 
 /*The corners of the HUD view, in HUD units: `min` bottom left, `max` top right.
 It widens and narrows as the window does; the height stays set_screen_height*/
-get_visible_rect :: proc() -> (min, max:[2]f32) {
-	return camera_visible_rect(get_screen_camera(), get_window_aspect())
+calculate_visible_rectangle :: proc() -> (min, max:[2]f32) {
+	return calculate_camera_visible_rectangle(get_screen_camera(), calculate_window_aspect())
 }
 
-/*A HUD position pinned to `anchor` and moved by `offset`. See camera_anchor_position*/
-anchor_position :: proc(anchor:Anchor, offset:[2]f32 = {}) -> [3]f32 {
-	return camera_anchor_position(get_screen_camera(), get_window_aspect(), anchor, offset)
+/*A HUD position pinned to `anchor` and moved by `offset`. See calculate_camera_anchor_position*/
+calculate_anchor_position :: proc(anchor:Anchor, offset:[2]f32 = {}) -> [3]f32 {
+	return calculate_camera_anchor_position(get_screen_camera(), calculate_window_aspect(), anchor, offset)
 }
 
-/*Where the mouse is on the HUD, in HUD units (+Y up, the same space as anchor_position).
+/*Where the mouse is on the HUD, in HUD units (+Y up, the same space as calculate_anchor_position).
 Use it to click things drawn between screen_start and screen_end*/
-get_mouse_screen_pos :: proc() -> [2]f32 {
-	return get_mouse_world_pos(get_screen_camera())
+calculate_mouse_screen_position :: proc() -> [2]f32 {
+	return calculate_mouse_world_position(get_screen_camera())
 }

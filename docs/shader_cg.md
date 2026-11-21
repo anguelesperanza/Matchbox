@@ -8,7 +8,7 @@
 
 ## What the Vita does differently from the PC
 
-- **No constant buffers.** Every engine and game uniform is a global `uniform` parameter. Engine fields are named `<block>_<field>` (`frame_view_projection`, `draw_model`, `draw_tint`). A game uniform keeps its own name.
+- **No constant buffers.** Every engine and game uniform is a global `uniform` parameter. Engine fields are named `<block>_<field>` (`frame_view_projection`, `render_model`, `render_tint`). A game uniform keeps its own name.
 - **Struct and array uniforms** appear in the `.gxp` parameter table as dotted leaves (`key_light.strength`, `lights[1].color`). Arrays are one parameter with an array count.
 - **Textures** are `uniform sampler2D name : TEXUNIT<slot>`.
 - **Entry point** is a `main` wrapper. The vertex program takes attributes as plain parameters named `a_<attribute>` and writes `out` parameters tagged `POSITION`, `TEXCOORDn`, `COLOR0`. The fragment program takes `i_<field>` (`POSITION` is `WPOS`) and returns `: COLOR`. Varyings with no tag (and `NORMALQUAT`, `VIEW`) get `TEXCOORD3` and up.
@@ -20,7 +20,7 @@
 
 ## Checks
 
-The tests compile every built-in, the shipped shaders and `testdata/uniforms.mbs` with the real `psp2cgc` (found through `PSP2CGC` or `../vito/tools/psp2cgc.exe`; the tests skip when it isn't there). The generated mesh programs were also run in Vita3K: matrices, `uv_rect`, alpha cut-off, vertex colour and texture all drew correctly.
+The tests compile every built-in, the shipped shaders and `testdata/uniforms.mbs` with the real `psp2cgc` (found through `PSP2CGC` or `../vito/tools/psp2cgc.exe`; the tests skip when it isn't there). The generated mesh programs were also run in Vita3K: matrices, `uv_rectangle`, alpha cut-off, vertex colour and texture all drew correctly.
 
 Regenerate the committed mesh shaders after changing the compiler or `mesh.mbs`:
 

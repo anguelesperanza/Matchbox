@@ -23,14 +23,13 @@ import gi "vendor:windows/GameInput"
 Timestamp :: struct {
 	fixed_timestamp:f64,
 	accumulator:f64,
-	deltatime:f64,
+	delta_time:f64,
 	current_time:win.LARGE_INTEGER,
 	last_time: win.LARGE_INTEGER,
 	frequency: win.LARGE_INTEGER,
 	counter: win.LARGE_INTEGER,
 	start_counter: win.LARGE_INTEGER, // when the window was created; frame.time counts from here
 }
-timestamp:Timestamp
 
 Matchbox_Info :: struct {
 
@@ -79,11 +78,11 @@ Matchbox_Info :: struct {
 	device: ^d3d11.IDevice,
 	device_context: ^d3d11.IDeviceContext,
 	swapchain:^dxgi.ISwapChain1,
-	swapchain_desc:dxgi.SWAP_CHAIN_DESC1,
+	swapchain_description:dxgi.SWAP_CHAIN_DESC1,
 	factory:^dxgi.IFactory2,
 	dxgi_device:^dxgi.IDevice1,
 	dxgi_adapter:^dxgi.IAdapter,
-	dxgi_desc:^dxgi.ADAPTER_DESC,
+	dxgi_description:^dxgi.ADAPTER_DESC,
 	framebuffer:^d3d11.ITexture2D,
 	depth_texture:^d3d11.ITexture2D,
 	depth_view:^d3d11.IDepthStencilView,
@@ -101,8 +100,8 @@ Matchbox_Info :: struct {
 	screen_height:f32,
 	bottom_screen_layout:Bottom_Screen_Layout, // HIDDEN until the game asks; see set_bottom_screen
 	discard_pass:bool, // the pass in progress is the hidden bottom screen: queued, never drawn
-	opaque_items:[dynamic]Draw_Item,
-	transparent_items:[dynamic]Draw_Item,
+	opaque_items:[dynamic]Render_Item,
+	transparent_items:[dynamic]Render_Item,
 
 	white_texture_view:^d3d11.IShaderResourceView,
 
@@ -115,7 +114,7 @@ Matchbox_Info :: struct {
 	input_layout:^d3d11.IInputLayout,
 	// test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
 	frame_constants:^d3d11.IBuffer,
-	draw_constants:^d3d11.IBuffer,
+	render_constants:^d3d11.IBuffer,
 	game_constants:^d3d11.IBuffer, // the game's own uniforms, set by name with set_shader_value
 	game_shadow:[]byte, // what game_constants holds, kept on the CPU so one value can change
 	game_dirty:bool,
@@ -127,10 +126,40 @@ Matchbox_Info :: struct {
 	triangle_mesh:Mesh,
 	circle_mesh:Mesh,
 	pixel_scale:f32,
-	
+
+	timestamp:Timestamp,
+
+	// Fixed values the engine works with, grouped by what they belong to
+	font_settings:Font_Settings,
+	screen_settings:Screen_Settings,
+	shader_format:Shader_Format,
 }
 
-mbi:Matchbox_Info
+/*
+	The one global (CLAUDE.md). The settings are given their values here rather than in
+	`init`: a value set here is right from the first line of the program, and under
+	`odin test`, where `init` never runs, as well
+*/
+mbi := Matchbox_Info {
+	font_settings = {
+		atlas_min_size = 256,
+		atlas_max_size = 4096,
+		first_glyph = 32,
+		line_spacing = 0.15,
+	},
+	screen_settings = {
+		default_height = 12,
+		bottom_screen_aspect = 320.0 / 240.0,
+	},
+	shader_format = {
+		reflection_version = 1,
+		vertex_attributes = {
+			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position))},
+			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv))},
+			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color))},
+		},
+	},
+}
 
 /*Initialize the core of Matchbox; from Windows, to D3D11, etc*/
 init :: proc(title:string, width:i32, height:i32) {
@@ -144,8 +173,8 @@ init :: proc(title:string, width:i32, height:i32) {
 	mbi.target_asset_path = "assets/pc/"
 	mbi.window_size = {width, height, 0, 0}
 
-	rect:win.RECT = {left = 0, top = 0, right = width, bottom = height}
-	mbi.screen_height = DEFAULT_SCREEN_HEIGHT
+	rectangle:win.RECT = {left = 0, top = 0, right = width, bottom = height}
+	mbi.screen_height = mbi.screen_settings.default_height
 
 	// Create a handle to the instance of the application - The thing the OS uses to ID the executable
 	instance := win.HINSTANCE(win.GetModuleHandleW(nil)) // Create Instance
@@ -167,7 +196,7 @@ init :: proc(title:string, width:i32, height:i32) {
 	}
 
 	win.RegisterClassExW(&window_class)
-	win.AdjustWindowRect(lpRect = &rect, dwStyle = win.WS_OVERLAPPEDWINDOW, bMenu = win.FALSE) // Adjust window
+	win.AdjustWindowRect(lpRect = &rectangle, dwStyle = win.WS_OVERLAPPEDWINDOW, bMenu = win.FALSE) // Adjust window
 
 
 	// Non Breaking issue: CreateWindowExW will immediate call the wm.ShowWindow(...) proc to present the window to the screen, if the `Y` is `win.CW_USEDEFUALT`
@@ -180,8 +209,8 @@ init :: proc(title:string, width:i32, height:i32) {
 		dwStyle = win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE | win.WS_SYSMENU,
 		X = win.CW_USEDEFAULT,
 		Y = win.CW_USEDEFAULT,
-		nWidth = rect.right - rect.left,
-		nHeight = rect.bottom - rect.top,
+		nWidth = rectangle.right - rectangle.left,
+		nHeight = rectangle.bottom - rectangle.top,
 		hWndParent = nil,
 		hMenu = nil,
 		hInstance = instance,
@@ -199,7 +228,7 @@ init :: proc(title:string, width:i32, height:i32) {
 
 		when ODIN_DEBUG {creation_flags += {.DEBUG}} // If in debug mode; enable debug for d3d11
 
-		res := d3d11.CreateDevice(
+		result := d3d11.CreateDevice(
 			pAdapter = nil,
 			DriverType = .HARDWARE,
 			Software = nil,
@@ -213,7 +242,7 @@ init :: proc(title:string, width:i32, height:i32) {
 		)
 
 
-		ensure(win.SUCCEEDED(res), "CreateDevice failed")
+		ensure(win.SUCCEEDED(result), "CreateDevice failed")
 
 	}
 
@@ -225,8 +254,8 @@ init :: proc(title:string, width:i32, height:i32) {
 
 		if device_debug != nil {
 			info_queue:^d3d11.IInfoQueue
-			res := device_debug->QueryInterface(d3d11.IInfoQueue_UUID, (^rawptr)(&info_queue))
-			if win.SUCCEEDED(res) {
+			result := device_debug->QueryInterface(d3d11.IInfoQueue_UUID, (^rawptr)(&info_queue))
+			if win.SUCCEEDED(result) {
 				info_queue->SetBreakOnSeverity(.CORRUPTION, true)
 				info_queue->SetBreakOnSeverity(.ERROR, true)
 
@@ -249,42 +278,42 @@ init :: proc(title:string, width:i32, height:i32) {
 	// Create swapchain
 	{
 		{
-			res := mbi.device->QueryInterface(dxgi.IDevice1_UUID, (^rawptr)(&mbi.dxgi_device))
-			ensure(win.SUCCEEDED(res), "DXGI device interface query failed")
+			result := mbi.device->QueryInterface(dxgi.IDevice1_UUID, (^rawptr)(&mbi.dxgi_device))
+			ensure(win.SUCCEEDED(result), "DXGI device interface query failed")
 
-			res = mbi.dxgi_device->GetAdapter(&mbi.dxgi_adapter)
-			ensure(win.SUCCEEDED(res), "DXGI adapter interface query failed")
+			result = mbi.dxgi_device->GetAdapter(&mbi.dxgi_adapter)
+			ensure(win.SUCCEEDED(result), "DXGI adapter interface query failed")
 
 			mbi.dxgi_adapter->GetParent(dxgi.IFactory2_UUID, (^rawptr)(&mbi.factory))
 		}
 
-		mbi.swapchain_desc.Width = 0
-		mbi.swapchain_desc.Height = 0
-		mbi.swapchain_desc.Format = .B8G8R8A8_UNORM_SRGB
-		mbi.swapchain_desc.SampleDesc = {Count = 1,Quality = 0}
-		mbi.swapchain_desc.BufferUsage = {.RENDER_TARGET_OUTPUT}
-		mbi.swapchain_desc.BufferCount = 2
-		mbi.swapchain_desc.Scaling = .STRETCH
-		mbi.swapchain_desc.SwapEffect = .DISCARD
-		mbi.swapchain_desc.AlphaMode = .UNSPECIFIED
-		mbi.swapchain_desc.Flags = {}
+		mbi.swapchain_description.Width = 0
+		mbi.swapchain_description.Height = 0
+		mbi.swapchain_description.Format = .B8G8R8A8_UNORM_SRGB
+		mbi.swapchain_description.SampleDesc = {Count = 1,Quality = 0}
+		mbi.swapchain_description.BufferUsage = {.RENDER_TARGET_OUTPUT}
+		mbi.swapchain_description.BufferCount = 2
+		mbi.swapchain_description.Scaling = .STRETCH
+		mbi.swapchain_description.SwapEffect = .DISCARD
+		mbi.swapchain_description.AlphaMode = .UNSPECIFIED
+		mbi.swapchain_description.Flags = {}
 
-		res := mbi.factory->CreateSwapChainForHwnd(
+		result := mbi.factory->CreateSwapChainForHwnd(
 			pDevice = mbi.device,
 			hWnd = mbi.window,
-			pDesc = &mbi.swapchain_desc,
+			pDesc = &mbi.swapchain_description,
 			pFullscreenDesc = nil,
 			pRestrictToOutput = nil,
 			ppSwapChain = &mbi.swapchain,
 		)
 
-		ensure(win.SUCCEEDED(res), "CreateSwapChain failed")
+		ensure(win.SUCCEEDED(result), "CreateSwapChain failed")
 	}
 	{
-		res := mbi.swapchain->GetBuffer(0, d3d11.ITexture2D_UUID, (^rawptr)(&mbi.framebuffer))
-		ensure(win.SUCCEEDED(res), "Get Framebuffer failed")
+		result := mbi.swapchain->GetBuffer(0, d3d11.ITexture2D_UUID, (^rawptr)(&mbi.framebuffer))
+		ensure(win.SUCCEEDED(result), "Get Framebuffer failed")
 
-		res = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
+		result = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
 	}
 
 	{
@@ -311,7 +340,7 @@ init :: proc(title:string, width:i32, height:i32) {
 	{
 		pixel := [4]u8{255, 255, 255, 255}
 
-		desc := d3d11.TEXTURE2D_DESC {
+		description := d3d11.TEXTURE2D_DESC {
 			Width = 1, Height = 1, MipLevels = 1, ArraySize = 1,
 			Format = .R8G8B8A8_UNORM,
 			Usage = .IMMUTABLE,
@@ -320,17 +349,17 @@ init :: proc(title:string, width:i32, height:i32) {
 		}
 		data := d3d11.SUBRESOURCE_DATA{pSysMem = &pixel, SysMemPitch = 4}
 
-		res := mbi.device->CreateTexture2D(&desc, &data, &mbi.white_texture)
-		ensure(win.SUCCEEDED(res), "Create white texture failed")
-		res = mbi.device->CreateShaderResourceView(mbi.white_texture, nil, &mbi.white_texture_view)
-		ensure(win.SUCCEEDED(res), "Create white texture view failed")
+		result := mbi.device->CreateTexture2D(&description, &data, &mbi.white_texture)
+		ensure(win.SUCCEEDED(result), "Create white texture failed")
+		result = mbi.device->CreateShaderResourceView(mbi.white_texture, nil, &mbi.white_texture_view)
+		ensure(win.SUCCEEDED(result), "Create white texture view failed")
 
 	}	
 	
 	// Setup the initial frequency and counter for delta time
-	win.QueryPerformanceFrequency(&timestamp.frequency)
-	win.QueryPerformanceCounter(&timestamp.last_time)
-	timestamp.start_counter = timestamp.last_time
+	win.QueryPerformanceFrequency(&mbi.timestamp.frequency)
+	win.QueryPerformanceCounter(&mbi.timestamp.last_time)
+	mbi.timestamp.start_counter = mbi.timestamp.last_time
 
 
 	result := gi.Create(&mbi.input)
@@ -354,13 +383,13 @@ stop_running :: proc() {
 }
 
 /*Returns the delta time value*/
-get_delta_time :: proc() -> (dt:f32) {
+get_delta_time :: proc() -> (delta_time:f32) {
 	/*In C, a LARGE_INTEGER is a struct, In Odin, it's a c_longlong --> an f64*/
 	now:win.LARGE_INTEGER
 	win.QueryPerformanceCounter(lpPerformanceCount = &now)
-	dt = f32(f64(now - timestamp.last_time) / cast(f64)timestamp.frequency)
-	timestamp.last_time = now
-	return dt
+	delta_time = f32(f64(now - mbi.timestamp.last_time) / cast(f64)mbi.timestamp.frequency)
+	mbi.timestamp.last_time = now
+	return delta_time
 }
 
 /*Cleans up resources created by Matchbox*/

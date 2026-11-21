@@ -32,7 +32,7 @@ Struct_Info :: struct {
 
 Uniform_Kind :: enum {
 	FRAME, // the engine's per-frame block
-	DRAW, // the engine's per-draw block
+	RENDER, // the engine's per-draw block (`render`)
 	GAME, // one the game sets by name
 }
 
@@ -360,8 +360,8 @@ read_uniform_kind :: proc(module: ^Module, value: ^ast.Expr) -> (kind: Uniform_K
 		switch selector.field.name {
 		case "FRAME":
 			return .FRAME, true
-		case "DRAW":
-			return .DRAW, true
+		case "RENDER":
+			return .RENDER, true
 		}
 	}
 	error(
@@ -369,9 +369,9 @@ read_uniform_kind :: proc(module: ^Module, value: ^ast.Expr) -> (kind: Uniform_K
 		"MBS-E24",
 		"unknown uniform block",
 		value,
-		"not `.FRAME` or `.DRAW`",
-		"the engine provides two blocks: `.FRAME` (once per frame) and `.DRAW` (once per draw). A uniform of your own has no value: `@(uniform)`",
-		"write `@(uniform = .FRAME)`, `@(uniform = .DRAW)` or `@(uniform)`",
+		"not `.FRAME` or `.RENDER`",
+		"the engine provides two blocks: `.FRAME` (once per frame) and `.RENDER` (once per draw). A uniform of your own has no value: `@(uniform)`",
+		"write `@(uniform = .FRAME)`, `@(uniform = .RENDER)` or `@(uniform)`",
 	)
 	return .GAME, false
 }
@@ -516,22 +516,22 @@ parse_tag :: proc(raw: string) -> (tags: []Tag, ok: bool) {
 
 @(private = "file")
 check_engine_uniforms :: proc(module: ^Module) {
-	seen_frame, seen_draw := false, false
+	seen_frame, seen_render := false, false
 	for uniform in module.uniforms {
 		if uniform.kind == .GAME {
 			continue
 		}
-		block_name := "frame" if uniform.kind == .FRAME else "draw"
+		block_name := "frame" if uniform.kind == .FRAME else "render"
 		if uniform.kind == .FRAME {
 			if seen_frame {
 				duplicate_block(module, uniform, ".FRAME")
 			}
 			seen_frame = true
 		} else {
-			if seen_draw {
-				duplicate_block(module, uniform, ".DRAW")
+			if seen_render {
+				duplicate_block(module, uniform, ".RENDER")
 			}
-			seen_draw = true
+			seen_render = true
 		}
 
 		if uniform.block == nil {
@@ -542,12 +542,12 @@ check_engine_uniforms :: proc(module: ^Module) {
 				uniform.type,
 				"not a struct",
 				"the engine fills it field by field",
-				fmt.aprintf("write `@(uniform = .%s) %s: struct { ... }`", "FRAME" if uniform.kind == .FRAME else "DRAW", uniform.name),
+				fmt.aprintf("write `@(uniform = .%s) %s: struct { ... }`", "FRAME" if uniform.kind == .FRAME else "RENDER", uniform.name),
 			)
 			continue
 		}
 
-		known: []Engine_Field = FRAME_FIELDS[:] if uniform.kind == .FRAME else DRAW_FIELDS[:]
+		known: []Engine_Field = FRAME_FIELDS[:] if uniform.kind == .FRAME else RENDER_FIELDS[:]
 		for field in uniform.block.fields {
 			expected, found := find_engine_field(known, field.name)
 			if found == false {

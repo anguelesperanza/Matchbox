@@ -16,17 +16,17 @@ struct Varying {
 uniform float4x4 frame_view_projection;
 uniform float frame_time;
 
-// draw
-uniform float4x4 draw_model;
-uniform float4 draw_tint;
-uniform float4 draw_uv_rect;
-uniform float draw_alpha_cutoff;
+// render
+uniform float4x4 render_model;
+uniform float4 render_tint;
+uniform float4 render_uv_rectangle;
+uniform float render_alpha_cutoff;
 
 uniform sampler2D tex : TEXUNIT0;
 
 float4 fragment_main(Varying v) {
     float4 color = tex2D(tex, v.uv) * v.color;
-    if (color.w < draw_alpha_cutoff) {
+    if (color.w < render_alpha_cutoff) {
         discard;
     }
     return color;

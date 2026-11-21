@@ -89,13 +89,13 @@ the_committed_mesh_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 the_engine_blocks_have_the_sizes_of_the_engines_structs :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	// Frame_Constants and Draw_Constants in render_windows.odin are 80 and 112 bytes, and the engine checks its own
+	// Frame_Constants and Render_Constants in render_windows.odin are 80 and 112 bytes, and the engine checks its own
 	// offsets against this file when it starts
 	text := reflect(t, no_carriage_returns(#load("testdata/mesh.mbs", string)))
 	testing.expect(t, strings.contains(text, "block frame 0 80\n"), text)
-	testing.expect(t, strings.contains(text, "block draw 1 112\n"), text)
+	testing.expect(t, strings.contains(text, "block render 1 112\n"), text)
 	testing.expect(t, strings.contains(text, "value frame time f32 64 4 0 0\n"), text)
-	testing.expect(t, strings.contains(text, "value draw alpha_cutoff f32 96 4 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value render alpha_cutoff f32 96 4 0 0\n"), text)
 }
 
 @(private = "file")

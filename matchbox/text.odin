@@ -14,11 +14,11 @@ package matchbox
 		font := mb.create_font(mb.DEFAULT_FONT_BYTES, 26, 90)
 
 		mb.screen_start()
-		mb.draw_text(font, "Score", mb.anchor_position(.TOP_LEFT, {0.5, -1}))
+		mb.render_text(font, "Score", mb.calculate_anchor_position(.TOP_LEFT, {0.5, -1}))
 		mb.screen_end()
 
-	`draw_text` takes the left end of the BASELINE, which suits one line. Text that
-	wraps goes in a box, so the wrapping procs (`draw_text_wrapped`) take the
+	`render_text` takes the left end of the BASELINE, which suits one line. Text that
+	wraps goes in a box, so the wrapping procs (`render_text_wrapped`) take the
 	TOP-LEFT corner of the box instead.
 
 	Sizes returned and taken are in world units. A line is broken at spaces and at
@@ -44,7 +44,7 @@ import stbtt "vendor:stb/truetype"
 	soft edges of the letters blend over whatever is behind them. Characters the
 	atlas does not hold (anything outside printable ASCII) are skipped.
 */
-draw_text_string :: proc(font:Font, text:string, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}) {
+render_text_string :: proc(font:Font, text:string, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}) {
 	ensure(font.pixels_per_unit > 0, "Font was not created with create_font")
 
 	sprite := Sprite {
@@ -60,16 +60,16 @@ draw_text_string :: proc(font:Font, text:string, position:[3]f32, color:[4]f32 =
 	chars := font.baked_chars
 	cursor_x, cursor_y:f32
 
-	for ch in text {
-		if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT {
+	for character in text {
+		if character < mbi.font_settings.first_glyph || character >= mbi.font_settings.first_glyph + FONT_GLYPH_COUNT {
 			continue
 		}
 
 		quad:stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(chars[:]), font.atlas_size, font.atlas_size, cast(i32)ch - FONT_FIRST_GLYPH, &cursor_x, &cursor_y, &quad, true)
+		stbtt.GetBakedQuad(raw_data(chars[:]), font.atlas_size, font.atlas_size, i32(character - mbi.font_settings.first_glyph), &cursor_x, &cursor_y, &quad, true)
 
 		// The glyph's rectangle in the atlas, in pixels from its top left
-		baked := font.baked_chars[int(ch) - FONT_FIRST_GLYPH]
+		baked := font.baked_chars[int(character - mbi.font_settings.first_glyph)]
 		sprite.source = {f32(baked.x0), f32(baked.y0), f32(baked.x1 - baked.x0), f32(baked.y1 - baked.y0)}
 
 		// stb's y is down from the baseline and world y is up. quad.y1 is the bottom edge
@@ -86,46 +86,46 @@ draw_text_string :: proc(font:Font, text:string, position:[3]f32, color:[4]f32 =
 	}
 }
 
-// An integer, without the caller building a string for it. Part of the `draw_text` group
-draw_text_i64 :: proc(font:Font, integer:i64, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}) {
+// An integer, without the caller building a string for it. Part of the `render_text` group
+render_text_i64 :: proc(font:Font, integer:i64, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}) {
 	buffer:[64]u8
-	draw_text_string(font, strconv.write_int(buffer[:], integer, 10), position, color)
+	render_text_string(font, strconv.write_int(buffer[:], integer, 10), position, color)
 }
 
-// A float at two decimal places. Part of the `draw_text` group
-draw_text_float :: proc(font:Font, value:$T, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}) where intrinsics.type_is_float(T) {
+// A float at two decimal places. Part of the `render_text` group
+render_text_float :: proc(font:Font, value:$T, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}) where intrinsics.type_is_float(T) {
 	buffer:[64]u8
-	draw_text_string(font, format_float(buffer[:], f64(value)), position, color)
+	render_text_string(font, format_float(buffer[:], f64(value)), position, color)
 }
 
-// Two floats with `separator` between: a position or a size. Part of the `draw_text` group
-draw_text_2_float :: proc(font:Font, value:[2]$T, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}, separator:string = " ") where intrinsics.type_is_float(T) {
+// Two floats with `separator` between: a position or a size. Part of the `render_text` group
+render_text_2_float :: proc(font:Font, value:[2]$T, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}, separator:string = " ") where intrinsics.type_is_float(T) {
 	first:[64]u8
 	second:[64]u8
 
 	// Temp, not the context allocator: this is a draw call, so a game showing a position
 	// every frame would otherwise leak a string a frame. The temp allocator is cleared each frame
 	text := strings.concatenate({format_float(first[:], f64(value[0])), separator, format_float(second[:], f64(value[1]))}, context.temp_allocator)
-	draw_text_string(font, text, position, color)
+	render_text_string(font, text, position, color)
 }
 
-// Two integers with `separator` between. Part of the `draw_text` group
-draw_text_2_i64 :: proc(font:Font, values:[2]i64, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}, separator:string = " ") {
+// Two integers with `separator` between. Part of the `render_text` group
+render_text_2_i64 :: proc(font:Font, values:[2]i64, position:[3]f32, color:[4]f32 = {1, 1, 1, 1}, separator:string = " ") {
 	first:[64]u8
 	second:[64]u8
 
 	text := strings.concatenate({strconv.write_int(first[:], values[0], 10), separator, strconv.write_int(second[:], values[1], 10)}, context.temp_allocator)
-	draw_text_string(font, text, position, color)
+	render_text_string(font, text, position, color)
 }
 
 // Draws a string, an integer, a float or a pair of them, so a game does not build a string
 // for a number it wants on screen
-draw_text :: proc {
-	draw_text_string,
-	draw_text_i64,
-	draw_text_float,
-	draw_text_2_float,
-	draw_text_2_i64,
+render_text :: proc {
+	render_text_string,
+	render_text_i64,
+	render_text_float,
+	render_text_2_float,
+	render_text_2_i64,
 }
 
 // `strconv.write_float` always writes a sign, so 3.14 comes back as "+3.14". Drop it when
@@ -148,10 +148,10 @@ format_float :: proc(buffer:[]u8, value:f64) -> string {
 	The height is the font's ascent plus descent, not the extent of these glyphs, so
 	"Play" and "Play Card" measure the same and a line does not bob as its content changes.
 */
-measure_text :: proc(font:Font, text:string) -> [2]f32 {
+calculate_text_size :: proc(font:Font, text:string) -> [2]f32 {
 	width:f32
-	for ch in text {
-		width += rune_advance(font, ch)
+	for character in text {
+		width += rune_advance(font, character)
 	}
 	return {width, (font.ascent + font.descent) / font.pixels_per_unit}
 }
@@ -159,22 +159,22 @@ measure_text :: proc(font:Font, text:string) -> [2]f32 {
 // How far the cursor moves for one character, in world units. Characters the atlas does
 // not hold are skipped when drawing, so they take no room here either
 @(private)
-rune_advance :: proc(font:Font, ch:rune) -> f32 {
-	if ch < FONT_FIRST_GLYPH || ch >= FONT_FIRST_GLYPH + FONT_GLYPH_COUNT do return 0
-	return font.baked_chars[int(ch) - FONT_FIRST_GLYPH].xadvance / font.pixels_per_unit
+rune_advance :: proc(font:Font, character:rune) -> f32 {
+	if character < mbi.font_settings.first_glyph || character >= mbi.font_settings.first_glyph + FONT_GLYPH_COUNT do return 0
+	return font.baked_chars[int(character - mbi.font_settings.first_glyph)].xadvance / font.pixels_per_unit
 }
 
 // The distance from one baseline to the next, in world units
-line_height :: proc(font:Font, spacing:f32 = FONT_LINE_SPACING) -> f32 {
+calculate_line_height :: proc(font:Font, spacing:f32 = mbi.font_settings.line_spacing) -> f32 {
 	return (font.ascent + font.descent) / font.pixels_per_unit * (1 + spacing)
 }
 
 /*
 	The height of `count` lines. The gap is counted between lines and not after the last,
-	so a one line block is as tall as `measure_text` and a block sits flush against
+	so a one line block is as tall as `calculate_text_size` and a block sits flush against
 	whatever goes under it
 */
-text_block_height :: proc(font:Font, count:int, spacing:f32 = FONT_LINE_SPACING) -> f32 {
+calculate_text_block_height :: proc(font:Font, count:int, spacing:f32 = mbi.font_settings.line_spacing) -> f32 {
 	if count <= 0 do return 0
 
 	line := (font.ascent + font.descent) / font.pixels_per_unit
@@ -229,7 +229,7 @@ wrap_paragraph :: proc(font:Font, paragraph:string, max_width:f32, lines:^[dynam
 		for i < len(paragraph) && paragraph[i] != ' ' do i += 1
 
 		word := paragraph[word_start:i]
-		word_width := measure_text(font, word).x
+		word_width := calculate_text_size(font, word).x
 		gap := space_width if line_end > line_start else 0
 
 		// The word does not fit, so the line being built is done
@@ -247,8 +247,8 @@ wrap_paragraph :: proc(font:Font, paragraph:string, max_width:f32, lines:^[dynam
 			chunk := word_start
 			run:f32
 
-			for ch, offset in word {
-				advance := rune_advance(font, ch)
+			for character, offset in word {
+				advance := rune_advance(font, character)
 
 				if run + advance > max_width && word_start + offset > chunk {
 					append(lines, paragraph[chunk:word_start + offset])
@@ -285,40 +285,40 @@ wrap_paragraph :: proc(font:Font, paragraph:string, max_width:f32, lines:^[dynam
 	Returns the space it took, so a panel can be sized to its text or the next thing
 	put underneath. The width is the widest line, at most `max_width`:
 
-		used := mb.draw_text_wrapped(font, rules, top_left, 6)
+		used := mb.render_text_wrapped(font, rules, top_left, 6)
 		top_left.y -= used.y     // +Y is up, so the next block is lower
 */
-draw_text_wrapped :: proc(font:Font, text:string, top_left:[3]f32, max_width:f32, color:[4]f32 = {1, 1, 1, 1}, spacing:f32 = FONT_LINE_SPACING) -> [2]f32 {
+render_text_wrapped :: proc(font:Font, text:string, top_left:[3]f32, max_width:f32, color:[4]f32 = {1, 1, 1, 1}, spacing:f32 = mbi.font_settings.line_spacing) -> [2]f32 {
 	lines := wrap_text(font, text, max_width, context.temp_allocator)
-	return draw_text_lines(font, lines, top_left, color, spacing)
+	return render_text_lines(font, lines, top_left, color, spacing)
 }
 
 /*
 	Draws lines that are already split, from a top-left corner. For a caller that wrapped
 	once and draws the same lines every frame
 */
-draw_text_lines :: proc(font:Font, lines:[]string, top_left:[3]f32, color:[4]f32 = {1, 1, 1, 1}, spacing:f32 = FONT_LINE_SPACING) -> [2]f32 {
-	step := line_height(font, spacing)
+render_text_lines :: proc(font:Font, lines:[]string, top_left:[3]f32, color:[4]f32 = {1, 1, 1, 1}, spacing:f32 = mbi.font_settings.line_spacing) -> [2]f32 {
+	step := calculate_line_height(font, spacing)
 	ascent := font.ascent / font.pixels_per_unit
 	width:f32
 
 	for line, i in lines {
 		// +Y is up, so each line is lower than the one before
 		baseline := [3]f32{top_left.x, top_left.y - ascent - f32(i) * step, top_left.z}
-		draw_text_string(font, line, baseline, color)
-		width = max(width, measure_text(font, line).x)
+		render_text_string(font, line, baseline, color)
+		width = max(width, calculate_text_size(font, line).x)
 	}
 
-	return {width, text_block_height(font, len(lines), spacing)}
+	return {width, calculate_text_block_height(font, len(lines), spacing)}
 }
 
 /*How much room `text` takes wrapped to `max_width`, without drawing it. For sizing a
 panel before anything goes in it*/
-measure_text_wrapped :: proc(font:Font, text:string, max_width:f32, spacing:f32 = FONT_LINE_SPACING) -> [2]f32 {
+calculate_text_wrapped_size :: proc(font:Font, text:string, max_width:f32, spacing:f32 = mbi.font_settings.line_spacing) -> [2]f32 {
 	lines := wrap_text(font, text, max_width, context.temp_allocator)
 
 	width:f32
-	for line in lines do width = max(width, measure_text(font, line).x)
+	for line in lines do width = max(width, calculate_text_size(font, line).x)
 
-	return {width, text_block_height(font, len(lines), spacing)}
+	return {width, calculate_text_block_height(font, len(lines), spacing)}
 }

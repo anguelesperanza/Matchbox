@@ -57,7 +57,7 @@ the_spec_shader_gets_one_modulate_stage_and_an_alpha_test :: proc(t: ^testing.T)
 	plan, problems := generate_tev(ir, context.temp_allocator)
 	testing.expect_value(t, len(problems), 0)
 	text := format_tev(plan, context.temp_allocator)
-	want := "mbs-tev 1\ntarget 3ds\n\ntexture 0 tex texcoord 0\n\nstage 0 MODULATE TEXTURE0 PRIMARY_COLOR\n\nalphatest GEQUAL uniform draw_alpha_cutoff\n"
+	want := "mbs-tev 1\ntarget 3ds\n\ntexture 0 tex texcoord 0\n\nstage 0 MODULATE TEXTURE0 PRIMARY_COLOR\n\nalphatest GEQUAL uniform render_alpha_cutoff\n"
 	testing.expectf(t, text == want, "got:\n%s", text)
 }
 

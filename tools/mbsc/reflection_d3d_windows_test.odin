@@ -193,10 +193,10 @@ the_layout_is_the_one_d3dcompiler_works_out :: proc(t: ^testing.T) {
 	}
 	game := game_layout(ir)
 	check_buffer(&check, ir, pixel_reflection, "mbs_game", game, ir.uniforms, "")
-	check_buffer(&check, ir, pixel_reflection, "draw_block", engine_layout(ir, .DRAW), nil, "draw")
+	check_buffer(&check, ir, pixel_reflection, "render_block", engine_layout(ir, .RENDER), nil, "render")
 	check_buffer(&check, ir, vertex_reflection, "frame_block", engine_layout(ir, .FRAME), nil, "frame")
 
-	check_engine_block(&check, ir, pixel_reflection, "draw_block", "draw", .DRAW)
+	check_engine_block(&check, ir, pixel_reflection, "render_block", "render", .RENDER)
 	check_engine_block(&check, ir, vertex_reflection, "frame_block", "frame", .FRAME)
 
 	if len(check.problems) > 0 {

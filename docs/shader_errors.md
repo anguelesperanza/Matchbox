@@ -159,7 +159,7 @@ the count is usually lower than the number of operators (part 3, section 18).
 error[MBS-E4]: this shader uses 104 uniform registers; the 3DS has 96
    |
    = note: a `matrix[4, 4]f32` takes 4 registers, a `[4]f32` takes 1, a `[3]f32` takes 1
-   = note: `frame` uses 4, `draw` uses 7, `lights` uses 93
+   = note: `frame` uses 4, `render` uses 7, `lights` uses 93
    = help: `lights` is the largest; lower its array length
    = more: docs/shader_errors.md#mbs-e4
 ```
@@ -216,8 +216,8 @@ send arbitrary data from the vertex shader to it.
 error[MBS-E7]: this loop's count isn't known when the shader is built
   --> blur.mbs:15:5
    |
-15 |     for i in 0..<draw.samples {
-   |         ^^^^^^^^^^^^^^^^^^^^^ `draw.samples` is a float uniform
+15 |     for i in 0..<render.samples {
+   |         ^^^^^^^^^^^^^^^^^^^^^^^ `render.samples` is a float uniform
    |
    = note: the PICA200 only loops with a count that is a constant or an integer uniform (i0 to i3, 8 bits)
    = help: declare `@(uniform) samples: u8` to make it an integer uniform
@@ -289,7 +289,7 @@ error[MBS-E12]: this `discard` isn't an alpha test
 ```
 
 **Why.** On the 3DS `discard` turns into the alpha test state: compare the final alpha with one 8-bit
-reference value, using one of 8 comparisons. `if color.a < draw.alpha_cutoff do discard()` becomes exactly
+reference value, using one of 8 comparisons. `if color.a < render.alpha_cutoff do discard()` becomes exactly
 that. The test must be on the alpha of the colour the shader returns, against a literal or an `f32` fragment
 uniform, and be the last statement before the `return`. `discard` on any other condition, in any other place,
 has no mapping (part 3, section 19). **Fix.** Express the cut as an alpha comparison.
@@ -312,7 +312,7 @@ error[MBS-E13]: mismatched types
 ```
 
 **Why.** The language has no implicit conversions, so mixing numbers is the most common way to get this. `1` is an
-`i32` and `1.0` is an `f32`; `draw.tint * 2` is this error and `draw.tint * 2.0` is not. The same error covers a
+`i32` and `1.0` is an `f32`; `render.tint * 2` is this error and `render.tint * 2.0` is not. The same error covers a
 built-in called with the wrong types or number of arguments, a procedure called with the wrong arguments, a
 `return` of the wrong type, a function that doesn't return a value on every path, and a swizzle that doesn't fit
 the vector (`.w` on a `[3]f32`). After one error in an expression, the expressions around it stay quiet, so one
@@ -442,18 +442,18 @@ A cycle through several procedures is reported too, listing each call in the loo
 **Unknown engine uniform field**
 
 ```
-error[MBS-E18]: the engine's `draw` block has no field `tintt`
+error[MBS-E18]: the engine's `render` block has no field `tintt`
   --> sprite.mbs:12:21
    |
-12 |     output.color = input.color * draw.tintt
-   |                                        ^^^^^ not a field of `draw`
+12 |     output.color = input.color * render.tintt
+   |                                          ^^^^^ not a field of `render`
    |
-   = note: `draw` has: model, tint, uv_rect, alpha_cutoff
+   = note: `render` has: model, tint, uv_rectangle, alpha_cutoff
    = help: did you mean `tint`?
    = more: docs/shader_errors.md#mbs-e18
 ```
 
-**Why.** The engine fills `frame` and `draw` itself, so a shader can only declare fields the engine really provides.
+**Why.** The engine fills `frame` and `render` itself, so a shader can only declare fields the engine really provides.
 A uniform of your own goes in a separate `@(uniform) name: type` declaration. mbsc reports a field the engine
 doesn't have where it is declared; a field the engine has but with the wrong type is `MBS-E13`.
 
@@ -491,11 +491,11 @@ the same shader builds for them.
 error[MBS-E20]: this texture coordinate is computed per pixel
   --> water.mbs:27:27
    |
-27 |     color := sample(tex, v.uv + draw.scroll)
-   |                          ^^^^^^^^^^^^^^^^^^ not a texcoord straight from the vertex stage
+27 |     color := sample(tex, v.uv + render.scroll)
+   |                          ^^^^^^^^^^^^^^^^^^^^ not a texcoord straight from the vertex stage
    |
    = note: on the 3DS a texture unit reads one of the interpolated texcoord outputs and nothing else
-   = help: add the scroll in the vertex stage: `output.uv = input.uv + draw.scroll`
+   = help: add the scroll in the vertex stage: `output.uv = input.uv + render.scroll`
    = more: docs/shader_errors.md#mbs-e20
 ```
 
@@ -514,11 +514,11 @@ as a `texcoord0`, `texcoord1` or `texcoord2` output of the vertex stage. PC and 
 error[MBS-E21]: this combiner stage needs two different constant colours
   --> flash.mbs:30:12
    |
-30 |     return sample(tex, v.uv) * draw.tint + draw.flash
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tint` and `flash` both need the stage's constant
+30 |     return sample(tex, v.uv) * render.tint + render.flash
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `tint` and `flash` both need the stage's constant
    |
    = note: each stage has one constant colour register
-   = help: split it into two stages: `c := sample(tex, v.uv) * draw.tint` then `return c + draw.flash`
+   = help: split it into two stages: `c := sample(tex, v.uv) * render.tint` then `return c + render.flash`
    = help: or combine `tint` and `flash` into one uniform
    = more: docs/shader_errors.md#mbs-e21
 ```
@@ -598,7 +598,7 @@ error[MBS-E24]: `texcord` is not a known attribute
 what a name is bound to, so each has a fixed set of words. mbsc reports:
 
 - an attribute that isn't `uniform` or `texture`, a texture with no slot or a slot that isn't a whole number, a
-  uniform block that isn't `.FRAME` or `.DRAW`, an attribute on a `::` declaration;
+  uniform block that isn't `.FRAME` or `.RENDER`, an attribute on a `::` declaration;
 - a variable at the top level that is neither a uniform nor a texture (a shader has no global variables), or a
   uniform given a value (the game sets uniforms);
 - a field tag that isn't of the form `key:"value"`;
@@ -628,7 +628,7 @@ error[MBS-E25]: texture slot 0 is used twice
 **Why.** Each of these must be unique, and a second use would silently replace the first:
 
 - a name at the top level (including the names built into the language, `TARGET`, `Target` and `Texture2D`);
-- the engine's `.FRAME` or `.DRAW` block;
+- the engine's `.FRAME` or `.RENDER` block;
 - a texture slot;
 - an `out:` name in the vertex output (two fields writing `texcoord0`, or two positions).
 

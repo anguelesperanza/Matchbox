@@ -18,7 +18,7 @@ package matchbox
 		player := mb.create_animated_sprite_from_clip(idle, 2)
 		...
 		mb.switch_animation(&player, walk)   // safe to call every frame
-		mb.update_animation(&player, dt)
+		mb.update_animation(&player, delta_time)
 		mb.render_animated_sprite(player)
 
 	The current frame lives in `sprite.frame`, the same field a plain Sprite
@@ -255,7 +255,7 @@ update_animation :: proc(sprite:^Animated_Sprite, delta_time:f32) {
 
 /*Which frame of the clip is showing, counting from 0. Relative to the clip, not the
 sheet: "frame 3 of this attack" is the fourth frame of the attack*/
-get_animation_frame :: proc(sprite:Animated_Sprite) -> int {
+calculate_animation_frame :: proc(sprite:Animated_Sprite) -> int {
 	if sprite.clip.frame_count <= 0 do return 0
 	return sprite.frame - sprite.clip.frame_start
 }
@@ -270,14 +270,14 @@ get_animation_frame :: proc(sprite:Animated_Sprite) -> int {
 is_animation_in_window :: proc(sprite:Animated_Sprite, first, last:int) -> bool {
 	if sprite.clip.frame_count <= 0 do return false
 
-	frame := get_animation_frame(sprite)
+	frame := calculate_animation_frame(sprite)
 	return frame >= first && frame <= last
 }
 
 /*How far the clip's `offset` moves the drawing, in world units. The offset is in
 image pixels, so it scales with `scale`; a mirrored sprite is moved the other way,
 because the art it describes is mirrored too*/
-animation_draw_offset :: proc(sprite:Animated_Sprite) -> [2]f32 {
+calculate_animation_render_offset :: proc(sprite:Animated_Sprite) -> [2]f32 {
 	if sprite.pixels_per_unit <= 0 do return {}
 
 	shift := sprite.clip.offset / sprite.pixels_per_unit * sprite.scale
@@ -289,9 +289,9 @@ animation_draw_offset :: proc(sprite:Animated_Sprite) -> [2]f32 {
 /*Draws an animated sprite. Same as render_sprite; the flip is read at draw time, so
 it takes effect on the very next draw. The clip's `offset` is applied here*/
 render_animated_sprite :: proc(sprite:Animated_Sprite, mode:Sprite_Mode = .CUTOUT) {
-	draw := sprite.sprite
-	shift := animation_draw_offset(sprite)
-	draw.position.x += shift.x
-	draw.position.y += shift.y
-	render_sprite(draw, mode)
+	shifted := sprite.sprite
+	shift := calculate_animation_render_offset(sprite)
+	shifted.position.x += shift.x
+	shifted.position.y += shift.y
+	render_sprite(shifted, mode)
 }

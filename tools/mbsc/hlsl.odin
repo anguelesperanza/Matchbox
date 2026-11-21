@@ -10,16 +10,16 @@ import "core:strings"
 // What the output relies on, and why:
 //   - The engine uploads a matrix in Odin's layout, which HLSL reads as column-major, so `m * v` is `mul(m, v)`
 //     and `v * m` is `mul(v, m)`. Matrix times matrix is `mul` as well, since HLSL's own `*` is per element.
-//   - The engine's constant buffers have a fixed layout (FRAME_FIELDS and DRAW_FIELDS in engine.odin), so each is
+//   - The engine's constant buffers have a fixed layout (FRAME_FIELDS and RENDER_FIELDS in engine.odin), so each is
 //     written with every engine field in the engine's order, whatever subset the shader declared. Their fields are
 //     named `<block>_<field>`, because HLSL puts constant buffer fields in the global scope.
 //   - A struct has no constructor expression in HLSL, so each struct a shader builds gets a small `mbs_make_` helper.
 //   - Every texture shares the one sampler at register s0, which is the one the runtime binds.
 
-// Registers the runtime binds: frame at b0, draw at b1. The game's own uniforms come after, at b2.
+// Registers the runtime binds: frame at b0, render at b1. The game's own uniforms come after, at b2.
 // The registers the generated HLSL uses, also written to the reflection file for the runtime.
 FRAME_REGISTER :: 0
-DRAW_REGISTER :: 1
+RENDER_REGISTER :: 1
 GAME_REGISTER :: 2
 SAMPLER_REGISTER :: 0
 
@@ -202,8 +202,8 @@ engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
 	#partial switch kind {
 	case .FRAME:
 		return FRAME_FIELDS[:]
-	case .DRAW:
-		return DRAW_FIELDS[:]
+	case .RENDER:
+		return RENDER_FIELDS[:]
 	}
 	return nil
 }
@@ -380,7 +380,7 @@ write_constant_buffers :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 		if uniform.kind == .GAME {
 			continue
 		}
-		register := FRAME_REGISTER if uniform.kind == .FRAME else DRAW_REGISTER
+		register := FRAME_REGISTER if uniform.kind == .FRAME else RENDER_REGISTER
 		fmt.sbprintf(builder, "\ncbuffer %s_block : register(b%d) {{\n", safe_name(uniform.name), register)
 		for field in engine_fields(uniform.kind) {
 			fmt.sbprintfln(builder, "    %s %s;", engine_type(field.type), block_field_name(uniform.name, field.name))

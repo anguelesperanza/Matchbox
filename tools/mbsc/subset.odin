@@ -98,7 +98,7 @@ check_node :: proc(checker: ^Checker, node: ^ast.Node) -> bool {
 		if n.is_using {
 			return reject(checker, node.pos, 5, "`using` is not available in shaders", "no `using`",
 				"`using` brings names in from elsewhere, which hides where a value comes from",
-				"write the name in full, for example `draw.tint`")
+				"write the name in full, for example `render.tint`")
 		}
 		if len(n.names) > 1 {
 			return reject(checker, n.names[1].pos, 1, "a declaration can have only one name here",
@@ -117,7 +117,7 @@ check_node :: proc(checker: ^Checker, node: ^ast.Node) -> bool {
 	case ^ast.Using_Stmt:
 		return reject(checker, node.pos, 5, "`using` is not available in shaders", "no `using`",
 			"`using` brings names in from elsewhere, which hides where a value comes from",
-			"write the name in full, for example `draw.tint`")
+			"write the name in full, for example `render.tint`")
 	case ^ast.Branch_Stmt:
 		word := n.tok.text
 		return reject(checker, node.pos, len(word), fmt.aprintf("`%s` is not available in shaders", word),

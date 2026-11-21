@@ -138,16 +138,16 @@ The engine fills these. A shader declares them with exactly this shape so every 
 	time:            f32, // seconds since the game started
 }
 
-@(uniform = .DRAW) draw: struct {
+@(uniform = .RENDER) render: struct {
 	model:        matrix[4, 4]f32,
 	tint:         [4]f32,
-	uv_rect:      [4]f32, // sub-rectangle of the texture: left, top, right, bottom
+	uv_rectangle: [4]f32, // sub-rectangle of the texture: left, top, right, bottom
 	alpha_cutoff: f32,
 }
 ```
 
 A shader may declare any subset of the fields, in any order. A field name the engine doesn't have is `MBS-E18`.
-The engine's current `Frame_Constants` and `Draw_Constants` (in `render_windows.odin`) are the reference; `time`
+The engine's current `Frame_Constants` and `Render_Constants` (in `render_windows.odin`) are the reference; `time`
 is new and comes with S3.
 
 ### Game-owned uniforms
@@ -179,7 +179,7 @@ custom shaders.
 ```
 
 - `N` is a slot. PC and Vita have many; the 3DS has **three** (slots 0 to 2).
-- Sampling filter and wrap mode are set on the texture by the game (`create_texture`), not in the shader.
+- Sampling filter and wrap mode are set on the texture by the game (`load_texture`), not in the shader.
 - `sample(albedo, uv)` reads it. The 3DS fragment stage can use a texture only as a combiner input (part 3), and
   its vertex stage can't sample at all (`MBS-E8`).
 
@@ -231,10 +231,10 @@ Varying :: struct {
 }
 
 @(uniform = .FRAME) frame: struct { view_projection: matrix[4, 4]f32 }
-@(uniform = .DRAW)  draw:  struct {
+@(uniform = .RENDER)  render:  struct {
 	model:        matrix[4, 4]f32,
 	tint:         [4]f32,
-	uv_rect:      [4]f32,
+	uv_rectangle: [4]f32,
 	alpha_cutoff: f32,
 }
 
@@ -243,16 +243,16 @@ Varying :: struct {
 vertex_main :: proc(input: Vertex_In) -> Varying {
 	output: Varying
 
-	world := draw.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
 	output.position = frame.view_projection * world
-	output.color = input.color * draw.tint
-	output.uv = lerp(draw.uv_rect.xy, draw.uv_rect.zw, input.uv)
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
 	return output
 }
 
 fragment_main :: proc(v: Varying) -> [4]f32 {
 	color := sample(tex, v.uv) * v.color
-	if color.a < draw.alpha_cutoff do discard()
+	if color.a < render.alpha_cutoff do discard()
 	return color
 }
 ```
@@ -637,7 +637,7 @@ A constant is stored as 8 bits per channel (see below).
 ## 19. The alpha test
 
 ```odin
-if color.a < draw.alpha_cutoff do discard()
+if color.a < render.alpha_cutoff do discard()
 ```
 
 This one form becomes the hardware alpha test: compare the final alpha with one reference value. The pixel

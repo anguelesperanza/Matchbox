@@ -10,7 +10,7 @@ package matchbox
 	PC (D3D11). Everything drawn is 3D; 2D is an orthographic camera.
 
 	Drawing is queued: render_mesh (and render_sprite / the shapes) only record
-	a Draw_Item between camera_start and camera_end. camera_end sorts the queue
+	a Render_Item between camera_start and camera_end. camera_end sorts the queue
 	and issues the draw calls. See render_plan.md.
 */
 
@@ -29,17 +29,17 @@ Frame_Constants :: struct {
 	_pad:[3]f32,
 }
 
-Draw_Constants :: struct {
+Render_Constants :: struct {
 	model:matrix[4,4]f32,
 	tint:[4]f32,
-	uv_rect:[4]f32,
+	uv_rectangle:[4]f32, // matched to mesh.mbs by name: renaming it means regenerating every shader, the Vita .gxp included
 	alpha_cutoff:f32,
 	_pad:[3]f32
 }
 
 // D3D constant buffers must be a multiple of 16 bytes
 #assert(size_of(Frame_Constants) % 16 == 0)
-#assert(size_of(Draw_Constants) % 16 == 0)
+#assert(size_of(Render_Constants) % 16 == 0)
 
 // linalg builds OpenGL clip space (depth -1..1); D3D wants 0..1: z_new = 0.5 * z + 0.5 * w
 GL_TO_D3D_DEPTH :: matrix[4, 4]f32 {
@@ -72,14 +72,14 @@ Mesh :: struct {
 	index_count:u32,
 }
 
-Draw_Item :: struct {
+Render_Item :: struct {
 	mesh:Mesh,
 	model:matrix[4,4]f32,
 	tint:[4]f32,
 	cull:Cull_Mode,
 	depth:f32,
 	texture:Texture,
-	uv_rect:[4]f32,
+	uv_rectangle:[4]f32,
 	alpha_cutoff:f32,
 }
 
@@ -88,25 +88,25 @@ create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
 	assert(len(vertices) > 0 && len(indices) > 0, "A mesh needs vertices and indices")
 	assert(len(vertices) <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
 
-	vertex_desc := d3d11.BUFFER_DESC {
+	vertex_description := d3d11.BUFFER_DESC {
 		ByteWidth = u32(len(vertices) * size_of(Vertex)),
 		Usage = .IMMUTABLE,
 		BindFlags = {.VERTEX_BUFFER},
 	}
 	vertex_data := d3d11.SUBRESOURCE_DATA{pSysMem = raw_data(vertices)}
 
-	res := mbi.device->CreateBuffer(&vertex_desc, &vertex_data, &mesh.vertex_buffer)
-	ensure(win.SUCCEEDED(res), "Create mesh vertex buffer failed")
+	result := mbi.device->CreateBuffer(&vertex_description, &vertex_data, &mesh.vertex_buffer)
+	ensure(win.SUCCEEDED(result), "Create mesh vertex buffer failed")
 
-	index_desc := d3d11.BUFFER_DESC {
+	index_description := d3d11.BUFFER_DESC {
 		ByteWidth = u32(len(indices) * size_of(u16)),
 		Usage = .IMMUTABLE,
 		BindFlags = {.INDEX_BUFFER},
 	}
 	index_data := d3d11.SUBRESOURCE_DATA{pSysMem = raw_data(indices)}
 
-	res = mbi.device->CreateBuffer(&index_desc, &index_data, &mesh.index_buffer)
-	ensure(win.SUCCEEDED(res), "Create mesh index buffer failed")
+	result = mbi.device->CreateBuffer(&index_description, &index_data, &mesh.index_buffer)
+	ensure(win.SUCCEEDED(result), "Create mesh index buffer failed")
 
 	mesh.index_count = u32(len(indices))
 	return
@@ -127,15 +127,15 @@ render_mesh :: proc(
 	cull:Cull_Mode = .BACK,
 	texture:Texture = {},
 ) {
-	queue_draw(mesh, model, tint, blend, cull, texture, {0, 0, 1, 1}, 0)
+	queue_render(mesh, model, tint, blend, cull, texture, {0, 0, 1, 1}, 0)
 }
 
 /*Records one draw. Shared by render_mesh, render_sprite and the shapes*/
 @(private)
-queue_draw :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rect:[4]f32, alpha_cutoff:f32) {
+queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32) {
 	ensure(mbi.camera_active == true, "Drawing must happen between camera_start and camera_end")
 
-	item := Draw_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
+	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff}
 
 	switch blend {
 	case .NONE:
@@ -152,8 +152,8 @@ queue_draw :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mod
 
 /*Issues the draw call for one queued item. The render state is already set*/
 @(private)
-draw_item :: proc(item:Draw_Item) {
-	set_draw_constants(item.model, item.tint, item.uv_rect, item.alpha_cutoff)
+render_item :: proc(item:Render_Item) {
+	set_render_constants(item.model, item.tint, item.uv_rectangle, item.alpha_cutoff)
 
 	vertex_buffer := item.mesh.vertex_buffer
 	stride:u32 = size_of(Vertex)
@@ -170,7 +170,7 @@ draw_item :: proc(item:Draw_Item) {
 	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
 
 	// Each constant buffer goes to the register the shader's reflection file names
-	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .DRAW = mbi.draw_constants, .GAME = mbi.game_constants}
+	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = mbi.game_constants}
 	for block, kind in mbi.reflection.blocks {
 		if block.present == false do continue
 		buffer := buffers[kind]
@@ -226,9 +226,9 @@ create_states :: proc() {
 		},
 	}
 
-	for &desc, mode in depth_descs {
-		res := mbi.device->CreateDepthStencilState(&desc, &mbi.depth_states[mode])
-		ensure(win.SUCCEEDED(res), "Create DepthStencilState Failed")
+	for &description, mode in depth_descs {
+		result := mbi.device->CreateDepthStencilState(&description, &mbi.depth_states[mode])
+		ensure(win.SUCCEEDED(result), "Create DepthStencilState Failed")
 	}
 
 	// Blend
@@ -256,9 +256,9 @@ create_states :: proc() {
 		RenderTargetWriteMask = 0xF,
 	}
 
-	for &desc, mode in blend_descs {
-		res := mbi.device->CreateBlendState(&desc, &mbi.blend_states[mode])
-		ensure(win.SUCCEEDED(res), "Create BlendState Failed")
+	for &description, mode in blend_descs {
+		result := mbi.device->CreateBlendState(&description, &mbi.blend_states[mode])
+		ensure(win.SUCCEEDED(result), "Create BlendState Failed")
 	}
 
 	rasterizer_descs := [Cull_Mode]d3d11.RASTERIZER_DESC {
@@ -277,9 +277,9 @@ create_states :: proc() {
 		},
 	}
 
-	for &desc, mode in rasterizer_descs {
-		res := mbi.device->CreateRasterizerState(&desc, &mbi.rasterizer_states[mode])
-		ensure(win.SUCCEEDED(res), "Create RasterizerState Failed")
+	for &description, mode in rasterizer_descs {
+		result := mbi.device->CreateRasterizerState(&description, &mbi.rasterizer_states[mode])
+		ensure(win.SUCCEEDED(result), "Create RasterizerState Failed")
 	}
 
 	sampler_descs := [Filter_Mode]d3d11.SAMPLER_DESC {
@@ -301,9 +301,9 @@ create_states :: proc() {
 		},
 	}
 
-	for &desc, mode in sampler_descs {
-		res := mbi.device->CreateSamplerState(&desc, &mbi.samplers[mode])
-		ensure(win.SUCCEEDED(res), "Create SamplerState Failed")
+	for &description, mode in sampler_descs {
+		result := mbi.device->CreateSamplerState(&description, &mbi.samplers[mode])
+		ensure(win.SUCCEEDED(result), "Create SamplerState Failed")
 	}
 }
 
@@ -326,15 +326,15 @@ set_render_state :: proc(depth:Depth_Mode, blend:Blend_Mode, cull:Cull_Mode) {
 
 @(private)
 create_constant_buffer :: proc(size:u32) -> (buffer:^d3d11.IBuffer) {
-	desc := d3d11.BUFFER_DESC {
+	description := d3d11.BUFFER_DESC {
 		ByteWidth = size,
 		Usage = .DYNAMIC,
 		BindFlags = {.CONSTANT_BUFFER},
 		CPUAccessFlags = {.WRITE},
 	}
 
-	res := mbi.device->CreateBuffer(&desc, nil, &buffer)
-	ensure(win.SUCCEEDED(res), "Create ConstantBuffer Failed")
+	result := mbi.device->CreateBuffer(&description, nil, &buffer)
+	ensure(win.SUCCEEDED(result), "Create ConstantBuffer Failed")
 	return
 }
 
@@ -342,8 +342,8 @@ create_constant_buffer :: proc(size:u32) -> (buffer:^d3d11.IBuffer) {
 @(private)
 update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 	mapped:d3d11.MAPPED_SUBRESOURCE
-	res := mbi.device_context->Map(buffer, 0, .WRITE_DISCARD, {}, &mapped)
-	ensure(win.SUCCEEDED(res), "Map buffer failed")
+	result := mbi.device_context->Map(buffer, 0, .WRITE_DISCARD, {}, &mapped)
+	ensure(win.SUCCEEDED(result), "Map buffer failed")
 	mem.copy(mapped.pData, data, size)
 	mbi.device_context->Unmap(buffer, 0)
 }
@@ -353,7 +353,7 @@ update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
 	now:win.LARGE_INTEGER
 	win.QueryPerformanceCounter(&now)
-	seconds := f32(f64(now - timestamp.start_counter) / f64(timestamp.frequency))
+	seconds := f32(f64(now - mbi.timestamp.start_counter) / f64(mbi.timestamp.frequency))
 
 	constants := Frame_Constants{view_projection = view_projection, time = seconds}
 	if mbi.frame_constants != nil do update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
@@ -378,9 +378,9 @@ upload_game_constants :: proc() {
 
 /*Sets the model matrix, tint, texture region and alpha cut-off used by the next draw*/
 @(private)
-set_draw_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32, uv_rect:[4]f32, alpha_cutoff:f32) {
-	constants := Draw_Constants{model = model, tint = tint, uv_rect = uv_rect, alpha_cutoff = alpha_cutoff}
-	if mbi.draw_constants != nil do update_buffer(mbi.draw_constants, &constants, size_of(Draw_Constants))
+set_render_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32, uv_rectangle:[4]f32, alpha_cutoff:f32) {
+	constants := Render_Constants{model = model, tint = tint, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff}
+	if mbi.render_constants != nil do update_buffer(mbi.render_constants, &constants, size_of(Render_Constants))
 }
 
 /*Starts a frame. Call once per frame before drawing anything*/
@@ -391,13 +391,13 @@ render_start :: proc() {
 		mbi.framebuffer->Release()
 		destroy_depth_buffer()
 
-		res := mbi.swapchain->ResizeBuffers(0, 0, 0, .UNKNOWN, {})
-		ensure(win.SUCCEEDED(res), "Swapchain buffer resize failed")
+		result := mbi.swapchain->ResizeBuffers(0, 0, 0, .UNKNOWN, {})
+		ensure(win.SUCCEEDED(result), "Swapchain buffer resize failed")
 
-		res = mbi.swapchain->GetBuffer(0, d3d11.ITexture2D_UUID, (^rawptr)(&mbi.framebuffer))
+		result = mbi.swapchain->GetBuffer(0, d3d11.ITexture2D_UUID, (^rawptr)(&mbi.framebuffer))
 
-		res  = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
-		ensure(win.SUCCEEDED(res), "Create RenderTargetView failed")
+		result  = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
+		ensure(win.SUCCEEDED(result), "Create RenderTargetView failed")
 
 		create_depth_buffer()
 
@@ -434,12 +434,12 @@ clear_background :: proc(color:[4]f32) {
 
 @(private)
 create_depth_buffer :: proc() {
-	framebuffer_desc:d3d11.TEXTURE2D_DESC
-	mbi.framebuffer->GetDesc(&framebuffer_desc)
+	framebuffer_description:d3d11.TEXTURE2D_DESC
+	mbi.framebuffer->GetDesc(&framebuffer_description)
 
-	depth_desc := d3d11.TEXTURE2D_DESC {
-		Width = framebuffer_desc.Width,
-		Height = framebuffer_desc.Height,
+	depth_description := d3d11.TEXTURE2D_DESC {
+		Width = framebuffer_description.Width,
+		Height = framebuffer_description.Height,
 		MipLevels = 1,
 		ArraySize = 1,
 		Format = .D32_FLOAT,
@@ -449,11 +449,11 @@ create_depth_buffer :: proc() {
 	}
 
 
-	res := mbi.device->CreateTexture2D(&depth_desc, nil, &mbi.depth_texture)
-	ensure(win.SUCCEEDED(res), "Create depth texture failed")
+	result := mbi.device->CreateTexture2D(&depth_description, nil, &mbi.depth_texture)
+	ensure(win.SUCCEEDED(result), "Create depth texture failed")
 
-	res = mbi.device->CreateDepthStencilView(mbi.depth_texture, nil, &mbi.depth_view)
-	ensure(win.SUCCEEDED(res), "Create DepthStencilView failed")
+	result = mbi.device->CreateDepthStencilView(mbi.depth_texture, nil, &mbi.depth_view)
+	ensure(win.SUCCEEDED(result), "Create DepthStencilView failed")
 }
 
 @(private)
@@ -466,7 +466,7 @@ destroy_depth_buffer :: proc() {
 compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) {
 	errors: ^d3d11.IBlob
 
-	res := d3d_compiler.Compile(
+	result := d3d_compiler.Compile(
 		pSrcData = raw_data(mbi.shader_src),
 		SrcDataSize = uint(len(mbi.shader_src)),
 		pSourceName = "shaders/mesh.pc.hlsl", // for debug messages
@@ -485,7 +485,7 @@ compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) 
 		errors->Release()
 	}
 
-	ensure(win.SUCCEEDED(res), "Shader Compilation failed")
+	ensure(win.SUCCEEDED(result), "Shader Compilation failed")
 }
 
 /*Compiles the shaders and creates the input layout, constant buffers and render states*/
@@ -505,22 +505,22 @@ create_pipeline :: proc() {
 	compile_shader("vertex_main", "vs_5_0", &mbi.vertex_shader_blob)
 	compile_shader("fragment_main", "ps_5_0", &mbi.pixel_shader_blob)
 
-	res := mbi.device->CreateVertexShader(
+	result := mbi.device->CreateVertexShader(
 		pShaderBytecode = mbi.vertex_shader_blob->GetBufferPointer(),
 		BytecodeLength = mbi.vertex_shader_blob->GetBufferSize(),
 		pClassLinkage = nil,
 		ppVertexShader = &mbi.vertex_shader,
 	)
 
-	ensure(win.SUCCEEDED(res), "Vertex shader creation failed")
+	ensure(win.SUCCEEDED(result), "Vertex shader creation failed")
 
-	res = mbi.device->CreatePixelShader(
+	result = mbi.device->CreatePixelShader(
 		pShaderBytecode = mbi.pixel_shader_blob->GetBufferPointer(),
 		BytecodeLength = mbi.pixel_shader_blob->GetBufferSize(),
 		pClassLinkage = nil,
 		ppPixelShader = &mbi.pixel_shader,
 	)
-	ensure(win.SUCCEEDED(res), "Pixel shader creation failed")
+	ensure(win.SUCCEEDED(result), "Pixel shader creation failed")
 
 	// The input layout is what the shader reads, each attribute found in the engine's Vertex
 	input_element_descs := make([]d3d11.INPUT_ELEMENT_DESC, len(mbi.reflection.attributes), context.temp_allocator)
@@ -535,7 +535,7 @@ create_pipeline :: proc() {
 		}
 	}
 
-	res = mbi.device->CreateInputLayout(
+	result = mbi.device->CreateInputLayout(
 		pInputElementDescs = raw_data(input_element_descs),
 		NumElements = u32(len(input_element_descs)),
 		pShaderBytecodeWithInputSignature = mbi.vertex_shader_blob->GetBufferPointer(),
@@ -543,12 +543,12 @@ create_pipeline :: proc() {
 		ppInputLayout = &mbi.input_layout,
 	)
 
-	ensure(win.SUCCEEDED(res), "Input layout creation failed")
+	ensure(win.SUCCEEDED(result), "Input layout creation failed")
 
 	// The engine's blocks are the size of its structs (check_engine_blocks made sure the shader agrees); the game's
 	// block is as big as the shader says, and starts out as zeros
 	if mbi.reflection.blocks[.FRAME].present do mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
-	if mbi.reflection.blocks[.DRAW].present do mbi.draw_constants = create_constant_buffer(size_of(Draw_Constants))
+	if mbi.reflection.blocks[.RENDER].present do mbi.render_constants = create_constant_buffer(size_of(Render_Constants))
 	if mbi.reflection.blocks[.GAME].present {
 		mbi.game_shadow = make([]byte, mbi.reflection.blocks[.GAME].size)
 		mbi.game_constants = create_constant_buffer(u32(len(mbi.game_shadow)))
@@ -559,23 +559,23 @@ create_pipeline :: proc() {
 }
 
 /*Everything drawn until camera_end is seen through this camera*/
-camera_start :: proc(cam:Camera) {
+camera_start :: proc(camera:Camera) {
 	ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
 	window :=[2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
-	aspect := get_window_aspect()
+	aspect := calculate_window_aspect()
 
 	// With pixel_snap, draw through a copy moved onto the pixel grid. render_sprite reads
 	// pixel_scale to snap sprite edges the same way
-	used := camera_snapped(cam, window)
-	mbi.pixel_scale = camera_snap_scale(cam, window.y)
+	used := calculate_camera_snapped(camera, window)
+	mbi.pixel_scale = calculate_camera_snap_scale(camera, window.y)
 
-	mbi.view = camera_view_matrix(used) // render_mesh needs it to sort transparent items
+	mbi.view = calculate_camera_view_matrix(used) // render_mesh needs it to sort transparent items
 	mbi.camera_active = true
-	mbi.screen_pass = cam.screen
+	mbi.screen_pass = camera.screen
 
 	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
-	view_projection := GL_TO_D3D_DEPTH * camera_projection_gl(used, aspect) * mbi.view
+	view_projection := GL_TO_D3D_DEPTH * calculate_camera_projection_gl(used, aspect) * mbi.view
 	set_frame_constants(view_projection)
 }
 
@@ -605,7 +605,7 @@ camera_end :: proc() {
 	// A stable sort keeps submission order for equal items. A screen pass skips it:
 	// with depth off, submission order is the paint order
 	if mbi.screen_pass == false {
-		slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Draw_Item) -> bool {
+		slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Render_Item) -> bool {
 			if a.texture.view != b.texture.view {
 				return uintptr(a.texture.view) < uintptr(b.texture.view)
 			}
@@ -614,18 +614,18 @@ camera_end :: proc() {
 	}
 
 	// Transparent items: farthest first, so nearer ones blend over farther ones
-	slice.stable_sort_by(mbi.transparent_items[:], proc(a, b:Draw_Item) -> bool {
+	slice.stable_sort_by(mbi.transparent_items[:], proc(a, b:Render_Item) -> bool {
 		return a.depth > b.depth
 	})
 
 	for item in mbi.opaque_items {
 		set_render_state(depth_opaque, .NONE, item.cull)
-		draw_item(item)
+		render_item(item)
 	}
 
 	for item in mbi.transparent_items {
 		set_render_state(depth_transparent, .ALPHA, item.cull)
-		draw_item(item)
+		render_item(item)
 	}
 
 	clear(&mbi.opaque_items)
@@ -640,7 +640,7 @@ destroy_pipeline :: proc() {
 	delete(mbi.transparent_items)
 
 	if mbi.game_constants != nil do mbi.game_constants->Release()
-	if mbi.draw_constants != nil do mbi.draw_constants->Release()
+	if mbi.render_constants != nil do mbi.render_constants->Release()
 	if mbi.frame_constants != nil do mbi.frame_constants->Release()
 	delete(mbi.game_shadow)
 	destroy_reflection(&mbi.reflection)

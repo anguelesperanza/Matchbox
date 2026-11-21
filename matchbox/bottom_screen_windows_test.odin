@@ -59,7 +59,7 @@ bottom_screen_fills_a_wide_window :: proc(t:^testing.T) {
 
 	mbi.screen_height = 12
 	mbi.window_size = {1600, 800, 0, 0} // aspect 2
-	min, max := get_bottom_screen_visible_rect()
+	min, max := calculate_bottom_screen_visible_rectangle()
 	testing.expect_value(t, min, [2]f32{-12, -6}) // the HUD's height, the window's width
 	testing.expect_value(t, max, [2]f32{12, 6})
 }
@@ -71,7 +71,7 @@ bottom_screen_keeps_its_width_in_a_narrow_window :: proc(t:^testing.T) {
 
 	mbi.screen_height = 12
 	mbi.window_size = {800, 800, 0, 0} // square: narrower than 4:3
-	min, max := get_bottom_screen_visible_rect()
+	min, max := calculate_bottom_screen_visible_rectangle()
 	testing.expect_value(t, max.x - min.x, 16) // 4:3 of 12, not cut off
 	testing.expect_value(t, max.y - min.y, 16) // so the view grew taller
 }
@@ -83,9 +83,9 @@ bottom_screen_anchors_follow_the_window :: proc(t:^testing.T) {
 
 	mbi.screen_height = 12
 	mbi.window_size = {1600, 800, 0, 0}
-	testing.expect_value(t, bottom_screen_anchor_position(.TOP_LEFT), [3]f32{-12, 6, 0})
-	testing.expect_value(t, bottom_screen_anchor_position(.BOTTOM_RIGHT, {-1, 1}), [3]f32{11, -5, 0})
-	testing.expect_value(t, bottom_screen_anchor_position(.CENTER), [3]f32{0, 0, 0})
+	testing.expect_value(t, calculate_bottom_screen_anchor_position(.TOP_LEFT), [3]f32{-12, 6, 0})
+	testing.expect_value(t, calculate_bottom_screen_anchor_position(.BOTTOM_RIGHT, {-1, 1}), [3]f32{11, -5, 0})
+	testing.expect_value(t, calculate_bottom_screen_anchor_position(.CENTER), [3]f32{0, 0, 0})
 }
 
 @(test)
@@ -101,7 +101,7 @@ bottom_screen_mouse_is_in_screen_units :: proc(t:^testing.T) {
 	set_bottom_screen(.FULLSCREEN)
 
 	mbi.mouse_position = {256, 128} // a quarter across, a quarter down
-	position, inside := get_mouse_bottom_screen_pos()
+	position, inside := calculate_mouse_bottom_screen_position()
 	testing.expect_value(t, position, [2]f32{-256, 128})
 	testing.expect_value(t, inside, true)
 }
@@ -118,15 +118,15 @@ bottom_screen_mouse_is_not_inside_when_hidden_or_outside :: proc(t:^testing.T) {
 
 	mbi.mouse_position = {256, 128}
 	set_bottom_screen(.HIDDEN)
-	_, inside := get_mouse_bottom_screen_pos()
+	_, inside := calculate_mouse_bottom_screen_position()
 	testing.expect_value(t, inside, false) // hidden: nothing to click
 
 	set_bottom_screen(.FULLSCREEN)
 	mbi.mouse_position = {0, 0}
-	_, inside = get_mouse_bottom_screen_pos()
+	_, inside = calculate_mouse_bottom_screen_position()
 	testing.expect_value(t, inside, true) // the corner pixel is on the screen
 
 	mbi.mouse_position = {-1, 100}
-	_, inside = get_mouse_bottom_screen_pos()
+	_, inside = calculate_mouse_bottom_screen_position()
 	testing.expect_value(t, inside, false) // outside the window
 }

@@ -1,106 +1,34 @@
 > **Copied from the `main` branch on 2026-11-21 so the style rules are in this branch.** The rules about naming,
 > grouping data in structs, no callbacks, constants and globals, comments that explain why, and verifying by measuring
 > apply here unchanged. Parts of the text describe `main`'s setup and do not describe `full-rewrite`: SDL3 and `stb` as
-> dependencies, the four packages (`matchbox`, `level`, `tether`, `eko`), `build_shaders.bat` with committed `.spv` / `.dxil`,
+> dependencies, the four packages (`matchbox`), `build_shaders.bat` with committed `.spv` / `.dxil`,
 > and `refactor.md` and the generated `cheatsheet.md`. This branch targets PC (Windows, D3D11), the New 3DS LL and the PS Vita;
-> its build and check commands are in `docs/next_session_handoff.md`. The body below is left as it was on `main`.
+> its build and check commands are in `docs/next_session_handoff.md`. The body below is left as it was on `main`, except
+> for the rules changed here on 2026-11-21: procedure names read action then thing, one verb per action (`render_`),
+> full words rather than shorthand, the wider `get_` and the new `calculate_` prefix, settings structs in `mbi`, and
+> how tests share `mbi`.
 
 # Working in Matchbox
 
 House style. Follow it for new code and when touching old code; `refactor.md`
 tracks bringing the rest of the package into line.
 
-## Scope: a complete framework, not a rendering layer
-
-Matchbox covers the parts of building a game -- and of building software
-around one -- rather than rendering and input alone. Audio, physics, an event
-system and whatever else a game actually needs belong here, as first-class
-parts of the framework, not as separate libraries a game is left to bolt on.
-
-**This reversed an earlier narrowing, deliberately.** Matchbox began as an
-all-encompassing framework, was cut back to rendering and input on the
-reasoning that everything else could arrive as its own package, and was widened
-again because those packages did not materialise and the split cost more than
-it bought: a game still needed sound, so `sound.odin` sat in the package anyway
-contradicting the stated scope, and `utility.odin` became an explicit "holding
-pen" for helpers that were useful and had nowhere to live. `refactor.md`'s own
-scope section has the full history.
-
-**The narrowing came back once, as separate repositories, and was reversed
-again on 2026-09-17.** Physics and audio *did* materialise as their own
-projects -- **Tether**, over `vendor:box3d`, and **Eko**, over
-`vendor:miniaudio` -- cloned beside Matchbox by whichever game wanted them. The
-project owner moved both into this repository because the dependency problem
-that split creates has no good answer:
-
-- `level` wants to describe colliders that a game turns into Tether bodies.
-  With Tether outside, `level` could only reach it by a path out of the
-  repository -- broken for anyone who cloned Matchbox without cloning Tether
-  beside it -- so the dependency had to be left to the game to wire up.
-- And it only gets worse as the framework fills in: an animation system that
-  wants footstep audio, a level that wants to place sound emitters. Every one
-  of those is either a path out of the repository or a job pushed onto the game.
-- A package reached by two different paths is two packages, with two copies of
-  its global. One repository means there is only ever one path.
-
-### Several packages, one repository
-
-Matchbox is **not one Odin package**. It is one repository holding four:
-
-| Package | Where | Depends on | What it is |
-| --- | --- | --- | --- |
-| `matchbox` | `matchbox/` | SDL3, stb | drawing, input, files, UI, the frame |
-| `level` | `level/` | `matchbox`, as `../matchbox` | the level format Stargate's editor writes |
-| `tether` | `tether/` | `vendor:box3d` | physics |
-| `eko` | `eko/` | `vendor:miniaudio` | audio |
-
-**All four are siblings at the repository root.** `level` lived at
-`matchbox/level/` and imported Matchbox as `..` until 2026-09-18; when physics
-and audio arrived as siblings, one package nested inside another was the odd one
-out, and it moved up. Nothing about how it reaches Matchbox actually changed:
-Odin resolves a relative import against the importing file's directory and
-identifies a package by the full path it lands on, so `../matchbox` from `level`
-and `matchbox/matchbox` from a game are two spellings of one directory and
-therefore one package. That is the whole of what the nesting was protecting --
-two paths to Matchbox would be two `mbi`s, and an `mb.Model` from one would not
-be an `mb.Model` to the other -- and one repository already guarantees it.
-
-A package depending on another inside the repository says so with one `../`,
-and that is the point of them all living here.
-
-**Why not fold them into `package matchbox`.** Three reasons, and any one of
-them is enough:
-
-- **Vendor cost.** `package matchbox` is what a game importing a sprite drawer
-  gets. Folding Tether in would link Box3D into a 2D game that never asked for
-  physics, and Eko would link miniaudio into a silent one.
-- **Globals.** `mbi` is `package matchbox`'s only global and stays that way.
-  Tether has `tpi` and Eko has `mac`, each for the same reason `mbi` exists --
-  one world, one audio engine, and an argument at every call site buys nothing.
-  Folded in, that would be three globals in one package, and the rule below
-  would be a lie.
-- **Churn.** A young subsystem changing weekly inside the package everything
-  imports is a rebuild of everything, weekly.
-
-**Where a new subsystem goes.** Into `package matchbox` by default -- that is
-where a thing a game reaches for alongside `draw_model` belongs. Into a package
-of its own beside it when it wraps a vendor library that not every game wants,
-or when it needs a global of its own. It is never a repository of its own
-again.
-
-**What a wider scope does not license.** It is about *what* may live here, not
-*how* it is built. Everything else in this file still governs, in every package:
-no callbacks, one global per package and only where one is earned,
-configuration as defaulted structs rather than loose constants, comments that
-explain why. A subsystem that arrives ignoring those is a subsystem to send
-back, whatever its subject. And breadth is not an invitation to speculative work
--- a thing belongs here when a game needs it, not because a complete framework
-would plausibly have one.
-
 ## Naming
 
-- **Procedures are `snake_case`** -- `draw_sprite`, `update_animation`,
-  `camera3d_view_projection`.
+- **Procedures are `snake_case`** and read **action, then the thing acted on**
+  -- `render_sprite`, `update_animation`, `destroy_texture`. The action comes
+  first, so the procedures that do the same thing line up: every
+  `render_*` draws, every `destroy_*` frees.
+- **One verb per action across the package.** Matchbox draws with `render_`
+  (`render_sprite`, `render_text`, `render_rectangle`), never a mix of `render_`
+  and `draw_` -- two words for one action make a reader wonder what the
+  difference is, and there is none.
+- **Full words, not shorthand** -- `position` not `pos`, `camera` not `cam`,
+  `delta_time` not `dt`, `rectangle` not `rect`, `description` not `desc`. A
+  name should say what it is without the reader guessing what an abbreviation
+  stands for. This covers procedures, parameters, fields and locals. Names that
+  belong to someone else stay as they come: an API's own fields (`wParam`,
+  D3D11's `DESC` types), a file format's keys (`ppu` in a `.meta` file).
 - **Types -- structs, enums and unions -- are `Pascal_Snake_Case`** --
   `Animated_Sprite`, `Render_Target`, `Model_Part`, `Key_State`. This is Odin's
   own convention, and what `core:` and `vendor:` use.
@@ -121,8 +49,8 @@ Player_State :: enum {
 
 Single-word type names need no separator, so `Sprite`, `Camera`, `Font` and
 `Mesh` are already right. It is the multi-word ones to watch: the separator is
-not optional, so `Animated_Sprite` and `Vert_Data` rather than running the
-words together.
+not optional, so `Animated_Sprite` and `Vertex_Data` rather than running the
+words together. The same goes for constants: `LIGHT_GRAY`, not `LIGHTGRAY`.
 
 SDL's own enums are used as they come -- Matchbox leans on `sdl.Scancode`,
 `sdl.GamepadButton` and `sdl.MouseButtonFlag` rather than wrapping them, and
@@ -138,19 +66,22 @@ those are SDL's types to name.
   resolves.
 - **`is_x`** asks a question and answers `bool` -- `is_key_pressed`,
   `is_mouse_captured`, `is_dropdown_open`.
-- **`get_x`** reads state that is already stored somewhere -- `get_delta_time`,
-  `get_mouse_position`, `get_status_text`.
+- **`get_x`** returns data that is not a `bool` (a `bool` is an `is_x`) --
+  `get_delta_time`, `get_mouse_position`, `get_window_size`. It does not matter
+  whether the value was stored or put together on the spot; what matters is
+  that the caller is asking for a thing.
+- **`calculate_x`** works a value out with maths -- `calculate_model_matrix`,
+  `calculate_sprite_bounds`, `calculate_line_height`,
+  `calculate_mouse_world_position`. When a procedure could be either, maths
+  wins: `calculate_` tells the caller the answer is computed each call, so it
+  is not free in a hot loop and may differ from one frame to the next.
 
-Two carve-outs, because the prefixes describe *reading*:
+One carve-out, because the prefixes describe *asking*:
 
 - A procedure that **does** something and reports what happened keeps its verb.
   `button` draws a button and answers whether it was clicked; `is_button` would
   be a lie. Same for `button_confirm`, `dropdown`, `slider`, `modal_begin`,
   `hover_dwell`.
-- A procedure that **computes** a value from its arguments is not a getter.
-  `measure_text`, `rect_center`, `model_center`, `line_height`, `screen_pos`
-  and `wrap_text` derive an answer rather than fetch one, and
-  `get_measure_text` would say the opposite.
 
 **Why it matters here:** the package used to carry both spellings, and the
 worst of it was inside one family in one file -- the uniform blocks in
@@ -190,7 +121,7 @@ Matchbox does not hand a game's procedure back to it later. Nothing here takes
 an `on_finished`, a listener, or a handler, and nothing should.
 
 Ask instead. The framework is immediate-mode from end to end -- `is_key_pressed`
-is polled rather than delivered, `draw_sprite` retains nothing -- so anything
+is polled rather than delivered, `render_sprite` retains nothing -- so anything
 that wants to know a thing happened asks on the frame it cares:
 
 ```odin
@@ -231,6 +162,20 @@ proc(d: f32 = DEFAULTS.duration)  // a field of one
 
 `BUTTON_STYLE :: Button_Style{...}` in `ui.odin` is the existing precedent.
 
+### Fixed values the engine itself works with
+
+A value the engine uses internally -- not one a caller passes -- goes in a
+settings struct named after what it belongs to (`Font_Settings`,
+`Screen_Settings`, `Shader_Format`), held as a field of `mbi`
+(`mbi.font_settings.line_spacing`). The struct is declared next to the code it
+serves, with a comment on each field saying what it is for.
+
+The values are written where `mbi` is declared (`mbi := Matchbox_Info{...}`),
+**not** set in `init`. A value given there is right from the first line of the
+program and under `odin test`, where `init` never runs; set in `init`, a test
+would see zero. A default parameter can read one directly
+(`spacing:f32 = mbi.font_settings.line_spacing`): Odin evaluates it at the call.
+
 ### The exceptions, and they are narrow
 
 - **Array sizes.** Odin needs a compile-time constant for a fixed array bound.
@@ -242,17 +187,22 @@ proc(d: f32 = DEFAULTS.duration)  // a field of one
 - **Embedded data.** `DEFAULT_FONT_BYTES` is a `#load` and cannot be anything
   else
 - **Colours.** `WHITE`, `BLACK`, `MAROON` and the rest stay loose on purpose.
-  Wrapping them in a struct buys nothing and complicates every call site
+  Wrapping them in a struct buys nothing and complicates every call site. They
+  are constants (`::`), never variables: a game could otherwise assign to
+  `WHITE` and change what every later use of it means
 - **`mbi`.** The one sanctioned global -- see below
 
 ## `mbi` is the only global -- one per package, and only where it is earned
 
-Matchbox is an immediate-mode API: `draw_rect` cannot take a renderer argument
-without every call site carrying one. `mbi` is that state, and it stays.
+Matchbox is an immediate-mode API: `render_rectangle` cannot take a renderer
+argument without every call site carrying one. `mbi` is that state, and it stays.
 
-Everything else that has crept out to package scope belongs *inside* it. Adding
-a new top-level `var` is not the answer; adding a field to the right struct
-under `mbi` is.
+`mbi` is a deliberate god struct: everything the engine holds lives in it --
+device handles, input, timing (`mbi.timestamp`), and the settings structs
+above. Everything else that has crept out to package scope belongs *inside* it.
+Adding a new top-level `var` is not the answer; adding a field to the right
+struct under `mbi` is. Keep it navigable by grouping: a new concern gets its
+own struct and one field, not a dozen loose fields.
 
 **The sibling packages each have exactly one of their own**, for the same
 reason and under the same rule: `tether.tpi` holds the one physics world, and
@@ -318,14 +268,17 @@ is a useful sentence.
   `odin test tether -define:ODIN_TEST_THREADS=1`. **Tether's want the define**:
   every test there makes and destroys the one world in `tpi`, and the runner
   otherwise runs them side by side against that same global. `matchbox`'s do
-  not, because `mbi` is thread-local under `odin test`; a package that grows a
-  global without that trick inherits Tether's rule, not Matchbox's
-- **Tests run in parallel, each with its own `mbi`.** Under `odin test`, and only
-  there, `mbi` is thread-local (types.odin), so a test may set whatever fields
-  it needs without another test seeing them. It starts zeroed, not initialised:
-  `init` never runs in a test, so anything `init` sets to a non-zero default is
-  still zero there. Prefer state whose zero value is already right, so that
-  neither a test nor anything else has to know
+  not: most only read `mbi`, and the few that write it take a lock (next item)
+- **Tests run in parallel and share the one `mbi`** (this is where
+  `full-rewrite` differs from `main`, which made `mbi` thread-local under
+  `odin test`). Odin refuses an initial value on a thread-local variable, and
+  `mbi`'s settings structs need theirs (see "Fixed values the engine itself
+  works with"), so `mbi` is an ordinary global here. A test that only reads
+  `mbi` needs nothing. A test that **writes** to it takes a lock first and puts
+  the fields back before letting go -- `save_state` / `restore_state` in
+  `bottom_screen_windows_test.odin` is the pattern. `init` never runs in a
+  test, so only the values written in `mbi`'s declaration are there; anything
+  `init` sets is still zero
 - **`cheatsheet.md` is generated**, by `python tools/gen_cheatsheet.py` from the
   repository root. Regenerate it after adding or changing a public procedure
   rather than editing it. Each entry's description is the first sentence of that

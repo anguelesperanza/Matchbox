@@ -12,13 +12,22 @@ package matchbox
 
 import "core:math/linalg"
 
+/*
+	How a sprite moves, kept apart from how it looks. Matchbox stores these and never
+	reads them: the game moves the sprite. Embedded in Sprite with `using`, so
+	`sprite.velocity` still works and `sprite.body` hands the whole group around
+*/
+Body :: struct {
+	velocity:f32,
+	jump_force:f32,
+}
+
 Sprite :: struct {
+	using body:Body,
 	texture:Texture,
 	position:[3]f32,
 	rotation:f32, // radians, counter-clockwise about Z
 	scale:[2]f32,
-	velocity:f32,
-	jump_force:f32,
 	tint:[4]f32,
 	pivot:[2]f32, // the point of the image that sits at `position`: {0,0} bottom left, {1,1} top right
 	flip_x:bool,
@@ -47,20 +56,20 @@ create_sprite :: proc(texture:Texture, position:[3]f32 = {}, pixels_per_unit:f32
 
 // The part of the image a sprite shows, in pixels {x, y, width, height}: `source` if set, else its frame
 @(private)
-get_sprite_source :: proc(sprite:Sprite) -> [4]f32 {
+calculate_sprite_source :: proc(sprite:Sprite) -> [4]f32 {
 	if sprite.source[2] > 0 && sprite.source[3] > 0 {
 		return sprite.source
 	}
-	return texture_frame_rect(sprite.texture, sprite.frame)
+	return calculate_texture_frame_rectangle(sprite.texture, sprite.frame)
 }
 
 /*The rectangle a sprite covers, in world units: `min` bottom left, `max` top right. Pair it
-with `is_point_in_rect` to find out whether the mouse is over a sprite.
+with `is_point_in_rectangle` to find out whether the mouse is over a sprite.
 
 Rotation is not counted: a rotated sprite gets the rectangle it would have unrotated.
 Pixel snapping is not either, so the edges can be up to half a screen pixel off*/
-get_sprite_bounds :: proc(sprite:Sprite) -> (min, max:[2]f32) {
-	source := get_sprite_source(sprite)
+calculate_sprite_bounds :: proc(sprite:Sprite) -> (min, max:[2]f32) {
+	source := calculate_sprite_source(sprite)
 	size := [2]f32{source[2], source[3]} / sprite.pixels_per_unit * sprite.scale
 
 	min = {sprite.position.x - sprite.pivot.x * size.x, sprite.position.y - sprite.pivot.y * size.y}
@@ -74,7 +83,7 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 	ensure(sprite.pixels_per_unit > 0, "Sprite pixels_per_unit must be above zero")
 
 	// Which part of the image to show, in pixels
-	source := get_sprite_source(sprite)
+	source := calculate_sprite_source(sprite)
 
 	// As 0..1 texture coordinates. v = 0 is the top of the image
 	u0 := source[0] / f32(sprite.texture.width)
@@ -91,19 +100,19 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 
 	// The shared quad is 1x1 and centred on its origin. Shift it so the pivot
 	// is at the origin, then scale, rotate and move. Rotation turns about the pivot
-	rotation := create_rotation_axis_angle({0, 0, 1}, sprite.rotation)
-	model := create_model_matrix(sprite.position, rotation, {size.x, size.y, 1}) *
+	rotation := calculate_rotation_axis_angle({0, 0, 1}, sprite.rotation)
+	model := calculate_model_matrix(sprite.position, rotation, {size.x, size.y, 1}) *
 		linalg.matrix4_translate_f32({0.5 - sprite.pivot.x, 0.5 - sprite.pivot.y, 0})
 
 	// Pixel snapping: put the four edges on whole screen pixels. Rotated sprites are left as they are
 	if mbi.pixel_scale > 0 && sprite.rotation == 0 {
-		left := snap_to_pixel(sprite.position.x - sprite.pivot.x * size.x, mbi.pixel_scale)
-		right := snap_to_pixel(sprite.position.x + (1 - sprite.pivot.x) * size.x, mbi.pixel_scale)
-		bottom := snap_to_pixel(sprite.position.y - sprite.pivot.y * size.y, mbi.pixel_scale)
-		top := snap_to_pixel(sprite.position.y + (1 - sprite.pivot.y) * size.y, mbi.pixel_scale)
+		left := calculate_snapped_to_pixel(sprite.position.x - sprite.pivot.x * size.x, mbi.pixel_scale)
+		right := calculate_snapped_to_pixel(sprite.position.x + (1 - sprite.pivot.x) * size.x, mbi.pixel_scale)
+		bottom := calculate_snapped_to_pixel(sprite.position.y - sprite.pivot.y * size.y, mbi.pixel_scale)
+		top := calculate_snapped_to_pixel(sprite.position.y + (1 - sprite.pivot.y) * size.y, mbi.pixel_scale)
 
 		centre := [3]f32{(left + right) * 0.5, (bottom + top) * 0.5, sprite.position.z}
-		model = create_model_matrix(centre, linalg.QUATERNIONF32_IDENTITY, {right - left, top - bottom, 1})
+		model = calculate_model_matrix(centre, linalg.QUATERNIONF32_IDENTITY, {right - left, top - bottom, 1})
 	}
 
 	blend := Blend_Mode.NONE
@@ -113,7 +122,7 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 		alpha_cutoff = 0
 	}
 
-	queue_draw(mbi.sprite_mesh, model, sprite.tint, blend, .NONE, sprite.texture, {u0, v0, u1, v1}, alpha_cutoff)
+	queue_render(mbi.sprite_mesh, model, sprite.tint, blend, .NONE, sprite.texture, {u0, v0, u1, v1}, alpha_cutoff)
 }
 
 /*Destroys the sprite -- calls destory_texture under the hood as sprite as the texture*/

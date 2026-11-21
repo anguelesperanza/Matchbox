@@ -92,10 +92,10 @@ Rig :: struct {
 }
 
 @(uniform = .FRAME) frame: struct { view_projection: matrix[4, 4]f32 }
-@(uniform = .DRAW) draw: struct {
+@(uniform = .RENDER) render: struct {
 	model:   matrix[4, 4]f32,
 	tint:    [4]f32,
-	uv_rect: [4]f32,
+	uv_rectangle: [4]f32,
 }
 @(uniform) flash: f32
 @(uniform) count: i32
@@ -121,11 +121,11 @@ shader :: proc(body: string, extras := "") -> string {
 engine_blocks_are_written_in_the_engines_full_layout :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	// the shader declares only three fields of `draw`, and none of `frame.time`; the buffers still hold them all
-	text, _ := generate(t, shader("\toutput.position = frame.view_projection * draw.model * [4]f32{input.position.x, 0.0, 0.0, 1.0}"))
+	// the shader declares only three fields of `render`, and none of `frame.time`; the buffers still hold them all
+	text, _ := generate(t, shader("\toutput.position = frame.view_projection * render.model * [4]f32{input.position.x, 0.0, 0.0, 1.0}"))
 	expect_compiles(t, text)
 	expect_has(t, text, "cbuffer frame_block : register(b0) {\n    float4x4 frame_view_projection;\n    float frame_time;\n};")
-	expect_has(t, text, "cbuffer draw_block : register(b1) {\n    float4x4 draw_model;\n    float4 draw_tint;\n    float4 draw_uv_rect;\n    float draw_alpha_cutoff;\n};")
+	expect_has(t, text, "cbuffer render_block : register(b1) {\n    float4x4 render_model;\n    float4 render_tint;\n    float4 render_uv_rectangle;\n    float render_alpha_cutoff;\n};")
 }
 
 @(test)
@@ -157,10 +157,10 @@ textures_get_their_slots_and_share_one_sampler :: proc(t: ^testing.T) {
 matrix_products_use_mul_and_scaling_does_not :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	body := "\tm := frame.view_projection * draw.model\n\tp := m * [4]f32{1.0, 0.0, 0.0, 1.0}\n\tq := [4]f32{1.0, 0.0, 0.0, 1.0} * m\n\ts := m * 2.0\n\tu := 2.0 * m\n\tw := m + m"
+	body := "\tm := frame.view_projection * render.model\n\tp := m * [4]f32{1.0, 0.0, 0.0, 1.0}\n\tq := [4]f32{1.0, 0.0, 0.0, 1.0} * m\n\ts := m * 2.0\n\tu := 2.0 * m\n\tw := m + m"
 	text, _ := generate(t, shader(body))
 	expect_compiles(t, text)
-	expect_has(t, text, "float4x4 m = mul(frame_view_projection, draw_model);")
+	expect_has(t, text, "float4x4 m = mul(frame_view_projection, render_model);")
 	expect_has(t, text, "float4 p = mul(m, float4(1.0, 0.0, 0.0, 1.0));")
 	expect_has(t, text, "float4 q = mul(float4(1.0, 0.0, 0.0, 1.0), m);")
 	expect_has(t, text, "float4x4 s = m * 2.0;")

@@ -25,21 +25,21 @@ Asset_Type :: enum {
 */
 
 print :: proc(args: ..any) {
-	buf: [256]u8 // zeroed, so it is already null-terminated
-	fmt.bprintln(buf[:255], ..args)
-	ctru.printf("%s", cstring(&buf[0]))
+	buffer: [256]u8 // zeroed, so it is already null-terminated
+	fmt.bprintln(buffer[:255], ..args)
+	ctru.printf("%s", cstring(&buffer[0]))
 }
 
-/*Joins the parts into buf and returns a null-terminated path. The caller owns buf, so it must outlive the returned cstring*/
-build_path :: proc(buf: []u8, parts: ..string) -> (path: cstring, ok: bool) {
+/*Joins the parts into buffer and returns a null-terminated path. The caller owns buffer, so it must outlive the returned cstring*/
+build_path :: proc(buffer: []u8, parts: ..string) -> (path: cstring, ok: bool) {
 	n := 0
 	for part in parts {
-		if n + len(part) >= len(buf) do return nil, false // leave room for the terminator
-		for i in 0..<len(part) do buf[n + i] = part[i]
+		if n + len(part) >= len(buffer) do return nil, false // leave room for the terminator
+		for i in 0..<len(part) do buffer[n + i] = part[i]
 		n += len(part)
 	}
-	buf[n] = 0
-	return cstring(raw_data(buf)), true
+	buffer[n] = 0
+	return cstring(raw_data(buffer)), true
 }
 
 /* "toyota.png" -> "toyota". Cuts at the LAST '.', and a name without a dot is returned unchanged */
@@ -59,12 +59,12 @@ file_exists :: proc(path: cstring) -> bool {
 }
 
 /*Returns the romfs path for an asset. The build step has already chosen shared vs 3DS-specific*/
-get_asset :: proc(buf: []u8, filename: string, asset_type: Asset_Type) -> (path: cstring, ok: bool) {
+get_asset :: proc(buffer: []u8, filename: string, asset_type: Asset_Type) -> (path: cstring, ok: bool) {
 	switch asset_type {
 	case .IMAGE:
-		return build_path(buf, mbi.asset_path, "gfx/", strip_extension(filename), ".t3x")
+		return build_path(buffer, mbi.asset_path, "gfx/", strip_extension(filename), ".t3x")
 	case .AUDIO:
-		return build_path(buf, mbi.asset_path, "audio/", filename) // untested; mp3 becomes .wav in the build
+		return build_path(buffer, mbi.asset_path, "audio/", filename) // untested; mp3 becomes .wav in the build
 	}
 	return nil, false
 }

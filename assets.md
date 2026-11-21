@@ -96,4 +96,4 @@ and the call the correct procedure to load it.
 
 Using textures as an example
 
-`mb.create_texture("meme.png")` => Matchbox will take care of finding `meme.png` inside of the asset folders and grab the proper asset
+`mb.load_texture("meme.png")` => Matchbox will take care of finding `meme.png` inside of the asset folders and grab the proper asset

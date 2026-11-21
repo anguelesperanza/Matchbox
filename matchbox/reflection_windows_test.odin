@@ -28,7 +28,7 @@ the_mesh_reflection_matches_the_engines_structs :: proc(t:^testing.T) {
 
 	testing.expect_value(t, check_engine_blocks(&reflection), "")
 	testing.expect_value(t, reflection.blocks[.FRAME], Reflected_Block{present = true, register = 0, size = size_of(Frame_Constants)})
-	testing.expect_value(t, reflection.blocks[.DRAW], Reflected_Block{present = true, register = 1, size = size_of(Draw_Constants)})
+	testing.expect_value(t, reflection.blocks[.RENDER], Reflected_Block{present = true, register = 1, size = size_of(Render_Constants)})
 	testing.expect_value(t, reflection.blocks[.GAME].present, false)
 	testing.expect_value(t, len(reflection.textures), 1)
 	testing.expect_value(t, reflection.textures[0], Reflected_Texture{name = "tex", slot = 0})

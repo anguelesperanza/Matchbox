@@ -1,7 +1,7 @@
 error[MBS-E14]: `Vertex_In` has no field `colr`
   --> e14_unknown_name.mbs:26:23
    |
-26 |     output.color = input.colr * draw.tint
+26 |     output.color = input.colr * render.tint
    |                          ^^^^ not a field
    |
    = note: no field of this name exists

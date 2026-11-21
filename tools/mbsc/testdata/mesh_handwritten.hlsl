@@ -9,7 +9,7 @@ cbuffer Frame : register(b0){
 cbuffer Draw : register(b1) {
     float4x4 model;
     float4 tint;
-    float4 uv_rect;
+    float4 uv_rectangle;
     float alpha_cutoff;
 };
 
@@ -33,7 +33,7 @@ V2P vertex_main(VS_Input input) {
     float4 world = mul(model, float4(input.position, 1.0));
     output.position = mul(view_projection, world);
     output.color = input.color * tint;
-    output.uv = lerp(uv_rect.xy, uv_rect.zw, input.uv);
+    output.uv = lerp(uv_rectangle.xy, uv_rectangle.zw, input.uv);
     return output;
 }
 

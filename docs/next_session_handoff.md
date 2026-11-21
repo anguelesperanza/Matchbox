@@ -43,7 +43,7 @@ rules too; they are repeated here so this file stands alone.
   with `-vet` it reports three older issues (`logger_windows.odin` unused `core:log`, `texture_windows.odin` unused
   `png`, `reflection_windows.odin:101` shadowed `line`).
 - **The 3DS build is broken** by API changes (the user knows; to be fixed later). `matchbox/shared.odin` (parallax) has no build tag but uses
-  Windows-only names (`Sprite`, `create_texture`, `get_window_size`), so it also fails a `-target:freestanding_arm32` check; the user knows. **The Vita is not started**:
+  Windows-only names (`Sprite`, `load_texture`, `get_window_size`), so it also fails a `-target:freestanding_arm32` check; the user knows. **The Vita is not started**:
   `vita_build.bat` / `vita_check.bat` are empty, no `matchbox/target.odin`, no Vita entry point.
 - `render_plan.md` in the repo is the newest copy. The old session's scratchpad held three older snapshots
   (`f4b/`, `mbsc/`, `plan/render_plan_3d_first.md`); diffed 2026-11-21, they contain nothing the repo lacks.
@@ -116,9 +116,9 @@ Open items (see the file for the user's wording and legend):
 - `create_sprite` should create its texture; `.meta` best guess when no `.meta` exists (a sheet without one draws as one
   frame); `sheetpack` should accept a single file; asset subfolders work only by writing them in the name
   (`"sprites/meme.png"`), nothing scans nested folders; positioning around `(0,0,0)` is tedious; move procs for sprites.
-- Parallax was written with the user's first test game (the Flappy clone): `create_parallax_sprites(filename, amount, direction, scale_factor, layer)`,
+- Parallax was written with the user's first test game (the Flappy clone): `create_parallax_layer(filename, amount, direction, scale_factor, layer)`,
   `parallax_move(&layer, dt, speed)`, `render_parallax`, `destroy_parallax` in `matchbox/shared.odin`, using one shared
-  offset per layer (avoids drift). `get_screen_bounds` assumes the camera is at the origin.
+  offset per layer (avoids drift). `calculate_screen_bounds` assumes the camera is at the origin.
 - Cut-out sprites at the **same z** have undefined draw order (sorted by texture handle, depth test `LESS`), so a bird at the
   same z as the background can vanish on some runs. Documented behaviour is "give overlapping sprites different z"; a
   tie-breaker by submission order, or a warning, would be a real fix (propose to the user).

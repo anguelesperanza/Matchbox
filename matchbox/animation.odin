@@ -83,7 +83,6 @@ create_animation_clip :: proc(texture:Texture, seconds_per_frame:f32) -> Animati
 	// The guess is put on the clip's own copy, not on `texture`: the same texture
 	// drawn as a plain sprite stays one whole picture (see calculate_guessed_texture_meta)
 	if sheet.guessed_meta.columns > 0 {
-		sheet.pixels_per_unit = sheet.guessed_meta.pixels_per_unit
 		sheet.columns = sheet.guessed_meta.columns
 		sheet.rows = sheet.guessed_meta.rows
 		sheet.frame_count = sheet.guessed_meta.frame_count

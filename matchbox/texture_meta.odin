@@ -123,8 +123,9 @@ parse_texture_meta :: proc(text:string) -> (meta:Texture_Meta, error:string, lin
 	   square frames (or one column, the other way round).
 
 	Without either, one frame. Trailing empty cells (a last row half filled) are
-	not counted as frames. `ppu` is the frame's height, as sheetpack writes it,
-	so a guessed sheet comes out the same size as a packed one.
+	not counted as frames. `ppu` stays 1, as for any image with no .meta: a ppu of
+	the frame height (what sheetpack writes) left a guessed sheet not drawing, and
+	the game can set `pixels_per_unit` on the sprite for the size it wants.
 
 	Not used on images that are only drawn, never animated: a wrong guess there
 	would crop a plain picture -- a background with gaps in it -- to its first cell.
@@ -169,10 +170,6 @@ calculate_guessed_texture_meta :: proc(pixels:[]u8, width, height:i32) -> Textur
 		if is_cell_drawn(pixels, width, left, top, cell_width, cell_height) {
 			meta.frame_count = cell + 1
 		}
-	}
-
-	if meta.columns * meta.rows > 1 {
-		meta.pixels_per_unit = f32(cell_height)
 	}
 	return meta
 }

@@ -61,3 +61,4 @@ These are things that would be nice for Matchbox to have but are not a requireme
 
 ## [x] Add parallax scrolling to matchbox (see flappy-clone for implementation details)
 
+## Add move procs to sprites as parallax has one and now the rest of the sprites api feels out of date

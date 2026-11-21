@@ -12,6 +12,9 @@ new Phase V), and every later step is "done" only when it works on all three.
 The old Phase H (Vita, late) is gone; the hard-float phase is now Phase H.
 Updated 2026-11-18: D1 to D3, E1 to E7 (PC), F1 to F4 are done on PC. The handheld
 halves of D4, E7 and F1 wait for the handheld phases (A0/A0b, C, V).
+Updated 2026-11-21: Phase S steps S0 to S7 are done. S4 (Vita Cg), S5 (3DS vertex) and S6 (3DS TexEnv plan) were checked on
+emulators only (Vita3K, Azahar) and still need real hardware; no runtime reads the `.tev` plan yet. S8 is split into S8a
+(`.shbin`) and S8b (`.gxp`). A reference for the next session is `docs/next_session_handoff.md`.
 
 ## The decision
 

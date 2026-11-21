@@ -20,6 +20,7 @@ import "core:math/linalg"
 Body :: struct {
 	velocity:f32,
 	jump_force:f32,
+	is_on_ground:bool,
 }
 
 Sprite :: struct {

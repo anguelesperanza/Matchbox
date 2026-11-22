@@ -13,14 +13,21 @@ package matchbox
 import "core:math/linalg"
 
 /*
-	How a sprite moves, kept apart from how it looks. Matchbox stores these and never
-	reads them: the game moves the sprite. Embedded in Sprite with `using`, so
-	`sprite.velocity` still works and `sprite.body` hands the whole group around
+	How a sprite moves and collides, kept apart from how it looks. Matchbox never
+	moves a sprite: the game does, and only the collision procedures (collision.odin)
+	read anything here. Embedded in Sprite with `using`, so `sprite.velocity` still
+	works and `sprite.body` hands the whole group around
 */
 Body :: struct {
 	velocity:f32,
 	jump_force:f32,
 	is_on_ground:bool,
+
+	// Pulls the collision box in from the picture's edges: {left, top, right, bottom},
+	// in the image's own pixels so it scales with the sprite. Per side, because art
+	// rarely fills its frame evenly -- a character with a hat wants the top pulled in
+	// further than the feet. Mirrored with `flip_x`. See calculate_sprite_collision_bounds
+	bounding_box_padding:[4]f32,
 }
 
 Sprite :: struct {

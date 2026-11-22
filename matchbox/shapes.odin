@@ -75,3 +75,32 @@ render_line :: proc(start, end:[3]f32, thickness:f32, color:[4]f32) {
 
 	queue_render(mbi.sprite_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
 }
+
+/*
+	A hollow rectangle from `min` (bottom left) to `max` (top right) at depth `z`, its
+	sides `thickness` world units wide, drawn inside the edges so the outer edge is
+	exactly the box. A thickness of half the smaller side or more fills it.
+
+	Four filled strips rather than a shader: the bottom and top run the full width and
+	the sides fit between them, so no corner is drawn twice and a see-through colour
+	stays even all the way round.
+
+	`main` drew this with an outline shader and measured `thickness` in pixels, after an
+	earlier fraction-of-the-size version drew long boxes with fat sides. World units
+	here, like render_line: the camera decides how many pixels that is.
+*/
+render_rectangle_outline :: proc(min, max:[2]f32, z:f32, thickness:f32, color:[4]f32) {
+	size := max - min
+	if size.x <= 0 || size.y <= 0 || thickness <= 0 do return
+
+	if thickness * 2 >= size.x || thickness * 2 >= size.y {
+		render_rectangle({min.x, min.y, z}, size, color, pivot = {0, 0})
+		return
+	}
+
+	side_height := size.y - thickness * 2
+	render_rectangle({min.x, min.y, z}, {size.x, thickness}, color, pivot = {0, 0}) // bottom
+	render_rectangle({min.x, max.y - thickness, z}, {size.x, thickness}, color, pivot = {0, 0}) // top
+	render_rectangle({min.x, min.y + thickness, z}, {thickness, side_height}, color, pivot = {0, 0}) // left
+	render_rectangle({max.x - thickness, min.y + thickness, z}, {thickness, side_height}, color, pivot = {0, 0}) // right
+}

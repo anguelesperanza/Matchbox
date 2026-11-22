@@ -1,5 +1,3 @@
-#+build windows
-
 package matchbox
 
 /*
@@ -87,7 +85,7 @@ calculate_sprite_bounds :: proc(sprite:Sprite) -> (min, max:[2]f32) {
 
 /*Queues a sprite to be drawn at camera_end. Sprites are see-through by default*/
 render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
-	ensure(sprite.texture.view != nil, "Sprite has no texture")
+	ensure(sprite.texture.width > 0, "Sprite has no texture") // not `view`: that is only the PC's
 	ensure(sprite.pixels_per_unit > 0, "Sprite pixels_per_unit must be above zero")
 
 	// Which part of the image to show, in pixels

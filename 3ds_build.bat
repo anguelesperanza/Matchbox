@@ -13,6 +13,10 @@ set MP3TOWAV=tools\mp3towav.exe
 :: Project settings — update these for your project
 :: ---------------------------------------------------------------
 set TARGET=MyGame
+:: The game to build: the folder given (3ds_build.bat examples\handheld-boot), or the
+:: one at the repository root when none is. Assets, romfs and main.c stay at the root
+set SRC=%~1
+if "%SRC%"=="" set SRC=.
 set DEVKITPRO=C:\devkitPro
 set DEVKITARM=%DEVKITPRO%\devkitARM
 set PATH=%DEVKITARM%\bin;%DEVKITPRO%\tools\bin;%PATH%
@@ -126,7 +130,7 @@ if "%AUDIO_FOUND%"=="1" (
 :: ---------------------------------------------------------------
 echo.
 echo Building Odin assembly...
-odin build . -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:mpcore
+odin build %SRC% -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:mpcore
 if errorlevel 1 goto :fail
 echo Moving Odin assembly files...
 for %%f in (*.S) do (

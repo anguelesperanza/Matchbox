@@ -42,17 +42,58 @@ rules too; they are repeated here so this file stands alone.
   a small test-only leak to fix). `odin test matchbox` -> 54 pass. `odin check matchbox -no-entry-point` is clean;
   with `-vet` it reports three older issues (`logger_windows.odin` unused `core:log`, `texture_windows.odin` unused
   `png`, `reflection_windows.odin:101` shadowed `line`).
-- **The 3DS build is broken** by API changes (the user knows; to be fixed later). `matchbox/shared.odin` (parallax) has no build tag but uses
-  Windows-only names (`Sprite`, `load_texture`, `get_window_size`), so it also fails a `-target:freestanding_arm32` check; the user knows. **The Vita is not started**:
-  `vita_build.bat` / `vita_check.bat` are empty, no `matchbox/target.odin`, no Vita entry point.
+- **Later on 2026-11-21, A0b (T0-T4) was done**, so the next three points are now history:
+  - The 3DS build is repaired.
+  - `shared.odin` is shared again.
+  - The Vita boots.
+- **How the targets are selected:**
+  - `matchbox/target.odin` holds `VITA :: #config(MATCHBOX_VITA, false)`. The 3DS files sit inside `when !VITA` and
+    the Vita's inside `when VITA`.
+  - `mbi` is one shared `Matchbox_Info` (`matchbox_info.odin`, which lists the backend contract), with
+    `using backend:Backend_State` from each `backend_<target>.odin`.
+- **What boots:**
+  - `examples/handheld-boot` checks, builds and boots in Citra (3DS) and Vita3K (Vita). It prints its four `boot:`
+    lines at 60 fps.
+  - The demo checks and builds on all three. On the handhelds it runs until its first sprite, then stops on
+    `ensure("Sprite has no texture")`, because handheld textures have no size until Phases C and V load them.
+- **What is still empty on the handhelds:**
+  - Nothing is drawn but the clear colour.
+  - Text has no glyphs: stb is PC-only, in `font_windows.odin`, and F2 is undecided.
+  - Touch isn't read.
+  - Audio is stubbed on all three targets.
+- **Not verified:** the clear colour on screen (the emulator logs were read, no screenshots), and real hardware.
 - `render_plan.md` in the repo is the newest copy. The old session's scratchpad held three older snapshots
   (`f4b/`, `mbsc/`, `plan/render_plan_3d_first.md`); diffed 2026-11-21, they contain nothing the repo lacks.
+
+## Check everything
+
+Run these after any change, on all three targets. The counts are from 2026-11-21.
+
+```
+PC:    odin check matchbox -no-entry-point          (clean; -vet: the 3 old issues)
+       odin test matchbox                           (63 pass)
+       odin test tools/mbsc                         (120 pass)
+       odin build examples/shia-test ; odin check demo.odin -file
+3DS:   3ds_check.bat                                (the demo at the root)
+       3ds_check.bat examples\handheld-boot
+       3ds_build.bat examples\handheld-boot         -> app.3dsx; four boot: lines in Citra/Azahar
+Vita:  vita_check.bat
+       vita_check.bat examples\handheld-boot
+       vita_build.bat examples\handheld-boot        -> MyGame.vpk; four boot: lines in Vita3K
+```
+
+**Reading the prints:**
+- **Vita3K** logs `sceClibPrintf` as it is.
+- **Citra's command-line build** (`citra.exe`) logs to stderr, but it drops `svcOutputDebugString`, which is where
+  `mb.print` goes, unless `%APPDATA%\Citra\config\sdl2-config.ini` has `log_filter = *:Info Debug.Emulated:Debug`.
+  Set it for the run, then put the file back.
+- **Azahar's log** loses the game's output when the emulator is killed.
 
 ## Status by phase (from `render_plan.md`, checked against the repo)
 
 | Phase | State |
 |---|---|
-| A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b not done** (target selection `-define:MATCHBOX_VITA`, Vita scripts, Vita entry point). A0 (o3dx context) was only verified statically in 2026-11-14. A1/A4 shared maths moves over when a handheld needs it. |
+| A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b done** (2026-11-21, T0-T4: target selection, the backend contract, Vita scripts, the handhelds' entry file). **A0 verified in Citra** (the o3dx context: `fmt.tprintf`, `make`/`append`, and a failed `assert` printed its message). A1/A4 shared maths moves over when a handheld needs it. |
 | B (PC 3D core) | Done on PC. **B8 (viewport/scissor, fit policy, overscan cap) deferred** by the user. |
 | C (3DS core), V (Vita core) | **Not done.** Everything in them is still to do. |
 | D (textures/assets) | D1-D3 done on PC. **D4 (subfolder asset names on the 3DS) open.** |

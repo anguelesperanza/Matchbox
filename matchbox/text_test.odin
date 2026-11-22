@@ -4,6 +4,8 @@ package matchbox
 
 import "core:testing"
 
+import stbtt "vendor:stb/truetype"
+
 // A font with no atlas: every glyph is 10 pixels wide to advance, 16 tall,
 // and one unit is 10 pixels, so a character is 1 unit wide
 test_font :: proc() -> Font {
@@ -95,4 +97,31 @@ floats_keep_their_minus_sign :: proc(t:^testing.T) {
 	buffer:[64]u8
 	testing.expect_value(t, format_float(buffer[:], 3.14), "3.14")
 	testing.expect_value(t, format_float(buffer[:], -8.5), "-8.50")
+}
+
+// calculate_glyph_corner is stb's GetBakedQuad written out, so the text code needs no stb on
+// the handhelds. Checked against stb itself, glyph by glyph along a real line, with the
+// default font baked at a size whose offsets are not whole pixels
+@(test)
+glyph_corner_matches_stb :: proc(t:^testing.T) {
+	atlas := i32(512)
+	bitmap := make([]u8, atlas * atlas)
+	defer delete(bitmap)
+	glyphs:[FONT_GLYPH_COUNT]Baked_Glyph
+	testing.expect(t, bake_font_atlas(DEFAULT_FONT_BYTES, 37, bitmap, atlas, &glyphs) > 0)
+
+	first := mbi.font_settings.first_glyph
+	stb_x, stb_y, cursor_x:f32
+	for character in "Hello, World! gjpqy 0123 ~{}" {
+		index := i32(character - first)
+		quad:stbtt.aligned_quad
+		stbtt.GetBakedQuad(cast(^stbtt.bakedchar)&glyphs[index], atlas, atlas, 0, &stb_x, &stb_y, &quad, true)
+
+		left, bottom := calculate_glyph_corner(glyphs[index], cursor_x)
+		cursor_x += glyphs[index].xadvance
+
+		testing.expect_value(t, left, quad.x0)
+		testing.expect_value(t, bottom, quad.y1)
+		testing.expect_value(t, cursor_x, stb_x)
+	}
 }

@@ -15,6 +15,13 @@ halves of D4, E7 and F1 wait for the handheld phases (A0/A0b, C, V).
 Updated 2026-11-21: Phase S steps S0 to S7 are done. S4 (Vita Cg), S5 (3DS vertex) and S6 (3DS TexEnv plan) were checked on
 emulators only (Vita3K, Azahar) and still need real hardware; no runtime reads the `.tev` plan yet. S8 is split into S8a
 (`.shbin`) and S8b (`.gxp`). A reference for the next session is `docs/next_session_handoff.md`.
+Updated 2026-11-21 (later): A0b is rewritten. Its `#config` catch was tested and works, it adds a backend contract so shared files are
+written once, and its steps are T0 to T4. Claude writes the handheld backends, and the user reviews and approves every file before it changes. Audio is stubbed on all three targets.
+Updated 2026-11-21 (end of day): **A0b T0-T4 done.**
+- `examples/handheld-boot` boots in Citra and Vita3K.
+- The demo builds unchanged on all three targets.
+- The checks to run are in `docs/next_session_handoff.md`, "Check everything".
+- Phases C and V start from here.
 
 ## The decision
 
@@ -169,31 +176,49 @@ GPU memory, its shader, its projection depth and its input mapping.
   the compile step optional in `vita_build.bat`, so a clean checkout builds
   without the tool.
 
-**Selecting the target's files** (tested 2026-11-14 with `odin check`/`build`
-on scratchpad packages; not yet used in Matchbox). The 3DS and Vita are both
-`freestanding_arm32`, so the `_3ds_freestanding_arm32` suffix and
-`#+build freestanding arm32` match both. What was tried:
-- **`odin build -file`: does not work.** `-file` builds one file as its own
-  package, and several files are rejected ("takes a package/directory").
-- **A microarch build tag (`#+build mpcore`): does not exist.** Odin's tags are
-  OS and architecture only.
-- **`when ODIN_MICROARCH_STRING == "cortex-a9"`: works for `odin build`,** but
-  `odin check` has no `-microarch` flag and always sees the default
-  (`arm1176jzf-s`), so the Vita check couldn't check Vita code.
-- **`#config` with `-define:MATCHBOX_VITA=true`: works for both `check` and
-  `build`. This is the chosen mechanism.** `VITA :: #config(MATCHBOX_VITA, false)`
-  once in a shared file; `when !VITA { ... }` wraps the contents of each 3DS
-  file and `when VITA { ... }` the Vita file. `vita_build.bat` and
-  `vita_check.bat` pass `-define:MATCHBOX_VITA=true`.
-- **Catch:** `import` is a syntax error inside `when`, so each target file
-  imports its packages at the top, unconditionally. A 3DS build therefore
-  type-checks the Vita files' imports (`vito/...`) and a Vita build those of
-  the 3DS (`o3dx/...`). Whether that compiles cleanly, and whether `foreign
-  import` libraries of the unused target leak into the link, is **untested: it
-  is the first thing A0b verifies.**
-- **Longer term:** Farlite's patched Odin (Phase H) could add `3ds` and `vita`
-  build tags, and the `when` blocks then become `#+build` lines. The compiler
-  already has a subtarget mechanism (the Playdate target uses it).
+**Selecting the target's files** (tried 2026-11-14 on scratchpad packages; the open catch was tested
+2026-11-21 with Odin dev-2026-11 e28f5d1ff; not yet used in Matchbox). The 3DS and Vita are both
+`freestanding_arm32`, so the `_3ds_freestanding_arm32` suffix and `#+build freestanding arm32` match both.
+What was tried:
+- **`odin build -file`: does not work.** `-file` builds one file as its own package, and several files are
+  rejected ("takes a package/directory").
+- **A microarch build tag (`#+build mpcore`): does not exist.** Odin's tags are OS and architecture only.
+- **`when ODIN_MICROARCH_STRING == "cortex-a9"`: works for `odin build`,** but `odin check` has no `-microarch`
+  flag (still true 2026-11-21) and always sees the default (`arm1176jzf-s`), so the Vita check couldn't check
+  Vita code.
+- **`#config` with `-define:MATCHBOX_VITA=true`: works for both `check` and `build`. This is the chosen
+  mechanism.**
+  - `VITA :: #config(MATCHBOX_VITA, false)` goes once in a shared file.
+  - `when !VITA { ... }` wraps the contents of each 3DS file, and `when VITA { ... }` each Vita file.
+  - `vita_build.bat` and `vita_check.bat` pass `-define:MATCHBOX_VITA=true`.
+- **The catch, tested 2026-11-21: it is not a problem.** `import` is a syntax error inside `when`, so each target
+  file imports its packages at the top, unconditionally. A scratch package was built the way Matchbox would be:
+  one file importing the real `o3dx/o3dx` and `o3dx/c3d`, one importing `vito/vito` and `vito/gfx`, and both
+  defining the same procedures inside `when`.
+  - Both checks pass, with and without the define.
+  - Both `-build-mode:asm` builds pass:
+    - the 3DS: `.cpu mpcore`, `.fpu vfpv2`
+    - the Vita: `.cpu cortex-a9`, `.fpu neon-fp16`
+  - **Nothing of the unused console reaches the assembly.**
+    - The 3DS `.S` has no `vito` or `sce*` symbol, and the Vita `.S` has no `o3dx`.
+    - Odin emits only what is reached. An `@(init)` proc or an initialised global *would* be emitted, and
+      neither `o3dx` nor `vito` has one; keep it that way, or wrap them in `when`.
+    - `foreign import`s don't matter, because asm mode doesn't link and the `.bat` chooses the libraries.
+  - **Not tested yet:** linking with the real toolchains, booting either console, and the full Matchbox
+    package. Steps T2 and T3 of A0b cover these.
+- **A script that forgets the define** would compile 3DS code for the Vita's CPU and fail at the link, far from
+  the cause. Two asserts in the shared file catch it. Tested: `-microarch:cortex-a9` without the define stops
+  with the message, and both checks still pass, because `check` sees the default microarch, which is neither.
+
+  ```odin
+  #assert(!(VITA && ODIN_MICROARCH_STRING == "mpcore"), "Vita build with the 3DS microarch")
+  #assert(!(!VITA && ODIN_MICROARCH_STRING == "cortex-a9"), "3DS build with the Vita microarch: pass -define:MATCHBOX_VITA=true")
+  ```
+- **Rejected: one package per backend, chosen with `-collection:backend=...`.** That selects imports cleanly, but
+  a backend in its own package can't reach `mbi` or the render queue unless they are made public.
+- **Longer term:** Farlite's patched Odin (Phase H) could add `3ds` and `vita` subtargets, and the `when` blocks
+  then become `#+build` lines. `-subtarget` already exists for `freestanding_arm32`, with `playdate` as its only
+  value.
 
 **File layout:** a module with per-target code gets one file per target:
 `window_windows.odin`, `window_3ds_freestanding_arm32.odin` (wrapped in
@@ -301,62 +326,167 @@ else, since later steps assume `make` and `append` work).
   `mb.print(s)` shows `1.5`, a `make([]int, 4)` returns a non-empty slice, and
   a deliberately failed `assert(false, "test")` prints its message.
 
-**A0b. Target selection and the Vita scripts** (new 2026-11-14; right after A0,
-before A1, because it fixes the file layout everything after it uses). See "The
-three targets" for the mechanism and its untested catch.
-- Add one shared file, e.g. `matchbox/target.odin`:
-  `VITA :: #config(MATCHBOX_VITA, false)`.
-- Wrap the contents of every existing `*_3ds_freestanding_arm32.odin` in
-  `when !VITA { ... }`, keeping the imports at the top, unconditional. The root
-  `3ds_entry_point_freestanding_arm32.odin` gets the same treatment (it's in
-  `package demo`, so import `target` through `matchbox`, or use a second
-  `#config` there; pick the smaller change).
-- Add the Vita entry point (`vita_entry_point_freestanding_arm32.odin`, wrapped
-  in `when VITA`):
-  ```odin
-  import vito "matchbox/vito/vito"
+**A0b. Target selection, the backend contract, and the Vita scripts** (new 2026-11-14; rewritten
+2026-11-21 after testing the mechanism). Right after A0 and before any C or V step, because it fixes the file
+layout everything after it uses. The mechanism, and how it was tested, is in "The three targets".
 
-  @(export, link_name = "odin_main")
-  odin_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
-  	context = vito.init()
-  	defer vito.shutdown()
-  	main()
-  	return 0
-  }
-  ```
-- **`vita_check.bat`:** the same as `3ds_check.bat` plus
-  `-define:MATCHBOX_VITA=true`. Run both checks after the wrapping; **both must
-  pass**, which is the test of the "imports compile in the other target" catch.
-- **`vita_build.bat`:** based on `vito/NewProjectTemplate/build.bat` (the
-  separate `vito` repo), with these settings:
-  - `odin build . -target:freestanding_arm32 -o:speed -build-mode:asm
-    -no-entry-point -min-link-libs -no-thread-local -microarch:cortex-a9
-    -define:MATCHBOX_VITA=true`
-  - Assemble each `.S` with `arm-vita-eabi-gcc -march=armv7-a -mtune=cortex-a9
-    -mfpu=neon -mfloat-abi=hard`.
-  - Then `arm-vita-eabi-objcopy --remove-section .ARM.attributes
-    --redefine-syms=matchbox\vito\libm\redefine.syms` on each object. (This
-    differs from the 3DS script: the Vita **removes** the ABI attributes so
-    `ld` accepts the soft-float objects, while the 3DS appends
-    `.eabi_attribute 28, 1`.)
-  - Compile a Vita `main.c` shim (the same 3 lines as the 3DS one; keep it in a
-    `vita/` folder so it doesn't clash with the root `main.c`), plus the
-    bridges: `matchbox\vito\libm\bridge.c` and `matchbox\vito\sce\bridge.c`
-    (`-O2`).
-  - Link with `-Wl,-q -Wl,--defsym,__sce_headroom=0x10000` and the stubs the
-    template lists (`SceDisplay`, `SceGxm`, `SceSysmodule`, `SceCtrl`,
-    `SceTouch`, `SceMotion`, `SceKernelThreadMgr`, `SceIofilemgr`, `SceAudio`,
-    `ScePgf`, `ScePvf`, `SceCommonDialog`, `SceAppMgr`, `SceAppUtil`,
-    `ScePower`, `SceSysmem`, `SceLibKernel`, plus `-lpng16 -lz -lm`).
-  - Package: `vita-elf-create`, `vita-make-fself -c`, `vita-mksfoex` (needs a
-    9-character `TITLE_ID`, 4 letters + 5 digits), `vita-pack-vpk` with
-    `-a assets=assets` for the shared assets folder.
-  - It needs VitaSDK at `C:\vitasdk` (or `VITASDK` set) on `PATH`.
-- Done when: `3ds_check.bat` and `vita_check.bat` both pass; `3ds_build.bat`
-  still produces a working `.3dsx`; `vita_build.bat` produces a `.vpk` for an
-  empty `main` that prints through `mb.print` and runs in Vita3K (or on
-  hardware) without a crash; and `arm-vita-eabi-nm -u` on the Vita Odin object
-  shows only `vito_*` for float maths (the same check as the 3DS's).
+**Who does it:** Claude writes the handheld backends (T2, T3), and the user reviews every file before it
+changes (decided 2026-11-21, replacing the user typing it in from walkthroughs). Each file is shown in full, or as
+exact changes, with the reasons. It is applied only once approved. The user still wants to learn the bindings,
+so the review is the walkthrough.
+Claude may run Azahar and Vita3K to check work it is asked to do; the user checks on the New 3DS LL and the Vita.
+
+**Audio** is stubbed on all three targets until the rendering pipeline is done. `audio_windows.odin` and
+`audio_3ds_freestanding_arm32.odin` already are (`Audio` is empty; `load_audio`, `play_audio` and
+`destroy_audio` do nothing), and the Vita gets the same three empty procs. Games keep their audio calls and
+compile everywhere.
+
+**Why this step is bigger than choosing files.** Choosing files is solved. What blocks the handhelds is that
+most of Matchbox is Windows-only today without needing to be (measured 2026-11-21):
+- `sprite`, `animation`, `collision`, `shapes`, `text` and `font` contain no Windows code. They are
+  `#+build windows` only because what they call (`queue_render`, `Texture`, `Render_Item`, `Mesh`) exists only
+  in the D3D11 files. The handhelds would get none of them, or a third copy of each.
+- `Matchbox_Info` is declared twice, once in `window_windows.odin` and once in
+  `window_3ds_freestanding_arm32.odin`, and the two have drifted. The Vita would make three.
+- Untagged test files (`bottom_screen_test.odin`, `texture_meta_test.odin`) pull `core:testing`, and through it
+  `core:os` and `core:thread`, into the freestanding build. They cause about 200 of the 3DS check's errors.
+  The rest are `demo.odin` (69), `shared.odin` (10, parallax uses `Sprite`) and `camera.odin` (1).
+- The 3DS backend files (586 lines) are the old pixel-space 2D path, which "no legacy 2D path" deletes.
+
+So A0b gives Matchbox a **backend contract**: shared types and procedures that each target fills in, so shared
+files are written once.
+
+**Layout:**
+
+```
+matchbox/
+  target.odin                           VITA and the microarch asserts
+  matchbox_info.odin                    Matchbox_Info (shared), with `backend:Backend_State`
+  sprite.odin animation.odin ...        shared (no tag), calling only the contract
+  backend_windows.odin                  Backend_State (D3D11), the contract on PC
+  backend_3ds_freestanding_arm32.odin   when !VITA { Backend_State (citro3d), the contract }
+  backend_vita_freestanding_arm32.odin  when  VITA { Backend_State (GXM), the contract }
+  window_*, input_*, events_*, ...      per target as now; handheld ones wrapped in `when`
+  *_test.odin                           #+build windows (tests run on PC)
+```
+
+**The contract:** the procedures shared code may call. Every backend defines them with the same signature:
+- `queue_render`, executed at `camera_end`
+- `Texture`, `load_texture`, `Mesh` and its create and destroy procs
+- `init`, `poll_events`, `get_window_size`, timing, input queries
+- `print`, the logger
+- audio stubs
+
+A backend that misses one fails its own check script, because a shared file calls it.
+
+**Entry point:** a game keeps one small file for both consoles. Matchbox can't own it (see decision 2 under
+"Decisions to make"):
+
+```odin
+// entry_freestanding_arm32.odin, in the game's package. The same file for the 3DS and the Vita
+package game
+
+import mb "matchbox"
+
+@(export, link_name = "odin_main")
+odin_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
+	context = mb.start_runtime() // o3dx.init() on the 3DS, vito.init() on the Vita
+	main()
+	mb.stop_runtime()
+	return 0
+}
+```
+
+**T0. Tests and stray files off the handhelds.**
+- Tag every `*_test.odin` with `#+build windows`.
+- Tag `shared.odin` (parallax) with `#+build windows` until `Sprite` is shared, in T1.
+- Done when: `odin check matchbox -target:freestanding_arm32 -no-entry-point -no-thread-local` reports nothing
+  from `core:os`, `core:testing` or `core:thread`.
+
+**T1. The contract on PC.**
+- Add `target.odin`.
+- Split `Matchbox_Info` into the shared struct plus `Backend_State`, and move the D3D11 and Win32 fields into
+  `backend_windows.odin`.
+- Untag `sprite`, `animation`, `collision`, `shapes`, `text`, `font` and `shared`.
+- PC only.
+- Done when:
+  - PC behaves exactly as before: `odin test matchbox` passes, and shia-test, the demo and RunTeddyRun run unchanged.
+  - The contract list is written at the top of `matchbox_info.odin`.
+
+**T2. 3DS boots on the contract.**
+- Delete the old 3DS render code. Update window, input, events, logger and util to the shared `Matchbox_Info`.
+- Wrap every 3DS file in `when !VITA`.
+- The drawing procs are empty, except `clear_background`.
+- `start_runtime` calls `o3dx.init()`.
+- The temp arena is freed once a frame.
+- Done when:
+  - `3ds_check.bat examples\handheld-boot` passes. Both scripts take the game's folder, and with none they use
+    the root as before.
+  - `3ds_build.bat examples\handheld-boot` gives a `.3dsx` that boots in Azahar or Citra, clears to a colour,
+    and prints through `mb.print`.
+  - The demo compiling on the 3DS stays with T4. It needs the HUD, the bottom screen and text, which the boot
+    example doesn't (decided 2026-11-21).
+  - A0's own check passes: `fmt.tprintf`, `make`, and a failed `assert` that shows its message.
+
+**T3. Vita boots on the contract.**
+- `vita_check.bat`: the same as `3ds_check.bat` plus `-define:MATCHBOX_VITA=true`.
+- `vita_build.bat`, based on `vito/NewProjectTemplate/build.bat` (the separate `vito` repo):
+  - Takes the game's folder like the 3DS scripts (`vita_build.bat examples\handheld-boot`), defaulting to the root.
+  - `odin build %SRC% -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs
+    -no-thread-local -microarch:cortex-a9 -define:MATCHBOX_VITA=true`
+  - Assemble each `.S` with `arm-vita-eabi-gcc -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard`.
+  - Then run `arm-vita-eabi-objcopy --remove-section .ARM.attributes --redefine-syms=matchbox\vito\libm\redefine.syms`
+    on each object. The Vita *removes* the ABI attributes so `ld` accepts the soft-float objects; the 3DS appends
+    `.eabi_attribute 28, 1` instead.
+  - Compile the root `main.c`, the same one `3ds_build.bat` uses. It's plain C with nothing console-specific, so
+    no `vita/main.c` was needed. Plus `matchbox\vito\libm\bridge.c` and `matchbox\vito\sce\bridge.c` (`-O2`).
+  - Link:
+    - flags: `-Wl,-q -Wl,--defsym,__sce_headroom=0x10000`
+    - stubs: `SceDisplay`, `SceGxm`, `SceSysmodule`, `SceCtrl`, `SceTouch`, `SceMotion`,
+      `SceKernelThreadMgr`, `SceIofilemgr`, `SceAudio`, `ScePgf`, `ScePvf`, `SceCommonDialog`, `SceAppMgr`,
+      `SceAppUtil`, `ScePower`, `SceSysmem`, `SceLibKernel`
+    - libraries: `-lpng16 -lz -lm`
+  - Package:
+    - `vita-elf-create`, then `vita-make-fself -c`
+    - `vita-mksfoex`, which needs a 9-character `TITLE_ID`: 4 letters and 5 digits
+    - `vita-pack-vpk`, with the assets staged like `3ds_build.bat` does (`assets\` plus `assets\vita\`) and
+      packed as `app0:/assets`. `TITLE_ID` is `MBOX00001`.
+  - VitaSDK is at `C:\vitasdk`. `arm-vita-eabi-gcc`, `nm` and `objcopy`, `vita-elf-create`, `vita-make-fself`,
+    `vita-mksfoex` and `vita-pack-vpk` were all found there on 2026-11-21.
+- The backend files are in `when VITA`:
+  - `start_runtime` calls `vito.init()`.
+  - `gfx.init()`, then `begin_frame` / `clear` / `end_frame` / `swap`. This is V0's clear.
+  - Input is mapped from `vito/vito/input.odin`.
+  - Audio is stubbed.
+- The keyboard and mouse stubs (neither handheld has a keyboard or a mouse) and the audio stubs are one file
+  each, used by both handhelds, with no `when`: `input_handheld_freestanding_arm32.odin` and
+  `audio_handheld_freestanding_arm32.odin`. A single copy can't drift from a second one. Audio splits back per
+  target once it's written.
+- Done when:
+  - `vita_check.bat examples\handheld-boot` passes.
+  - `vita_build.bat examples\handheld-boot` gives a `.vpk` that boots in Vita3K, clears, and prints.
+  - `arm-vita-eabi-nm -u` on the Odin object shows only `vito_*` for float maths.
+  - `3ds_check.bat` and `3ds_build.bat` still pass on the same example.
+
+**T4. All three green from one tree.**
+- From a clean checkout, these pass:
+  - the PC check and the shia-test build
+  - both 3DS scripts
+  - both Vita scripts
+- One example builds for all three unchanged, drawing nothing yet on the handhelds.
+- Done when: all of that passes, and the list is written into `docs/next_session_handoff.md` as "check everything".
+- **Done 2026-11-21.** The example is the demo, which builds on all three.
+  - The HUD (`screen.odin`) is shared.
+  - The bottom screen is in two files: `bottom_screen_one_surface.odin` for the PC and the Vita, and
+    `bottom_screen_3ds_freestanding_arm32.odin` for the 3DS.
+  - The text code is shared, with only the atlas baking per target (see F2).
+- On the handhelds the demo runs until its first sprite, then stops on `ensure("Sprite has no texture")`.
+  Handheld `load_texture` gives no size until Phases C and V load images. A fake size would hide this, so the
+  `ensure` stays.
+
+Phases C and V then go row by row through the table at the start of Phase B:
+- The Vita's shaders come from `mbsc --emit-cg`, which was written for this backend, compiled to the committed `.gxp`.
+- The 3DS's come from `mbsc --emit-pica` and the `.tev` plan.
 
 **A1. Shared maths file.** The FPU is done (`3ds_build.bat` uses
 `-microarch:mpcore`) and libm calls are corrected at link time (see "3DS float
@@ -1124,6 +1254,15 @@ that swap does not touch games.
   it is pixel-space and doesn't use the camera).
 - Decide which before starting. The pre-baked atlas is identical on all three
   targets, which is the argument for it.
+- 2026-11-21 (A0b T4): **stb is isolated.**
+  - `bake_font_atlas` in `font_windows.odin` is Matchbox's only stb call.
+  - `Font` holds `Baked_Glyph`, not stb's type.
+  - `text.odin` places glyphs with `calculate_glyph_corner`, stb's arithmetic written out. The test
+    `glyph_corner_matches_stb` checks it against stb.
+  - The handhelds' `bake_font_atlas` (`font_handheld_freestanding_arm32.odin`) bakes nothing, so text draws
+    nothing there until this decision is made. Whichever option is chosen replaces that one procedure.
+  - A third option for the handhelds: stb compiled for ARM, with a bridge for `BakeFontBitmap`'s float
+    argument, the way `libm/bridge.c` handles maths.
 
 **F3. Input to world.** DONE on PC for orthographic cameras (2026-11-18).
 - Mouse, ortho: `calculate_mouse_world_position(camera)` (from E2) already inverts any
@@ -1336,6 +1475,9 @@ above all the same.
 - [x] 3DS fragment policy: portable subset that maps to TexEnv, a compile error naming the line and the fix for anything else (decided 2026-11-18).
 - [x] Generated shader output: generate at build on PC; Vita `.gxp` stays committed (vito's rule, 2026-11-13); 3DS output decided at S5 (decided 2026-11-18).
 - [ ] Vita emulator: Vita3K vs hardware as the per-step check (decide before V0).
+  User, 2026-11-21, for both handhelds: Claude may run Azahar and Vita3K to check work it does; the user checks on the New 3DS LL and the Vita. (Left for the user to tick.)
+- [ ] `Matchbox_Info` for three targets (A0b): one shared struct holding the engine state, with a per-target `Backend_State` field for the device handles (recommended), or one whole struct per target, as now.
+- [ ] Entry point on the handhelds (A0b): Matchbox can't own `odin_main`, because it can't call the game's `main`. It can't import the game, and `intrinsics.__entry_point()` compiles to nothing under `-build-mode:asm`: the compiler sets the entry point only for executables (`src/checker.cpp`, "check entry point"; measured 2026-11-21). `init` can't set it either, because `context` is passed per call, so a context set inside `init` never reaches the game's `main`. That is the same reason `context.logger = mb.mbi.logger` is needed on PC. Recommended: one six-line game file shared by both consoles, calling `mb.start_runtime()`.
 - [ ] Vita MSAA: off, or 4x (decide at V8).
 - [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).
 - [ ] Sprite pivot convention (recommended: `{0.5, 0.5}` = centre).

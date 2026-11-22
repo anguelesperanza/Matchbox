@@ -1,5 +1,3 @@
-#+build windows
-
 package matchbox
 
 /*
@@ -26,12 +24,11 @@ package matchbox
 	running out of the box is the one thing a caller asking for a width did not want.
 */
 
+import "core:math"
 import "core:strconv"
 import "core:strings"
 
 import "base:intrinsics"
-
-import stbtt "vendor:stb/truetype"
 
 // -----------------------------------------------------------------------
 // One line
@@ -55,27 +52,25 @@ render_text_string :: proc(font:Font, text:string, position:[3]f32, color:[4]f32
 		pixels_per_unit = font.pixels_per_unit,
 	}
 
-	// stb walks a cursor along the baseline in atlas pixels, y down. It wants a pointer to
-	// the glyph table, which a by-value parameter can't give, so it reads a copy
-	chars := font.baked_chars
-	cursor_x, cursor_y:f32
+	// A cursor walks along the baseline in atlas pixels, y down, as stb lays glyphs out
+	cursor_x:f32
 
 	for character in text {
 		if character < mbi.font_settings.first_glyph || character >= mbi.font_settings.first_glyph + FONT_GLYPH_COUNT {
 			continue
 		}
 
-		quad:stbtt.aligned_quad
-		stbtt.GetBakedQuad(raw_data(chars[:]), font.atlas_size, font.atlas_size, i32(character - mbi.font_settings.first_glyph), &cursor_x, &cursor_y, &quad, true)
-
 		// The glyph's rectangle in the atlas, in pixels from its top left
 		baked := font.baked_chars[int(character - mbi.font_settings.first_glyph)]
 		sprite.source = {f32(baked.x0), f32(baked.y0), f32(baked.x1 - baked.x0), f32(baked.y1 - baked.y0)}
 
-		// stb's y is down from the baseline and world y is up. quad.y1 is the bottom edge
+		// y is down from the baseline and world y is up, so the bottom edge places the sprite
+		left, bottom := calculate_glyph_corner(baked, cursor_x)
+		cursor_x += baked.xadvance
+
 		sprite.position = {
-			position.x + quad.x0 / font.pixels_per_unit,
-			position.y - quad.y1 / font.pixels_per_unit,
+			position.x + left / font.pixels_per_unit,
+			position.y - bottom / font.pixels_per_unit,
 			position.z,
 		}
 
@@ -84,6 +79,21 @@ render_text_string :: proc(font:Font, text:string, position:[3]f32, color:[4]f32
 			render_sprite(sprite, .BLENDED)
 		}
 	}
+}
+
+/*
+	Where a glyph's box sits for a cursor at `cursor_x` on the baseline, in atlas pixels with y
+	down: its left edge, and its bottom edge below the baseline. Worked out as stb's
+	GetBakedQuad does it with the OpenGL fill rule -- the top left snapped to a whole pixel, so
+	the atlas is sampled pixel for pixel. Written here rather than called so the text code
+	needs no baker on the handhelds; text_test.odin checks it against stb on PC
+*/
+@(private)
+calculate_glyph_corner :: proc(glyph:Baked_Glyph, cursor_x:f32) -> (left, bottom:f32) {
+	left = math.floor(cursor_x + glyph.xoff + 0.5)
+	top := math.floor(glyph.yoff + 0.5) // the cursor's own y is the baseline, 0
+	bottom = top + f32(glyph.y1 - glyph.y0)
+	return
 }
 
 // An integer, without the caller building a string for it. Part of the `render_text` group

@@ -31,135 +31,135 @@ Timestamp :: struct {
 	start_counter: win.LARGE_INTEGER, // when the window was created; frame.time counts from here
 }
 
-Matchbox_Info :: struct {
+// Matchbox_Info :: struct {
 
-	// General values
-	did_resize:bool,
-	asset_path:string, // General asset path for shared assets
-	target_asset_path:string, // Asset path for pc specific assets
+// 	// General values
+// 	did_resize:bool,
+// 	asset_path:string, // General asset path for shared assets
+// 	target_asset_path:string, // Asset path for pc specific assets
 
-	// Win32 Related Values
-	window:win.HWND,
-	is_running:bool,
-	window_size:[4]i32,
+// 	// Win32 Related Values
+// 	window:win.HWND,
+// 	is_running:bool,
+// 	window_size:[4]i32,
 
-	keys_pressed: #sparse [Key]bool,
-	keys_released: #sparse [Key]bool,
-	keys_held: #sparse [Key]bool,
+// 	keys_pressed: #sparse [Key]bool,
+// 	keys_released: #sparse [Key]bool,
+// 	keys_held: #sparse [Key]bool,
 
-	event_message:^win.MSG,
-	mouse_wheel_value:i16,
-	mouse_position:[2]i32,
+// 	event_message:^win.MSG,
+// 	mouse_wheel_value:i16,
+// 	mouse_position:[2]i32,
 
-	mouse_pressed:[Mouse]bool,
-	mouse_released:[Mouse]bool,
-	mouse_held:[Mouse]bool,
+// 	mouse_pressed:[Mouse]bool,
+// 	mouse_released:[Mouse]bool,
+// 	mouse_held:[Mouse]bool,
 
-	// GameInput Values
-	gamepad_pressed: bit_set [Button],
-	gamepad_released: bit_set [Button],
-	gamepad_held: bit_set [Button],
+// 	// GameInput Values
+// 	gamepad_pressed: bit_set [Button],
+// 	gamepad_released: bit_set [Button],
+// 	gamepad_held: bit_set [Button],
 
-	input:^gi.IGameInput,
-	gamepad:^gi.IDevice,
-	reading:^gi.IReading,
-	left_thumbstick_axis:[2]f32,
-	right_thumbstick_axis:[2]f32,
-	left_trigger_value:f32,
-	right_trigger_value:f32,
+// 	input:^gi.IGameInput,
+// 	gamepad:^gi.IDevice,
+// 	reading:^gi.IReading,
+// 	left_thumbstick_axis:[2]f32,
+// 	right_thumbstick_axis:[2]f32,
+// 	left_trigger_value:f32,
+// 	right_trigger_value:f32,
 
-	// For feature parity; the controller on PC can also be a button as the 3DS
-	// so added these as values to set the value where the trigger being >= to
-	// will be considered "pressed"
-	left_trigger_as_button_value:f32,
-	right_trigger_as_button_value:f32,
+// 	// For feature parity; the controller on PC can also be a button as the 3DS
+// 	// so added these as values to set the value where the trigger being >= to
+// 	// will be considered "pressed"
+// 	left_trigger_as_button_value:f32,
+// 	right_trigger_as_button_value:f32,
 
-	//D3D11 Values
-	device: ^d3d11.IDevice,
-	device_context: ^d3d11.IDeviceContext,
-	swapchain:^dxgi.ISwapChain1,
-	swapchain_description:dxgi.SWAP_CHAIN_DESC1,
-	factory:^dxgi.IFactory2,
-	dxgi_device:^dxgi.IDevice1,
-	dxgi_adapter:^dxgi.IAdapter,
-	dxgi_description:^dxgi.ADAPTER_DESC,
-	framebuffer:^d3d11.ITexture2D,
-	depth_texture:^d3d11.ITexture2D,
-	depth_view:^d3d11.IDepthStencilView,
-	framebuffer_view: ^d3d11.IRenderTargetView,
-	white_texture:^d3d11.ITexture2D,
+// 	//D3D11 Values
+// 	device: ^d3d11.IDevice,
+// 	device_context: ^d3d11.IDeviceContext,
+// 	swapchain:^dxgi.ISwapChain1,
+// 	swapchain_description:dxgi.SWAP_CHAIN_DESC1,
+// 	factory:^dxgi.IFactory2,
+// 	dxgi_device:^dxgi.IDevice1,
+// 	dxgi_adapter:^dxgi.IAdapter,
+// 	dxgi_description:^dxgi.ADAPTER_DESC,
+// 	framebuffer:^d3d11.ITexture2D,
+// 	depth_texture:^d3d11.ITexture2D,
+// 	depth_view:^d3d11.IDepthStencilView,
+// 	framebuffer_view: ^d3d11.IRenderTargetView,
+// 	white_texture:^d3d11.ITexture2D,
 
-	// Pipeline states; one is chosen per draw with set_render_state
-	depth_states:[Depth_Mode]^d3d11.IDepthStencilState,
-	blend_states:[Blend_Mode]^d3d11.IBlendState,
-	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
-	samplers:[Filter_Mode]^d3d11.ISamplerState,
-	view:matrix[4,4]f32,
-	camera_active:bool,
-	screen_pass:bool,
-	screen_height:f32,
-	bottom_screen_layout:Bottom_Screen_Layout, // HIDDEN until the game asks; see set_bottom_screen
-	discard_pass:bool, // the pass in progress is the hidden bottom screen: queued, never drawn
-	opaque_items:[dynamic]Render_Item,
-	transparent_items:[dynamic]Render_Item,
+// 	// Pipeline states; one is chosen per draw with set_render_state
+// 	depth_states:[Depth_Mode]^d3d11.IDepthStencilState,
+// 	blend_states:[Blend_Mode]^d3d11.IBlendState,
+// 	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
+// 	samplers:[Filter_Mode]^d3d11.ISamplerState,
+// 	view:matrix[4,4]f32,
+// 	camera_active:bool,
+// 	screen_pass:bool,
+// 	screen_height:f32,
+// 	bottom_screen_layout:Bottom_Screen_Layout, // HIDDEN until the game asks; see set_bottom_screen
+// 	discard_pass:bool, // the pass in progress is the hidden bottom screen: queued, never drawn
+// 	opaque_items:[dynamic]Render_Item,
+// 	transparent_items:[dynamic]Render_Item,
 
-	white_texture_view:^d3d11.IShaderResourceView,
+// 	white_texture_view:^d3d11.IShaderResourceView,
 
-	// 3D Pipeline | shaders/mesh.pc.hlsl (generated from shaders/mesh.mbs)
-	shader_src:[]u8,
-	vertex_shader:^d3d11.IVertexShader,
-	vertex_shader_blob: ^d3d11.IBlob,
-	pixel_shader:^d3d11.IPixelShader,
-	pixel_shader_blob:^d3d11.IBlob,
-	input_layout:^d3d11.IInputLayout,
-	// test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
-	frame_constants:^d3d11.IBuffer,
-	render_constants:^d3d11.IBuffer,
-	game_constants:^d3d11.IBuffer, // the game's own uniforms, set by name with set_shader_value
-	game_shadow:[]byte, // what game_constants holds, kept on the CPU so one value can change
-	game_dirty:bool,
-	reflection:Shader_Reflection, // what the shader needs, from shaders/mesh.pc.refl
+// 	// 3D Pipeline | shaders/mesh.pc.hlsl (generated from shaders/mesh.mbs)
+// 	shader_src:[]u8,
+// 	vertex_shader:^d3d11.IVertexShader,
+// 	vertex_shader_blob: ^d3d11.IBlob,
+// 	pixel_shader:^d3d11.IPixelShader,
+// 	pixel_shader_blob:^d3d11.IBlob,
+// 	input_layout:^d3d11.IInputLayout,
+// 	// test_vertex_buffer:^d3d11.IBuffer, // temporary for testing
+// 	frame_constants:^d3d11.IBuffer,
+// 	render_constants:^d3d11.IBuffer,
+// 	game_constants:^d3d11.IBuffer, // the game's own uniforms, set by name with set_shader_value
+// 	game_shadow:[]byte, // what game_constants holds, kept on the CPU so one value can change
+// 	game_dirty:bool,
+// 	reflection:Shader_Reflection, // what the shader needs, from shaders/mesh.pc.refl
 	
 
-	// Sprites
-	sprite_mesh:Mesh,
-	triangle_mesh:Mesh,
-	circle_mesh:Mesh,
-	pixel_scale:f32,
+// 	// Sprites
+// 	sprite_mesh:Mesh,
+// 	triangle_mesh:Mesh,
+// 	circle_mesh:Mesh,
+// 	pixel_scale:f32,
 
-	timestamp:Timestamp,
+// 	timestamp:Timestamp,
 
-	// Fixed values the engine works with, grouped by what they belong to
-	font_settings:Font_Settings,
-	screen_settings:Screen_Settings,
-	shader_format:Shader_Format,
-}
+// 	// Fixed values the engine works with, grouped by what they belong to
+// 	font_settings:Font_Settings,
+// 	screen_settings:Screen_Settings,
+// 	shader_format:Shader_Format,
+// }
 
-/*
-	The one global (CLAUDE.md). The settings are given their values here rather than in
-	`init`: a value set here is right from the first line of the program, and under
-	`odin test`, where `init` never runs, as well
-*/
-mbi := Matchbox_Info {
-	font_settings = {
-		atlas_min_size = 256,
-		atlas_max_size = 4096,
-		first_glyph = 32,
-		line_spacing = 0.15,
-	},
-	screen_settings = {
-		default_height = 12,
-		bottom_screen_aspect = 320.0 / 240.0,
-	},
-	shader_format = {
-		reflection_version = 1,
-		vertex_attributes = {
-			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position))},
-			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv))},
-			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color))},
-		},
-	},
-}
+// /*
+// 	The one global (CLAUDE.md). The settings are given their values here rather than in
+// 	`init`: a value set here is right from the first line of the program, and under
+// 	`odin test`, where `init` never runs, as well
+// */
+// mbi := Matchbox_Info {
+// 	font_settings = {
+// 		atlas_min_size = 256,
+// 		atlas_max_size = 4096,
+// 		first_glyph = 32,
+// 		line_spacing = 0.15,
+// 	},
+// 	screen_settings = {
+// 		default_height = 12,
+// 		bottom_screen_aspect = 320.0 / 240.0,
+// 	},
+// 	shader_format = {
+// 		reflection_version = 1,
+// 		vertex_attributes = {
+// 			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position))},
+// 			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv))},
+// 			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color))},
+// 		},
+// 	},
+// }
 
 /*Initialize the core of Matchbox; from Windows, to D3D11, etc*/
 init :: proc(title:string, width:i32, height:i32) {

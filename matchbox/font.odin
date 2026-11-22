@@ -1,19 +1,18 @@
-#+build windows
-
 package matchbox
 
 import "core:log"
-
-import stbtt "vendor:stb/truetype"
 
 /*
 	Font
 	====
 	Bakes a TTF into a texture atlas. Drawing with it lives in text.odin.
 
-	The baking is stb_truetype (vendor:stb/truetype), as on the main branch. That
-	may change: the aim is to drop the stb dependency later, and the rest of the
-	engine only sees `Font`, so a different baker would not change a game.
+	The baking is each target's `bake_font_atlas`. On PC that is stb_truetype
+	(vendor:stb/truetype, font_windows.odin), as on the main branch. The handhelds have
+	no baker yet (font_handheld_freestanding_arm32.odin): stb has no ARM build, and its
+	float argument would need a bridge across the soft-float / hard-float line, so which
+	approach the handhelds take is still open (render_plan.md, F2). Everything else here
+	is shared, and `Font` holds no stb type, so a different baker would not change a game.
 
 	A font is baked at ONE pixel size, because stb bakes fixed-size glyphs rather
 	than scaling them. Drawing a 26 pixel atlas at twice the size is a blurry 26
@@ -41,9 +40,20 @@ Font_Settings :: struct {
 	line_spacing:f32, // the gap between lines, as a fraction of the line's height
 }
 
+/*
+	One glyph's place in the atlas and how it sits on the baseline, in atlas pixels. The same
+	layout as stb's `bakedchar`, so the PC's baker writes these directly; font_windows.odin
+	asserts that, so a change on either side fails to compile rather than garbling text
+*/
+Baked_Glyph :: struct {
+	x0, y0, x1, y1:u16, // the glyph's rectangle in the atlas, from its top left
+	xoff, yoff:f32, // from the cursor on the baseline to the rectangle's top left, y down
+	xadvance:f32, // how far the cursor moves on
+}
+
 Font :: struct {
 	texture:Texture, // white RGB, with the glyph coverage in alpha
-	baked_chars:[FONT_GLYPH_COUNT]stbtt.bakedchar,
+	baked_chars:[FONT_GLYPH_COUNT]Baked_Glyph,
 	atlas_size:i32,
 
 	size:f32, // pixels the glyphs were baked at
@@ -80,7 +90,7 @@ create_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0, filte
 	for {
 		bitmap = make([]u8, atlas * atlas)
 
-		rows_used := stbtt.BakeFontBitmap(raw_data(bytes), 0, pixel_size, raw_data(bitmap), atlas, atlas, i32(mbi.font_settings.first_glyph), FONT_GLYPH_COUNT, raw_data(font.baked_chars[:]))
+		rows_used := bake_font_atlas(bytes, pixel_size, bitmap, atlas, &font.baked_chars)
 		if rows_used > 0 do break
 
 		if atlas >= mbi.font_settings.atlas_max_size {

@@ -17,12 +17,14 @@ assets/**
 
 # Build output. 3ds_build.bat writes romfs/ (converted images and audio),
 # odin_asm/ (the assembly it links) and the .elf / .smdh / .3dsx it packages.
+# vita_build.bat uses the same build/ and odin_asm/, and packs a .vpk.
 build/
 romfs/
 odin_asm/
 *.elf
 *.smdh
 *.3dsx
+*.vpk
 
 # Local reference material, not the repository's to share.
 3ds_adv_prog_man.html

@@ -11,8 +11,13 @@ package matchbox
 
 	Button -> This is where the buttons are mapped for the 3DS
 
-	Key and Mouse, and the is_key_* / is_mouse_* procs that always answer false,
-	are in input_handheld_freestanding_arm32.odin: the Vita has neither either
+	Key and Mouse, and the is_key_* procs that always answer false, are in
+	input_handheld_freestanding_arm32.odin: the Vita has neither either.
+
+	The stylus is the mouse's LEFT button, and where it touches is the mouse position, as the
+	render plan has it (F3): a game written for the PC's mouse on the bottom screen works with
+	no change. The alternative was touch procedures of its own, which every game would need a
+	second code path for, to get the same three answers
 
 */
 
@@ -110,5 +115,28 @@ when !VITA {
 				if mbi.gamepad_held & u32(trigger) != 0 do return 1
 		}
 		return 0
+	}
+
+	/*
+		Where the stylus is, in bottom screen pixels (top left, y down), or where it last was
+		after it lifts. calculate_mouse_bottom_screen_position gives it in the screen's units
+	*/
+	get_mouse_position :: proc() -> [2]i32 {
+		return {i32(mbi.touch_position.x), i32(mbi.touch_position.y)}
+	}
+
+	/*True on the frame the stylus touched the screen, for LEFT; never for the other buttons*/
+	is_mouse_pressed :: proc(mouse:Mouse) -> bool {
+		return mouse == .LEFT && mbi.gamepad_pressed & ctru.KEY_TOUCH != 0
+	}
+
+	/*True while the stylus is on the screen, for LEFT*/
+	is_mouse_held :: proc(mouse:Mouse) -> bool {
+		return mouse == .LEFT && mbi.gamepad_held & ctru.KEY_TOUCH != 0
+	}
+
+	/*True on the frame the stylus lifted, for LEFT*/
+	is_mouse_released :: proc(mouse:Mouse) -> bool {
+		return mouse == .LEFT && mbi.gamepad_released & ctru.KEY_TOUCH != 0
 	}
 }

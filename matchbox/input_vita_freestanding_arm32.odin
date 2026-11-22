@@ -8,7 +8,8 @@ package matchbox
 	Button -> the Vita's buttons, mapped onto the same names the PC and the 3DS use. The
 	values are SceCtrl's bits, so a query is one mask against vito's Input.
 
-	Key and Mouse, and their procs, are in input_handheld_freestanding_arm32.odin.
+	Key and Mouse are in input_handheld_freestanding_arm32.odin, with the key procs; the mouse
+	procs are here and in the 3DS's file, because the 3DS answers them from its stylus.
 
 	Inside `when VITA` for the reason in backend_vita_freestanding_arm32.odin
 */
@@ -85,5 +86,27 @@ when VITA {
 	/*Always 0: the Vita has no triggers (see the fake LEFT_TRIGGER / RIGHT_TRIGGER above)*/
 	get_trigger_value :: proc(trigger:Button) -> f32 {
 		return 0
+	}
+
+	// The mouse, until the front touch panel stands in for it (render_plan.md, F3)
+
+	/*Always {0, 0} for now*/
+	get_mouse_position :: proc() -> [2]i32 {
+		return {}
+	}
+
+	/*Always false for now*/
+	is_mouse_pressed :: proc(mouse:Mouse) -> bool {
+		return false
+	}
+
+	/*Always false for now*/
+	is_mouse_held :: proc(mouse:Mouse) -> bool {
+		return false
+	}
+
+	/*Always false for now*/
+	is_mouse_released :: proc(mouse:Mouse) -> bool {
+		return false
 	}
 }

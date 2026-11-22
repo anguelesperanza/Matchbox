@@ -35,6 +35,13 @@ when !VITA {
 		mbi.gamepad_held = ctru.hidKeysHeld()
 		mbi.gamepad_released = ctru.hidKeysUp()
 
+		// Only while the stylus is down: otherwise hidTouchRead gives 0, 0, which is a real corner
+		if mbi.gamepad_held & ctru.KEY_TOUCH != 0 {
+			touch:ctru.touchPosition
+			ctru.hidTouchRead(&touch)
+			mbi.touch_position = {f32(touch.px), f32(touch.py)}
+		}
+
 		/*
 			Circle Pad and CStick / Circle Pad Pro
 			This does two things: converts the input into a float and stores it, and then clamps the diagnals so they

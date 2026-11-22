@@ -44,6 +44,11 @@ when !VITA {
 		left_thumbstick_max:f32,
 		right_thumbstick_max:f32,
 
+		// Where the stylus is, in bottom screen pixels (top left, y down). Kept after the stylus
+		// lifts: hidTouchRead reports 0, 0 by then, and the frame it lifted still needs the point
+		// it lifted from
+		touch_position:[2]f32,
+
 		timestamp:Timestamp, // osGetTime values, so its type is the 3DS's own
 
 		pipeline:Render_Pipeline, // the shader, its uniforms and its TexEnv plan (render_3ds_freestanding_arm32.odin)
@@ -151,7 +156,10 @@ when !VITA {
 		return mbi.window_size
 	}
 
-	/*The 3DS has no mouse. The touch screen gets its own procedures when input is ported*/
+	/*
+		Always {0, 0}: the stylus is the 3DS's mouse, and it only reaches the bottom screen, never
+		a camera on the top one. calculate_mouse_bottom_screen_position is where it is
+	*/
 	calculate_mouse_world_position :: proc(camera:Camera) -> [2]f32 {
 		return {}
 	}

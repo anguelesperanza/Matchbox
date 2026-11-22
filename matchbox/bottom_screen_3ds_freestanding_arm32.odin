@@ -213,10 +213,19 @@ when !VITA {
 	}
 
 	/*
-		Where the stylus is, in the bottom screen's units, and whether it is down. Never down
-		yet: the touch screen is read once input is ported
+		Where the stylus is, in the bottom screen's units, and whether it is on the screen: while
+		it is down, and on the frame it lifts, so a button that acts on release still knows where.
+		A mouse is somewhere whether or not a button is down; a stylus in the air is nowhere, so
+		`inside` is the 3DS's nearest match to the PC's mouse being over the window.
+		False while the console has the screen: there is nothing of the game's there to touch
 	*/
 	calculate_mouse_bottom_screen_position :: proc() -> (position:[2]f32, inside:bool) {
-		return {}, false
+		if is_bottom_screen_visible() == false do return {}, false
+
+		touching := (mbi.gamepad_held | mbi.gamepad_released) & ctru.KEY_TOUCH != 0
+		if touching == false do return {}, false
+
+		bottom_screen_size := [2]f32{f32(mbi.window_size[2]), f32(mbi.window_size[3])}
+		return calculate_screen_to_world_2d(get_bottom_screen_camera(), mbi.touch_position, bottom_screen_size), true
 	}
 }

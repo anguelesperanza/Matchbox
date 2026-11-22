@@ -94,7 +94,8 @@ rules too; they are repeated here so this file stands alone.
   - The Vita draws nothing but the clear colour (Phase V). The 3DS draws both screens, with `print` drawn on the
     bottom one.
   - Text: the 3DS draws it with the console's system font (F2). The Vita has no glyphs until Phase V.
-  - Touch isn't read.
+  - Touch: the 3DS reads the stylus as the mouse (`is_mouse_*(.LEFT)`, `get_mouse_position`,
+    `calculate_mouse_bottom_screen_position`), checked in Azahar. The Vita's touch panels aren't read yet (Phase V).
   - Audio is stubbed on all three targets.
 - **Not verified:** the clear colour on screen (the emulator logs were read, no screenshots), and real hardware.
 - `render_plan.md` in the repo is the newest copy. The old session's scratchpad held three older snapshots
@@ -238,8 +239,8 @@ Open items (see the file for the user's wording and legend):
 
 1. Finish the PC side of the plan while the 2D game keeps feeding `fixes.md`: B8 (viewport, fit policy, overscan), F2 closure,
    the open decisions above, the `[c]` renames.
-2. Handhelds: A0b, Phase C C0-C4, the 3DS half of Phase D, native 3DS text and the 3DS bottom screen are done.
-   Next: touch, the rest of the handheld halves of E and F, the Phase C gate scene, and C5 once B8 is settled.
+2. Handhelds: A0b, Phase C C0-C4, the 3DS half of Phase D, native 3DS text, the 3DS bottom screen and 3DS touch are done.
+   Next: the rest of the handheld halves of E and F, the Phase C gate scene, and C5 once B8 is settled.
 3. Phase V (Vita), reusing `mbsc --emit-cg` + committed `.gxp`.
 4. Then G (3D games), then H.
 5. In parallel when convenient: S6 runtime applier, real-hardware tests of the PICA and TexEnv output, S8a.

@@ -33,7 +33,7 @@ The user also settled the other handheld gaps:
 - **Text (F2):** each target uses its own native text: stb on PC, the system font on the 3DS, and the Vita's font system.
   A shared font framework may come later.
 - **The 3DS bottom screen:** `print` output becomes text drawn on the bottom screen, in place of the ctru console.
-- **Touch** gets implemented.
+- **Touch** gets implemented. Done on the 3DS: the stylus is the mouse (see F3).
 - **Audio** stays stubbed. The user writes it.
 - **The handheld halves of E and F** get implemented.
 - **The small loose ends** wait for a tidy-up at the end.
@@ -1396,7 +1396,21 @@ that swap does not touch games.
   - Perspective: a ray from the camera (Phase G).
   - Points in the bars report as outside: needs B8. With no bars, every point
     in the window is inside.
-- 3DS touch maps to the bottom screen's camera (F4).
+- 3DS touch maps to the bottom screen's camera (F4). DONE on the 3DS (2026-11-22, Azahar only):
+  - The stylus is the mouse. `is_mouse_pressed/held/released(.LEFT)` come from `KEY_TOUCH`, and the other buttons are
+    never down. `get_mouse_position` is the stylus in bottom screen pixels.
+  - `calculate_mouse_bottom_screen_position` gives the point in the bottom screen's units, through
+    `calculate_screen_to_world_2d` over the 320x240 screen. `inside` is true while the stylus is down and on the
+    frame it lifts, and false in `.CONSOLE`.
+  - The point is kept after the stylus lifts: `hidTouchRead` reports 0, 0 by then, and a button that acts on release
+    still needs the point it lifted from.
+  - `calculate_mouse_world_position` and `calculate_mouse_screen_position` stay {0, 0}: the stylus never reaches the top
+    screen. The demo ignores a world click made on the bottom screen for that reason.
+  - Checked in Azahar with a throwaway app:
+    - Pixel (279, 39) gave (5.95, 4.05) units, and (80, 176) gave (-4, -2.8); both match 12 units over 240 pixels.
+    - A tap on a box counted as a hit.
+    - A square followed a drag.
+    - A release outside the box reported the last held point and no hit.
 - Vita front touch (and the rear panel) report in the panel's own coordinate
   range, not screen pixels; scale them to 960x544 first, then treat as mouse.
   Check the range on hardware.

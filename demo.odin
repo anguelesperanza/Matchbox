@@ -118,8 +118,9 @@ main :: proc() {
 		if over_middle == true && mb.is_mouse_pressed(.LEFT) do shia.flip_x = shia.flip_x == false
 
 		// Left click moves the camera there; it glides, so it sits on fractional positions.
-		// Not when the click landed on the HUD
-		if mb.is_mouse_pressed(.LEFT) && menu_open == false && over_corner == false && over_middle == false {
+		// Not when the click landed on the HUD, nor on the bottom screen: on the 3DS the stylus only
+		// ever touches the bottom screen, and a tap there is not a tap in the world
+		if mb.is_mouse_pressed(.LEFT) && menu_open == false && on_bottom_screen == false && over_corner == false && over_middle == false {
 			follow_target = mb.calculate_mouse_world_position(camera)
 		}
 		mb.camera_follow(&camera, follow_target, 3, dt)

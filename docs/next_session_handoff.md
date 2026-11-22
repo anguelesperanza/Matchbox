@@ -49,6 +49,9 @@ rules too; they are repeated here so this file stands alone.
       itself. The 3DS cat is 32x32, so those crops land on transparent padding and are cut away. The cat's
       `.meta` is right since the `.meta` fix (a target's own image no longer takes the shared `.meta`), and a
       sprite that uses frames and the texture's ppu draws it at the same world size as on PC.
+- **2026-11-22 (later still): native text on the 3DS** (render_plan.md, "F2: status (3DS)").
+  - `create_font` on the 3DS bakes from the console's system font and ignores the TTF. Layout, wrapping and
+    measuring stay shared.
 - **The user's decisions for the handhelds (2026-11-22):**
   - Native text per target.
   - On the 3DS, `print` draws on the bottom screen.
@@ -83,7 +86,7 @@ rules too; they are repeated here so this file stands alone.
 - **What is still empty on the handhelds:**
   - The Vita draws nothing but the clear colour (Phase V). The 3DS draws the top screen; its bottom screen holds the
     text console.
-  - Text has no glyphs: stb is PC-only, in `font_windows.odin`, and F2 is undecided.
+  - Text: the 3DS draws it with the console's system font (F2). The Vita has no glyphs until Phase V.
   - Touch isn't read.
   - Audio is stubbed on all three targets.
 - **Not verified:** the clear colour on screen (the emulator logs were read, no screenshots), and real hardware.
@@ -102,7 +105,7 @@ PC:    odin check matchbox -no-entry-point          (clean; -vet: the 3 old issu
 3DS:   3ds_check.bat                                (the demo at the root)
        3ds_check.bat examples\handheld-boot
        3ds_build.bat examples\handheld-boot         -> app.3dsx; four boot: lines in Azahar
-       3ds_build.bat examples\render-check          -> app.3dsx; "check: 21 probes, 10 facts, failures 0" on Azahar's bottom screen
+       3ds_build.bat examples\render-check          -> app.3dsx; "check: 21 probes, 11 facts, text, failures 0" on Azahar's bottom screen
 Vita:  vita_check.bat
        vita_check.bat examples\handheld-boot
        vita_build.bat examples\handheld-boot        -> MyGame.vpk; four boot: lines in Vita3K
@@ -129,7 +132,7 @@ Vita:  vita_check.bat
 | V (Vita core) | **Not done.** Everything in it is still to do. |
 | D (textures/assets) | D1-D3 done on PC. **The 3DS half of D1, D2 and D4 done** (2026-11-22, Azahar only; subfolders are kept). The Vita half is V5. |
 | E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). Handheld halves open. |
-| F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: font code ported from `main` (`font.odin`, `text.odin`, CC0 Bitrimus font); the plan does not mark it done, and the 3DS/Vita text approach is undecided. |
+| F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: font code ported from `main` (`font.odin`, `text.odin`, CC0 Bitrimus font); each target uses its native text: **the 3DS's system font is done** (2026-11-22, Azahar only); the Vita's waits for Phase V. |
 | G (3D games) | Not started (models, lighting, 3D cameras, billboards, render targets, skinning). |
 | H (hard-float via Farlite) | Late, not started. |
 | S (shader language) | S0-S7 done; see below. |

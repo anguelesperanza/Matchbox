@@ -11,6 +11,7 @@ package render_check
 // neither. The scene keeps drawing so it can be looked at as well as measured.
 
 import "core:fmt"
+import "core:math"
 import "core:math/linalg"
 
 import mb "../../matchbox"
@@ -94,6 +95,13 @@ main :: proc() {
 	override := mb.load_texture("override.png", .POINT)
 	defer mb.destroy_texture(override)
 
+	// Text (F2): the console's system font on the 3DS. Baked at 20 pixels with 20 pixels to the
+	// unit, so glyphs land 1:1 on screen. Descenders and capitals, to catch a glyph cut short
+	font := mb.create_font(mb.DEFAULT_FONT_BYTES, 20, 20, .POINT)
+	defer mb.destroy_font(font)
+	text :: "Matchbox gjy|ABC!"
+	text_position := [3]f32{-7, 4, 0} // baseline at screen (60, 40)
+
 	// What the .meta and the guess say, checked as numbers
 	Fact :: struct {
 		name:string,
@@ -110,6 +118,7 @@ main :: proc() {
 		{"3DS override width", override.width, 8},
 		{"3DS override ignores shared .meta: frames", override.frame_count, 1},
 		{"3DS override ignores shared .meta: ppu", i32(override.pixels_per_unit), 1},
+		{"font has glyphs (ascent above 0)", i32(font.ascent > 0), 1},
 	}
 
 	frames := 0
@@ -132,6 +141,7 @@ main :: proc() {
 		mb.render_sprite(made_sprite)
 		mb.render_sprite(frame_sprite)
 		mb.render_sprite(flipped_sprite)
+		mb.render_text(font, text, text_position)
 		mb.camera_end()
 
 		mb.render_end()
@@ -160,7 +170,33 @@ main :: proc() {
 					mb.print(fmt.tprintf("check: FAIL %s: got %d, expected %d", fact.name, fact.got, fact.expected))
 				}
 			}
-			mb.print(fmt.tprintf("check: %d probes, %d facts, failures %d", len(probes), len(facts), failures))
+			// The text: white pixels inside the box the shared measuring gives it (with 2 pixels of
+			// slack for edges), and nothing but background in an 8 pixel ring around that
+			text_size := mb.calculate_text_size(font, text)
+			box_left := 60
+			box_right := 60 + int(math.ceil(text_size.x * 20))
+			box_top := 40 - int(math.ceil(font.ascent / font.pixels_per_unit * 20))
+			box_bottom := 40 + int(math.ceil(font.descent / font.pixels_per_unit * 20))
+			lit, stray := 0, 0
+			for y in box_top - 8 ..< box_bottom + 8 {
+				for x in box_left - 8 ..< box_right + 8 {
+					offset := (x * int(width) + (int(width) - 1 - y)) * 3
+					red := pixels[offset + 2]
+					inside := x >= box_left - 2 && x < box_right + 2 && y >= box_top - 2 && y < box_bottom + 2
+					if inside && red > 128 do lit += 1
+					if !inside && red > 40 do stray += 1
+				}
+			}
+			if lit == 0 {
+				failures += 1
+				mb.print("check: FAIL text drew nothing inside its box")
+			}
+			if stray > 0 {
+				failures += 1
+				mb.print(fmt.tprintf("check: FAIL text has %d pixels outside its box", stray))
+			}
+			mb.print(fmt.tprintf("check: text box %v..%v x %v..%v, %d lit", box_left, box_right, box_top, box_bottom, lit))
+			mb.print(fmt.tprintf("check: %d probes, %d facts, text, failures %d", len(probes), len(facts), failures))
 		}
 	}
 }

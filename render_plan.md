@@ -37,6 +37,8 @@ The user also settled the other handheld gaps:
 - **Audio** stays stubbed. The user writes it.
 - **The handheld halves of E and F** get implemented.
 - **The small loose ends** wait for a tidy-up at the end.
+Updated 2026-11-22 (later still): **F2 on the 3DS done: text uses the console's system font**, checked in Azahar only.
+See "F2: status (3DS)".
 
 ## The decision
 
@@ -1293,6 +1295,22 @@ points, not two (decided 2026-11-18).
   without them: the HUD fills the window and follows its shape. They come with B8.
 - Known limit: in a screen pass cut-out items are drawn before blended ones, so
   a blended panel is always on top of a cut-out icon, whatever the submission order.
+
+**F2: status (3DS, 2026-11-22).** Each target uses its own native text (decided 2026-11-22).
+- **3DS:** `font_3ds_freestanding_arm32.odin` bakes from the console's system font. It ignores the TTF the game
+  passes.
+  - It copies the 95 printable ASCII glyphs out of the font's 4-bit tiled sheets into the shared grayscale atlas,
+    scaled from the font's 30-pixel cells to the size asked for. Each atlas pixel averages a 4 x 4 grid of samples.
+  - Each glyph's rectangle and advance come from libctru's `fontCalcGlyphPos`. The baseline comes from the
+    sheet info.
+  - Everything after the bake is shared: `create_font`, layout, wrapping and measuring.
+  - If the system font cannot be mapped, the game prints that once and text draws nothing.
+- **Checked by:** `examples/render-check`.
+  - A line of text with descenders has lit pixels inside the box `calculate_text_size` and the ascent and
+    descent give it, and nothing in an 8-pixel ring around that box.
+  - Drawn at three times the size in a throwaway build, the glyphs were whole: the tails of g, j and y, and
+    the dot on the j.
+- **Vita:** a stub until Phase V (`font_vita_freestanding_arm32.odin`).
 
 **F2. Text.** Decided 2026-11-18: port the font code from `main` (`font.odin`,
 `text.odin`) and rework it onto this branch, for PC first. It bakes with

@@ -7,12 +7,14 @@ import "core:log"
 	====
 	Bakes a TTF into a texture atlas. Drawing with it lives in text.odin.
 
-	The baking is each target's `bake_font_atlas`. On PC that is stb_truetype
-	(vendor:stb/truetype, font_windows.odin), as on the main branch. The handhelds have
-	no baker yet (font_handheld_freestanding_arm32.odin): stb has no ARM build, and its
-	float argument would need a bridge across the soft-float / hard-float line, so which
-	approach the handhelds take is still open (render_plan.md, F2). Everything else here
-	is shared, and `Font` holds no stb type, so a different baker would not change a game.
+	The baking is each target's `bake_font_atlas`, and each uses its native text
+	(render_plan.md, F2):
+	- PC: stb_truetype bakes the TTF given (vendor:stb/truetype, font_windows.odin).
+	- 3DS: the console's system font, copied out of its glyph sheets; the TTF is not read
+	  (font_3ds_freestanding_arm32.odin).
+	- Vita: none yet (font_vita_freestanding_arm32.odin, Phase V), so text draws nothing.
+	Everything else here is shared, and `Font` holds no type of any one baker, so a game
+	is the same on every target.
 
 	A font is baked at ONE pixel size, because stb bakes fixed-size glyphs rather
 	than scaling them. Drawing a 26 pixel atlas at twice the size is a blurry 26

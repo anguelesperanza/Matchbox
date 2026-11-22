@@ -87,8 +87,6 @@ Backend_State :: struct {
 	game_dirty:bool,
 	reflection:Shader_Reflection, // what the shader needs, from shaders/mesh.pc.refl
 
-	timestamp:Timestamp, // QueryPerformanceCounter values, so its type is the PC's own
-
 	// Fixed values the PC backend works with
 	shader_format:Shader_Format,
 }

@@ -191,22 +191,8 @@ camera_set_pixel_scale :: proc(camera:^Camera, pixels_per_unit:f32, scale:f32, w
 }
 
 /*
-	The largest whole-number zoom at which `design_height` units fit in the window: the zoom
-	for pixel art that has to look the same on every target.
-	design_height: how many units tall the art was made to be seen at (Teddy's is 270)
-	window_height: 0 (the default) means the window's, read when called; pass another for a
-	render target or a test. 0 rather than the window's height as the default value, because
-	Odin refuses a call or an index there (get_window_size()[1], mbi.window_size[1])
-
-	A whole number, because pixel art with POINT filtering needs each art pixel to cover the
-	same number of screen pixels. Dividing exactly (240 / 270 = 0.89 on the 3DS) would show
-	the same area everywhere, but some rows and columns would be dropped and the art would
-	shimmer as it scrolls. The cost is that each target sees a slightly different amount: 270
-	units tall on PC (zoom 4), 272 on the Vita (2), 240 on the 3DS (1). Place things from
-	calculate_screen_bounds or the anchors, not fixed numbers.
-
-	Never below 1: a screen shorter than the art (the 3DS, for 270) shows it at 1:1 and crops
-	the edges, rather than shrinking it to a fraction and losing pixels
+	Calculates the zoom level (used by a 2D camera) based on a value.
+	Use the height of the art asset with the biggest height
 */
 calculate_integer_zoom :: proc(design_height:f32, window_height:f32 = 0) -> f32 {
 	height := window_height

@@ -118,6 +118,10 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
 
+	counter:win.LARGE_INTEGER
+	win.QueryPerformanceCounter(&counter)
+	tick_clock(&mbi.clock, u64(counter))
+
 	free_all(context.allocator)
 	
 	// Before processing messages clear the input for keys pressed

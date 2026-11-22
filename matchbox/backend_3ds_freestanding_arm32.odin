@@ -49,8 +49,6 @@ when !VITA {
 		// it lifted from
 		touch_position:[2]f32,
 
-		timestamp:Timestamp, // osGetTime values, so its type is the 3DS's own
-
 		pipeline:Render_Pipeline, // the shader, its uniforms and its TexEnv plan (render_3ds_freestanding_arm32.odin)
 
 		print_log:Print_Log, // what `print` wrote, drawn on the bottom screen (bottom_screen_3ds_freestanding_arm32.odin)

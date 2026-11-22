@@ -14,6 +14,8 @@ package matchbox
 */
 
 // Core
+import "base:runtime"
+
 import "o3dx/ctru"
 import "o3dx/c3d"
 import "o3dx/o3dx"
@@ -23,11 +25,6 @@ when !VITA {
 	// How the frame is copied to the screen. Lives in `mbi.display_settings`, set in BACKEND_DEFAULTS
 	Display_Settings :: struct {
 		transfer_flags:u32,
-	}
-
-
-	Timestamp :: struct {
-		last_time:u64,
 	}
 
 
@@ -108,8 +105,17 @@ when !VITA {
 		// A game that asked for the console before init gets it now, once the screens exist
 		if mbi.bottom_screen_layout == .CONSOLE do start_bottom_screen_console()
 
-		// Delta time
-		mbi.timestamp.last_time = ctru.osGetTime()
+		// svcGetSystemTick rather than osGetTime: osGetTime counts whole milliseconds, so a
+		// 16.67 ms frame read as 16 or 17 and delta time alternated between them. The system
+		// tick runs at SYSCLOCK_ARM11 on every model, New 3DS included, whatever the CPU clock
+		start_clock(&mbi.clock, ctru.svcGetSystemTick(), ctru.SYSCLOCK_ARM11)
+
+		// Odin's random generator seeds itself from the system's entropy the first time it is
+		// used, and freestanding has none: the runtime traps ("no runtime entropy source"), past
+		// report_crash, so a game's first rand call stopped it dead. Seeded here instead, from the
+		// date and the tick, which differ every boot. Not cryptographic; a game that wants that,
+		// or a repeatable run, calls rand.reset itself after init
+		runtime.random_generator_reset_u64(context.random_generator, ctru.osGetTime() ~ ctru.svcGetSystemTick())
 	}
 
 	/*Returns true if the window is running; other returns fale -> Almost always will return true*/
@@ -120,14 +126,6 @@ when !VITA {
 	/*Stops running the application*/
 	stop_running :: proc() {
 		mbi.is_running = false
-	}
-
-	/*Returns the delta time value*/
-	get_delta_time :: proc() -> (delta_time:f32) {
-		now := ctru.osGetTime() // u64, milliseconds
-		delta_time = f32(f64(now - mbi.timestamp.last_time) / 1000.0)
-		mbi.timestamp.last_time = now
-		return delta_time
 	}
 
 	/*Cleans up resources created by Matchbox*/

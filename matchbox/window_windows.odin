@@ -20,17 +20,6 @@ import "vendor:directx/dxgi"
 import gi "vendor:windows/GameInput"
 
 
-Timestamp :: struct {
-	fixed_timestamp:f64,
-	accumulator:f64,
-	delta_time:f64,
-	current_time:win.LARGE_INTEGER,
-	last_time: win.LARGE_INTEGER,
-	frequency: win.LARGE_INTEGER,
-	counter: win.LARGE_INTEGER,
-	start_counter: win.LARGE_INTEGER, // when the window was created; frame.time counts from here
-}
-
 // Matchbox_Info :: struct {
 
 // 	// General values
@@ -356,10 +345,11 @@ init :: proc(title:string, width:i32, height:i32) {
 
 	}	
 	
-	// Setup the initial frequency and counter for delta time
-	win.QueryPerformanceFrequency(&mbi.timestamp.frequency)
-	win.QueryPerformanceCounter(&mbi.timestamp.last_time)
-	mbi.timestamp.start_counter = mbi.timestamp.last_time
+	// The frame clock counts from here (clock.odin)
+	frequency, counter:win.LARGE_INTEGER
+	win.QueryPerformanceFrequency(&frequency)
+	win.QueryPerformanceCounter(&counter)
+	start_clock(&mbi.clock, u64(counter), u64(frequency))
 
 
 	result := gi.Create(&mbi.input)
@@ -380,16 +370,6 @@ is_running :: proc() -> bool {
 /*Stops running the application*/
 stop_running :: proc() {
 	mbi.is_running = false
-}
-
-/*Returns the delta time value*/
-get_delta_time :: proc() -> (delta_time:f32) {
-	/*In C, a LARGE_INTEGER is a struct, In Odin, it's a c_longlong --> an f64*/
-	now:win.LARGE_INTEGER
-	win.QueryPerformanceCounter(lpPerformanceCount = &now)
-	delta_time = f32(f64(now - mbi.timestamp.last_time) / cast(f64)mbi.timestamp.frequency)
-	mbi.timestamp.last_time = now
-	return delta_time
 }
 
 /*Cleans up resources created by Matchbox*/

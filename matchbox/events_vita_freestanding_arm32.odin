@@ -15,6 +15,8 @@ when VITA {
 
 	/*Process the events for this frame: the controller, and the temp allocator's reset*/
 	poll_events :: proc() {
+		tick_clock(&mbi.clock, vito.time_us())
+
 		// The handhelds have no event loop that would free it, so the frame's start does
 		free_all(context.temp_allocator)
 

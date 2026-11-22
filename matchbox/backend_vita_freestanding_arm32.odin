@@ -26,7 +26,6 @@ when VITA {
 
 	Backend_State :: struct {
 		input:vito.Input, // buttons and sticks for this frame, from vito.input_update
-		timestamp:Timestamp, // sceKernelGetProcessTimeWide values, so its type is the Vita's own
 	}
 
 	/*Nothing to set yet. Declared so matchbox_info.odin's `backend = BACKEND_DEFAULTS` works on every target*/

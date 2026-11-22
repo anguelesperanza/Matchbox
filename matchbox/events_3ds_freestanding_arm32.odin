@@ -21,6 +21,8 @@ when !VITA {
 	/*Process the events sent to the window (events/inputs/etc)*/
 	poll_events :: proc() {
 
+		tick_clock(&mbi.clock, ctru.svcGetSystemTick())
+
 		free_all(context.temp_allocator)
 
 		left_thumbstick:ctru.circlePosition

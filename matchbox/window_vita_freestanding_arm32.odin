@@ -10,15 +10,13 @@ package matchbox
 	Inside `when VITA` for the reason in backend_vita_freestanding_arm32.odin
 */
 
+import "base:runtime"
+
 import "vito/gfx"
 import "vito/sce"
 import "vito/vito"
 
 when VITA {
-
-	Timestamp :: struct {
-		last_time:u64, // microseconds since the program started
-	}
 
 	/*
 		Initialize the core of Matchbox for the target platform. `width` and `height` are the
@@ -39,7 +37,15 @@ when VITA {
 		}
 
 		mbi.window_size = {gfx.WIDTH, gfx.HEIGHT, 0, 0}
-		mbi.timestamp.last_time = vito.time_us()
+		start_clock(&mbi.clock, vito.time_us(), 1_000_000) // microseconds
+
+		// Odin's random generator seeds itself from the system's entropy the first time it is
+		// used, and freestanding has none: the runtime traps ("no runtime entropy source"), so a
+		// game's first rand call stopped it dead. Seeded here instead, from the microseconds since
+		// the process started, which vary with how long loading took: weaker than the 3DS's date,
+		// since the Vita's clock is not bound yet (sceRtcGetCurrentTick). Not cryptographic; a game
+		// that wants that, or a repeatable run, calls rand.reset itself after init
+		runtime.random_generator_reset_u64(context.random_generator, vito.time_us())
 	}
 
 	/*Returns true while the game runs. Only stop_running ends it on the Vita: the PS button suspends, it doesn't quit*/
@@ -50,14 +56,6 @@ when VITA {
 	/*Stops running the application*/
 	stop_running :: proc() {
 		mbi.is_running = false
-	}
-
-	/*Returns the delta time value, in seconds*/
-	get_delta_time :: proc() -> (delta_time:f32) {
-		now := vito.time_us()
-		delta_time = f32(f64(now - mbi.timestamp.last_time) / 1_000_000.0)
-		mbi.timestamp.last_time = now
-		return delta_time
 	}
 
 	/*

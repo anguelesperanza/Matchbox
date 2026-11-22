@@ -302,9 +302,7 @@ update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 /*Sets the combined view * projection matrix used by everything drawn until it is called again*/
 @(private)
 set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
-	now:win.LARGE_INTEGER
-	win.QueryPerformanceCounter(&now)
-	seconds := f32(f64(now - mbi.timestamp.start_counter) / f64(mbi.timestamp.frequency))
+	seconds := f32(get_time())
 
 	constants := Frame_Constants{view_projection = view_projection, time = seconds}
 	if mbi.frame_constants != nil do update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))

@@ -76,6 +76,10 @@ when VITA {
 	destroy_texture :: proc(texture:Texture) {
 	}
 
+	/*Nothing to free: the Vita has no meshes until Phase V. Here so `destroy` is one group on every target*/
+	destroy_mesh :: proc(mesh:Mesh) {
+	}
+
 	/*{width, height, 0, 0} in pixels: 960 x 544, and no second screen*/
 	get_window_size :: proc() -> [4]i32 {
 		return mbi.window_size

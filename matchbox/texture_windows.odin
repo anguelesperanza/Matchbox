@@ -33,6 +33,7 @@ load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:
 	texture = create_texture_from_pixels(raw_data(loaded_image.pixels), i32(loaded_image.width), i32(loaded_image.height), filter)
 
 	texture.pixels_per_unit = meta.pixels_per_unit
+	texture.source_pixels_per_unit = meta.source_pixels_per_unit
 	texture.columns = meta.columns
 	texture.rows = meta.rows
 	texture.frame_count = meta.frame_count
@@ -84,6 +85,7 @@ create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filt
 
 	meta := default_texture_meta()
 	texture.pixels_per_unit = meta.pixels_per_unit
+	texture.source_pixels_per_unit = meta.source_pixels_per_unit
 	texture.columns = meta.columns
 	texture.rows = meta.rows
 	texture.frame_count = meta.frame_count

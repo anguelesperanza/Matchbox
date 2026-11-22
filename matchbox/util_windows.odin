@@ -72,20 +72,3 @@ get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
 	print("Asset not found")
 	panic("Asset not found")
 }
-
-/* |===============|
-   |PROCEDURE GROUP|
-   |===============|
-*/
-
-/*Procedure group that will call the appropiate
-destroy procedure based on arugment passed*/
-destroy :: proc {
-	destroy_audio,
-	destroy_mesh,
-	destroy_texture,
-	destroy_sprite,
-	destroy_animation_clip,
-	destroy_parallax,
-	destroy_font,
-}

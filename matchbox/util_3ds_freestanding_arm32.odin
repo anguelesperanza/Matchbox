@@ -119,15 +119,4 @@ when !VITA {
 		}
 		return nil, false
 	}
-
-	/* |===============|
-	   |PROCEDURE GROUP|
-	   |===============|
-	*/
-
-	/*Procedure group that will call the appropiate
-	destroy procedure based on arugment passed*/
-	destroy :: proc {
-		destroy_audio,
-	}
 }

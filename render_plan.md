@@ -1066,7 +1066,24 @@ in both `3ds_build.bat` and `get_asset`.
 - Still left out: `replay`, progress, frame-passed and `sprite_set_frame`.
 
 **E7. Acceptance test: port shia-test.** PC half DONE (`examples/shia-test`, run with
-`odin run examples/shia-test`); the 3DS and Vita halves wait for their phases.
+`odin run examples/shia-test`). 3DS half DONE (2026-11-22, Azahar only); the Vita half waits for Phase V.
+- 3DS status:
+  - **Built with** `3ds_build.bat examples\shia-test`, with no layout changes. The camera is in world units
+    (`1080 * PX` tall), so the 400x240 screen shows the same view as the PC, smaller.
+  - **Sheet:** the 832x832 sheet from `assets\3ds\images` loads onto a 1024 canvas.
+  - **Checked in Azahar:** it runs at 60 FPS, and walk, jump and the attack chain respond to the buttons.
+    SELECT quits (added for the handhelds, which have no Escape).
+  - **Clip offsets were 4x too big on the 3DS.** An offset is in image pixels divided by the sheet's ppu, and
+    the 3DS sheet has 64 ppu to the PC's 256. The crouch attack measured 1.547 units on the 3DS against 0.387
+    on PC.
+    - Fix (the user's choice): sheetpack writes `source_ppu` (the full-size sheet's ppu) into a target's
+      smaller `.meta`, and `calculate_animation_render_offset` shrinks the offset by `ppu / source_ppu`.
+    - Game code keeps offsets in the pixels of the art it was made with.
+    - Measured after: 0.38671875 x 0.0703125 units on both. A test covers it.
+  - **Not checked:** the crouch attacks on screen. The emulator input tools can't hold two buttons at once, so
+    the offset was measured with a probe instead. Real hardware isn't checked either.
+  - **Same kind of gap left in the demo:** its cat crop (`Sprite.source`) is in PC pixels too. `source_ppu`
+    could fix it the same way.
 - PC first, with y flipped to +Y up and positions in units.
 - Then the 3DS with the downscaled sheet; layout changes there are expected.
 - Then the Vita with the full-size sheet; the 960x544 surface should show it

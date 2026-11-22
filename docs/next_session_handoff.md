@@ -107,13 +107,14 @@ Run these after any change, on all three targets. The counts are from 2026-11-22
 
 ```
 PC:    odin check matchbox -no-entry-point          (clean; -vet: the 3 old issues)
-       odin test matchbox                           (67 pass)
+       odin test matchbox                           (69 pass)
        odin test tools/mbsc                         (120 pass)
        odin build examples/shia-test ; odin check demo.odin -file
 3DS:   3ds_check.bat                                (the demo at the root)
        3ds_check.bat examples\handheld-boot
        3ds_build.bat examples\handheld-boot         -> app.3dsx; four boot: lines in Azahar
        3ds_build.bat examples\render-check          -> app.3dsx; "check: 21 probes, 2 bottom, 11 facts, text, failures 0" on Azahar's bottom screen
+       3ds_build.bat examples\shia-test             -> app.3dsx; idles at 60 FPS in Azahar, SELECT quits
 Vita:  vita_check.bat
        vita_check.bat examples\handheld-boot
        vita_build.bat examples\handheld-boot        -> MyGame.vpk; four boot: lines in Vita3K
@@ -139,7 +140,7 @@ Vita:  vita_check.bat
 | C (3DS core) | **C0-C4 done** (2026-11-22, Azahar only). C5 waits on B8; C6 optional. Gate (cube scene, real 3DS) not run. |
 | V (Vita core) | **Not done.** Everything in it is still to do. |
 | D (textures/assets) | D1-D3 done on PC. **The 3DS half of D1, D2 and D4 done** (2026-11-22, Azahar only; subfolders are kept). The Vita half is V5. |
-| E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). Handheld halves open. |
+| E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). E7 done on the 3DS too (Azahar; clip offsets use the `.meta`'s `source_ppu`). Vita halves wait for Phase V. |
 | F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: font code ported from `main` (`font.odin`, `text.odin`, CC0 Bitrimus font); each target uses its native text: **the 3DS's system font is done** (2026-11-22, Azahar only); the Vita's waits for Phase V. |
 | G (3D games) | Not started (models, lighting, 3D cameras, billboards, render targets, skinning). |
 | H (hard-float via Farlite) | Late, not started. |
@@ -239,8 +240,8 @@ Open items (see the file for the user's wording and legend):
 
 1. Finish the PC side of the plan while the 2D game keeps feeding `fixes.md`: B8 (viewport, fit policy, overscan), F2 closure,
    the open decisions above, the `[c]` renames.
-2. Handhelds: A0b, Phase C C0-C4, the 3DS half of Phase D, native 3DS text, the 3DS bottom screen and 3DS touch are done.
-   Next: the rest of the handheld halves of E and F, the Phase C gate scene, and C5 once B8 is settled.
+2. Handhelds: A0b, Phase C C0-C4, the 3DS half of Phase D, native 3DS text, the 3DS bottom screen, 3DS touch and shia-test on the
+   3DS (E7) are done, so the 3DS halves of E and F are finished. Next: the Phase C gate scene, and C5 once B8 is settled.
 3. Phase V (Vita), reusing `mbsc --emit-cg` + committed `.gxp`.
 4. Then G (3D games), then H.
 5. In parallel when convenient: S6 runtime applier, real-hardware tests of the PICA and TexEnv output, S8a.

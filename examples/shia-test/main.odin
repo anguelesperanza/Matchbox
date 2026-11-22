@@ -711,7 +711,8 @@ main :: proc() {
 		dt := matchbox.get_delta_time()
 		matchbox.poll_events()
 
-		if matchbox.is_key_pressed(.ESCAPE) {
+		// SELECT for the handhelds, which have no Escape; the demo quits on it too
+		if matchbox.is_key_pressed(.ESCAPE) || matchbox.is_gamepad_pressed(.SELECT) {
 			matchbox.stop_running()
 		}
 		if matchbox.is_key_pressed(.T) {

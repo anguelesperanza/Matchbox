@@ -207,7 +207,7 @@ write_scaled_sheet :: proc(
 
 	// The same art is smaller, so fewer pixels make a world unit
 	small_ppu := ppu * f64(small_height) / f64(frame_height)
-	write_meta(path, small_ppu, columns, rows, len(frames), small_width, small_height)
+	write_meta(path, small_ppu, columns, rows, len(frames), small_width, small_height, source_ppu = ppu)
 	fmt.printfln("%s: %dx%d frames -> %dx%d pixels: %s", target, small_width, small_height, sheet_width, sheet_height, path)
 }
 
@@ -403,8 +403,12 @@ write_png :: proc(path: string, pixels: []u8, width, height: int) {
 	}
 }
 
-/*Writes `name.meta` next to `name.png`*/
-write_meta :: proc(png_path: string, ppu: f64, columns, rows, frames, frame_width, frame_height: int) {
+/*
+	Writes `name.meta` next to `name.png`. `source_ppu` is the full-size sheet's ppu, given
+	for a target's smaller copy: a game writes a clip's offset in the pixels of the art it
+	drew, and Matchbox needs it to turn those into this sheet's pixels. 0 leaves it out
+*/
+write_meta :: proc(png_path: string, ppu: f64, columns, rows, frames, frame_width, frame_height: int, source_ppu: f64 = 0) {
 	dot := strings.last_index_byte(png_path, '.')
 	base := png_path[:dot] if dot >= 0 else png_path
 	meta_path := strings.concatenate({base, ".meta"})
@@ -412,6 +416,9 @@ write_meta :: proc(png_path: string, ppu: f64, columns, rows, frames, frame_widt
 	builder := strings.builder_make()
 	fmt.sbprintfln(&builder, "# Written by sheetpack: %d frames of %dx%d", frames, frame_width, frame_height)
 	fmt.sbprintfln(&builder, "ppu     = %g", ppu)
+	if source_ppu > 0 {
+		fmt.sbprintfln(&builder, "source_ppu = %g # the full-size sheet's ppu: clip offsets are in its pixels", source_ppu)
+	}
 	fmt.sbprintfln(&builder, "columns = %d", columns)
 	fmt.sbprintfln(&builder, "rows    = %d", rows)
 	if frames != columns * rows {

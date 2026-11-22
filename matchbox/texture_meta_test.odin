@@ -14,6 +14,21 @@ meta_parses_all_keys :: proc(t:^testing.T) {
 	testing.expect_value(t, meta.frame_count, 30)
 }
 
+// What sheetpack writes for the 3DS's copy of shia.png
+@(test)
+meta_parses_the_source_ppu :: proc(t:^testing.T) {
+	meta, err, _ := parse_texture_meta("ppu     = 64\nsource_ppu = 256 # the full-size sheet's ppu\ncolumns = 13\nrows    = 13\n")
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, meta.pixels_per_unit, 64)
+	testing.expect_value(t, meta.source_pixels_per_unit, 256)
+
+	meta, err, _ = parse_texture_meta("ppu = 64")
+	testing.expect_value(t, meta.source_pixels_per_unit, 0) // none given: offsets are in this sheet's pixels
+
+	_, err, _ = parse_texture_meta("source_ppu = 0")
+	testing.expect(t, err != "")
+}
+
 @(test)
 meta_defaults :: proc(t:^testing.T) {
 	meta, err, _ := parse_texture_meta("")

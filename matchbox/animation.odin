@@ -44,7 +44,8 @@ Animation_Clip :: struct {
 	seconds_per_frame:f32, // 0 = frozen on the first frame
 
 	// Moves the drawing, not the sprite: image pixels, +x right and +y up, in the
-	// sheet's own pixels, so it scales with the sprite. For art that is drawn off
+	// pixels of the full-size art (a target's smaller sheet says how much smaller
+	// with `source_ppu` in its .meta), so it scales with the sprite. For art that is drawn off
 	// its anchor -- a crouch attack whose frames sit 33 pixels left of the crouch
 	// it returns to would jump back when it ends. Mirrored with `flip_x`
 	offset:[2]f32,
@@ -291,7 +292,18 @@ because the art it describes is mirrored too*/
 calculate_animation_render_offset :: proc(sprite:Animated_Sprite) -> [2]f32 {
 	if sprite.pixels_per_unit <= 0 do return {}
 
-	shift := sprite.clip.offset / sprite.pixels_per_unit * sprite.scale
+	// The offset is in the full-size art's pixels. A target's smaller sheet has fewer
+	// pixels for the same art (64 for 256 on the 3DS), so it shrinks by the same ratio;
+	// divided by the sheet's ppu alone, it moved the 3DS drawing four times too far.
+	// Not by the sprite's own ppu: a game may set that for size, and the ratio between
+	// the two sheets stays the same either way
+	texture := sprite.clip.texture
+	art_to_sheet:f32 = 1
+	if texture.source_pixels_per_unit > 0 && texture.pixels_per_unit > 0 {
+		art_to_sheet = texture.pixels_per_unit / texture.source_pixels_per_unit
+	}
+
+	shift := sprite.clip.offset * art_to_sheet / sprite.pixels_per_unit * sprite.scale
 	if sprite.flip_x == true do shift.x = -shift.x
 	if sprite.flip_y == true do shift.y = -shift.y
 	return shift

@@ -14,6 +14,16 @@ package matchbox
 		rows    = 2     # frames down
 		frames  = 4     # optional: how many of the columns * rows cells are used
 
+	A target's smaller copy of a sheet (sheetpack's -3ds and -vita) also says what the
+	full-size sheet's ppu is:
+
+		ppu        = 64
+		source_ppu = 256   # optional: the full-size art's ppu
+
+	A clip's offset is written in the pixels of the art the game was made with, so on the
+	3DS's quarter-size sheet it has to shrink by 64 / 256 to land in the same place. Without
+	`source_ppu` the offset is taken to be in this sheet's own pixels, as it always was.
+
 	A missing file means: ppu 1, one frame. An image with no file that is then
 	animated gets a guessed grid instead (calculate_guessed_texture_meta below).
 */
@@ -26,6 +36,7 @@ Texture_Meta :: struct {
 	columns:i32,
 	rows:i32,
 	frame_count:i32,
+	source_pixels_per_unit:f32, // the full-size sheet's ppu, for a target's smaller copy; 0 when the file has none
 }
 
 /*What a texture with no .meta file gets*/
@@ -67,6 +78,13 @@ parse_texture_meta :: proc(text:string) -> (meta:Texture_Meta, error:string, lin
 			}
 			meta.pixels_per_unit = number
 
+		case "source_ppu":
+			number, ok := strconv.parse_f32(value)
+			if ok == false || number <= 0 {
+				return meta, "source_ppu must be a number above 0", line
+			}
+			meta.source_pixels_per_unit = number
+
 		case "columns":
 			number, ok := strconv.parse_int(value, 10)
 			if ok == false || number < 1 {
@@ -90,7 +108,7 @@ parse_texture_meta :: proc(text:string) -> (meta:Texture_Meta, error:string, lin
 			frames_given = true
 
 		case:
-			return meta, "unknown name (expected ppu, columns, rows or frames)", line
+			return meta, "unknown name (expected ppu, source_ppu, columns, rows or frames)", line
 		}
 	}
 

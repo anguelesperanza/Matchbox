@@ -24,9 +24,4 @@ when VITA {
 	print :: proc(args: ..any) {
 		vito.println(..args)
 	}
-
-	/*Procedure group that will call the appropiate destroy procedure based on arugment passed*/
-	destroy :: proc {
-		destroy_audio,
-	}
 }

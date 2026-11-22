@@ -21,6 +21,7 @@ Texture :: struct {
 
 	// From the optional .meta file next to the image (see texture_meta.odin)
 	pixels_per_unit:f32, // image pixels per world unit. Sprites use it as their default
+	source_pixels_per_unit:f32, // the full-size sheet's ppu when this is a target's smaller copy, else 0 (texture_meta.odin)
 	columns:i32, // frames across
 	rows:i32, // frames down
 	frame_count:i32,

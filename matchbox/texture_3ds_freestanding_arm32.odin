@@ -61,6 +61,7 @@ when !VITA {
 
 		meta, meta_found := load_texture_meta(filename)
 		texture.pixels_per_unit = meta.pixels_per_unit
+		texture.source_pixels_per_unit = meta.source_pixels_per_unit
 		texture.columns = meta.columns
 		texture.rows = meta.rows
 		texture.frame_count = meta.frame_count
@@ -112,6 +113,7 @@ when !VITA {
 
 		meta := default_texture_meta()
 		texture.pixels_per_unit = meta.pixels_per_unit
+		texture.source_pixels_per_unit = meta.source_pixels_per_unit
 		texture.columns = meta.columns
 		texture.rows = meta.rows
 		texture.frame_count = meta.frame_count

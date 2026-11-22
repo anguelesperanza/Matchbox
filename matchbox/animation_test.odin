@@ -168,6 +168,24 @@ offset_scales_with_the_sprite_and_mirrors_with_flip :: proc(t:^testing.T) {
 	testing.expect_value(t, shift.y, 0.25)
 }
 
+// shia-test's crouch attack, on the PC's full-size sheet and the 3DS's quarter-size copy:
+// the same offset, written in the full-size art's pixels, moves both by the same amount
+@(test)
+offset_is_the_same_on_a_targets_smaller_sheet :: proc(t:^testing.T) {
+	full := Texture{frame_count = 4, columns = 2, rows = 2, pixels_per_unit = 256}
+	small := Texture{frame_count = 4, columns = 2, rows = 2, pixels_per_unit = 64, source_pixels_per_unit = 256}
+
+	full_clip := create_animation_clip(full, 0.1)
+	small_clip := create_animation_clip(small, 0.1)
+	full_clip.offset = {33, 6}
+	small_clip.offset = {33, 6}
+
+	full_shift := calculate_animation_render_offset(create_animated_sprite_from_clip(full_clip, 3))
+	small_shift := calculate_animation_render_offset(create_animated_sprite_from_clip(small_clip, 3))
+	testing.expect_value(t, full_shift, [2]f32{33.0 / 256 * 3, 6.0 / 256 * 3})
+	testing.expect_value(t, small_shift, full_shift)
+}
+
 @(test)
 no_offset_moves_nothing :: proc(t:^testing.T) {
 	sprite := create_animated_sprite_from_clip(test_sheet())

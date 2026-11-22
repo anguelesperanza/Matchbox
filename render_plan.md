@@ -22,6 +22,12 @@ Updated 2026-11-21 (end of day): **A0b T0-T4 done.**
 - The demo builds unchanged on all three targets.
 - The checks to run are in `docs/next_session_handoff.md`, "Check everything".
 - Phases C and V start from here.
+Updated 2026-11-22: **Phase C, C0 to C4 done, checked in Azahar only.**
+- The 3DS draws the shared render queue with the mbsc-generated shader and `.tev` plan.
+- `examples/render-check` reads the framebuffer back, and all ten probes pass.
+- C5 waits on B8, and C6 is optional. The Phase C gate (the cube scene, real hardware) is not met yet; see "Phase C: status".
+- **Citra's 2024 nightly is not used for 3DS checks any more.** It hangs on `C3D_DrawElements` and ignores vertex
+  uniforms, where Azahar draws the same build correctly. Azahar replaces it wherever this plan says Citra.
 
 ## The decision
 
@@ -281,7 +287,7 @@ models or skinning.
   - Files have no target suffix, and `odin test` runs on PC.
   - Main's `display_test.odin` is the model.
 - **Every step has a "done when".** Don't start the next step until it is met
-  on all three targets (Citra for the 3DS, Vita3K or real hardware for the
+  on all three targets (Azahar for the 3DS, Vita3K or real hardware for the
   Vita; real hardware at the end of each phase). If the Vita emulator isn't
   trusted for GXM details, treat a step as done on the Vita only after a
   hardware run.
@@ -719,6 +725,29 @@ aspect, and letterbox and expand both behave as in the mockups.
 
 ## Phase C: 3DS 3D core (citro3d)
 
+**Phase C: status (2026-11-22).** C0 to C4 are done and checked in Azahar 2126.2; nothing has run on a real 3DS yet.
+How the build differs from the steps below, which are kept as written:
+- **C0.** The shader is generated rather than hand-written: `matchbox/shaders/mesh.3ds.v.pica` and `mesh.3ds.tev`
+  are mbsc's output for `mesh.mbs`, committed like `mesh.pc.hlsl`. `3ds_build.bat` assembles the `.pica` with
+  picasso into `romfs/shaders/mesh.shbin`. The uniforms are mbsc's names: `render_model`, `frame_view_projection`,
+  `render_tint`, `render_uv_rectangle`. The old 2D path and `vshader.shbin` were already gone (A0b).
+- **C1.** The projection is linalg's OpenGL one, followed by `GL_TO_PICA_DEPTH` (z' = 0.5z - 0.5w) and
+  `TILT_TO_PANEL`. citro3d's default depth map makes near 1, so the test is GREATER and depth clears to 0.
+- **C2.** The TexEnv stages and the alpha test come from the `.tev` file, read by the shared `shader_tev.odin` (with
+  PC tests). Untextured draws bind an 8x8 white texture, because 8x8 is the smallest the PICA takes. Real textures
+  are Phase D.
+- **C3.** Each mesh is one vertex and one 16-bit index buffer in linear memory. The attribute layout is set once
+  per frame and the buffer per draw.
+- **C4.** The queue sort is in `render.odin`, shared by every target. Each backend only supplies
+  `calculate_render_item_sort_key`.
+- **Checked by:** `examples/render-check` (3DS only), which reads the framebuffer back. All ten probes pass:
+  depth against submission order, alpha blending, back-face culling, both corners, and the background.
+- **Open:**
+  - C5 waits on B8.
+  - C6 is optional.
+  - The bottom screen is queued and thrown away, because it holds the text console.
+  - The gate below (the cube scene) has not been run.
+
 **C0. Shader toolchain.**
 - Only `romfs/vshader.shbin` (a compiled binary) is in the repo; its source
   isn't.
@@ -766,7 +795,7 @@ aspect, and letterbox and expand both behave as in the mockups.
 - The queue is drawn once per eye.
 
 **Phase C done when:** the Phase B cube and transparent quad scene runs on
-Citra and on real hardware. (C0 first deletes the old 2D sprite and triangle
+Azahar and on real hardware. (C0 first deletes the old 2D sprite and triangle
 path from the 3DS backend, as B0 did on PC.)
 
 ---
@@ -1406,9 +1435,9 @@ above all the same.
 |---|---|---|
 | PC `Constants.viewport_size` and the pixel→NDC shader maths | `view_projection` cbuffer | B4 |
 | PC immediate `batch` + `flush` | Render queue | B7 |
-| 3DS `Renderer` enum, `use_renderer`, `finish_renderer` | Render queue | C4 |
-| 3DS hand-built pixel projection rows | `Mtx_OrthoTilt` / `Mtx_PerspTilt` | C0 |
-| 3DS `vshader.shbin` without source | `vshader.v.pica` + picasso step | C0 |
+| 3DS `Renderer` enum, `use_renderer`, `finish_renderer` | Render queue | C4 (gone, 2026-11-22) |
+| 3DS hand-built pixel projection rows | `GL_TO_PICA_DEPTH` and `TILT_TO_PANEL` on linalg's projection | C0 (gone, 2026-11-22) |
+| 3DS `vshader.shbin` without source | mbsc's `mesh.3ds.v.pica` + picasso step | C0 (gone, 2026-11-22) |
 | `Sprite.x/y` (pixels), `width/height`, pixel `source` | `position: [3]f32`, frame index, PPU | E1 |
 | citro2d sprite drawing (`DrawImageAtRotated`, sub-texture maths) | Quads in the queue | E1 |
 | `render_triangle_points` (pixel-space) | World-space shapes | E4 |

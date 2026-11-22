@@ -14,12 +14,13 @@ package matchbox
 	imports stay outside: Odin does not allow `import` inside `when`, and an import whose
 	procedures are never called adds nothing to the build.
 
-	Textures and meshes are empty until Phase C draws: the contract only needs the names
-	to exist so the shared files compile.
+	Meshes and the pipeline that draws them are in render_3ds_freestanding_arm32.odin.
+	Textures are not loaded yet: load_texture gives one with no image, which draws as white.
 */
 
 import "base:runtime"
 
+import "o3dx/c3d"
 import "o3dx/o3dx"
 
 when !VITA {
@@ -42,6 +43,8 @@ when !VITA {
 
 		timestamp:Timestamp, // osGetTime values, so its type is the 3DS's own
 
+		pipeline:Render_Pipeline, // the shader, its uniforms and its TexEnv plan (render_3ds_freestanding_arm32.odin)
+
 		// Fixed values the 3DS backend works with
 		display_settings:Display_Settings,
 	}
@@ -59,11 +62,13 @@ when !VITA {
 		right_thumbstick_max = 146,
 	}
 
-	/*Empty until Phase C uploads textures with citro3d*/
-	Backend_Texture :: struct {}
-
-	/*Empty until Phase C builds vertex buffers with citro3d*/
-	Mesh :: struct {}
+	/*
+		What only a 3DS texture has: citro3d's texture, on the heap so the copies a sprite and its
+		clips make all point at one. nil until load_texture uploads images, and drawn as white
+	*/
+	Backend_Texture :: struct {
+		texture:^c3d.C3D_Tex,
+	}
 
 	/*
 		Sets up the Odin runtime on the 3DS and returns the context the game runs in. Called
@@ -80,8 +85,8 @@ when !VITA {
 	}
 
 	/*
-		Not loaded yet: returns a Texture of the right size once Phase C uploads it. Until then
-		an empty Texture, so a game that loads images still runs and draws nothing
+		Not loaded yet: Phase D uploads images with citro3d. Until then an empty Texture, which
+		the renderer draws with its white texture (render_3ds_freestanding_arm32.odin)
 	*/
 	load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
 		texture.filter = filter
@@ -90,7 +95,7 @@ when !VITA {
 
 	/*
 		A texture from RGBA8 pixels already in memory: what create_font uploads its atlas with.
-		Records the size and uploads nothing until Phase C, so the sizes a game reads are right
+		Records the size and uploads nothing until Phase D, so the sizes a game reads are right
 	*/
 	create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
 		texture.width = width

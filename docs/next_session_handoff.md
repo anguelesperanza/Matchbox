@@ -35,7 +35,14 @@ rules too; they are repeated here so this file stands alone.
 10. Gotchas on this machine: Bash/Python heredocs mangle `\n` inside Odin string literals (use the Edit tool); devkitPro
    `make` does not work from this shell (compile C by hand, see "Tooling").
 
-## State of the repo (2026-11-21)
+## State of the repo (2026-11-21, Phase C added 2026-11-22)
+
+- **2026-11-22: Phase C, C0 to C4 done on the 3DS, checked in Azahar only** (render_plan.md, "Phase C: status").
+  - The 3DS draws the shared render queue with mbsc's `mesh.3ds.v.pica` and `.tev`.
+  - `examples/render-check` passes all ten framebuffer probes.
+  - Textures still have no image (Phase D), so they draw white, and the demo still stops at its first sprite.
+  - **Use Azahar, not Citra.** The 2024 Citra nightly hangs on `C3D_DrawElements` and ignores vertex uniforms.
+    That cost a long hunt in which nothing in Matchbox was wrong.
 
 - HEAD `f165a6f` on `full-rewrite`; working tree: only `fixes.md` modified (the user's).
 - Tests: `odin test tools/mbsc` -> 120 pass (a leak report from `pica_safe_name` in `pica.odin` prints during the run:
@@ -57,7 +64,8 @@ rules too; they are repeated here so this file stands alone.
   - The demo checks and builds on all three. On the handhelds it runs until its first sprite, then stops on
     `ensure("Sprite has no texture")`, because handheld textures have no size until Phases C and V load them.
 - **What is still empty on the handhelds:**
-  - Nothing is drawn but the clear colour.
+  - The Vita draws nothing but the clear colour (Phase V). The 3DS draws the top screen; its bottom screen holds the
+    text console.
   - Text has no glyphs: stb is PC-only, in `font_windows.odin`, and F2 is undecided.
   - Touch isn't read.
   - Audio is stubbed on all three targets.
@@ -67,16 +75,17 @@ rules too; they are repeated here so this file stands alone.
 
 ## Check everything
 
-Run these after any change, on all three targets. The counts are from 2026-11-21.
+Run these after any change, on all three targets. The counts are from 2026-11-22.
 
 ```
 PC:    odin check matchbox -no-entry-point          (clean; -vet: the 3 old issues)
-       odin test matchbox                           (63 pass)
+       odin test matchbox                           (66 pass)
        odin test tools/mbsc                         (120 pass)
        odin build examples/shia-test ; odin check demo.odin -file
 3DS:   3ds_check.bat                                (the demo at the root)
        3ds_check.bat examples\handheld-boot
-       3ds_build.bat examples\handheld-boot         -> app.3dsx; four boot: lines in Citra/Azahar
+       3ds_build.bat examples\handheld-boot         -> app.3dsx; four boot: lines in Azahar
+       3ds_build.bat examples\render-check          -> app.3dsx; "check: failures 0" on Azahar's bottom screen
 Vita:  vita_check.bat
        vita_check.bat examples\handheld-boot
        vita_build.bat examples\handheld-boot        -> MyGame.vpk; four boot: lines in Vita3K
@@ -87,7 +96,11 @@ Vita:  vita_check.bat
 - **Citra's command-line build** (`citra.exe`) logs to stderr, but it drops `svcOutputDebugString`, which is where
   `mb.print` goes, unless `%APPDATA%\Citra\config\sdl2-config.ini` has `log_filter = *:Info Debug.Emulated:Debug`.
   Set it for the run, then put the file back.
-- **Azahar's log** loses the game's output when the emulator is killed.
+- **Azahar's log** loses the game's output when the emulator is killed. render-check avoids the log: it prints on
+  the bottom screen and keeps drawing, so a screenshot of the Azahar window shows both the scene and the results.
+  Launch Azahar with the `.3dsx` path as its argument.
+- **Citra is not to be trusted for drawing** (see "State of the repo"). Its logging notes above still hold for
+  print-only checks.
 
 ## Status by phase (from `render_plan.md`, checked against the repo)
 
@@ -95,7 +108,8 @@ Vita:  vita_check.bat
 |---|---|
 | A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b done** (2026-11-21, T0-T4: target selection, the backend contract, Vita scripts, the handhelds' entry file). **A0 verified in Citra** (the o3dx context: `fmt.tprintf`, `make`/`append`, and a failed `assert` printed its message). A1/A4 shared maths moves over when a handheld needs it. |
 | B (PC 3D core) | Done on PC. **B8 (viewport/scissor, fit policy, overscan cap) deferred** by the user. |
-| C (3DS core), V (Vita core) | **Not done.** Everything in them is still to do. |
+| C (3DS core) | **C0-C4 done** (2026-11-22, Azahar only). C5 waits on B8; C6 optional. Gate (cube scene, real 3DS) not run. |
+| V (Vita core) | **Not done.** Everything in it is still to do. |
 | D (textures/assets) | D1-D3 done on PC. **D4 (subfolder asset names on the 3DS) open.** |
 | E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). Handheld halves open. |
 | F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: font code ported from `main` (`font.odin`, `text.odin`, CC0 Bitrimus font); the plan does not mark it done, and the 3DS/Vita text approach is undecided. |
@@ -127,12 +141,12 @@ What is done and how well it is verified:
 | S0-S3 (language, front end, HLSL, reflection) | yes | tests; the PC engine loads `mesh.pc.hlsl` + `mesh.pc.refl`; pixel tests on the D3D software device. **The user should still run the demo to confirm it looks unchanged**, then may delete the hand-written `matchbox/shaders/mesh.hlsl` (kept, not loaded). |
 | S4 Vita Cg | yes | compiled with `psp2cgc`; mesh programs ran in Vita3K. **No Vita runtime exists**, no real Vita. Doc: `docs/shader_cg.md`. |
 | S5 3DS vertex (PICA) | yes | every program assembles with `picasso`; assembly agrees numerically with the IR interpreter for all 3DS built-ins; a triangle drawn in **Azahar** with matrix, `[4]f32` and bool uniforms. **No real 3DS.** Doc: `docs/shader_pica.md`. |
-| S6 3DS fragment (TexEnv `.tev`) | plan generator + tests | One run on Azahar with hand-applied stages: `MULTIPLY_ADD TEXTURE0 PRIMARY_COLOR CONSTANT` gave the exact expected colour; alpha test `GEQUAL 0x70` kept, `0x90` discarded. **Not covered:** INTERPOLATE, ADD_MULTIPLY, one-minus operands, PREVIOUS chaining, several textures, real 3DS. **No runtime reads `.tev` yet.** |
+| S6 3DS fragment (TexEnv `.tev`) | plan generator + tests | One run on Azahar with hand-applied stages: `MULTIPLY_ADD TEXTURE0 PRIMARY_COLOR CONSTANT` gave the exact expected colour; alpha test `GEQUAL 0x70` kept, `0x90` discarded. **Not covered:** INTERPOLATE, ADD_MULTIPLY, one-minus operands, PREVIOUS chaining, several textures, real 3DS. **The 3DS runtime reads `.tev` since Phase C** (`shader_tev.odin`), and applies `mesh.3ds.tev` (MODULATE, alpha test from `render_alpha_cutoff`). |
 | S7 capabilities | yes | tests |
 
 Open Phase S work:
-- A 3DS runtime step that reads `.tev` and applies it (`C3D_TexEnv*`, `C3D_AlphaTest`), plus Azahar checks of the other
-  stage functions. Note citro3d blends by default: an opaque draw must turn blending off.
+- Azahar checks of the other TexEnv stage functions. The runtime applier exists (Phase C), but only `mesh.3ds.tev` has
+  run through it. It refuses a constant read from a uniform and more than one texture, because both need custom shaders.
 - Errors without source spans: E3 and E21 come from the backends as plain strings; structural E2 and E5 are not yet
   AST-spanned. Making them rustc-style with a span is the open polish.
 - Custom shaders in the engine: `set_shader_value(name, value)` has no `shader` argument (one built-in shader); there is no
@@ -182,8 +196,9 @@ Open items (see the file for the user's wording and legend):
 
 - picasso `C:\devkitPro\tools\bin\picasso.exe` (tests find it via `PICASSO`, `DEVKITPRO` or `C:/devkitPro`); `psp2cgc` in the
   vito repo (`PSP2CGC` or `../vito/tools/psp2cgc.exe`); tests skip when a tool is absent.
-- Emulators: Azahar `C:\Program Files\Azahar\azahar.exe` (an "Update Available" dialog may appear; ignore it); Vita3K
-  `C:\Users\King-\Documents\windows-latest\Vita3K.exe`. The test 3DS is a New 3DS LL.
+- Emulators: Azahar `C:\Program Files\Azahar\azahar.exe` (2126.2 since 2026-11-22); Vita3K
+  `C:\Users\King-\Documents\vita3k\Vita3K.exe` (updated 2026-11-22; the old one, `C:\Users\King-\Documents\windows-latest\Vita3K.exe`,
+  is kept as a fallback). The test 3DS is a New 3DS LL.
 - Building a small 3DS test app by hand (the shape that worked): `picasso -o x.shbin x.v.pica`; `bin2s -a 4 -H x_shbin.h x.shbin > x_shbin.s`;
   `arm-none-eabi-gcc -c x_shbin.s`; compile `main.c` with `-O2 -mword-relocations -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -D__3DS__ -I<libctru include>`;
   link with `-specs=3dsx.specs ... -lcitro3d -lctru -lm`; `3dsxtool app.elf app.3dsx`. PATH needs `C:\devkitPro\devkitARM\bin` and `C:\devkitPro\tools\bin`.
@@ -196,8 +211,8 @@ Open items (see the file for the user's wording and legend):
 
 1. Finish the PC side of the plan while the 2D game keeps feeding `fixes.md`: B8 (viewport, fit policy, overscan), F2 closure,
    the open decisions above, the `[c]` renames.
-2. Unblock the handhelds: repair the 3DS build against the new API (shared files need target-correct build tags), do A0b
-   (target selection, Vita scripts), then Phase C steps against the plan with generated shaders from `mbsc`.
+2. Handhelds: A0b and Phase C C0-C4 are done. Next: Phase D textures on the 3DS (so sprites have images and the demo runs),
+   the Phase C gate scene, and C5 once B8 is settled.
 3. Phase V (Vita), reusing `mbsc --emit-cg` + committed `.gxp`.
 4. Then G (3D games), then H.
 5. In parallel when convenient: S6 runtime applier, real-hardware tests of the PICA and TexEnv output, S8a.

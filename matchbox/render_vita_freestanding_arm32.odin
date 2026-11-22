@@ -60,4 +60,13 @@ when VITA {
 	clear_background :: proc(color:[4]f32) {
 		gfx.clear(color)
 	}
+
+	/*
+		What render.odin's sort groups opaque items by. All equal until Phase V gives meshes and
+		textures GXM objects to group by: the stable sort then keeps submission order
+	*/
+	@(private)
+	calculate_render_item_sort_key :: proc(item:Render_Item) -> [2]uintptr {
+		return {}
+	}
 }

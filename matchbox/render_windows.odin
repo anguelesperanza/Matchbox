@@ -16,7 +16,6 @@ package matchbox
 
 import win "core:sys/windows"
 import "core:mem"
-import "core:slice"
 import "core:strings"
 
 import "vendor:directx/d3d11"
@@ -48,11 +47,6 @@ GL_TO_D3D_DEPTH :: matrix[4, 4]f32 {
 	0, 0, 0,   1,
 }
 
-Depth_Mode :: enum {
-	OPAQUE,
-	TRANSPARENT,
-	DISABLED,
-}
 
 
 
@@ -99,6 +93,13 @@ destroy_mesh :: proc(mesh:Mesh) {
 }
 
 
+
+/*What render.odin's sort groups opaque items by: the texture, then the mesh, so the same
+GPU objects are bound back to back*/
+@(private)
+calculate_render_item_sort_key :: proc(item:Render_Item) -> [2]uintptr {
+	return {uintptr(item.texture.view), uintptr(item.mesh.vertex_buffer)}
+}
 
 /*Issues the draw call for one queued item. The render state is already set*/
 @(private)
@@ -551,22 +552,7 @@ camera_end :: proc() {
 		depth_transparent = .DISABLED
 	}
 
-	// Opaque items: group them by mesh so the same buffers are bound back to back.
-	// A stable sort keeps submission order for equal items. A screen pass skips it:
-	// with depth off, submission order is the paint order
-	if mbi.screen_pass == false {
-		slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Render_Item) -> bool {
-			if a.texture.view != b.texture.view {
-				return uintptr(a.texture.view) < uintptr(b.texture.view)
-			}
-			return uintptr(a.mesh.vertex_buffer) < uintptr(b.mesh.vertex_buffer)
-		})
-	}
-
-	// Transparent items: farthest first, so nearer ones blend over farther ones
-	slice.stable_sort_by(mbi.transparent_items[:], proc(a, b:Render_Item) -> bool {
-		return a.depth > b.depth
-	})
+	sort_render_queue()
 
 	for item in mbi.opaque_items {
 		set_render_state(depth_opaque, .NONE, item.cull)

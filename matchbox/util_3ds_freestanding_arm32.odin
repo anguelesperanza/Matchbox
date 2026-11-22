@@ -49,6 +49,29 @@ when !VITA {
 		return name
 	}
 
+	/*
+		Reads a whole file into memory the caller deletes, as 32-bit words: what the shader
+		binary parser takes, which also gives it the 4-byte alignment it needs. Empty when the
+		file cannot be read
+	*/
+	read_file_words :: proc(path:cstring) -> []u32 {
+		file := ctru.fopen(path, "rb")
+		if file == nil do return nil
+		defer ctru.fclose(file)
+
+		ctru.fseek(file, 0, 2) // SEEK_END
+		size := int(ctru.ftell(file))
+		ctru.fseek(file, 0, 0) // SEEK_SET
+		if size <= 0 do return nil
+
+		words := make([]u32, (size + 3) / 4)
+		if int(ctru.fread(raw_data(words), 1, uint(size), file)) != size {
+			delete(words)
+			return nil
+		}
+		return words
+	}
+
 	/*3DS equivalent of os.is_file: true if the file can be opened*/
 	file_exists :: proc(path: cstring) -> bool {
 		file := ctru.fopen(path, "rb")

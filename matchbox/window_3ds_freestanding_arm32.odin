@@ -63,6 +63,24 @@ when !VITA {
 		)
 
 
+		create_render_pipeline()
+
+		// The meshes every sprite and shape is drawn with, as on PC
+		sprite_vertices, sprite_indices := mesh_quad()
+		mbi.sprite_mesh = create_mesh(sprite_vertices, sprite_indices)
+		delete(sprite_vertices)
+		delete(sprite_indices)
+
+		triangle_vertices, triangle_indices := mesh_triangle()
+		mbi.triangle_mesh = create_mesh(triangle_vertices, triangle_indices)
+		delete(triangle_vertices)
+		delete(triangle_indices)
+
+		circle_vertices, circle_indices := mesh_circle()
+		mbi.circle_mesh = create_mesh(circle_vertices, circle_indices)
+		delete(circle_vertices)
+		delete(circle_indices)
+
 		// Delta time
 		mbi.timestamp.last_time = ctru.osGetTime()
 	}
@@ -87,6 +105,10 @@ when !VITA {
 
 	/*Cleans up resources created by Matchbox*/
 	cleanup :: proc() {
+		destroy_mesh(mbi.triangle_mesh)
+		destroy_mesh(mbi.circle_mesh)
+		destroy_mesh(mbi.sprite_mesh)
+		destroy_render_pipeline()
 
 		c3d.Fini()
 		ctru.gfxExit()

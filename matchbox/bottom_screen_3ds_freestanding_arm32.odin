@@ -13,8 +13,9 @@ package matchbox
 		is_bottom_screen_visible  always true
 
 	Its camera is the HUD's height in units and the bottom screen's own 4:3 shape. Drawing
-	goes nowhere until Phase C gives it a citro3d target (render_plan.md); the queue is
-	recorded and emptied the same way as the top screen's.
+	goes nowhere yet: the bottom screen holds the text console mb.print writes to, and has no
+	citro3d target of its own (bottom_screen_start says more). The queue is recorded and
+	emptied the same way as the top screen's.
 
 	Inside `when !VITA` for the reason in backend_3ds_freestanding_arm32.odin
 */
@@ -41,9 +42,15 @@ when !VITA {
 		return create_screen_camera(calculate_bottom_screen_view_height(mbi.screen_height, mbi.screen_settings.bottom_screen_aspect))
 	}
 
-	/*Everything drawn until bottom_screen_end is the bottom screen*/
+	/*
+		Everything drawn until bottom_screen_end is the bottom screen. Queued and thrown away for
+		now: the bottom screen is the text console mb.print writes to (consoleInit in init), and
+		it has no render target yet. Drawing it through the top screen's target would put the
+		bottom screen's content over the top screen's
+	*/
 	bottom_screen_start :: proc() {
 		camera_start(get_bottom_screen_camera())
+		mbi.discard_pass = true
 	}
 
 	bottom_screen_end :: proc() {

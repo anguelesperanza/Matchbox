@@ -9,10 +9,19 @@ package matchbox
 */
 
 import "core:math/linalg"
+import "core:slice"
 
 Blend_Mode :: enum {
 	NONE,
 	ALPHA,
+}
+
+/*How a draw uses the depth buffer. camera_end picks it: OPAQUE and TRANSPARENT in a world pass,
+DISABLED in a screen pass, where what is drawn last lands on top*/
+Depth_Mode :: enum {
+	OPAQUE, // tested and written
+	TRANSPARENT, // tested, not written, so things behind still show through
+	DISABLED,
 }
 
 Cull_Mode :: enum {
@@ -62,4 +71,30 @@ queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_M
 		item.depth = -view_position.z
 		append(&mbi.transparent_items, item)
 	}
+}
+
+/*
+	Puts the queue in the order camera_end draws it. Shared so every target draws the same
+	scene the same way; only the key the opaque items are grouped by is the backend's
+	(calculate_render_item_sort_key), because it is made of GPU objects.
+
+	Opaque items are grouped by texture, then mesh, so the same objects are bound back to back.
+	The sort is stable, so equal items keep the order they were submitted in. A screen pass
+	skips it: with depth off, submission order is the paint order.
+	Transparent items go farthest first, so nearer ones blend over farther ones
+*/
+@(private)
+sort_render_queue :: proc() {
+	if mbi.screen_pass == false {
+		slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Render_Item) -> bool {
+			key_a := calculate_render_item_sort_key(a)
+			key_b := calculate_render_item_sort_key(b)
+			if key_a[0] != key_b[0] do return key_a[0] < key_b[0]
+			return key_a[1] < key_b[1]
+		})
+	}
+
+	slice.stable_sort_by(mbi.transparent_items[:], proc(a, b:Render_Item) -> bool {
+		return a.depth > b.depth
+	})
 }

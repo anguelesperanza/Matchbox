@@ -28,6 +28,15 @@ Updated 2026-11-22: **Phase C, C0 to C4 done, checked in Azahar only.**
 - C5 waits on B8, and C6 is optional. The Phase C gate (the cube scene, real hardware) is not met yet; see "Phase C: status".
 - **Citra's 2024 nightly is not used for 3DS checks any more.** It hangs on `C3D_DrawElements` and ignores vertex
   uniforms, where Azahar draws the same build correctly. Azahar replaces it wherever this plan says Citra.
+Updated 2026-11-22 (later): **Phase D on the 3DS done (D1, D2, D4), checked in Azahar only.** See "Phase D: status".
+The user also settled the other handheld gaps:
+- **Text (F2):** each target uses its own native text: stb on PC, the system font on the 3DS, and the Vita's font system.
+  A shared font framework may come later.
+- **The 3DS bottom screen:** `print` output becomes text drawn on the bottom screen, in place of the ctru console.
+- **Touch** gets implemented.
+- **Audio** stays stubbed. The user writes it.
+- **The handheld halves of E and F** get implemented.
+- **The small loose ends** wait for a tidy-up at the end.
 
 ## The decision
 
@@ -940,6 +949,28 @@ without `psp2cgc`, and the PC and 3DS scenes still draw.
 ---
 
 ## Phase D: textures and assets
+
+**Phase D: status (2026-11-22).** The 3DS half of D1, D2 and D4 is done and checked in Azahar 2126.2.
+- **D1.** `texture_3ds_freestanding_arm32.odin` loads the `.t3x` with Tex3DS and keeps the `C3D_Tex` on the
+  heap. `create_texture_from_pixels` pads and tiles pixels the way tritex does. The renderer maps the shared
+  0..1, v-down coordinates onto the power-of-two, v-up canvas.
+- **D2.** `3ds_build.bat` copies each image's `.meta` next to its `.t3x`. An image with no `.meta` gets its
+  frames guessed from its pixels, read back from the tiled texture.
+  - **A `.meta` belongs to the picture beside it.** When a target's own image replaces a shared one, the
+    shared `.meta` is left out, and the target's own `.meta` (if any) is used. Both `3ds_build.bat` and
+    `vita_build.bat` do this. Without the rule, a smaller 3DS copy was read with the PC's ppu and grid.
+  - `assets\3ds\images\meme_cat.meta` is the 3DS cat's own: ppu 6.4, scaled the same way as the 32x32
+    image, so the cat is 5 units wide on both targets.
+- **D4.** The rule is that subfolders are kept: `images\enemies\bat.png` becomes `gfx\enemies\bat.t3x`, the same
+  name `load_texture` takes on PC.
+- **Also new:** a game in its own folder can bring `assets\` of its own, which win over the root's.
+- **Checked by:** `examples/render-check`, which has 21 framebuffer probes and 10 facts:
+  - a loaded `.t3x` and the same picture made from pixels, both pixel-exact
+  - one frame of a `.meta` grid
+  - `flip_x`
+  - the `.meta` values, and a guessed layout
+  - a 3DS-only image that must not take the shared `.meta`
+- **The Vita half** is V5: the Vita has no GXM renderer to upload to yet.
 
 **D1. `Texture` as its own resource.** DONE on PC.
 - `load_texture(filename) -> Texture` and `destroy_texture`.

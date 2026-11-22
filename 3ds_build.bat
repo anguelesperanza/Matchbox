@@ -46,12 +46,23 @@ set STAGE=%BUILD%\assets_stage
 mkdir %STAGE%\images
 mkdir %STAGE%\audio
 
-if exist assets\images     xcopy /E /Y /I assets\images     %STAGE%\images >nul
-if exist assets\3ds\images xcopy /E /Y /I assets\3ds\images %STAGE%\images >nul
+call :stage_images assets\images
+call :stage_images assets\3ds\images
 if exist assets\audio      xcopy /E /Y /I assets\audio      %STAGE%\audio  >nul
 if exist assets\3ds\audio  xcopy /E /Y /I assets\3ds\audio  %STAGE%\audio  >nul
 
+:: A game in its own folder can bring its own assets, which win over the root's. Same
+:: order inside: shared first, then the 3DS's own
+if not "%SRC%"=="." (
+    call :stage_images %SRC%\assets\images
+    call :stage_images %SRC%\assets\3ds\images
+    if exist %SRC%\assets\audio      xcopy /E /Y /I %SRC%\assets\audio      %STAGE%\audio  >nul
+    if exist %SRC%\assets\3ds\audio  xcopy /E /Y /I %SRC%\assets\3ds\audio  %STAGE%\audio  >nul
+)
+
 set IMAGES=%STAGE%\images
+:: The full path, to cut off the front of each image's path and keep the subfolders after it
+set IMAGES_FULL=%CD%\%IMAGES%\
 set AUDIO=%STAGE%\audio
 
 if not exist %ROMFS%    mkdir %ROMFS%
@@ -77,6 +88,8 @@ if "%T3S_FOUND%"=="0" echo  - No .t3s atlas files found.
 :: ---------------------------------------------------------------
 :: Pass 2 — standalone images: convert any PNG/JPG that does NOT
 :: live in a folder that already has a .t3s (those belong to pass 1).
+:: Each keeps its subfolder (images\enemies\bat.png -> gfx\enemies\bat.t3x),
+:: which is the path load_texture looks for, and its .meta goes beside it.
 :: ---------------------------------------------------------------
 set IMG_FOUND=0
 for /r %IMAGES% %%f in (*.png *.jpg *.jpeg) do (
@@ -85,9 +98,12 @@ for /r %IMAGES% %%f in (*.png *.jpg *.jpeg) do (
     for %%t in ("!IMG_DIR!*.t3s") do set "SKIP=1"
     if "!SKIP!"=="0" (
         set IMG_FOUND=1
+        set "SUBFOLDER=!IMG_DIR:%IMAGES_FULL%=!"
+        if not exist "%GFXOUT%\!SUBFOLDER!" mkdir "%GFXOUT%\!SUBFOLDER!"
         echo  - %%f
-        "%TRITEX%" "%%f" "%GFXOUT%\%%~nf.t3x"
+        "%TRITEX%" "%%f" "%GFXOUT%\!SUBFOLDER!%%~nf.t3x"
         if errorlevel 1 goto :fail
+        if exist "%%~dpnf.meta" copy /Y "%%~dpnf.meta" "%GFXOUT%\!SUBFOLDER!%%~nf.meta" >nul
     )
 )
 if "%IMG_FOUND%"=="0" echo  - No standalone images found.
@@ -218,6 +234,22 @@ echo Creating 3DSX...
 3dsxtool "app.elf" "app.3dsx" --smdh="%TARGET%.smdh" --romfs="%ROMFS%"
 echo.
 echo Build complete: app.3dsx
+exit /b 0
+:: ---------------------------------------------------------------
+:: Copies one images folder into the stage, over what is there. A .meta describes the
+:: picture beside it, so an image that replaces a staged one takes the staged .meta out
+:: first: the 3DS's own smaller copy read with the PC's .meta gets the wrong ppu and grid.
+:: Its own .meta, when it has one, comes in with it
+:: ---------------------------------------------------------------
+:stage_images
+if not exist "%~1" exit /b 0
+set "FROM=%CD%\%~1\"
+for /r "%~1" %%f in (*.png *.jpg *.jpeg) do (
+    set "NAME=%%~dpnf"
+    set "NAME=!NAME:%FROM%=!"
+    if exist "%STAGE%\images\!NAME!.meta" del "%STAGE%\images\!NAME!.meta"
+)
+xcopy /E /Y /I "%~1" %STAGE%\images >nul
 exit /b 0
 :fail
 echo.

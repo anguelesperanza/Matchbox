@@ -284,10 +284,16 @@ when !VITA {
 		pipeline := &mbi.pipeline
 		set_matrix_uniform(pipeline.model_uniform, item.model)
 		c3d.C3D_FVUnifSet(.VERTEX_SHADER, pipeline.tint_uniform, item.tint.r, item.tint.g, item.tint.b, item.tint.a)
+		// The queue holds coordinates over the image, v down, as on PC. A real texture sits in the
+		// corner of a larger, upside-down canvas (texture_3ds_freestanding_arm32.odin); the white
+		// one is the same colour everywhere, so its coordinates are left alone
 		uv := item.uv_rectangle
+		texture := &pipeline.white_texture
+		if item.texture.texture != nil {
+			uv = calculate_canvas_uv_rectangle(item.texture, uv)
+			texture = item.texture.texture
+		}
 		c3d.C3D_FVUnifSet(.VERTEX_SHADER, pipeline.uv_rectangle_uniform, uv[0], uv[1], uv[2], uv[3])
-
-		texture := item.texture.texture if item.texture.texture != nil else &pipeline.white_texture
 		c3d.C3D_TexBind(0, texture)
 
 		buffers := c3d.C3D_GetBufInfo()

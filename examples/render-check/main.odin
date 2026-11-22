@@ -39,6 +39,77 @@ main :: proc() {
 		{"background bottom-left", 20, 220, {0, 0, 255}},
 		{"quad facing the camera, cull BACK: drawn", 300, 30, {255, 128, 0}},
 		{"quad mirrored (facing away), cull BACK: culled", 340, 30, {0, 0, 255}},
+
+		// Textures (Phase D). Each sprite is 12 x 20 image pixels at 10 a unit, so 24 x 40 screen
+		// pixels, and shows four colours: red top left, green top right, yellow bottom left,
+		// cyan bottom right. POINT filtering, so every pixel is exact
+		{"loaded .t3x, top left", 54, 200, {255, 0, 0}},
+		{"loaded .t3x, top right", 66, 200, {0, 255, 0}},
+		{"loaded .t3x, bottom left", 54, 220, {255, 255, 0}},
+		{"loaded .t3x, bottom right", 66, 220, {0, 255, 255}},
+		{"made from pixels, top left", 114, 200, {255, 0, 0}},
+		{"made from pixels, top right", 126, 200, {0, 255, 0}},
+		{"made from pixels, bottom left", 114, 220, {255, 255, 0}},
+		{"made from pixels, bottom right", 126, 220, {0, 255, 255}},
+		{"frame 3 of the .meta grid", 180, 210, {0, 255, 255}},
+		{"flip_x, top left shows top right", 234, 200, {0, 255, 0}},
+		{"flip_x, bottom right shows bottom left", 246, 220, {255, 255, 0}},
+	}
+
+	// The same 12 x 20 picture the .t3x holds, made in memory, so both texture paths are
+	// checked against one set of probes
+	quadrant_pixels:[12 * 20 * 4]u8
+	quadrant_colors := [4][4]u8{{255, 0, 0, 255}, {0, 255, 0, 255}, {255, 255, 0, 255}, {0, 255, 255, 255}}
+	for y in 0 ..< 20 {
+		for x in 0 ..< 12 {
+			color := quadrant_colors[int(y >= 10) * 2 + int(x >= 6)]
+			for c in 0 ..< 4 do quadrant_pixels[(y * 12 + x) * 4 + c] = color[c]
+		}
+	}
+
+	// From examples/render-check/assets/images, in a subfolder to check the build keeps it,
+	// and with a .meta (a 2 x 2 grid, ppu 10)
+	loaded := mb.load_texture("checks/quadrants.png", .POINT)
+	defer mb.destroy_texture(loaded)
+	made := mb.create_texture_from_pixels(&quadrant_pixels, 12, 20, .POINT)
+	defer mb.destroy_texture(made)
+	// Two squares with a transparent gap and no .meta, so its frames are guessed
+	guessed := mb.load_texture("guessed.png", .POINT)
+	defer mb.destroy_texture(guessed)
+
+	whole := [4]f32{0, 0, 12, 20}
+	loaded_sprite := mb.create_sprite(loaded, {-7, -4.5, 0})
+	loaded_sprite.source = whole
+	made_sprite := mb.create_sprite(made, {-4, -4.5, 0}, 10)
+	made_sprite.source = whole
+	frame_sprite := mb.create_sprite(loaded, {-1, -4.5, 0})
+	frame_sprite.frame = 3
+	flipped_sprite := mb.create_sprite(loaded, {2, -4.5, 0})
+	flipped_sprite.source = whole
+	flipped_sprite.flip_x = true
+
+	// The shared override.png is a 16 x 8 strip with a .meta of 2 columns at ppu 10. The 3DS
+	// has its own 8 x 8 override.png and no .meta, so the build must leave the shared one out:
+	// read with it, an 8 pixel image would be split into two 4 pixel frames at the wrong size
+	override := mb.load_texture("override.png", .POINT)
+	defer mb.destroy_texture(override)
+
+	// What the .meta and the guess say, checked as numbers
+	Fact :: struct {
+		name:string,
+		got, expected:i32,
+	}
+	facts := [?]Fact {
+		{"loaded width", loaded.width, 12},
+		{"loaded height", loaded.height, 20},
+		{"loaded ppu", i32(loaded.pixels_per_unit), 10},
+		{"loaded frames", loaded.frame_count, 4},
+		{"guessed columns", guessed.guessed_meta.columns, 2},
+		{"guessed rows", guessed.guessed_meta.rows, 1},
+		{"guessed frames", guessed.guessed_meta.frame_count, 2},
+		{"3DS override width", override.width, 8},
+		{"3DS override ignores shared .meta: frames", override.frame_count, 1},
+		{"3DS override ignores shared .meta: ppu", i32(override.pixels_per_unit), 1},
 	}
 
 	frames := 0
@@ -57,6 +128,10 @@ main :: proc() {
 		// which turns its winding round so it faces away and must not be drawn
 		mb.render_mesh(mb.mbi.sprite_mesh, linalg.matrix4_translate_f32({5, 4.5, 0}), {1, 0.5, 0, 1})
 		mb.render_mesh(mb.mbi.sprite_mesh, linalg.matrix4_translate_f32({7, 4.5, 0}) * linalg.matrix4_scale_f32({-1, 1, 1}), {1, 0.5, 0, 1})
+		mb.render_sprite(loaded_sprite)
+		mb.render_sprite(made_sprite)
+		mb.render_sprite(frame_sprite)
+		mb.render_sprite(flipped_sprite)
 		mb.camera_end()
 
 		mb.render_end()
@@ -72,10 +147,20 @@ main :: proc() {
 				offset := (probe.x * int(width) + (int(width) - 1 - probe.y)) * 3
 				got := [3]u8{pixels[offset + 2], pixels[offset + 1], pixels[offset + 0]} // stored B, G, R
 				close := abs(int(got.r) - int(probe.expected.r)) <= 2 && abs(int(got.g) - int(probe.expected.g)) <= 2 && abs(int(got.b) - int(probe.expected.b)) <= 2
-				if !close do failures += 1
-				mb.print(fmt.tprintf("check: %s %s at (%d, %d): got %v, expected %v", "ok  " if close else "FAIL", probe.name, probe.x, probe.y, got, probe.expected))
+				// Only failures get a line: the console holds about 30, and the passes would push
+				// the failures off the top
+				if !close {
+					failures += 1
+					mb.print(fmt.tprintf("check: FAIL %s at (%d, %d): got %v, expected %v", probe.name, probe.x, probe.y, got, probe.expected))
+				}
 			}
-			mb.print("check: failures", failures)
+			for fact in facts {
+				if fact.got != fact.expected {
+					failures += 1
+					mb.print(fmt.tprintf("check: FAIL %s: got %d, expected %d", fact.name, fact.got, fact.expected))
+				}
+			}
+			mb.print(fmt.tprintf("check: %d probes, %d facts, failures %d", len(probes), len(facts), failures))
 		}
 	}
 }

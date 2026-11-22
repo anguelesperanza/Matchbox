@@ -55,8 +55,8 @@ mkdir %ODINASM%
 set STAGE=%BUILD%\assets_stage
 mkdir %STAGE%\images
 mkdir %STAGE%\audio
-if exist assets\images      xcopy /E /Y /I assets\images      %STAGE%\images >nul
-if exist assets\vita\images xcopy /E /Y /I assets\vita\images %STAGE%\images >nul
+call :stage_images assets\images
+call :stage_images assets\vita\images
 if exist assets\audio       xcopy /E /Y /I assets\audio       %STAGE%\audio  >nul
 if exist assets\vita\audio  xcopy /E /Y /I assets\vita\audio  %STAGE%\audio  >nul
 echo.
@@ -142,6 +142,22 @@ vita-pack-vpk -s "%BUILD%\param.sfo" -b "%BUILD%\eboot.bin" !VPK_ADD! "%TARGET%.
 if errorlevel 1 goto :fail
 echo.
 echo Build complete: %TARGET%.vpk
+exit /b 0
+:: ---------------------------------------------------------------
+:: Copies one images folder into the stage, over what is there. A .meta describes the
+:: picture beside it, so an image that replaces a staged one takes the staged .meta out
+:: first: the Vita's own smaller copy read with the PC's .meta gets the wrong ppu and grid.
+:: Its own .meta, when it has one, comes in with it. The same as in 3ds_build.bat
+:: ---------------------------------------------------------------
+:stage_images
+if not exist "%~1" exit /b 0
+set "FROM=%CD%\%~1\"
+for /r "%~1" %%f in (*.png *.jpg *.jpeg) do (
+    set "NAME=%%~dpnf"
+    set "NAME=!NAME:%FROM%=!"
+    if exist "%STAGE%\images\!NAME!.meta" del "%STAGE%\images\!NAME!.meta"
+)
+xcopy /E /Y /I "%~1" %STAGE%\images >nul
 exit /b 0
 :fail
 echo.

@@ -72,6 +72,25 @@ when !VITA {
 		return words
 	}
 
+	/*Reads a whole file into memory the caller deletes. nil when the file cannot be read*/
+	read_file_bytes :: proc(path:cstring) -> []u8 {
+		file := ctru.fopen(path, "rb")
+		if file == nil do return nil
+		defer ctru.fclose(file)
+
+		ctru.fseek(file, 0, 2) // SEEK_END
+		size := int(ctru.ftell(file))
+		ctru.fseek(file, 0, 0) // SEEK_SET
+		if size <= 0 do return nil
+
+		bytes := make([]u8, size)
+		if int(ctru.fread(raw_data(bytes), 1, uint(size), file)) != size {
+			delete(bytes)
+			return nil
+		}
+		return bytes
+	}
+
 	/*3DS equivalent of os.is_file: true if the file can be opened*/
 	file_exists :: proc(path: cstring) -> bool {
 		file := ctru.fopen(path, "rb")
@@ -80,7 +99,11 @@ when !VITA {
 		return true
 	}
 
-	/*Returns the romfs path for an asset. The build step has already chosen shared vs 3DS-specific*/
+	/*
+		Returns the romfs path for an asset. The build step has already chosen shared vs
+		3DS-specific. Subfolders are kept: 3ds_build.bat writes each image's .t3x at its path
+		under assets/images, so `filename` means the same file here as on PC (D4)
+	*/
 	get_asset :: proc(buffer: []u8, filename: string, asset_type: Asset_Type) -> (path: cstring, ok: bool) {
 		switch asset_type {
 		case .IMAGE:

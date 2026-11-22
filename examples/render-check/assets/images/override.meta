@@ -1,0 +1,5 @@
+# render-check: the shared image's grid. The 3DS has its own override.png with no .meta,
+# which must not be read with this one
+ppu     = 10
+columns = 2
+rows    = 1

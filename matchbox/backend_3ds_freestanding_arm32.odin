@@ -14,8 +14,8 @@ package matchbox
 	imports stay outside: Odin does not allow `import` inside `when`, and an import whose
 	procedures are never called adds nothing to the build.
 
-	Meshes and the pipeline that draws them are in render_3ds_freestanding_arm32.odin.
-	Textures are not loaded yet: load_texture gives one with no image, which draws as white.
+	Meshes and the pipeline that draws them are in render_3ds_freestanding_arm32.odin, and
+	textures in texture_3ds_freestanding_arm32.odin.
 */
 
 import "base:runtime"
@@ -64,7 +64,8 @@ when !VITA {
 
 	/*
 		What only a 3DS texture has: citro3d's texture, on the heap so the copies a sprite and its
-		clips make all point at one. nil until load_texture uploads images, and drawn as white
+		clips make all point at one (its address must not move while the GPU reads it). nil
+		for the zero Texture, which the renderer draws with its white texture
 	*/
 	Backend_Texture :: struct {
 		texture:^c3d.C3D_Tex,
@@ -82,30 +83,6 @@ when !VITA {
 	/*Undoes start_runtime. Called after `main` returns*/
 	stop_runtime :: proc "contextless" () {
 		o3dx.shutdown()
-	}
-
-	/*
-		Not loaded yet: Phase D uploads images with citro3d. Until then an empty Texture, which
-		the renderer draws with its white texture (render_3ds_freestanding_arm32.odin)
-	*/
-	load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
-		texture.filter = filter
-		return
-	}
-
-	/*
-		A texture from RGBA8 pixels already in memory: what create_font uploads its atlas with.
-		Records the size and uploads nothing until Phase D, so the sizes a game reads are right
-	*/
-	create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
-		texture.width = width
-		texture.height = height
-		texture.filter = filter
-		return
-	}
-
-	/*Nothing to free until load_texture uploads something*/
-	destroy_texture :: proc(texture:Texture) {
 	}
 
 	/*

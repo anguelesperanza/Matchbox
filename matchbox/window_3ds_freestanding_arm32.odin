@@ -16,6 +16,7 @@ package matchbox
 // Core
 import "o3dx/ctru"
 import "o3dx/c3d"
+import "o3dx/o3dx"
 
 when !VITA {
 
@@ -42,7 +43,12 @@ when !VITA {
 
 		ctru.gfxInitDefault()
 		c3d.Init(c3d.DEFAULT_CMDBUF_SIZE)
-		ctru.consoleInit(ctru.GFX_BOTTOM, nil)
+
+		// No ctru console: the bottom screen is the game's to draw on, and `print` draws its lines
+		// there itself (bottom_screen_3ds_freestanding_arm32.odin). o3dx's own printf to that
+		// console would go nowhere, so it is switched off; its debug-log copy stays. The console
+		// comes back for set_bottom_screen(.CONSOLE), and for a crash (report_crash)
+		o3dx.print_to_console = false
 
 		// As the player holds it (see get_window_size). The render target below is the
 		// panel's own way round, 240 x 400
@@ -58,6 +64,21 @@ when !VITA {
 		c3d.RenderTargetSetOutput(
 			target = mbi.top_screen,
 			screen = ctru.GFX_TOP,
+			side = ctru.GFX_LEFT,
+			transferFlags = mbi.display_settings.transfer_flags
+		)
+
+		// The bottom screen's panel is on its side too: 240 x 320
+		mbi.bottom_screen = c3d.RenderTargetCreate(
+			width = 240,
+			height = 320,
+			colorFmt = .RGBA8,
+			depthFmt = c3d.DEPTHTYPE_DEPTH24_STENCIL8
+		)
+
+		c3d.RenderTargetSetOutput(
+			target = mbi.bottom_screen,
+			screen = ctru.GFX_BOTTOM,
 			side = ctru.GFX_LEFT,
 			transferFlags = mbi.display_settings.transfer_flags
 		)
@@ -80,6 +101,12 @@ when !VITA {
 		mbi.circle_mesh = create_mesh(circle_vertices, circle_indices)
 		delete(circle_vertices)
 		delete(circle_indices)
+
+		// The print log's text: the system font, 1 unit a screen pixel (render_print_log)
+		mbi.print_log.font = create_font(DEFAULT_FONT_BYTES, mbi.print_log_settings.pixel_size, 1)
+
+		// A game that asked for the console before init gets it now, once the screens exist
+		if mbi.bottom_screen_layout == .CONSOLE do start_bottom_screen_console()
 
 		// Delta time
 		mbi.timestamp.last_time = ctru.osGetTime()
@@ -105,10 +132,14 @@ when !VITA {
 
 	/*Cleans up resources created by Matchbox*/
 	cleanup :: proc() {
+		destroy_font(mbi.print_log.font)
+		mbi.print_log.font = {}
 		destroy_mesh(mbi.triangle_mesh)
 		destroy_mesh(mbi.circle_mesh)
 		destroy_mesh(mbi.sprite_mesh)
 		destroy_render_pipeline()
+		c3d.RenderTargetDelete(mbi.bottom_screen)
+		c3d.RenderTargetDelete(mbi.top_screen)
 
 		c3d.Fini()
 		ctru.gfxExit()

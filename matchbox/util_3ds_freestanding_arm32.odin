@@ -9,6 +9,8 @@ package matchbox
 	procedures I couldn't thematically find a spot for
 */
 
+import "core:fmt"
+
 import "o3dx/ctru"
 import "o3dx/o3dx"
 
@@ -20,13 +22,17 @@ when !VITA {
 	}
 
 	/*
-		Prints a line to the bottom screen's console and to the emulator's log (Luma3DS's
-		debugger on hardware). The log matters: it is the only output a test run can read
-		back, and the console is gone once the bottom screen draws. Formats on the stack,
-		1024 bytes at most; longer lines are cut off
+		Prints a line on the bottom screen (drawn at render_end, over the game; see
+		bottom_screen_3ds_freestanding_arm32.odin) and to the emulator's log (Luma3DS's
+		debugger on hardware). The log matters: it is the only copy a test run can read back
+		without looking at the screen. Formats on the stack, 1024 bytes at most
 	*/
 	print :: proc(args: ..any) {
-		o3dx.println(..args)
+		buffer:[o3dx.PRINT_BUFFER_SIZE]u8
+		text := fmt.bprint(buffer[:], ..args, sep = " ")
+		o3dx.write(text)
+		o3dx.write("\n")
+		add_print_lines(text)
 	}
 
 	/*Joins the parts into buffer and returns a null-terminated path. The caller owns buffer, so it must outlive the returned cstring*/

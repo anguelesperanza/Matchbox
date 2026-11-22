@@ -39,6 +39,8 @@ The user also settled the other handheld gaps:
 - **The small loose ends** wait for a tidy-up at the end.
 Updated 2026-11-22 (later still): **F2 on the 3DS done: text uses the console's system font**, checked in Azahar only.
 See "F2: status (3DS)".
+Updated 2026-11-22 (later still): **the 3DS bottom screen draws** (its own render target), and `print` is drawn on it in
+place of the ctru console. Checked in Azahar only. See "Bottom screen: status (3DS)" in Phase F.
 
 ## The decision
 
@@ -756,7 +758,8 @@ How the build differs from the steps below, which are kept as written:
 - **Open:**
   - C5 waits on B8.
   - C6 is optional.
-  - The bottom screen is queued and thrown away, because it holds the text console.
+  - The bottom screen was queued and thrown away here. It has its own target since 2026-11-22 (Phase F,
+    "Bottom screen: status (3DS)").
   - The gate below (the cube scene) has not been run.
 
 **C0. Shader toolchain.**
@@ -1295,6 +1298,46 @@ points, not two (decided 2026-11-18).
   without them: the HUD fills the window and follows its shape. They come with B8.
 - Known limit: in a screen pass cut-out items are drawn before blended ones, so
   a blended panel is always on top of a cut-out icon, whatever the submission order.
+
+**Bottom screen: status (3DS, 2026-11-22).** Checked in Azahar only.
+- **The bottom screen has its own citro3d target** (240 x 320, with depth).
+  - `bottom_screen_start` points the frame at it, and `camera_start` sizes its view by the screen being drawn, so
+    the shared queue and cameras draw there as on the top screen.
+  - `clear_background` clears both screens.
+- **`print` draws on the bottom screen,** replacing the ctru console (decided 2026-11-22).
+  - The last 32 lines are kept in `mbi.print_log`. At `render_end` the newest lines that fit are drawn over the
+    game's bottom screen: wrapped, newest at the bottom of the block, on a dark backdrop.
+  - The text is in the system font at `print_log_settings.pixel_size` (12).
+  - Each line still goes to the emulator's log and Luma3DS's debugger.
+- **Checked by:** `examples/render-check`.
+  - A red rectangle over the left half of the bottom screen's view lands on the left half of the bottom
+    framebuffer, and the cleared colour is on the right.
+  - The print log's text is lit where it should be.
+- **Every pass, every frame (decided 2026-11-22).** A game draws the world, the HUD and the bottom screen every
+  frame and never picks a screen. Matchbox drops the passes a target cannot show (`bottom_screen.odin`):
+  - On PC and the Vita, `.FULLSCREEN` drops the world and HUD (`is_top_screen_hidden`, asked by
+    `camera_start`), and `.HIDDEN` drops the bottom screen.
+  - On the 3DS both screens always show.
+  - Whether a menu is open is the game's own state. `is_bottom_screen_visible` only says whether the screen is
+    shown.
+  - The demo works this way: B toggles its `menu_open`, and its three passes are always drawn.
+- **`.CONSOLE` (new layout value).** On the 3DS it hands the bottom screen to ctru's console: `print` writes there
+  the old way, citro3d's bottom target is unlinked, and the bottom screen pass is dropped. Any other layout gives
+  the screen back, with the screen format and double buffering citro3d needs restored. On PC and the Vita it is
+  `.HIDDEN`.
+- **Crashes show on the console.** `start_runtime` wraps o3dx's assertion handler (`report_crash`): on a failed
+  assert or a panic it brings up ctru's console on the bottom screen, shows the message, and waits for START. Then
+  o3dx appends the message to the SD card log and traps. Bounds-check and nil failures trap without a message, as
+  before.
+- **Checked in Azahar** with a throwaway app:
+  - In `.CONSOLE` the top screen keeps drawing and a print lands on the console.
+  - Switching back draws the game's rectangle on the bottom screen in the right colours.
+  - A deliberate panic shows its file, line and message, and "Press START to quit".
+  - The demo shows the world and HUD on top and its menu on the bottom.
+- **Known gaps:**
+  - Each glyph of the print log is one draw.
+  - The PC side of the pass rule is covered by a unit test (`bottom_screen_windows_test.odin`). It has not been
+    watched in a window.
 
 **F2: status (3DS, 2026-11-22).** Each target uses its own native text (decided 2026-11-22).
 - **3DS:** `font_3ds_freestanding_arm32.odin` bakes from the console's system font. It ignores the TTF the game

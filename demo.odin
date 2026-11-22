@@ -55,6 +55,7 @@ main :: proc() {
 
 	scale := 4
 	fractional := false
+	menu_open := false // the bottom screen as a menu: the game's own state, not Matchbox's
 	follow_target := [2]f32{0, 0}
 	angle:f32
 
@@ -89,23 +90,18 @@ main :: proc() {
 		corner.position = mb.calculate_anchor_position(.TOP_LEFT, {1.5, -1.5})
 		middle.position = mb.calculate_anchor_position(.BOTTOM_RIGHT, {-1.5, 1.5})
 
-		// B or Start swaps between the world and the bottom screen, like opening a menu
-		if mb.is_key_pressed(.B) || mb.is_gamepad_pressed(.START) {
-			if mb.is_bottom_screen_visible() == true {
-				mb.set_bottom_screen(.HIDDEN)
-			} else {
-				mb.set_bottom_screen(.FULLSCREEN)
-			}
-		}
-		bottom_visible := mb.is_bottom_screen_visible()
+		// B or Start opens and closes the menu. On PC it fills the window while open, and the
+		// world comes back when it closes; on the 3DS it is on its own screen either way
+		if mb.is_key_pressed(.B) || mb.is_gamepad_pressed(.START) do menu_open = menu_open == false
+		mb.set_bottom_screen(.FULLSCREEN if menu_open else .HIDDEN)
 
 		// The HUD gets the mouse first. A face under the mouse lights up, and a click on
-		// one must not also move the world camera. With the bottom screen up, the world and HUD are not shown
+		// one must not also move the world camera. With the menu filling the window, the world and HUD are not shown
 		mouse_on_hud := mb.calculate_mouse_screen_position()
 		corner_min, corner_max := mb.calculate_sprite_bounds(corner)
 		middle_min, middle_max := mb.calculate_sprite_bounds(middle)
-		over_corner := bottom_visible == false && mb.is_point_in_rectangle(mouse_on_hud, corner_min, corner_max)
-		over_middle := bottom_visible == false && mb.is_point_in_rectangle(mouse_on_hud, middle_min, middle_max)
+		over_corner := menu_open == false && mb.is_point_in_rectangle(mouse_on_hud, corner_min, corner_max)
+		over_middle := menu_open == false && mb.is_point_in_rectangle(mouse_on_hud, middle_min, middle_max)
 
 		// The bottom screen has its own mouse position, as touch would be on a 3DS
 		back.position = mb.calculate_bottom_screen_anchor_position(.BOTTOM, {0, 2})
@@ -113,7 +109,7 @@ main :: proc() {
 		back_min, back_max := mb.calculate_sprite_bounds(back)
 		over_back := on_bottom_screen == true && mb.is_point_in_rectangle(mouse_on_bottom, back_min, back_max)
 		back.tint = {1, 0.6, 0.6, 1} if over_back else {1, 1, 1, 1}
-		if over_back == true && mb.is_mouse_pressed(.LEFT) do mb.set_bottom_screen(.HIDDEN)
+		if over_back == true && mb.is_mouse_pressed(.LEFT) do menu_open = false
 
 		corner.tint = {1, 0.6, 0.6, 1} if over_corner else {1, 1, 1, 1}
 		middle.tint = {1, 0.6, 0.6, 1} if over_middle else {1, 1, 1, 1}
@@ -123,7 +119,7 @@ main :: proc() {
 
 		// Left click moves the camera there; it glides, so it sits on fractional positions.
 		// Not when the click landed on the HUD
-		if mb.is_mouse_pressed(.LEFT) && bottom_visible == false && over_corner == false && over_middle == false {
+		if mb.is_mouse_pressed(.LEFT) && menu_open == false && over_corner == false && over_middle == false {
 			follow_target = mb.calculate_mouse_world_position(camera)
 		}
 		mb.camera_follow(&camera, follow_target, 3, dt)
@@ -157,30 +153,30 @@ main :: proc() {
 		mb.render_start()
 		mb.clear_background(color = {0, 0, 0, 1})
 
-			if bottom_visible == true {
-				// The bottom screen fills the window, laid out with anchors so it fits any shape
-				mb.bottom_screen_start()
-				mb.render_sprite(back)
-				mb.render_text_wrapped(font, "The bottom screen. Click the face, or press B, to go back.", mb.calculate_bottom_screen_anchor_position(.TOP_LEFT, {1, -1}), 10)
-				mb.bottom_screen_end()
-			} else {
-				mb.camera_start(camera)
+			// Every pass, every frame. Matchbox drops what the target cannot show: on PC the menu
+			// replaces the world while it is open; on the 3DS both screens always show
+			mb.camera_start(camera)
 
-				mb.render_sprite(face)
-				mb.render_sprite(mover)
-				mb.render_animated_sprite(shia)
+			mb.render_sprite(face)
+			mb.render_sprite(mover)
+			mb.render_animated_sprite(shia)
 
-				mb.camera_end()
+			mb.camera_end()
 
-				mb.screen_start()
-				mb.render_sprite(corner)
-				mb.render_sprite(middle)
+			mb.screen_start()
+			mb.render_sprite(corner)
+			mb.render_sprite(middle)
 
-				top_left := mb.calculate_anchor_position(.TOP_LEFT, {3, -0.3})
-				mb.render_text_wrapped(font, "Text in the HUD. It wraps at a width in world units.", top_left, 7)
-				mb.render_text(font, 1 / dt, mb.calculate_anchor_position(.BOTTOM_LEFT, {0.5, 0.5}), {1, 1, 0, 1}) // frames per second
-				mb.screen_end()
-			}
+			top_left := mb.calculate_anchor_position(.TOP_LEFT, {3, -0.3})
+			mb.render_text_wrapped(font, "Text in the HUD. It wraps at a width in world units.", top_left, 7)
+			mb.render_text(font, 1 / dt, mb.calculate_anchor_position(.BOTTOM_LEFT, {0.5, 0.5}), {1, 1, 0, 1}) // frames per second
+			mb.screen_end()
+
+			// The menu, laid out with anchors so it fits any shape
+			mb.bottom_screen_start()
+			mb.render_sprite(back)
+			mb.render_text_wrapped(font, "The bottom screen. Click the face, or press B, to go back.", mb.calculate_bottom_screen_anchor_position(.TOP_LEFT, {1, -1}), 10)
+			mb.bottom_screen_end()
 
 		mb.render_end()
 	}

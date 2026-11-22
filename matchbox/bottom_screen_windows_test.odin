@@ -50,6 +50,27 @@ visibility_follows_the_layout :: proc(t:^testing.T) {
 
 	set_bottom_screen(.HIDDEN)
 	testing.expect_value(t, is_bottom_screen_visible(), false)
+
+	// There is no console on one surface, so it is the same as HIDDEN
+	set_bottom_screen(.CONSOLE)
+	testing.expect_value(t, is_bottom_screen_visible(), false)
+}
+
+// The game draws every pass every frame; the layout decides which ones reach the window.
+// camera_start throws a top pass away when this says so, and bottom_screen_start its own pass
+// when the bottom screen is not visible: exactly one of the two is shown, whatever the layout
+@(test)
+the_top_passes_hide_while_the_bottom_screen_fills_the_window :: proc(t:^testing.T) {
+	saved := save_state()
+	defer restore_state(saved)
+
+	for layout in Bottom_Screen_Layout {
+		set_bottom_screen(layout)
+		top_shown := is_top_screen_hidden() == false
+		bottom_shown := is_bottom_screen_visible()
+		testing.expectf(t, top_shown != bottom_shown, "%v: the top shown is %v and the bottom shown is %v", layout, top_shown, bottom_shown)
+		testing.expect_value(t, bottom_shown, layout == .FULLSCREEN)
+	}
 }
 
 @(test)

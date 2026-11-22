@@ -42,9 +42,7 @@ rules too; they are repeated here so this file stands alone.
   - `examples/render-check` passes all its framebuffer probes.
 - **2026-11-22 (later): Phase D on the 3DS done** (render_plan.md, "Phase D: status").
   - `load_texture` reads the `.t3x` and the `.meta` beside it, and image subfolders are kept.
-  - The demo now runs on the 3DS, and its shia sheet animates. Two things still keep it from looking right there:
-    - On the 3DS `is_bottom_screen_visible` is always true, so the demo takes its bottom-screen branch every
-      frame, and that screen is not drawn yet.
+  - The demo now runs on the 3DS, and its shia sheet animates. One thing still keeps it from looking right there:
     - The demo crops the cat with PC pixel coordinates (`face.source = {150, 150, 64, 64}`) and sets ppu 16
       itself. The 3DS cat is 32x32, so those crops land on transparent padding and are cut away. The cat's
       `.meta` is right since the `.meta` fix (a target's own image no longer takes the shared `.meta`), and a
@@ -52,6 +50,15 @@ rules too; they are repeated here so this file stands alone.
 - **2026-11-22 (later still): native text on the 3DS** (render_plan.md, "F2: status (3DS)").
   - `create_font` on the 3DS bakes from the console's system font and ignores the TTF. Layout, wrapping and
     measuring stay shared.
+- **2026-11-22 (later still): the 3DS bottom screen draws** (render_plan.md, "Bottom screen: status (3DS)").
+  - It has its own render target.
+  - `print` lines are drawn on it at `render_end`, in place of the ctru console, and still go to the emulator's
+    log.
+  - **Every pass, every frame:** a game draws the world, the HUD and the bottom screen every frame, and
+    Matchbox drops what a target cannot show. On PC and the Vita, `.FULLSCREEN` drops the world and HUD. The
+    3DS shows both screens. The demo draws this way now.
+  - `set_bottom_screen(.CONSOLE)` gives the 3DS bottom screen to ctru's console, with `print` going there.
+  - A failed assert or a panic shows its message on the bottom screen's console and waits for START.
 - **The user's decisions for the handhelds (2026-11-22):**
   - Native text per target.
   - On the 3DS, `print` draws on the bottom screen.
@@ -84,8 +91,8 @@ rules too; they are repeated here so this file stands alone.
   - The demo checks and builds on all three. On the handhelds it runs until its first sprite, then stops on
     `ensure("Sprite has no texture")`, because handheld textures have no size until Phases C and V load them.
 - **What is still empty on the handhelds:**
-  - The Vita draws nothing but the clear colour (Phase V). The 3DS draws the top screen; its bottom screen holds the
-    text console.
+  - The Vita draws nothing but the clear colour (Phase V). The 3DS draws both screens, with `print` drawn on the
+    bottom one.
   - Text: the 3DS draws it with the console's system font (F2). The Vita has no glyphs until Phase V.
   - Touch isn't read.
   - Audio is stubbed on all three targets.
@@ -99,13 +106,13 @@ Run these after any change, on all three targets. The counts are from 2026-11-22
 
 ```
 PC:    odin check matchbox -no-entry-point          (clean; -vet: the 3 old issues)
-       odin test matchbox                           (66 pass)
+       odin test matchbox                           (67 pass)
        odin test tools/mbsc                         (120 pass)
        odin build examples/shia-test ; odin check demo.odin -file
 3DS:   3ds_check.bat                                (the demo at the root)
        3ds_check.bat examples\handheld-boot
        3ds_build.bat examples\handheld-boot         -> app.3dsx; four boot: lines in Azahar
-       3ds_build.bat examples\render-check          -> app.3dsx; "check: 21 probes, 11 facts, text, failures 0" on Azahar's bottom screen
+       3ds_build.bat examples\render-check          -> app.3dsx; "check: 21 probes, 2 bottom, 11 facts, text, failures 0" on Azahar's bottom screen
 Vita:  vita_check.bat
        vita_check.bat examples\handheld-boot
        vita_build.bat examples\handheld-boot        -> MyGame.vpk; four boot: lines in Vita3K
@@ -231,8 +238,8 @@ Open items (see the file for the user's wording and legend):
 
 1. Finish the PC side of the plan while the 2D game keeps feeding `fixes.md`: B8 (viewport, fit policy, overscan), F2 closure,
    the open decisions above, the `[c]` renames.
-2. Handhelds: A0b, Phase C C0-C4 and the 3DS half of Phase D are done. Next: the handheld halves of E and F (the 3DS
-   bottom screen with `print` drawn on it, native text, touch), the Phase C gate scene, and C5 once B8 is settled.
+2. Handhelds: A0b, Phase C C0-C4, the 3DS half of Phase D, native 3DS text and the 3DS bottom screen are done.
+   Next: touch, the rest of the handheld halves of E and F, the Phase C gate scene, and C5 once B8 is settled.
 3. Phase V (Vita), reusing `mbsc --emit-cg` + committed `.gxp`.
 4. Then G (3D games), then H.
 5. In parallel when convenient: S6 runtime applier, real-hardware tests of the PICA and TexEnv output, S8a.

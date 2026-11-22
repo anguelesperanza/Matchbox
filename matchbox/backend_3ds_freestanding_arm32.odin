@@ -19,8 +19,10 @@ package matchbox
 */
 
 import "base:runtime"
+import "core:fmt"
 
 import "o3dx/c3d"
+import "o3dx/ctru"
 import "o3dx/o3dx"
 
 when !VITA {
@@ -29,6 +31,7 @@ when !VITA {
 		// citro3d render targets, as `rawptr` because that is how o3dx's c3d binds them
 		top_screen:rawptr,
 		bottom_screen:rawptr,
+		drawing_bottom_screen:bool, // between bottom_screen_start and _end: the target camera_start sizes its view by
 
 		// HID button masks for this frame (hidKeysDown / Held / Up)
 		gamepad_pressed:u32,
@@ -45,8 +48,11 @@ when !VITA {
 
 		pipeline:Render_Pipeline, // the shader, its uniforms and its TexEnv plan (render_3ds_freestanding_arm32.odin)
 
+		print_log:Print_Log, // what `print` wrote, drawn on the bottom screen (bottom_screen_3ds_freestanding_arm32.odin)
+
 		// Fixed values the 3DS backend works with
 		display_settings:Display_Settings,
+		print_log_settings:Print_Log_Settings,
 	}
 
 	/*
@@ -55,6 +61,12 @@ when !VITA {
 	*/
 	BACKEND_DEFAULTS :: Backend_State {
 		display_settings = {transfer_flags = 0x1000},
+		print_log_settings = {
+			pixel_size = 12,
+			margin = 4,
+			backdrop = {0, 0, 0, 0.6},
+			color = {1, 1, 1, 1},
+		},
 
 		// The largest values the New 3DS LL used for testing reports. Not a setting: they
 		// scale what the hardware gives, so they are right from the start
@@ -74,10 +86,54 @@ when !VITA {
 	/*
 		Sets up the Odin runtime on the 3DS and returns the context the game runs in. Called
 		from the game's entry_freestanding_arm32.odin, before `main`: Matchbox can't run it
-		itself, because `context` belongs to the caller and nothing calls Odin before odin_main
+		itself, because `context` belongs to the caller and nothing calls Odin before odin_main.
+		Failed asserts and panics go to report_crash, so their message is shown on the console
 	*/
 	start_runtime :: proc "contextless" () -> runtime.Context {
-		return o3dx.init()
+		context = o3dx.init()
+		context.assertion_failure_proc = report_crash
+		return context
+	}
+
+	/*
+		Shows a failed assert's or a panic's message on the bottom screen, as ctru's console, and
+		waits for START, then hands over to o3dx's handler, which appends it to the SD card log
+		and traps (Luma3DS's exception screen on hardware). The console comes back for this even
+		when the game had the bottom screen: on a console with no log window, the screen is the
+		only place the message can be read.
+
+		Before init there is no screen yet, and o3dx's handler alone reports it. Bounds-check and
+		nil-dereference failures never come here: Odin's runtime traps on those by itself
+	*/
+	@(private)
+	report_crash :: proc(prefix, message:string, location:runtime.Source_Code_Location) -> ! {
+		if mbi.bottom_screen != nil {
+			if mbi.bottom_screen_layout != .CONSOLE {
+				c3d.C3D_RenderTargetSetOutput(nil, ctru.GFX_BOTTOM, ctru.GFX_LEFT, 0)
+				ctru.consoleInit(ctru.GFX_BOTTOM, nil)
+			}
+			o3dx.print_to_console = true
+
+			buffer:[512]u8
+			line := fmt.bprintf(buffer[:], "%s(%d:%d) %s: %s%s%s", location.file_path, location.line, location.column,
+				location.procedure, prefix, ": " if message != "" else "", message)
+			o3dx.write("\n*** Crash ***\n\n")
+			o3dx.write(line)
+			o3dx.write("\n\nPress START to quit.\n")
+			ctru.gfxFlushBuffers()
+			ctru.gfxSwapBuffers()
+
+			for ctru.aptMainLoop() {
+				ctru.hidScanInput()
+				if ctru.hidKeysDown() & ctru.KEY_START != 0 do break
+				ctru.svcSleepThread(16_000_000) // a frame; nothing changes on screen while waiting
+			}
+
+			// Already on the screen and in the debug log: o3dx's handler only adds the SD card copy
+			o3dx.print_to_console = false
+			o3dx.print_to_debug = false
+		}
+		o3dx.assertion_failure_proc(prefix, message, location)
 	}
 
 	/*Undoes start_runtime. Called after `main` returns*/

@@ -309,16 +309,24 @@ when !VITA {
 		bind_render_pipeline()
 	}
 
-	/*Renders final output -- Present all the gathered data this frame to the screen*/
+	/*
+		Renders final output -- Present all the gathered data this frame to the screen. The print
+		log goes on last, over the game's bottom screen (bottom_screen_3ds_freestanding_arm32.odin)
+	*/
 	render_end :: proc() {
+		render_print_log()
 		c3d.C3D_FrameEnd(0)
 	}
 
-	/*Everything drawn until camera_end is seen through this camera*/
+	/*
+		Everything drawn until camera_end is seen through this camera. Sized by the screen being
+		drawn: the top one, or the bottom one between bottom_screen_start and _end
+	*/
 	camera_start :: proc(camera:Camera) {
 		ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
 		window := [2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
+		if mbi.drawing_bottom_screen == true do window = {f32(mbi.window_size[2]), f32(mbi.window_size[3])}
 		used := calculate_camera_snapped(camera, window)
 		mbi.pixel_scale = calculate_camera_snap_scale(camera, window.y)
 
@@ -326,7 +334,7 @@ when !VITA {
 		mbi.camera_active = true
 		mbi.screen_pass = camera.screen
 
-		view_projection := TILT_TO_PANEL * GL_TO_PICA_DEPTH * calculate_camera_projection_gl(used, calculate_window_aspect()) * mbi.view
+		view_projection := TILT_TO_PANEL * GL_TO_PICA_DEPTH * calculate_camera_projection_gl(used, window.x / window.y) * mbi.view
 		set_matrix_uniform(mbi.pipeline.view_projection_uniform, view_projection)
 	}
 
@@ -380,8 +388,16 @@ when !VITA {
 		return (rgba & 0xFF) << 24 | ((rgba >> 8) & 0xFF) << 16 | ((rgba >> 16) & 0xFF) << 8 | rgba >> 24
 	}
 
-	/*Clears colour and depth. Depth clears to 0, the far end, since the test is GREATER*/
+	/*
+		Clears colour and depth on both screens. Depth clears to 0, the far end, since the test is
+		GREATER. Both, because a game that never draws the bottom screen would otherwise show
+		whatever its memory held; one that wants it another colour draws a rectangle there.
+		The bottom one is left alone while the console has the screen
+	*/
 	clear_background :: proc(color:[4]f32) {
 		c3d.C3D_RenderTargetClear(mbi.top_screen, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
+		if is_bottom_screen_visible() == true {
+			c3d.C3D_RenderTargetClear(mbi.bottom_screen, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
+		}
 	}
 }

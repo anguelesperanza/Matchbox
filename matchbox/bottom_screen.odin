@@ -5,15 +5,28 @@ package matchbox
 	=============
 	The 3DS has a second screen under the main one, 320x240 and touch. PC and Vita have
 	one surface, so what a game draws "on the bottom screen" has to go somewhere there.
-	On PC the game chooses:
 
-		HIDDEN      nothing is drawn, for a game where the bottom screen is optional
-		FULLSCREEN  the bottom screen takes over the whole window, until the game switches back
+	A game draws every pass every frame -- the world, the HUD, and the bottom screen -- and
+	never chooses between them. Matchbox drops the passes the target cannot show, at
+	camera_end, so nothing of theirs reaches the GPU:
 
-	While FULLSCREEN the game draws the bottom screen's content and skips the world.
-	It fills the window with no letterbox: like the HUD, the view has a fixed height and
-	its width follows the window, so lay it out with anchors.
-	(Seeing both screens at once, an overlay or a stacked layout, is not offered at this time.)
+		layout       PC and Vita                              3DS
+		HIDDEN       world and HUD; bottom screen dropped     both screens
+		FULLSCREEN   bottom screen fills the window;          both screens
+		             world and HUD dropped
+		CONSOLE      as HIDDEN                                world and HUD on top; the bottom
+		                                                      screen is ctru's text console,
+		                                                      `print` writes to it, and the
+		                                                      bottom screen pass is dropped
+
+	So an inventory on the bottom screen is opened on PC with set_bottom_screen(.FULLSCREEN),
+	and sits on its own screen on the 3DS with no change to the game. Whether it is open is
+	the game's own state; is_bottom_screen_visible only says whether the screen is shown.
+
+	A fullscreen bottom screen fills the window with no letterbox: like the HUD, the view has a
+	fixed height and its width follows the window, so lay it out with anchors.
+	(Seeing both screens at once on one surface, an overlay or a stacked layout, is not offered
+	at this time.)
 */
 
 /*
@@ -28,6 +41,7 @@ Screen_Settings :: struct {
 Bottom_Screen_Layout :: enum {
 	HIDDEN,
 	FULLSCREEN,
+	CONSOLE, // the 3DS's text console, for debugging; elsewhere the same as HIDDEN
 }
 
 /*

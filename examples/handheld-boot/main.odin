@@ -8,8 +8,9 @@ package boot
 	backend prints here is what a test run reads back from the emulator's log, so every
 	line starts with "boot:".
 
-	It draws nothing but the clear colour, because the handhelds draw nothing else yet
-	(A0b, T2 and T3 in render_plan.md). Builds on PC too, as a check that it is one game.
+	It draws nothing but the clear colour, so a target with no renderer yet can still run it
+	(A0b, T2 and T3 in render_plan.md); on the 3DS its prints also show on the bottom screen.
+	Builds on PC too, as a check that it is one game.
 */
 
 import "core:fmt"

@@ -12,9 +12,12 @@ package matchbox
 	What happens to it depends on the layout, set with set_bottom_screen:
 
 		.HIDDEN      (the default) the drawing is queued and thrown away; nothing reaches the window
-		.FULLSCREEN  the bottom screen fills the window. The game draws only this and skips the world
+		.FULLSCREEN  the bottom screen fills the window, and the world and HUD passes are thrown
+		             away instead (camera_start asks is_top_screen_hidden)
+		.CONSOLE     the 3DS's text console. There is none here, so it is .HIDDEN
 
-	A game that wants to skip the work of drawing a hidden screen asks is_bottom_screen_visible.
+	The game draws every pass every frame either way (bottom_screen.odin). One that wants to
+	skip the work of building a pass that will be thrown away asks is_bottom_screen_visible.
 	It is a screen camera, like the HUD, and the same rules apply: between render_start and
 	render_end, not nested with another camera.
 
@@ -35,9 +38,19 @@ when ODIN_OS != .Freestanding || VITA {
 		return mbi.bottom_screen_layout
 	}
 
-	/*False when the bottom screen is hidden, so a game can skip drawing it entirely*/
+	/*True only while the bottom screen fills the window*/
 	is_bottom_screen_visible :: proc() -> bool {
-		return mbi.bottom_screen_layout != .HIDDEN
+		return mbi.bottom_screen_layout == .FULLSCREEN
+	}
+
+	/*
+		True while the bottom screen fills the window, so the world and HUD are not shown. Asked
+		by camera_start, which throws those passes away, so a game draws them every frame and
+		never has to pick a screen itself
+	*/
+	@(private)
+	is_top_screen_hidden :: proc() -> bool {
+		return mbi.bottom_screen_layout == .FULLSCREEN
 	}
 
 	// The bottom screen's camera: the same units as the HUD, grown taller in a window narrower than 4:3
@@ -46,9 +59,10 @@ when ODIN_OS != .Freestanding || VITA {
 		return create_screen_camera(calculate_bottom_screen_view_height(mbi.screen_height, calculate_window_aspect()))
 	}
 
-	/*Everything drawn until bottom_screen_end is the bottom screen: shown when FULLSCREEN, thrown away when HIDDEN*/
+	/*Everything drawn until bottom_screen_end is the bottom screen: shown when FULLSCREEN, thrown away otherwise*/
 	bottom_screen_start :: proc() {
 		camera_start(get_bottom_screen_camera())
+		// After camera_start, which set it for a top pass: this pass is the other way round
 		mbi.discard_pass = is_bottom_screen_visible() == false
 	}
 

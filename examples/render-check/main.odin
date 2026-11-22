@@ -121,6 +121,14 @@ main :: proc() {
 		{"font has glyphs (ascent above 0)", i32(font.ascent > 0), 1},
 	}
 
+	// The bottom screen (F): its own target, a camera sized to it, and `print` drawn on it.
+	// Probed like the top screen, in the bottom framebuffer: 240 wide, 320 tall, on its side
+	bottom_probes := [?]Probe {
+		{"bottom screen: red rectangle on the left half", 80, 200, {255, 0, 0}},
+		{"bottom screen: cleared background on the right", 240, 200, {0, 0, 255}},
+	}
+	mb.print("check: started") // so the print log has a line to show by frame 30
+
 	frames := 0
 	for mb.is_running() {
 		mb.poll_events()
@@ -143,6 +151,13 @@ main :: proc() {
 		mb.render_sprite(flipped_sprite)
 		mb.render_text(font, text, text_position)
 		mb.camera_end()
+
+		// Red over the left half of the bottom screen's view, whatever its size in units
+		mb.bottom_screen_start()
+		bottom_min, bottom_max := mb.calculate_bottom_screen_visible_rectangle()
+		middle_x := (bottom_min.x + bottom_max.x) / 2
+		mb.render_rectangle({(bottom_min.x + middle_x) / 2, (bottom_min.y + bottom_max.y) / 2, 0}, {middle_x - bottom_min.x, bottom_max.y - bottom_min.y}, {1, 0, 0, 1})
+		mb.bottom_screen_end()
 
 		mb.render_end()
 		frames += 1
@@ -196,7 +211,31 @@ main :: proc() {
 				mb.print(fmt.tprintf("check: FAIL text has %d pixels outside its box", stray))
 			}
 			mb.print(fmt.tprintf("check: text box %v..%v x %v..%v, %d lit", box_left, box_right, box_top, box_bottom, lit))
-			mb.print(fmt.tprintf("check: %d probes, %d facts, text, failures %d", len(probes), len(facts), failures))
+			// The bottom screen: the two probes, then text where the print log goes. The log has
+			// "check: started" in it by now, white over a dark backdrop, along its top
+			bottom_pixels := ([^]u8)(ctru.gfxGetFramebuffer(.BOTTOM, .LEFT, &width, &height))
+			for probe in bottom_probes {
+				offset := (probe.x * int(width) + (int(width) - 1 - probe.y)) * 3
+				got := [3]u8{bottom_pixels[offset + 2], bottom_pixels[offset + 1], bottom_pixels[offset + 0]}
+				close := abs(int(got.r) - int(probe.expected.r)) <= 2 && abs(int(got.g) - int(probe.expected.g)) <= 2 && abs(int(got.b) - int(probe.expected.b)) <= 2
+				if !close {
+					failures += 1
+					mb.print(fmt.tprintf("check: FAIL %s at (%d, %d): got %v, expected %v", probe.name, probe.x, probe.y, got, probe.expected))
+				}
+			}
+			print_lit := 0
+			for y in 2 ..< 22 {
+				for x in 2 ..< 318 {
+					offset := (x * int(width) + (int(width) - 1 - y)) * 3
+					if min(bottom_pixels[offset], bottom_pixels[offset + 1], bottom_pixels[offset + 2]) > 180 do print_lit += 1
+				}
+			}
+			if print_lit == 0 {
+				failures += 1
+				mb.print("check: FAIL no print text on the bottom screen")
+			}
+			mb.print(fmt.tprintf("check: bottom screen %d x %d, %d print pixels lit", width, height, print_lit))
+			mb.print(fmt.tprintf("check: %d probes, %d bottom, %d facts, text, failures %d", len(probes), len(bottom_probes), len(facts), failures))
 		}
 	}
 }

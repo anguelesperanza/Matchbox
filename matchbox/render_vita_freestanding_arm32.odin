@@ -40,6 +40,8 @@ when VITA {
 		mbi.view = calculate_camera_view_matrix(used)
 		mbi.camera_active = true
 		mbi.screen_pass = camera.screen
+		// While the bottom screen fills the screen, the world and HUD are not shown. As on PC
+		mbi.discard_pass = is_top_screen_hidden()
 	}
 
 	/*

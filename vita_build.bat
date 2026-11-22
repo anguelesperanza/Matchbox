@@ -17,6 +17,9 @@ set TITLE=My Game
 :: none is. Assets and main.c stay at the root, as for 3ds_build.bat
 set SRC=%~1
 if "%SRC%"=="" set SRC=.
+:: Matchbox: what gets built is matchbox\handheld_entry, which imports the game through this
+:: collection, so the game needs no entry file and its package can have any name
+for %%I in ("%SRC%") do set "GAME_DIR=%%~fI"
 :: ---------------------------------------------------------------
 :: VitaSDK - default install location of vdpm's bootstrap-vitasdk.ps1.
 :: Override by setting VITASDK before running this script.
@@ -67,7 +70,7 @@ echo === Building %TARGET% ===
 :: ---------------------------------------------------------------
 echo.
 echo Building Odin assembly...
-odin build %SRC% -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:cortex-a9 -define:MATCHBOX_VITA=true
+odin build matchbox\handheld_entry -collection:matchbox_game="%GAME_DIR%" -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:cortex-a9 -define:MATCHBOX_VITA=true
 if errorlevel 1 goto :fail
 for %%f in (*.S) do (
     ren "%%f" "%%~nf.odin.s"

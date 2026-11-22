@@ -398,23 +398,28 @@ matchbox/
 
 A backend that misses one fails its own check script, because a shared file calls it.
 
-**Entry point:** a game keeps one small file for both consoles. Matchbox can't own it (see decision 2 under
-"Decisions to make"):
+**Entry point:** `matchbox/handheld_entry`, one package for both consoles. Matchbox's own package can't hold it
+(see decision 2 under "Decisions to make"), so it is a package of its own that imports the game:
 
 ```odin
-// entry_freestanding_arm32.odin, in the game's package. The same file for the 3DS and the Vita
-package game
+package matchbox_handheld_entry
 
-import mb "matchbox"
+import game "matchbox_game:." // the scripts point this collection at the game's folder
+import mb ".."
 
 @(export, link_name = "odin_main")
 odin_main :: proc "c" (argc: i32, argv: [^]cstring) -> i32 {
 	context = mb.start_runtime() // o3dx.init() on the 3DS, vito.init() on the Vita
-	main()
+	game.main()
 	mb.stop_runtime()
 	return 0
 }
 ```
+
+The build and check scripts build this package with `-collection:matchbox_game=<the game's folder>`. Changed
+2026-11-22: each game used to carry this as `entry_freestanding_arm32.odin` in its own package. A copy of that file
+named the package it came from, so a game in any other package failed with "Different package name, expected
+'demo'". Now a game has no entry file, and its package can have any name.
 
 **T0. Tests and stray files off the handhelds.**
 - Tag every `*_test.odin` with `#+build windows`.

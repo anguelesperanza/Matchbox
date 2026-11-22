@@ -134,7 +134,7 @@ Vita:  vita_check.bat
 
 | Phase | State |
 |---|---|
-| A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b done** (2026-11-21, T0-T4: target selection, the backend contract, Vita scripts, the handhelds' entry file). **A0 verified in Citra** (the o3dx context: `fmt.tprintf`, `make`/`append`, and a failed `assert` printed its message). A1/A4 shared maths moves over when a handheld needs it. |
+| A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b done** (2026-11-21, T0-T4: target selection, the backend contract, Vita scripts, the handhelds' entry file; since 2026-11-22 that is `matchbox/handheld_entry`, which the scripts build with the game imported through the `matchbox_game` collection, so games carry no entry file). **A0 verified in Citra** (the o3dx context: `fmt.tprintf`, `make`/`append`, and a failed `assert` printed its message). A1/A4 shared maths moves over when a handheld needs it. |
 | B (PC 3D core) | Done on PC. **B8 (viewport/scissor, fit policy, overscan cap) deferred** by the user. |
 | C (3DS core) | **C0-C4 done** (2026-11-22, Azahar only). C5 waits on B8; C6 optional. Gate (cube scene, real 3DS) not run. |
 | V (Vita core) | **Not done.** Everything in it is still to do. |

@@ -17,6 +17,9 @@ set TARGET=MyGame
 :: one at the repository root when none is. Assets, romfs and main.c stay at the root
 set SRC=%~1
 if "%SRC%"=="" set SRC=.
+:: What gets built is matchbox\handheld_entry, which imports the game through this collection,
+:: so the game needs no entry file and its package can have any name
+for %%I in ("%SRC%") do set "GAME_DIR=%%~fI"
 set DEVKITPRO=C:\devkitPro
 set DEVKITARM=%DEVKITPRO%\devkitARM
 set PATH=%DEVKITARM%\bin;%DEVKITPRO%\tools\bin;%PATH%
@@ -155,7 +158,7 @@ if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
 echo.
 echo Building Odin assembly...
-odin build %SRC% -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:mpcore
+odin build matchbox\handheld_entry -collection:matchbox_game="%GAME_DIR%" -target:freestanding_arm32 -o:speed -build-mode:asm -no-entry-point -min-link-libs -no-thread-local -microarch:mpcore
 if errorlevel 1 goto :fail
 echo Moving Odin assembly files...
 for %%f in (*.S) do (

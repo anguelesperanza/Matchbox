@@ -40,7 +40,7 @@ when VITA {
 
 	/*
 		Sets up the Odin runtime on the Vita and returns the context the game runs in. Called
-		from the game's entry_freestanding_arm32.odin, before `main`: Matchbox can't run it
+		from matchbox/handheld_entry, before the game's `main`: Matchbox can't run it
 		itself, because `context` belongs to the caller and nothing calls Odin before odin_main
 	*/
 	start_runtime :: proc "contextless" () -> runtime.Context {

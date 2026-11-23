@@ -465,10 +465,21 @@ generate_vertex :: proc(h: ^Pica) {
 		name := strings.concatenate({"mbs_out_", field.out})
 		fmt.sbprintfln(&h.outputs_text, ".out %s %s", name, field.out)
 		lanes := component_count(field.type)
-		if field.out == "position" {
-			lanes = 4
+		if field.out == "position" || lanes == 4 {
+			pica_emit(h, "mov", name, pica_first_lanes(4), result[index])
+			continue
 		}
-		pica_emit(h, "mov", name, pica_first_lanes(lanes), result[index])
+
+		// Written whole, every lane, even for a vec2 or a float. The New 3DS LL's GPU hangs on
+		// a draw whose shader writes only part of an output register: a texcoord0 written .xy
+		// hung it, the same written whole drew (gpu_test4, 2026-11-23). Azahar and Citra don't
+		// mind, so no emulator shows it. The lanes the field doesn't have get 0, and w gets 1,
+		// what a vertex attribute loader fills in for the components it isn't given
+		whole := pica_temp_operand(h, 4)
+		pica_emit(h, "mov", whole.base, pica_first_lanes(4), pica_constant(h, {0, 0, 0, 1}))
+		pica_emit(h, "mov", whole.base, pica_first_lanes(lanes), result[index])
+		pica_emit(h, "mov", name, pica_first_lanes(4), whole)
+		pica_release(h, whole)
 	}
 }
 

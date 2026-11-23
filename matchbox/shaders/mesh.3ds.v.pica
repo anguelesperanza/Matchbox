@@ -6,6 +6,7 @@
 .constf mbs_k0(0.000000000e+00, 0.000000000e+00, 0.000000000e+00, 0.000000000e+00)
 .constf mbs_k1(1.000000000e+00, 1.000000000e+00, 1.000000000e+00, 1.000000000e+00)
 .constf mbs_k2(5.000000000e-01, 5.000000000e-01, 5.000000000e-01, 5.000000000e-01)
+.constf mbs_k3(0.000000000e+00, 0.000000000e+00, 0.000000000e+00, 1.000000000e+00)
 .out mbs_out_position position
 .out mbs_out_texcoord0 texcoord0
 .out mbs_out_color color
@@ -32,7 +33,9 @@
 	add r5.xy, render_uv_rectangle.xyyy, r3.xyzw
 	mov r1.xy, r5.xyzw
 	mov mbs_out_position.xyzw, r0.xyzw
-	mov mbs_out_texcoord0.xy, r1.xyzw
+	mov r3.xyzw, mbs_k3.xyzw
+	mov r3.xy, r1.xyzw
+	mov mbs_out_texcoord0.xyzw, r3.xyzw
 	mov mbs_out_color.xyzw, r2.xyzw
 	end
 .end

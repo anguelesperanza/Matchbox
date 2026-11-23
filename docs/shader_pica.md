@@ -1,6 +1,36 @@
 # The PICA200 vertex backend (3DS)
 
-> **Hardware status:** this has only been tested on emulators so far (Azahar; for the `.tev` plan only one stage shape and the alpha test, see the end of the TexEnv section). It still needs to be tested on real hardware (a 3DS) before it can be considered working.
+> **Hardware status (2026-11-23):** `mesh.mbs`'s generated program runs on a real New 3DS LL: rectangles, textured
+> sprites, a 480x270 background, circles, lines, blended boxes and system-font text all draw (`gpu_test5`). It took
+> one fix that no emulator showed, below in "Output registers are written whole". Other shaders and the other `.tev`
+> stage shapes have only run in Azahar.
+
+## Output registers are written whole (real hardware hangs otherwise)
+
+**Rule:** every instruction that writes an output register (`mbs_out_*`) writes all four components, `.xyzw`. A
+`vec2` or scalar output is built in a temporary first, the missing lanes 0 and `w` 1 (what an attribute loader fills
+in for components it isn't given), and the temporary is moved to the output whole. `generate_vertex` in
+`pica_stmt.odin` does this; `every_output_register_is_written_whole` in `pica_test.odin` checks `mesh.mbs` and
+`hit_flash.mbs`, and fails on the old generator.
+
+**Why:** on a real New 3DS LL the GPU **hangs** on the first draw whose vertex shader writes only part of an output
+register: `mov mbs_out_texcoord0.xy, r1.xyzw` froze the console, with no error and the frame never finishing. Azahar
+and Citra draw the same program correctly, so emulator runs can't catch it. Written whole (`mov outtc0, inuv`, as
+devkitPro's textured examples do) the same draw runs.
+
+**How it was found** (2026-11-23, bisected on hardware one feature per frame, each frame waiting at most 3 s for the
+GPU and printing which step it was on):
+1. `gpu_test`: clear and an empty camera pass were fine; the first real draw hung.
+2. `gpu_test2`: one triangle with `C3D_DrawArrays` and nothing else (no index buffer, texture, depth, alpha test,
+   blending or culling) still hung, so none of those were the cause.
+3. `gpu_test3`: devkitPro's `simple_tri` shader drew, on its own layout and on Matchbox's three-attribute `Vertex`.
+   Adding a `texcoord0` output written `.xy` hung.
+4. `gpu_test4`: the same output written whole drew, and so did the engine's own `render_rectangle` and a textured
+   sprite with the mesh shader patched that way; `.xy` alone hung again.
+5. `gpu_test5`: mbsc's regenerated output, unpatched, ran the engine's 2D draws.
+
+If the 3DS freezes on a draw again, suspect the generated shader first: compare it with a devkitPro example that is
+known to run on hardware, changing one thing at a time.
 
 `mbsc shader.mbs -target:3ds --emit-pica -o:name` writes `name.v.pica`, which `picasso` (devkitPro) turns into a `.shbin`.
 `--emit-reflection` with `-target:3ds` writes the file the runtime reads. The fragment stage is not a program on this
@@ -50,8 +80,10 @@ register (`C3D_FVUnifMtx4x4` does that for a `C3D_Mtx`); a `[4]f32` with `C3D_FV
   evaluates the intermediate form directly; the two must agree on random inputs (mixed signs, positive only, exact
   halves, whole numbers).
 - On Azahar a triangle drawn with a generated vertex shader (matrix from `C3D_Mtx`, a `[4]f32` tint, a `bool`
-  uniform, the vertex colour output) came out the colour and place expected, both with the bool on and off. This is an
-  emulator run; no real 3DS has run it yet.
+  uniform, the vertex colour output) came out the colour and place expected, both with the bool on and off.
+- On a real New 3DS LL, `mesh.mbs`'s program runs the engine's 2D draws (2026-11-23, see "Output registers are
+  written whole"). Emulators and hardware disagree on what the GPU accepts, so a generated change that alters how
+  outputs or registers are written wants a hardware run, not only Azahar.
 
 ## The fragment stage: the `.tev` plan (S6)
 

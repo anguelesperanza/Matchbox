@@ -136,6 +136,35 @@ the_example_shader_runs_the_same_on_the_3ds :: proc(t: ^testing.T) {
 	expect_assembles(t, program.vertex, "hit_flash.mbs")
 }
 
+/*
+	The New 3DS LL's GPU hangs on a draw whose vertex shader writes only part of an output
+	register (gpu_test4, 2026-11-23), and no emulator shows it. So every write to an output
+	register is a whole one: mesh.mbs has a vec2 texcoord0, and hit_flash.mbs its own outputs
+*/
+@(test)
+every_output_register_is_written_whole :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	sources := [?]struct{name, text:string} {
+		{"mesh.mbs", #load("../../matchbox/shaders/mesh.mbs", string)},
+		{"hit_flash.mbs", #load("../../examples/shader-language/hit_flash.mbs", string)},
+	}
+	for source in sources {
+		ir, parsed, _ := build_ir_for(no_carriage_returns_for_pica(source.text), .PICA200)
+		defer destroy_parsed(parsed)
+		program, _ := generate_pica(ir, context.temp_allocator)
+		writes := 0
+		for line in strings.split_lines(program.vertex, context.temp_allocator) {
+			fields := strings.fields(strings.trim_space(line), context.temp_allocator)
+			// Instructions only: a `.out` line declares the register, it doesn't write it
+			if len(fields) < 2 || strings.has_prefix(fields[0], ".") || strings.has_prefix(fields[1], "mbs_out_") == false do continue
+			writes += 1
+			testing.expectf(t, strings.has_suffix(fields[1], ".xyzw,"), "%s: `%s` writes part of an output register", source.name, strings.trim_space(line))
+		}
+		testing.expectf(t, writes > 0, "%s: no output writes found", source.name)
+	}
+}
+
 @(private = "file")
 no_carriage_returns_for_pica :: proc(text: string) -> string {
 	result, _ := strings.replace_all(text, "\r\n", "\n", context.temp_allocator)

@@ -743,7 +743,12 @@ aspect, and letterbox and expand both behave as in the mockups.
 
 ## Phase C: 3DS 3D core (citro3d)
 
-**Phase C: status (2026-11-22).** C0 to C4 are done and checked in Azahar 2126.2; nothing has run on a real 3DS yet.
+**Phase C: status (2026-11-22; hardware 2026-11-23).** C0 to C4 are done and checked in Azahar 2126.2. On the real
+New 3DS LL the engine's 2D draws run since 2026-11-23 (`gpu_test5`: rectangles, textured sprites, a 480x270
+background, circles, lines, blended boxes, text). Before that every draw froze the console: mbsc wrote the
+`texcoord0` output `.xy` only, and the real GPU hangs on a partial write to an output register while Azahar does not.
+Found by bisecting on hardware; the rule, the fix and how it was found are in `docs/shader_pica.md`, "Output registers
+are written whole".
 How the build differs from the steps below, which are kept as written:
 - **C0.** The shader is generated rather than hand-written: `matchbox/shaders/mesh.3ds.v.pica` and `mesh.3ds.tev`
   are mbsc's output for `mesh.mbs`, committed like `mesh.pc.hlsl`. `3ds_build.bat` assembles the `.pica` with
@@ -1145,8 +1150,9 @@ and `mbsc` (`tools/mbsc/`) builds it for all three targets. Details are in `docs
 - S6 3DS fragment (TexEnv): `mbsc` writes a `.tev` plan that the 3DS runtime applies (`shader_tev.odin`).
 - S7 capabilities: per-target checks, with tests.
 - S8 (writing `.shbin` and `.gxp` directly, without picasso and psp2cgc): not started; later.
-- Nothing generated has run on real hardware yet: the 3DS hangs on its first draw (2026-11-23), and the
-  Vita's first hardware pass is waiting.
+- Hardware (2026-11-23): S5's output runs on the real New 3DS LL, after a fix found there: the GPU hangs when a
+  vertex shader writes only part of an output register, which no emulator shows, so mbsc writes every output whole
+  (`docs/shader_pica.md`). The Vita's generated Cg waits for its first hardware pass.
 
 **Why.** A custom shader today means HLSL (PC), Cg (Vita) and PICA assembly
 (3DS): up to three times the work for one effect. The goal is one shader
@@ -1646,7 +1652,12 @@ above all the same.
 2. **HLSL matrix packing** (B4): a transposed matrix looks like a wrong
    rotation. Check with the x = +1 test before anything else.
 3. **PICA shader authoring** (C0): new language and toolchain. Start from a
-   citro3d example shader and change one thing at a time.
+   citro3d example shader and change one thing at a time. **Emulators accept
+   shaders the real GPU hangs on:** a partial write to an output register
+   (`mov out.xy, ...`) froze the New 3DS LL on every draw while Azahar drew it
+   (2026-11-23). mbsc now writes outputs whole, and a test holds it; see
+   `docs/shader_pica.md`. A freeze on hardware is bisected one feature per
+   frame, with a timeout on the frame wait so the hang names its step.
 4. **3DS depth direction and range** (C1): wrong comparison means nothing
    draws. Test with two overlapping quads of known order.
 5. **3DS linear memory** (C3): VBOs and textures share a small linear heap.

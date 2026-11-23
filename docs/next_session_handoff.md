@@ -33,10 +33,22 @@ rules too; they are repeated here so this file stands alone.
 9. **Targets are exactly three:** PC (Windows, D3D11), the 3DS (specifically a New 3DS LL) and the PS Vita. Nothing else is
    planned for this rewrite. (Linux only through Wine/Proton running the Windows build, per `README.md`.)
 10. Gotchas on this machine: Bash/Python heredocs mangle `\n` inside Odin string literals (use the Edit tool); devkitPro
-   `make` does not work from this shell (compile C by hand, see "Tooling").
+   `make` does not work from this shell (compile C by hand, see "Tooling"). `sed -i` on a `.bat` breaks its CRLF line
+   endings and cmd then misreads the script; edit `.bat` files with the Edit tool or PowerShell.
+11. **Emulators are not hardware.** Azahar drew a shader the real New 3DS LL hung on (partial output write, 2026-11-23;
+   see `docs/shader_pica.md`). Claude runs Azahar and Vita3K; the user runs the real consoles. To find a hardware-only
+   hang, build a test that adds one feature per frame and waits for the GPU with a timeout (`C3D_FrameBegin` with
+   `FRAME_NONBLOCK`), printing each step, so the hang names its step. **Give every hardware test build its own file name
+   and on-console title** (the 3DS `TARGET` / the Vita `TITLE` in the build script, and a first printed line naming the
+   test): all of them showed as "My Game" once and the wrong one was run.
 
 ## State of the repo (2026-11-21, Phase C added 2026-11-22)
 
+- **2026-11-23: the 3DS draws on real hardware, and Phase V is done in Vita3K.** The freeze on the New 3DS LL was mbsc
+  writing the `texcoord0` output `.xy` only; the real GPU hangs on that, Azahar does not. mbsc now writes outputs whole
+  (`docs/shader_pica.md`). The Vita has the shared renderer, textures, text, touch and a print log
+  (`ux0:data/matchbox.log`); `examples/vita-check` is the build for its first hardware pass (`render_plan.md`,
+  "Phase V: status").
 - **2026-11-22: Phase C, C0 to C4 done on the 3DS, checked in Azahar only** (render_plan.md, "Phase C: status").
   - The 3DS draws the shared render queue with mbsc's `mesh.3ds.v.pica` and `.tev`.
   - `examples/render-check` passes all its framebuffer probes.
@@ -137,11 +149,11 @@ Vita:  vita_check.bat
 |---|---|
 | A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b done** (2026-11-21, T0-T4: target selection, the backend contract, Vita scripts, the handhelds' entry file; since 2026-11-22 that is `matchbox/handheld_entry`, which the scripts build with the game imported through the `matchbox_game` collection, so games carry no entry file). **A0 verified in Citra** (the o3dx context: `fmt.tprintf`, `make`/`append`, and a failed `assert` printed its message). A1/A4 shared maths moves over when a handheld needs it. |
 | B (PC 3D core) | Done on PC. **B8 (viewport/scissor, fit policy, overscan cap) deferred** by the user. |
-| C (3DS core) | **C0-C4 done** (2026-11-22, Azahar only). C5 waits on B8; C6 optional. Gate (cube scene, real 3DS) not run. |
-| V (Vita core) | **Not done.** Everything in it is still to do. |
-| D (textures/assets) | D1-D3 done on PC. **The 3DS half of D1, D2 and D4 done** (2026-11-22, Azahar only; subfolders are kept). The Vita half is V5. |
-| E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). E7 done on the 3DS too (Azahar; clip offsets use the `.meta`'s `source_ppu`). Vita halves wait for Phase V. |
-| F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: font code ported from `main` (`font.odin`, `text.odin`, CC0 Bitrimus font); each target uses its native text: **the 3DS's system font is done** (2026-11-22, Azahar only); the Vita's waits for Phase V. |
+| C (3DS core) | **C0-C4 done** (2026-11-22, Azahar). **Runs on the real New 3DS LL since 2026-11-23** (`gpu_test5`: rectangles, textured sprites, background, circles, lines, blended boxes, text), after the hang fix in `docs/shader_pica.md` ("Output registers are written whole"). C5 waits on B8; C6 optional. The cube-scene gate itself not run on hardware. |
+| V (Vita core) | **Done in Vita3K** (2026-11-23) except V8 (deferred with B8) and audio (the user's). See `render_plan.md`, "Phase V: status". **Hardware pass 1** (`examples/vita-check`) not run yet. |
+| D (textures/assets) | D1-D3 done on PC. The 3DS half of D1, D2 and D4 done (2026-11-22, Azahar). The Vita half (V5) done in Vita3K (2026-11-23). |
+| E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). E7 done on the 3DS (Azahar) and the Vita (Vita3K, 2026-11-23). |
+| F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: each target uses its native text: the 3DS's system font (2026-11-22; draws on hardware since 2026-11-23), the Vita's through ScePvf (2026-11-23, Vita3K). Vita front touch is the mouse (2026-11-23). |
 | G (3D games) | Not started (models, lighting, 3D cameras, billboards, render targets, skinning). |
 | H (hard-float via Farlite) | Late, not started. |
 | S (shader language) | S0-S7 done; see below. |
@@ -169,7 +181,7 @@ What is done and how well it is verified:
 |---|---|---|
 | S0-S3 (language, front end, HLSL, reflection) | yes | tests; the PC engine loads `mesh.pc.hlsl` + `mesh.pc.refl`; pixel tests on the D3D software device. **The user should still run the demo to confirm it looks unchanged**, then may delete the hand-written `matchbox/shaders/mesh.hlsl` (kept, not loaded). |
 | S4 Vita Cg | yes | compiled with `psp2cgc`; mesh programs ran in Vita3K. **No Vita runtime exists**, no real Vita. Doc: `docs/shader_cg.md`. |
-| S5 3DS vertex (PICA) | yes | every program assembles with `picasso`; assembly agrees numerically with the IR interpreter for all 3DS built-ins; a triangle drawn in **Azahar** with matrix, `[4]f32` and bool uniforms. **No real 3DS.** Doc: `docs/shader_pica.md`. |
+| S5 3DS vertex (PICA) | yes | every program assembles with `picasso`; assembly agrees numerically with the IR interpreter for all 3DS built-ins; a triangle drawn in **Azahar** with matrix, `[4]f32` and bool uniforms. **`mesh.mbs` runs on the real New 3DS LL** (2026-11-23) since outputs are written whole: a partial write (`mov out.xy`) hangs the real GPU, not Azahar. `every_output_register_is_written_whole` guards it. Doc: `docs/shader_pica.md`. |
 | S6 3DS fragment (TexEnv `.tev`) | plan generator + tests | One run on Azahar with hand-applied stages: `MULTIPLY_ADD TEXTURE0 PRIMARY_COLOR CONSTANT` gave the exact expected colour; alpha test `GEQUAL 0x70` kept, `0x90` discarded. **Not covered:** INTERPOLATE, ADD_MULTIPLY, one-minus operands, PREVIOUS chaining, several textures, real 3DS. **The 3DS runtime reads `.tev` since Phase C** (`shader_tev.odin`), and applies `mesh.3ds.tev` (MODULATE, alpha test from `render_alpha_cutoff`). |
 | S7 capabilities | yes | tests |
 

@@ -1133,6 +1133,21 @@ the 3DS and the Vita under letterbox, and shia-test plays on PC.
 
 ## Phase S: Matchbox shader language (added 2026-11-17)
 
+**Phase S: status (2026-11-23).** S0 to S7 are done; S8 is a later item. `mesh.mbs` is the one engine shader,
+and `mbsc` (`tools/mbsc/`) builds it for all three targets. Details are in `docs/next_session_handoff.md`
+("Phase S in detail") and `docs/shader_*.md`.
+- S0-S3: the language, the front end, HLSL and reflection. The PC loads `mesh.pc.hlsl` and `mesh.pc.refl`;
+  pixel tests run on the D3D software device.
+- S4 Vita Cg: `mesh_v.cg` / `mesh_f.cg`, compiled by `psp2cgc` to the committed `.gxp`. The Vita runtime
+  (Phase V) draws with them in Vita3K.
+- S5 3DS vertex (PICA): every program assembles with `picasso`, and agrees numerically with the IR
+  interpreter; the 3DS runtime draws with `mesh.3ds.v.pica` in Azahar.
+- S6 3DS fragment (TexEnv): `mbsc` writes a `.tev` plan that the 3DS runtime applies (`shader_tev.odin`).
+- S7 capabilities: per-target checks, with tests.
+- S8 (writing `.shbin` and `.gxp` directly, without picasso and psp2cgc): not started; later.
+- Nothing generated has run on real hardware yet: the 3DS hangs on its first draw (2026-11-23), and the
+  Vita's first hardware pass is waiting.
+
 **Why.** A custom shader today means HLSL (PC), Cg (Vita) and PICA assembly
 (3DS): up to three times the work for one effect. The goal is one shader
 language with Odin-like syntax, compiled to each target's own format.
@@ -1675,12 +1690,14 @@ above all the same.
 - [x] Generated shader output: generate at build on PC; Vita `.gxp` stays committed (vito's rule, 2026-11-13); 3DS output decided at S5 (decided 2026-11-18).
 - [x] Vita emulator: Vita3K is the per-step check while the bindings are built; the user checks on the real Vita (decided 2026-11-22).
   User, 2026-11-21, for both handhelds: Claude may run Azahar and Vita3K to check work it does; the user checks on the New 3DS LL and the Vita.
-- [ ] `Matchbox_Info` for three targets (A0b): one shared struct holding the engine state, with a per-target `Backend_State` field for the device handles (recommended), or one whole struct per target, as now.
-- [ ] Entry point on the handhelds (A0b): Matchbox can't own `odin_main`, because it can't call the game's `main`. It can't import the game, and `intrinsics.__entry_point()` compiles to nothing under `-build-mode:asm`: the compiler sets the entry point only for executables (`src/checker.cpp`, "check entry point"; measured 2026-11-21). `init` can't set it either, because `context` is passed per call, so a context set inside `init` never reaches the game's `main`. That is the same reason `context.logger = mb.mbi.logger` is needed on PC. Recommended: one six-line game file shared by both consoles, calling `mb.start_runtime()`.
+- [x] `Matchbox_Info` for three targets (A0b): one shared struct holding the engine state, with a per-target `Backend_State` embedded with `using` (landed 2026-11-21, `matchbox_info.odin`).
+- [x] Entry point on the handhelds (A0b): `matchbox/handheld_entry` is the package that gets built, and it imports the game through the `matchbox_game` collection, so a game needs no entry file of its own (landed 2026-11-22). Why Matchbox can't simply own `odin_main`: it can't import the game, and `intrinsics.__entry_point()` compiles to nothing under `-build-mode:asm`, where the compiler sets the entry point only for executables (`src/checker.cpp`, "check entry point"; measured 2026-11-21).
+- [x] Sprite pivot convention: `{0.5, 0.5}`, the centre (the default in `create_sprite`).
+- [x] Sprites default to cut-out (`render_sprite`'s `mode` defaults to `.CUTOUT`); blended is asked for.
+- [x] Text: each target uses its native text (decided 2026-11-22): stb on PC, the system font on the 3DS (`fontGetSystemFont`) and on the Vita (ScePvf). A shared font framework may come later.
+- [x] Vita `print`: also written to `ux0:data/matchbox.log` for crashes and hangs; anything meant to be seen while playing is drawn with `render_text` (decided 2026-11-23).
+- [x] Hardware passes on the Vita: one after Phase V (with the Vita halves of D, E and F), one after Phase G; Vita3K is the check between them (decided 2026-11-22).
+- [x] Bottom screen on PC: hidden or fullscreen, no overlay or stacked layout for now (decided 2026-11-18).
 - [ ] Vita MSAA: off, or 4x (decide at V8).
 - [ ] Design aspect: all three screens have different shapes (400x240, 960x544, any PC window); pick the default design aspect and fit policy together (F1).
-- [ ] Sprite pivot convention (recommended: `{0.5, 0.5}` = centre).
-- [ ] Sprites default to cut-out or blended (recommended: cut-out).
-- [ ] Default fit policy and the overscan cap (F1 shipped without them; decide with B8).
-- [ ] Text approach on the 3DS (before E1).
-- [x] Bottom screen on PC: hidden or fullscreen, no overlay or stacked layout for now (decided 2026-11-18).
+- [ ] Default fit policy and the overscan cap (F1 shipped without them; decide with B8, C5 and V8).

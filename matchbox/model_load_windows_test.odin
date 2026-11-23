@@ -5,7 +5,7 @@ package matchbox
 import "core:testing"
 
 /*
-	assets/models/test_crate.gltf and .glb, written by tools/make_test_model.py: a textured cube
+	tools/testdata/models/test_crate.gltf and .glb, written by tools/make_test_model.py: a textured cube
 	(node "crate") with a child node "flag" moved up 1 and scaled 0.5, holding a red quad with a
 	double-sided MASK material. The two files hold the same model, the image once as a base64
 	URI and once as a buffer view, so both of glTF's ways of carrying an image are read
@@ -52,18 +52,18 @@ expect_test_crate :: proc(t:^testing.T, path:string) {
 
 @(test)
 a_gltf_with_embedded_data_reads_as_its_numbers_say :: proc(t:^testing.T) {
-	expect_test_crate(t, "assets/models/test_crate.gltf")
+	expect_test_crate(t, "tools/testdata/models/test_crate.gltf")
 	free_all(context.temp_allocator)
 }
 
 @(test)
 a_glb_reads_the_same_as_its_gltf :: proc(t:^testing.T) {
-	expect_test_crate(t, "assets/models/test_crate.glb")
+	expect_test_crate(t, "tools/testdata/models/test_crate.glb")
 	free_all(context.temp_allocator)
 }
 
 @(test)
 a_missing_model_file_is_not_ok :: proc(t:^testing.T) {
-	_, ok := read_gltf_model("assets/models/no_such_model.glb")
+	_, ok := read_gltf_model("tools/testdata/models/no_such_model.glb")
 	testing.expect(t, ok == false)
 }

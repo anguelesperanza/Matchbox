@@ -6,6 +6,10 @@ package model_check
 	`3ds_build.bat examples\model-check` / `vita_build.bat examples\model-check` once they read
 	models.
 
+	test_crate.glb is loaded from assets/models, which git ignores (assets are the game's own).
+	`python tools/make_test_model.py` writes it there, beside the tracked copy the tests read in
+	tools/testdata/models.
+
 	What should show, left to right on a grey floor (create_plane_model):
 	- a cube (create_cube_model), tinted blue
 	- test_crate.glb, turning: an orange/white checkered crate with a red square standing

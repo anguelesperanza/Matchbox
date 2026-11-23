@@ -1,4 +1,6 @@
-"""Writes assets/models/test_crate.gltf and .glb: the model Matchbox's glTF reader is tested with.
+"""Writes tools/testdata/models/test_crate.gltf and .glb: the model Matchbox's glTF reader is tested with.
+Copies them into assets/models too, where examples/model-check loads one. assets/ is the game's own
+and git ignores it, so the tracked copies are the ones in tools/testdata.
 
     python tools/make_test_model.py
 
@@ -88,7 +90,8 @@ def document(image_entry, buffer_entry):
         "accessors": accessors,
     }
 
-root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "models")
+here = os.path.dirname(os.path.abspath(__file__))
+root = os.path.join(here, "testdata", "models")
 os.makedirs(root, exist_ok=True)
 
 gltf = document({"uri": "data:image/png;base64," + base64.b64encode(image).decode()},
@@ -104,4 +107,9 @@ with open(os.path.join(root, "test_crate.glb"), "wb") as f:
     f.write(struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(glb_json) + 8 + len(binary)))
     f.write(struct.pack("<I4s", len(glb_json), b"JSON") + glb_json)
     f.write(struct.pack("<I4s", len(binary), b"BIN\0") + binary)
-print("wrote", root)
+import shutil
+assets = os.path.join(here, "..", "assets", "models")
+os.makedirs(assets, exist_ok=True)
+for name in ("test_crate.gltf", "test_crate.glb"):
+    shutil.copy(os.path.join(root, name), os.path.join(assets, name))
+print("wrote", root, "and copied them into", assets)

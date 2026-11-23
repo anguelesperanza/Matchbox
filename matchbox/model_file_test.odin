@@ -7,7 +7,7 @@ import "core:testing"
 /*What the PC reads from glTF, written as a .mbm and read back, is the same model the handhelds get*/
 @(test)
 a_model_file_reads_back_what_was_written :: proc(t:^testing.T) {
-	original, ok := read_gltf_model("assets/models/test_crate.glb")
+	original, ok := read_gltf_model("tools/testdata/models/test_crate.glb")
 	defer destroy_model_data(original)
 	if testing.expect(t, ok) == false do return
 
@@ -45,7 +45,7 @@ a_model_file_reads_back_what_was_written :: proc(t:^testing.T) {
 /*A file cut short anywhere, or one that isn't a model, is refused rather than read as garbage*/
 @(test)
 a_short_or_foreign_model_file_is_refused :: proc(t:^testing.T) {
-	original, ok := read_gltf_model("assets/models/test_crate.glb")
+	original, ok := read_gltf_model("tools/testdata/models/test_crate.glb")
 	defer destroy_model_data(original)
 	if testing.expect(t, ok) == false do return
 	bytes := write_model_file(original, []string{"models/test_crate_0.png"})

@@ -14,8 +14,6 @@ package matchbox
 	so a checkout builds without psp2cgc; the .gxp files are embedded with #load, as gfx does
 	for its clear shaders.
 
-	Not done yet (render_plan.md Phase V): textures (V5) draw white.
-
 	Inside `when VITA` for the reason in backend_vita_freestanding_arm32.odin
 */
 
@@ -86,10 +84,10 @@ when VITA {
 		gfx.free(mesh.uid)
 	}
 
-	/*What render.odin's sort groups opaque items by: the mesh, until textures exist (V5)*/
+	/*What render.odin's sort groups opaque items by: texture, then mesh*/
 	@(private)
 	calculate_render_item_sort_key :: proc(item:Render_Item) -> [2]uintptr {
-		return {0, uintptr(item.mesh.vertices)}
+		return {uintptr(item.texture.texture), uintptr(item.mesh.vertices)}
 	}
 
 	/*
@@ -192,7 +190,9 @@ when VITA {
 		gfx.set_uniform(vertex_uniforms, pipeline.uv_rectangle_uniform, uv[:])
 		gfx.set_uniform(fragment_uniforms, pipeline.alpha_cutoff_uniform, ([^]f32)(&cutoff)[:1])
 
-		sce.sceGxmSetFragmentTexture(gfx.ctx, pipeline.texture_unit, &pipeline.white_texture.texture)
+		// No texture is white, as on PC: the shader always samples, and white times the tint is the tint
+		texture := item.texture.texture if item.texture.texture != nil else &pipeline.white_texture
+		sce.sceGxmSetFragmentTexture(gfx.ctx, pipeline.texture_unit, &texture.texture)
 		sce.sceGxmSetVertexStream(gfx.ctx, 0, item.mesh.vertices)
 		sce.sceGxmDraw(gfx.ctx, .TRIANGLES, .U16, item.mesh.indices, item.mesh.index_count)
 	}

@@ -16,11 +16,12 @@ package matchbox
 
 	The GPU's context and display queue are not here: vito's gfx package keeps its own, and the
 	backend calls it. The shader and its programs are (mbi.pipeline), and meshes and the
-	pipeline are in render_vita_freestanding_arm32.odin. Textures are empty until V5.
+	pipeline are in render_vita_freestanding_arm32.odin, textures in texture_vita_freestanding_arm32.odin.
 */
 
 import "base:runtime"
 
+import "vito/gfx"
 import "vito/sce"
 import "vito/vito"
 
@@ -34,8 +35,10 @@ when VITA {
 	/*Nothing to set yet. Declared so matchbox_info.odin's `backend = BACKEND_DEFAULTS` works on every target*/
 	BACKEND_DEFAULTS :: Backend_State {}
 
-	/*Empty until Phase V uploads textures with GXM*/
-	Backend_Texture :: struct {}
+	/*The GXM texture, on the heap so every copy of a Texture names the same one (texture_vita_freestanding_arm32.odin)*/
+	Backend_Texture :: struct {
+		texture:^gfx.Texture,
+	}
 
 	/*
 		Geometry in GPU-mapped memory: vertices, then indices, in one gfx.alloc block.
@@ -60,30 +63,6 @@ when VITA {
 	/*Undoes start_runtime. Called after `main` returns*/
 	stop_runtime :: proc "contextless" () {
 		vito.shutdown()
-	}
-
-	/*
-		Not loaded yet: returns a Texture of the right size once Phase V uploads it. Until then
-		an empty Texture, so a game that loads images still runs and draws nothing
-	*/
-	load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
-		texture.filter = filter
-		return
-	}
-
-	/*
-		A texture from RGBA8 pixels already in memory: what create_font uploads its atlas with.
-		Records the size and uploads nothing until Phase V, so the sizes a game reads are right
-	*/
-	create_texture_from_pixels :: proc(pixels:rawptr, width, height:i32, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
-		texture.width = width
-		texture.height = height
-		texture.filter = filter
-		return
-	}
-
-	/*Nothing to free until load_texture uploads something*/
-	destroy_texture :: proc(texture:Texture) {
 	}
 
 	/*{width, height, 0, 0} in pixels: 960 x 544, and no second screen*/

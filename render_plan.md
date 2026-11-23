@@ -812,7 +812,7 @@ How the build differs from the steps below, which are kept as written:
 - The scissor is in portrait framebuffer coordinates, so swap x and y, as in
   the projection.
 
-**C6. Stereoscopic 3D** (optional, any time after C4).
+**C6. Stereoscopic 3D** (optional, any time after C4). **Deferred 2026-11-23:** the user isn't sure it is wanted.
 - `gfxSet3D(true)`, with left and right render targets.
 - `Mtx_PerspStereoTilt` / ortho with an eye offset scaled by
   `osGet3DSliderState()`.
@@ -1541,6 +1541,13 @@ DONE on PC (2026-11-18).
   binary from `assets/`; GPU buffers there come from `gfx.alloc`.
 
 **G2. Lighting.**
+- **2026-11-23, superseding the per-target bullets below:** per-vertex **and** per-pixel lighting on all three
+  targets; per-pixel on the 3DS through its fixed-function fragment lighting unit; main's API names (`Light`,
+  `create_directional_light`, `set_lights`, `set_lighting`). The plan, steps L0-L7 and the open questions are in
+  `docs/3ds_fragment_lighting_plan.md`; it starts with a hardware spike (L0) before any G2 code.
+- Also decided 2026-11-23: per-vertex or per-pixel chosen per model part (global default); 8 lights to start as a
+  per-target limit, easy to raise on PC and the Vita; specular in G2; directional first, then point and spot. After
+  the core: normal and bump maps, environment mapping, procedural textures and fog. Stereoscopic 3D (C6) deferred.
 - Directional plus ambient to start. Add `normal` to the vertex format.
 - PC: per-pixel in HLSL.
 - 3DS: PICA hardware fragment lighting (`C3D_LightEnv`, `C3D_Light`) or

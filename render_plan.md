@@ -829,6 +829,30 @@ Vita a working build and entry point, so this phase is only rendering. The
 rules that apply throughout are in "The three targets". Files are
 `render_vita_freestanding_arm32.odin` (and others) wrapped in `when VITA`.
 
+**Phase V: status (2026-11-23).** Done in Vita3K except V8 (deferred with B8)
+and audio (the user's). Not yet run on a real Vita: that is hardware pass 1,
+with `examples/vita-check` (see below).
+- V1 shader, V2 depth (LESS, as PC), V4 culling (`.BACK` is GXM's `.CW`: the
+  viewport flips y, so the mode was picked by test), V5 textures (PNGs through
+  libpng, `.meta` or a guessed grid, point and linear), V6 meshes (1,000
+  create/destroy cycles left free memory unchanged), V7 the queue with
+  per-draw uniforms, V3 cameras (2D pan and zoom measured to within 2 px, 3D
+  perspective).
+- V9: buttons and sticks, and the front touch panel as the mouse (one finger;
+  `calculate_mouse_world_position` as on PC). The back panel and motion stay
+  off: Matchbox has no API for them.
+- `print` also writes `ux0:data/matchbox.log`, one run per file, with vito's
+  crash report after the prints (decided 2026-11-23: on-screen information
+  uses `render_text`; prints are for crashes and hangs).
+- **Hardware pass 1:** `vita_build.bat examples\vita-check` builds an 11-step
+  check (clear, shapes, depth, culling, textures, animation, the Phase B
+  scene, text, touch, memory). Each step says on screen what it should look
+  like and is logged as it starts and once it draws, so after a hang the
+  log's last line names the step.
+- Vita3K notes: it runs the real libpvf and system fonts; it ignores
+  `O_TRUNC`; a file kept open lost its buffered lines in a crash; a tap
+  shorter than a frame is missed, as on any polled input.
+
 **V0. Backend skeleton.**
 - `render_vita_freestanding_arm32.odin` implements the same public procedures
   as `render_windows.odin`: `render_start`, `render_end`, `render_mesh`,
@@ -934,10 +958,10 @@ rules that apply throughout are in "The three targets". Files are
   frames and cleared at `camera_end`, as on the other targets.
 - Done when: the Phase B scene (spinning textured cube, half-transparent quad
   passing through it) renders on the Vita.
-- Status (2026-11-23, Vita3K): sprites, shapes, textured and animated sprites,
-  a perspective cube with depth and culling, and blended quads all draw
-  (V1-V6 tests). The exact Phase B scene, a transparent quad passing through
-  the cube, has not been run on the Vita yet.
+- Status (2026-11-23, Vita3K): DONE. The Phase B scene draws: the textured
+  cube hides the pane where it is in front, and is tinted where it is behind.
+  The test found a shared bug, `mesh_cube(colored = false)` still colouring
+  the faces, fixed with a test.
 
 **V8. Fit and viewport.**
 - The surface is fixed at 960x544. `gfx.set_viewport(width, height, x, y)`
@@ -1077,7 +1101,9 @@ in both `3ds_build.bat` and `get_asset`.
 - Still left out: `replay`, progress, frame-passed and `sprite_set_frame`.
 
 **E7. Acceptance test: port shia-test.** PC half DONE (`examples/shia-test`, run with
-`odin run examples/shia-test`). 3DS half DONE (2026-11-22, Azahar only); the Vita half waits for Phase V.
+`odin run examples/shia-test`). 3DS half DONE (2026-11-22, Azahar only). Vita half DONE (2026-11-23, Vita3K only):
+`vita_build.bat examples\shia-test` with no changes, the 128 px sheet from `assets\vita\images`, 60 FPS; walk,
+jump, attack, knee, guard and crouch respond. Not checked: run and the crouch attacks (two buttons at once).
 - 3DS status:
   - **Built with** `3ds_build.bat examples\shia-test`, with no layout changes. The camera is in world units
     (`1080 * PX` tall), so the 400x240 screen shows the same view as the PC, smaller.
@@ -1386,7 +1412,10 @@ points, not two (decided 2026-11-18).
     descent give it, and nothing in an 8-pixel ring around that box.
   - Drawn at three times the size in a throwaway build, the glyphs were whole: the tails of g, j and y, and
     the dot on the j.
-- **Vita:** a stub until Phase V (`font_vita_freestanding_arm32.odin`).
+- **Vita (2026-11-23, Vita3K):** `font_vita_freestanding_arm32.odin` bakes from the system font through ScePvf,
+  rendering each glyph at the size asked for straight into the shared atlas; the TTF is not read, as on the 3DS.
+  Sizes come from `scePvfGetCharImageRect` and offsets from the bearings (PvfCharInfo's bitmap fields stay 0).
+  Checked at 16, 32 and 64 px over boxes from `calculate_text_size`, and wrapped.
 
 **F2. Text.** Decided 2026-11-18: port the font code from `main` (`font.odin`,
 `text.odin`) and rework it onto this branch, for PC first. It bakes with
@@ -1444,9 +1473,11 @@ that swap does not touch games.
     - A tap on a box counted as a hit.
     - A square followed a drag.
     - A release outside the box reported the last held point and no hit.
-- Vita front touch (and the rear panel) report in the panel's own coordinate
-  range, not screen pixels; scale them to 960x544 first, then treat as mouse.
-  Check the range on hardware.
+- Vita front touch: DONE (2026-11-23, Vita3K). vito already scales the panel's
+  own range to 960x544. The first finger is the mouse (LEFT, and its
+  position), and `calculate_mouse_world_position` works as on PC. Checked:
+  screen and world points within a pixel of the click. Check the panel range
+  on hardware.
 
 **F4. 3DS bottom screen** as a second surface (320x240) with its own camera.
 DONE on PC (2026-11-18).

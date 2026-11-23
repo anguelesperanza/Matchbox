@@ -701,11 +701,8 @@ main :: proc() {
 	camera.position.y = 1.5
 	camera.target.y = 1.5
 
-	// Debug: T toggles slow motion (a tenth of the speed), and the sheet frame is
-	// printed to the console each time it changes, so a pose can be matched to
-	// its number in anim_list.txt
+	// Debug: T toggles slow motion (a tenth of the speed), to study a pose
 	slow_motion := false
-	last_frame := -1
 
 	for matchbox.is_running() {
 		dt := matchbox.get_delta_time()
@@ -724,11 +721,6 @@ main :: proc() {
 
 		movement(&player, dt)
 		matchbox.camera_follow(&camera, {player.position.x, 1.5}, 4, dt)
-
-		if player.frame != last_frame {
-			last_frame = player.frame
-			matchbox.print("frame", player.frame, "state", player.state)
-		}
 
 		matchbox.render_start()
 		matchbox.clear_background({0.1, 0.1, 0.14, 1})

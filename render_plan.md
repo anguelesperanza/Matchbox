@@ -1631,8 +1631,8 @@ above all the same.
 - [x] Shader file extension and location: `.mbs`, under `matchbox/shaders/` (decided 2026-11-18). Compiler: `mbsc`.
 - [x] 3DS fragment policy: portable subset that maps to TexEnv, a compile error naming the line and the fix for anything else (decided 2026-11-18).
 - [x] Generated shader output: generate at build on PC; Vita `.gxp` stays committed (vito's rule, 2026-11-13); 3DS output decided at S5 (decided 2026-11-18).
-- [ ] Vita emulator: Vita3K vs hardware as the per-step check (decide before V0).
-  User, 2026-11-21, for both handhelds: Claude may run Azahar and Vita3K to check work it does; the user checks on the New 3DS LL and the Vita. (Left for the user to tick.)
+- [x] Vita emulator: Vita3K is the per-step check while the bindings are built; the user checks on the real Vita (decided 2026-11-22).
+  User, 2026-11-21, for both handhelds: Claude may run Azahar and Vita3K to check work it does; the user checks on the New 3DS LL and the Vita.
 - [ ] `Matchbox_Info` for three targets (A0b): one shared struct holding the engine state, with a per-target `Backend_State` field for the device handles (recommended), or one whole struct per target, as now.
 - [ ] Entry point on the handhelds (A0b): Matchbox can't own `odin_main`, because it can't call the game's `main`. It can't import the game, and `intrinsics.__entry_point()` compiles to nothing under `-build-mode:asm`: the compiler sets the entry point only for executables (`src/checker.cpp`, "check entry point"; measured 2026-11-21). `init` can't set it either, because `context` is passed per call, so a context set inside `init` never reaches the game's `main`. That is the same reason `context.logger = mb.mbi.logger` is needed on PC. Recommended: one six-line game file shared by both consoles, calling `mb.start_runtime()`.
 - [ ] Vita MSAA: off, or 4x (decide at V8).

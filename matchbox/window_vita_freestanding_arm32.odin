@@ -37,6 +37,25 @@ when VITA {
 		}
 
 		mbi.window_size = {gfx.WIDTH, gfx.HEIGHT, 0, 0}
+
+		create_render_pipeline()
+
+		// The meshes every sprite and shape is drawn with, as on PC and 3DS
+		sprite_vertices, sprite_indices := mesh_quad()
+		mbi.sprite_mesh = create_mesh(sprite_vertices, sprite_indices)
+		delete(sprite_vertices)
+		delete(sprite_indices)
+
+		triangle_vertices, triangle_indices := mesh_triangle()
+		mbi.triangle_mesh = create_mesh(triangle_vertices, triangle_indices)
+		delete(triangle_vertices)
+		delete(triangle_indices)
+
+		circle_vertices, circle_indices := mesh_circle()
+		mbi.circle_mesh = create_mesh(circle_vertices, circle_indices)
+		delete(circle_vertices)
+		delete(circle_indices)
+
 		start_clock(&mbi.clock, vito.time_us(), 1_000_000) // microseconds
 
 		// Odin's random generator seeds itself from the system's entropy the first time it is
@@ -60,11 +79,15 @@ when VITA {
 
 	/*
 		Cleans up resources created by Matchbox. The GPU and the display queue have to be idle
-		before gfx frees the memory they read, so both are waited on first
+		before anything they read is freed, so both are waited on first
 	*/
 	cleanup :: proc() {
 		gfx.finish()
 		sce.sceGxmDisplayQueueFinish()
+		destroy_mesh(mbi.triangle_mesh)
+		destroy_mesh(mbi.circle_mesh)
+		destroy_mesh(mbi.sprite_mesh)
+		destroy_render_pipeline()
 		gfx.shutdown()
 		vito.input_shutdown()
 	}

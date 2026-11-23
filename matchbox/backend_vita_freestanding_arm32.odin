@@ -14,18 +14,21 @@ package matchbox
 	because Odin does not allow `import` inside `when`, and an import whose procedures are
 	never called adds nothing to the build.
 
-	The GPU's state is not here: vito's gfx package keeps its own (one context, one display
-	queue), and the backend calls it. Textures and meshes are empty until Phase V draws.
+	The GPU's context and display queue are not here: vito's gfx package keeps its own, and the
+	backend calls it. The shader and its programs are (mbi.pipeline), and meshes and the
+	pipeline are in render_vita_freestanding_arm32.odin. Textures are empty until V5.
 */
 
 import "base:runtime"
 
+import "vito/sce"
 import "vito/vito"
 
 when VITA {
 
 	Backend_State :: struct {
 		input:vito.Input, // buttons and sticks for this frame, from vito.input_update
+		pipeline:Render_Pipeline, // the shader, its programs and uniforms (render_vita_freestanding_arm32.odin)
 	}
 
 	/*Nothing to set yet. Declared so matchbox_info.odin's `backend = BACKEND_DEFAULTS` works on every target*/
@@ -34,8 +37,16 @@ when VITA {
 	/*Empty until Phase V uploads textures with GXM*/
 	Backend_Texture :: struct {}
 
-	/*Empty until Phase V builds vertex buffers with GXM*/
-	Mesh :: struct {}
+	/*
+		Geometry in GPU-mapped memory: vertices, then indices, in one gfx.alloc block.
+		`create_mesh` makes one, `destroy_mesh` frees it
+	*/
+	Mesh :: struct {
+		vertices:rawptr,
+		indices:rawptr, // inside the same block, just after the vertices
+		index_count:u32,
+		uid:sce.UID, // the block, for gfx.free
+	}
 
 	/*
 		Sets up the Odin runtime on the Vita and returns the context the game runs in. Called
@@ -73,10 +84,6 @@ when VITA {
 
 	/*Nothing to free until load_texture uploads something*/
 	destroy_texture :: proc(texture:Texture) {
-	}
-
-	/*Nothing to free: the Vita has no meshes until Phase V. Here so `destroy` is one group on every target*/
-	destroy_mesh :: proc(mesh:Mesh) {
 	}
 
 	/*{width, height, 0, 0} in pixels: 960 x 544, and no second screen*/

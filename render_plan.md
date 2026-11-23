@@ -916,17 +916,28 @@ rules that apply throughout are in "The three targets". Files are
   no crash after 1,000 create/destroy cycles).
 
 **V7. Render queue execution.**
-- The queue's sorting and batching are shared (B7). The Vita executes it:
-  - Quads: the CPU-transformed vertices go into a **ring of three** GPU
-    buffers (one per display buffer) so a frame in flight is never overwritten.
-    `vito/gfx/draw2d.odin` is a working example of exactly this (`push_quad`,
-    `flush_2d`, `draw2d_next_frame`); lift its buffer handling, not its pixel
-    maths.
-  - Meshes use their own buffers and the per-draw uniforms.
-- The queue and its sort scratch stay in `context.temp_allocator`; only the
-  quad vertices are copied into GPU memory each frame.
+- The queue's recording and sorting are shared (B7, `render.odin`). The Vita
+  executes it the way PC and 3DS do: every item, sprite, shape or mesh, is one
+  draw of a mesh already in GPU memory, placed by per-draw uniforms (`model`,
+  `tint`, `uv_rectangle`, `alpha_cutoff`). Sprites all draw the one shared unit
+  quad (`mbi.sprite_mesh`), shapes their shared triangle, circle and quad.
+- Nothing is copied into GPU memory per frame. `gfx.use_programs` reserves each
+  draw's uniform buffers from GXM's own ring, which is what keeps a frame in
+  flight from being overwritten.
+- Not done, and why: the earlier plan here copied CPU-transformed quad vertices
+  into a ring of three GPU buffers, as `vito/gfx/draw2d.odin` does. Per-draw
+  uniforms made that unnecessary: there are no per-frame vertices to protect,
+  and the Vita would have been the one target transforming sprites on the CPU.
+  Revisit only if the draw count per frame turns out to cost too much on
+  hardware; batching would then be shared work, not Vita-only.
+- The queues are `mbi.opaque_items` and `mbi.transparent_items`, kept between
+  frames and cleared at `camera_end`, as on the other targets.
 - Done when: the Phase B scene (spinning textured cube, half-transparent quad
   passing through it) renders on the Vita.
+- Status (2026-11-23, Vita3K): sprites, shapes, textured and animated sprites,
+  a perspective cube with depth and culling, and blended quads all draw
+  (V1-V6 tests). The exact Phase B scene, a transparent quad passing through
+  the cube, has not been run on the Vita yet.
 
 **V8. Fit and viewport.**
 - The surface is fixed at 960x544. `gfx.set_viewport(width, height, x, y)`

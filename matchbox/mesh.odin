@@ -52,11 +52,10 @@ mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.alloca
 
 		first := i * 4 // index of this face's first vertex
 
+		// White when not colored, so a texture on the cube shows in its own colours
+		color := face.color if colored else [4]f32{1, 1, 1, 1}
 		for corner, c in corners {
-			vertices[first + c] = {position = corner * half, uv = uvs[c], color = face.color}
-
-			color:[4]f32 = face.color
-			if colored == false do color = {1,1,1,1}
+			vertices[first + c] = {position = corner * half, uv = uvs[c], color = color}
 		}
 
 		for index, k in quad_indices {

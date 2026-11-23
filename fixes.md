@@ -48,6 +48,7 @@ example: assets/images/sprites/meme.png => mb.create_sprite("sprites/meme.png") 
 
 ## [x] Add velocity to sprite struct
 ## [x] Add jump force to sprite struct
+## Add is_alive check to sprite struct
 
 ## [x] Parallax struct
 
@@ -58,6 +59,7 @@ Make a parallax struct that contains a `[dynamic]Sprite` to make some of the val
 ## create_sprite calls create_texture under the hood
 Right now, creating a sprite requires a texture. Really, calling create_sprite should create the texture it needs. Will look into feasibility of this
 
+
 # Nice to haves
 
 These are things that would be nice for Matchbox to have but are not a requirement
@@ -65,3 +67,4 @@ These are things that would be nice for Matchbox to have but are not a requireme
 ## [x] Add parallax scrolling to matchbox (see flappy-clone for implementation details)
 
 ## Add move procs to sprites as parallax has one and now the rest of the sprites api feels out of date
+

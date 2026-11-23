@@ -14,8 +14,7 @@ package matchbox
 	so a checkout builds without psp2cgc; the .gxp files are embedded with #load, as gfx does
 	for its clear shaders.
 
-	Not done yet (render_plan.md Phase V): textures (V5) draw white, depth is off (V2), every
-	draw is uncull'd (V4). What is drawn last lands on top.
+	Not done yet (render_plan.md Phase V): textures (V5) draw white, every draw is uncull'd (V4).
 
 	Inside `when VITA` for the reason in backend_vita_freestanding_arm32.odin
 */
@@ -198,6 +197,25 @@ when VITA {
 		sce.sceGxmDraw(gfx.ctx, .TRIANGLES, .U16, item.mesh.indices, item.mesh.index_count)
 	}
 
+	/*
+		Sets the depth test for one draw. LESS as on PC: gfx.set_viewport puts near at 0 and the
+		surface starts every scene at 1, so smaller is nearer. The 3DS is the one that is reversed
+	*/
+	@(private)
+	set_depth_mode :: proc(depth:Depth_Mode) {
+		switch depth {
+		case .OPAQUE:
+			sce.sceGxmSetFrontDepthFunc(gfx.ctx, .LESS)
+			sce.sceGxmSetFrontDepthWriteEnable(gfx.ctx, .ENABLED)
+		case .TRANSPARENT:
+			sce.sceGxmSetFrontDepthFunc(gfx.ctx, .LESS)
+			sce.sceGxmSetFrontDepthWriteEnable(gfx.ctx, .DISABLED)
+		case .DISABLED:
+			sce.sceGxmSetFrontDepthFunc(gfx.ctx, .ALWAYS)
+			sce.sceGxmSetFrontDepthWriteEnable(gfx.ctx, .DISABLED)
+		}
+	}
+
 	render_start :: proc() {
 		gfx.begin_frame()
 	}
@@ -244,13 +262,21 @@ when VITA {
 		// A hidden pass was queued but is never drawn
 		if mbi.discard_pass == true do return
 
-		// Until V2 and V4: no depth test, nothing culled. gfx.clear left LESS_EQUAL on
-		sce.sceGxmSetFrontDepthFunc(gfx.ctx, .ALWAYS)
-		sce.sceGxmSetFrontDepthWriteEnable(gfx.ctx, .DISABLED)
+		// Until V4: nothing culled
 		sce.sceGxmSetCullMode(gfx.ctx, .NONE)
 
+		// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
+		depth_opaque := Depth_Mode.OPAQUE
+		depth_transparent := Depth_Mode.TRANSPARENT
+		if mbi.screen_pass == true {
+			depth_opaque = .DISABLED
+			depth_transparent = .DISABLED
+		}
+
 		sort_render_queue()
+		set_depth_mode(depth_opaque)
 		for item in mbi.opaque_items do render_item(item, .NONE)
+		set_depth_mode(depth_transparent)
 		for item in mbi.transparent_items do render_item(item, .ALPHA)
 	}
 

@@ -14,7 +14,7 @@ package matchbox
 	so a checkout builds without psp2cgc; the .gxp files are embedded with #load, as gfx does
 	for its clear shaders.
 
-	Not done yet (render_plan.md Phase V): textures (V5) draw white, every draw is uncull'd (V4).
+	Not done yet (render_plan.md Phase V): textures (V5) draw white.
 
 	Inside `when VITA` for the reason in backend_vita_freestanding_arm32.odin
 */
@@ -216,6 +216,20 @@ when VITA {
 		}
 	}
 
+	/*
+		Skips triangles facing away for .BACK. PC and the 3DS treat counter-clockwise as front, so
+		clockwise is what gets culled. gfx.set_viewport flips y, which made it unclear whether GXM
+		judges winding before or after the flip: the V4 test answered it (a clockwise triangle is
+		culled with .CW, a counter-clockwise one draws), checked in Vita3K, not yet on hardware
+	*/
+	@(private)
+	set_cull_mode :: proc(cull:Cull_Mode) {
+		switch cull {
+		case .BACK: sce.sceGxmSetCullMode(gfx.ctx, .CW)
+		case .NONE: sce.sceGxmSetCullMode(gfx.ctx, .NONE)
+		}
+	}
+
 	render_start :: proc() {
 		gfx.begin_frame()
 	}
@@ -262,9 +276,6 @@ when VITA {
 		// A hidden pass was queued but is never drawn
 		if mbi.discard_pass == true do return
 
-		// Until V4: nothing culled
-		sce.sceGxmSetCullMode(gfx.ctx, .NONE)
-
 		// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
 		depth_opaque := Depth_Mode.OPAQUE
 		depth_transparent := Depth_Mode.TRANSPARENT
@@ -275,9 +286,15 @@ when VITA {
 
 		sort_render_queue()
 		set_depth_mode(depth_opaque)
-		for item in mbi.opaque_items do render_item(item, .NONE)
+		for item in mbi.opaque_items {
+			set_cull_mode(item.cull)
+			render_item(item, .NONE)
+		}
 		set_depth_mode(depth_transparent)
-		for item in mbi.transparent_items do render_item(item, .ALPHA)
+		for item in mbi.transparent_items {
+			set_cull_mode(item.cull)
+			render_item(item, .ALPHA)
+		}
 	}
 
 	/*Fills the screen with one colour, 0..1 RGBA. Call between render_start and render_end*/

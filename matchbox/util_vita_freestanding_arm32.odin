@@ -18,6 +18,7 @@ when VITA {
 	Asset_Type :: enum {
 		IMAGE,
 		AUDIO,
+		MODEL,
 	}
 
 	/*
@@ -74,7 +75,17 @@ when VITA {
 			return build_path(buffer, mbi.asset_path, "images/", filename)
 		case .AUDIO:
 			return build_path(buffer, mbi.asset_path, "audio/", filename)
+		case .MODEL:
+			// The build turned models/<name>.gltf or .glb into models/<name>.mbm (tools/modelpack.odin)
+			return build_path(buffer, mbi.asset_path, "models/", strip_extension(filename), ".mbm")
 		}
 		return nil, false
+	}
+
+	/*Reads a whole file into memory the caller deletes. nil when the file cannot be read. The 3DS's has the same name and shape*/
+	read_file_bytes :: proc(path:cstring) -> []u8 {
+		bytes, ok := vito.read_entire_file(path)
+		if ok == false do return nil
+		return bytes
 	}
 }

@@ -14,6 +14,7 @@ package matchbox
 destroy :: proc {
 	destroy_audio,
 	destroy_mesh,
+	destroy_model,
 	destroy_texture,
 	destroy_sprite,
 	destroy_animation_clip,

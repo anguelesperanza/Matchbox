@@ -19,6 +19,7 @@ when !VITA {
 	Asset_Type :: enum {
 		IMAGE,
 		AUDIO,
+		MODEL,
 	}
 
 	/*
@@ -96,6 +97,9 @@ when !VITA {
 			return build_path(buffer, mbi.asset_path, "gfx/", strip_extension(filename), ".t3x")
 		case .AUDIO:
 			return build_path(buffer, mbi.asset_path, "audio/", filename) // untested; mp3 becomes .wav in the build
+		case .MODEL:
+			// The build turned models/<name>.gltf or .glb into romfs:/models/<name>.mbm (tools/modelpack.odin)
+			return build_path(buffer, mbi.asset_path, "models/", strip_extension(filename), ".mbm")
 		}
 		return nil, false
 	}

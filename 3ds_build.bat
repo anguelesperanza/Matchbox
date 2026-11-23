@@ -9,6 +9,7 @@ setlocal enabledelayedexpansion
 :: ---------------------------------------------------------------
 set TRITEX=tools\tritex.exe
 set MP3TOWAV=tools\mp3towav.exe
+set MODELPACK=tools\modelpack.exe
 :: ---------------------------------------------------------------
 :: Project settings — update these for your project
 :: ---------------------------------------------------------------
@@ -30,6 +31,7 @@ set BUILD=build
 set ROMFS=romfs
 set GFXOUT=%ROMFS%\gfx
 set AUDIOOUT=%ROMFS%\audio
+set MODELOUT=%ROMFS%\models
 set ODINASM=odin_asm
 set IMAGES=assets\3ds\images
 set AUDIO=assets\3ds\audio
@@ -61,6 +63,22 @@ if not "%SRC%"=="." (
     call :stage_images %SRC%\assets\3ds\images
     if exist %SRC%\assets\audio      xcopy /E /Y /I %SRC%\assets\audio      %STAGE%\audio  >nul
     if exist %SRC%\assets\3ds\audio  xcopy /E /Y /I %SRC%\assets\3ds\audio  %STAGE%\audio  >nul
+)
+
+:: Matchbox: the models, before the images, since each model's images join the stage. The
+:: game's own folder wins, then the 3DS's own, as for images. romfs\models is emptied first, so
+:: a model taken out of assets is taken out of the build too
+if exist %MODELOUT% rd /s /q %MODELOUT%
+echo Converting models...
+call :pack_models assets\models
+if errorlevel 1 goto :fail
+call :pack_models assets\3ds\models
+if errorlevel 1 goto :fail
+if not "%SRC%"=="." (
+    call :pack_models %SRC%\assets\models
+    if errorlevel 1 goto :fail
+    call :pack_models %SRC%\assets\3ds\models
+    if errorlevel 1 goto :fail
 )
 
 set IMAGES=%STAGE%\images
@@ -253,6 +271,23 @@ for /r "%~1" %%f in (*.png *.jpg *.jpeg) do (
     if exist "%STAGE%\images\!NAME!.meta" del "%STAGE%\images\!NAME!.meta"
 )
 xcopy /E /Y /I "%~1" %STAGE%\images >nul
+exit /b 0
+:: ---------------------------------------------------------------
+:: Matchbox: turns every glTF in one models folder into %MODELOUT%\<name>.mbm with
+:: tools\modelpack.exe, and writes the images each uses into the stage's images\models\, so
+:: the image step converts them like any other image. A later folder's model of the same name
+:: replaces an earlier one's, as images do
+:: ---------------------------------------------------------------
+:pack_models
+if not exist "%~1" exit /b 0
+for %%m in ("%~1\*.gltf" "%~1\*.glb") do (
+    if not exist "%MODELPACK%" (
+        echo %MODELPACK% is missing. Build it with: odin build tools/modelpack.odin -file -out:tools/modelpack.exe
+        exit /b 1
+    )
+    "%MODELPACK%" "%%~m" "%MODELOUT%" "%STAGE%\images"
+    if errorlevel 1 exit /b 1
+)
 exit /b 0
 :fail
 echo.

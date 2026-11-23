@@ -835,8 +835,9 @@ rules that apply throughout are in "The three targets". Files are
 `render_vita_freestanding_arm32.odin` (and others) wrapped in `when VITA`.
 
 **Phase V: status (2026-11-23).** Done in Vita3K except V8 (deferred with B8)
-and audio (the user's). Not yet run on a real Vita: that is hardware pass 1,
-with `examples/vita-check` (see below).
+and audio (the user's). **Hardware pass 1 passed (2026-11-23):** the user ran
+`examples/vita-check` on a real Vita and it runs, and RunTeddyRun plays. The
+second pass comes after Phase G.
 - V1 shader, V2 depth (LESS, as PC), V4 culling (`.BACK` is GXM's `.CW`: the
   viewport flips y, so the mode was picked by test), V5 textures (PNGs through
   libpng, `.meta` or a guessed grid, point and linear), V6 meshes (1,000

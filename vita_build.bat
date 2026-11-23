@@ -56,12 +56,21 @@ mkdir %ODINASM%
 :: app0:/assets/images and app0:/assets/audio and nothing meant for another target
 :: ---------------------------------------------------------------
 set STAGE=%BUILD%\assets_stage
+set MODELPACK=tools\modelpack.exe
+set MODELOUT=%STAGE%\models
 mkdir %STAGE%\images
 mkdir %STAGE%\audio
 call :stage_images assets\images
 call :stage_images assets\vita\images
 if exist assets\audio       xcopy /E /Y /I assets\audio       %STAGE%\audio  >nul
 if exist assets\vita\audio  xcopy /E /Y /I assets\vita\audio  %STAGE%\audio  >nul
+:: Matchbox: the models, packed as app0:/assets/models/<name>.mbm, with the images each uses
+:: joining the staged images. The Vita's own folder wins, as for images
+echo Converting models...
+call :pack_models assets\models
+if errorlevel 1 goto :fail
+call :pack_models assets\vita\models
+if errorlevel 1 goto :fail
 echo.
 echo === Building %TARGET% ===
 :: ---------------------------------------------------------------
@@ -161,6 +170,23 @@ for /r "%~1" %%f in (*.png *.jpg *.jpeg) do (
     if exist "%STAGE%\images\!NAME!.meta" del "%STAGE%\images\!NAME!.meta"
 )
 xcopy /E /Y /I "%~1" %STAGE%\images >nul
+exit /b 0
+:: ---------------------------------------------------------------
+:: Matchbox: turns every glTF in one models folder into %MODELOUT%\<name>.mbm with
+:: tools\modelpack.exe, and writes the images each uses into the stage's images\models\, so
+:: the image step converts them like any other image. A later folder's model of the same name
+:: replaces an earlier one's, as images do
+:: ---------------------------------------------------------------
+:pack_models
+if not exist "%~1" exit /b 0
+for %%m in ("%~1\*.gltf" "%~1\*.glb") do (
+    if not exist "%MODELPACK%" (
+        echo %MODELPACK% is missing. Build it with: odin build tools/modelpack.odin -file -out:tools/modelpack.exe
+        exit /b 1
+    )
+    "%MODELPACK%" "%%~m" "%MODELOUT%" "%STAGE%\images"
+    if errorlevel 1 exit /b 1
+)
 exit /b 0
 :fail
 echo.

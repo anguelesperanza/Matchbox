@@ -16,6 +16,7 @@ import "core:os"
 Asset_Type :: enum {
 	IMAGE,
 	AUDIO,
+	MODEL,
 }
 
 
@@ -54,6 +55,7 @@ get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
 
 	folder := "images/"
 	if asset_type == .AUDIO do folder = "audio/"
+	if asset_type == .MODEL do folder = "models/"
 
 	// Target-specific first
 	dir := strings.concatenate({mbi.target_asset_path, folder})

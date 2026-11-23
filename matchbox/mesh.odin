@@ -123,3 +123,117 @@ mesh_circle :: proc(segments:int = 48, allocator := context.allocator) -> (verti
 	}
 	return
 }
+
+/*
+	A flat square of `size` units on the ground plane (x and z), facing up: the same four
+	corners as the cube's top face, wound the same way. The caller frees both slices
+*/
+mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+	half := size * 0.5
+	white := [4]f32{1, 1, 1, 1}
+	vertices = make([]Vertex, 4, allocator)
+	indices = make([]u16, 6, allocator)
+	vertices[0] = {position = {-half, 0, half}, uv = {0, 1}, color = white}
+	vertices[1] = {position = {half, 0, half}, uv = {1, 1}, color = white}
+	vertices[2] = {position = {half, 0, -half}, uv = {1, 0}, color = white}
+	vertices[3] = {position = {-half, 0, -half}, uv = {0, 0}, color = white}
+	indices[0], indices[1], indices[2] = 0, 1, 2
+	indices[3], indices[4], indices[5] = 0, 2, 3
+	return
+}
+
+/*
+	A sphere of `radius`, in rings of latitude and sectors of longitude, wound counter-clockwise
+	from outside. Both loops run to `<=` their count, so the seam where longitude wraps has two
+	vertices in the same place with different uvs: otherwise the last sector would stretch the
+	whole texture back across itself. The caller frees both slices
+*/
+mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+	rings := max(rings, 2)
+	sectors := max(sectors, 3)
+	assert((rings + 1) * (sectors + 1) <= 65536, "A sphere this fine needs more than 16-bit indices")
+	vertices = make([]Vertex, (rings + 1) * (sectors + 1), allocator)
+	indices = make([]u16, rings * sectors * 6, allocator)
+
+	for ring in 0 ..= rings {
+		phi := math.PI * f32(ring) / f32(rings) // 0 at the top, pi at the bottom
+		y := math.cos(phi)
+		ring_radius := math.sin(phi)
+		for sector in 0 ..= sectors {
+			theta := 2 * math.PI * f32(sector) / f32(sectors)
+			direction := [3]f32{ring_radius * math.cos(theta), y, ring_radius * math.sin(theta)}
+			vertices[ring * (sectors + 1) + sector] = Vertex {
+				position = direction * radius,
+				uv = {f32(sector) / f32(sectors), f32(ring) / f32(rings)},
+				color = {1, 1, 1, 1},
+			}
+		}
+	}
+	next := 0
+	for ring in 0 ..< rings {
+		for sector in 0 ..< sectors {
+			a := u16(ring * (sectors + 1) + sector)
+			b := a + u16(sectors + 1)
+			indices[next + 0], indices[next + 1], indices[next + 2] = a, a + 1, b
+			indices[next + 3], indices[next + 4], indices[next + 5] = a + 1, b + 1, b
+			next += 6
+		}
+	}
+	return
+}
+
+/*
+	A cylinder of `radius` and `height`, upright about Y and centred on its own origin, wound
+	counter-clockwise from outside. The side and the two caps share no vertices: once normals
+	arrive (G2) a shared rim vertex would have to average a cap's and the side's and round the
+	edge off. The caller frees both slices
+*/
+mesh_cylinder :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+	sectors := max(sectors, 3)
+	half := height * 0.5
+	white := [4]f32{1, 1, 1, 1}
+
+	// The side: two rings of sectors + 1. Each cap: a middle vertex and a ring of sectors
+	side_count := (sectors + 1) * 2
+	vertices = make([]Vertex, side_count + (sectors + 1) * 2, allocator)
+	indices = make([]u16, sectors * 12, allocator)
+
+	for sector in 0 ..= sectors {
+		theta := 2 * math.PI * f32(sector) / f32(sectors)
+		x, z := math.cos(theta) * radius, math.sin(theta) * radius
+		u := f32(sector) / f32(sectors)
+		vertices[sector] = {position = {x, half, z}, uv = {u, 0}, color = white}
+		vertices[sectors + 1 + sector] = {position = {x, -half, z}, uv = {u, 1}, color = white}
+	}
+
+	top_middle := side_count
+	bottom_middle := side_count + sectors + 1
+	vertices[top_middle] = {position = {0, half, 0}, uv = {0.5, 0.5}, color = white}
+	vertices[bottom_middle] = {position = {0, -half, 0}, uv = {0.5, 0.5}, color = white}
+	for sector in 0 ..< sectors {
+		theta := 2 * math.PI * f32(sector) / f32(sectors)
+		x, z := math.cos(theta), math.sin(theta)
+		uv := [2]f32{x * 0.5 + 0.5, z * 0.5 + 0.5}
+		vertices[top_middle + 1 + sector] = {position = {x * radius, half, z * radius}, uv = uv, color = white}
+		vertices[bottom_middle + 1 + sector] = {position = {x * radius, -half, z * radius}, uv = uv, color = white}
+	}
+
+	next := 0
+	for sector in 0 ..< sectors {
+		top := u16(sector)
+		bottom := u16(sectors + 1 + sector)
+		indices[next + 0], indices[next + 1], indices[next + 2] = top, bottom + 1, bottom
+		indices[next + 3], indices[next + 4], indices[next + 5] = top, top + 1, bottom + 1
+		next += 6
+	}
+	for sector in 0 ..< sectors {
+		following := (sector + 1) % sectors
+		// Seen from above the top ring runs clockwise in x and z, so its fan is middle, next,
+		// sector to come out counter-clockwise from outside; the bottom, seen from below, is
+		// the other way round
+		indices[next + 0], indices[next + 1], indices[next + 2] = u16(top_middle), u16(top_middle + 1 + following), u16(top_middle + 1 + sector)
+		indices[next + 3], indices[next + 4], indices[next + 5] = u16(bottom_middle), u16(bottom_middle + 1 + sector), u16(bottom_middle + 1 + following)
+		next += 6
+	}
+	return
+}

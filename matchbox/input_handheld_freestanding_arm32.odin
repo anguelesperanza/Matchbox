@@ -93,8 +93,8 @@ Key :: enum {
 }
 
 /*
-	Neither handheld has a mouse. On the 3DS the stylus is LEFT (input_3ds_freestanding_arm32.odin);
-	the rest are never down, and on the Vita none are yet
+	Neither handheld has a mouse. The touch screen is LEFT: the 3DS's stylus and the Vita's front
+	panel (input_3ds_ and input_vita_freestanding_arm32.odin). The rest are never down
 */
 Mouse :: enum {
 	LEFT,

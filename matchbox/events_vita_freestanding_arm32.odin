@@ -5,7 +5,7 @@ package matchbox
 /*
 	Events -- Vita
 	==============
-	Reads the controller once a frame. Inside `when VITA` for the reason in
+	Reads the controller and the front touch panel once a frame. Inside `when VITA` for the reason in
 	backend_vita_freestanding_arm32.odin
 */
 
@@ -21,5 +21,6 @@ when VITA {
 		free_all(context.temp_allocator)
 
 		vito.input_update(&mbi.input)
+		update_touch_state(&mbi.touch, mbi.input.front)
 	}
 }

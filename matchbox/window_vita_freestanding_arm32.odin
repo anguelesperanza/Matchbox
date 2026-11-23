@@ -27,7 +27,9 @@ when VITA {
 		mbi.asset_path = "app0:/assets/" // vita_build.bat packs assets\ there
 		mbi.screen_height = mbi.screen_settings.default_height // the HUD's height until set_screen_height
 
-		vito.input_init({}) // the touch panels and motion are off until input is ported
+		// The front panel is the mouse (input_vita_freestanding_arm32.odin). The back panel and
+		// motion stay off: Matchbox has no API for them, and sampling them costs every frame
+		vito.input_init({.Front_Touch})
 
 		// A failed gfx.init leaves nothing to draw with, and the screen is not up to show why,
 		// so the step and the error code go to the log before stopping

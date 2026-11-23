@@ -28,7 +28,8 @@ import "vito/vito"
 when VITA {
 
 	Backend_State :: struct {
-		input:vito.Input, // buttons and sticks for this frame, from vito.input_update
+		input:vito.Input, // buttons, sticks and touch panels for this frame, from vito.input_update
+		touch:Touch_State, // the front panel's first finger, as the mouse (input_vita_freestanding_arm32.odin)
 		pipeline:Render_Pipeline, // the shader, its programs and uniforms (render_vita_freestanding_arm32.odin)
 	}
 
@@ -70,8 +71,13 @@ when VITA {
 		return mbi.window_size
 	}
 
-	/*The Vita has no mouse. The touch panels get their own procedures when input is ported*/
+	/*
+		Where the finger on the front panel is, in `camera`'s world units, or where it last was.
+		The panel covers the whole 960 x 544 screen, so this is the PC's sum with the touch in
+		place of the mouse
+	*/
 	calculate_mouse_world_position :: proc(camera:Camera) -> [2]f32 {
-		return {}
+		size := get_window_size()
+		return calculate_screen_to_world_2d(camera, mbi.touch.position, {f32(size[0]), f32(size[1])})
 	}
 }

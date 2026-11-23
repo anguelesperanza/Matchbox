@@ -27,6 +27,11 @@ when VITA {
 		mbi.asset_path = "app0:/assets/" // vita_build.bat packs assets\ there
 		mbi.screen_height = mbi.screen_settings.default_height // the HUD's height until set_screen_height
 
+		// Emptied before anything can fail, and vito's crash report pointed at the same file, so a
+		// crash's message lands after the prints that led to it, in this run's log
+		start_print_log(&mbi.print_log)
+		vito.panic_log_path = mbi.print_log.path
+
 		// The front panel is the mouse (input_vita_freestanding_arm32.odin). The back panel and
 		// motion stay off: Matchbox has no API for them, and sampling them costs every frame
 		vito.input_init({.Front_Touch})

@@ -31,10 +31,13 @@ when VITA {
 		input:vito.Input, // buttons, sticks and touch panels for this frame, from vito.input_update
 		touch:Touch_State, // the front panel's first finger, as the mouse (input_vita_freestanding_arm32.odin)
 		pipeline:Render_Pipeline, // the shader, its programs and uniforms (render_vita_freestanding_arm32.odin)
+		print_log:Print_Log, // the file print writes to (util_vita_freestanding_arm32.odin)
 	}
 
-	/*Nothing to set yet. Declared so matchbox_info.odin's `backend = BACKEND_DEFAULTS` works on every target*/
-	BACKEND_DEFAULTS :: Backend_State {}
+	/*The backend's fixed values, which matchbox_info.odin puts in `mbi` where it is declared*/
+	BACKEND_DEFAULTS :: Backend_State {
+		print_log = {path = "ux0:data/matchbox.log"},
+	}
 
 	/*The GXM texture, on the heap so every copy of a Texture names the same one (texture_vita_freestanding_arm32.odin)*/
 	Backend_Texture :: struct {

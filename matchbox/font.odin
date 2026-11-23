@@ -12,7 +12,7 @@ import "core:log"
 	- PC: stb_truetype bakes the TTF given (vendor:stb/truetype, font_windows.odin).
 	- 3DS: the console's system font, copied out of its glyph sheets; the TTF is not read
 	  (font_3ds_freestanding_arm32.odin).
-	- Vita: none yet (font_vita_freestanding_arm32.odin, Phase V), so text draws nothing.
+	- Vita: the system font through ScePvf; the TTF is not read (font_vita_freestanding_arm32.odin).
 	Everything else here is shared, and `Font` holds no type of any one baker, so a game
 	is the same on every target.
 

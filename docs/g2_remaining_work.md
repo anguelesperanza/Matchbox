@@ -112,7 +112,7 @@ after more is stable and tested. Don't measure or change them now.
   hardware builds (rule 6) and ask the user for the hardware check.
 - **Done when:** both modes and the mixed frame measured, recorded in the plan, and passed on hardware.
 
-### W2. L7: lighting steps in the hardware check apps
+### W2. L7: lighting steps in the hardware check apps (DONE 2026-11-25, passed on hardware)
 
 - **Depends on:** W1.
 - **Owns:** `examples/render-check/main.odin` (3DS: reads the framebuffer back at chosen points),

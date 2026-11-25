@@ -421,6 +421,8 @@ the new procedures.
     bottom screen) and `build/hardware/vita_check_lit.vpk` (Vita Check Lit, MBOX00048, first log line "vita check lit (G2 L7):
     started"; steps 8 to 10 of 14, ~42 s in, L / R move between steps). To check on hardware: the 3DS says failures 0;
     the Vita's three steps look as each describes.
+  - **Hardware pass 2026-11-25:** the user ran both builds on the New 3DS LL and the real Vita and reported they work (passed).
+    L7 is done on hardware.
 
 ## What the same unit opens (after the G2 core)
 

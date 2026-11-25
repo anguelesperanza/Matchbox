@@ -21,6 +21,7 @@ import "core:strings"
 FRAME_REGISTER :: 0
 RENDER_REGISTER :: 1
 GAME_REGISTER :: 2
+LIGHTS_REGISTER :: 3 // after the game's own, so a shader that doesn't light keeps the registers it had
 SAMPLER_REGISTER :: 0
 
 @(private = "file")
@@ -518,7 +519,7 @@ write_polynomial_helper :: proc(builder: ^strings.Builder, type: string, name: s
 @(private = "file")
 write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 	count := get_max_lights(.PC)
-	fmt.sbprintln(builder, "\ncbuffer mbs_lights_block : register(b3) {")
+	fmt.sbprintfln(builder, "\ncbuffer mbs_lights_block : register(b%d) {{", LIGHTS_REGISTER)
 	fmt.sbprintfln(builder, "    float4 %s;", LIGHT_UNIFORM_NAMES[0])
 	for name in LIGHT_UNIFORM_NAMES[1:] {
 		fmt.sbprintfln(builder, "    float4 %s[%d];", name, count)

@@ -86,6 +86,12 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 		}
 	}
 
+	// The lights block is declared by mbsc, not the shader, whenever a light built-in is called (lighting.odin). The
+	// specular reads the material from `render`, which the HLSL then declares even when the shader didn't, so the
+	// runtime has to bind it as well
+	lights := calls_light_builtin(ir)
+	has_render ||= lights
+
 	fmt.sbprintln(&builder)
 	frame := engine_layout(ir, .FRAME)
 	draw := engine_layout(ir, .RENDER)
@@ -99,6 +105,9 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	if has_game {
 		write_block(&builder, "game", GAME_REGISTER, game)
 	}
+	if lights {
+		write_light_reflection(&builder, false)
+	}
 
 	fmt.sbprintln(&builder)
 	if has_frame {
@@ -109,6 +118,9 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	}
 	if has_game {
 		write_values(&builder, "game", game)
+	}
+	if lights {
+		write_light_reflection(&builder, true)
 	}
 
 	if len(ir.textures) > 0 {

@@ -42,7 +42,7 @@ sampler 0
 | `mbs-reflection <version>` | always the first line; the version is 1 |
 | `target <name>` | `pc` |
 | `attribute <name> <type>` | a vertex attribute the vertex stage reads, in the order of the vertex input struct. `<name>` is the `attr:"name"` tag |
-| `block <name> <register> <size>` | a constant buffer: `frame`, `render` or `game`, the register it is bound to (`b0` is register 0), and its size in bytes, a multiple of 16. Only the blocks the shader declares are listed |
+| `block <name> <register> <size>` | a constant buffer: `frame`, `render`, `game` or `lights`, the register it is bound to (`b0` is register 0), and its size in bytes, a multiple of 16. Only the blocks the shader declares are listed, and `lights`, which no shader declares: it is listed when the shader calls `light_diffuse` or `light_specular`, at `b3`, with its values (`ambient`, `direction`, `diffuse`, `specular`, `count`). A shader that lights also gets `render`, which the specular reads its material from, whether it declared it or not |
 | `value <block> <name> <type> <offset> <size> <count> <stride>` | one value the runtime can set inside a block |
 | `texture <name> <slot>` | a texture and the slot it is bound to |
 | `sampler <register>` | the register of the one sampler every texture is read through |

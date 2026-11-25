@@ -119,8 +119,8 @@ what_a_stage_cannot_do_is_reported :: proc(t: ^testing.T) {
 
 // ---- lighting (G2 L2) -----------------------------------------------------------------------------------------------
 
-// A shader with the lighting unit's two varyings, as the lighting plan's L1 test wrote them
-@(private = "file")
+// A shader with the lighting unit's two varyings, as the lighting plan's L1 test wrote them. reflection_test.odin
+// uses it too
 lit_shader :: proc(body: string) -> string {
 	return strings.concatenate(
 		{

@@ -244,6 +244,25 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
     - Left for L4-5: `3ds_build.bat` assembles only `mesh.shbin`; `mesh_lit.shbin` needs a line there (a handheld
       file, shown to the user first).
   - L4-4. PC: a second pipeline, the lights buffer at b3, lit items drawn with it.
+    **DONE 2026-11-25, PC only (seen on screen and measured; the handhelds are L4-5).**
+    - `Render_Pipeline` on PC, as the handhelds have: `mbi.pipeline` (mesh.mbs) and `mbi.lit_pipeline`
+      (mesh_lit.mbs), each with its shaders, input layout and reflection; the constant buffers are shared and each
+      pipeline binds the ones its reflection lists. A lit mesh is drawn with the lit pipeline while
+      `mbi.lighting.settings.enabled`; off, it goes through the unlit one as before L4.
+    - The lights buffer is filled once per camera, at `camera_end` (`calculate_lights_block` with that camera's view),
+      and only while lighting is on. `Render_Item` carries the part's `material` into `Render_Constants`;
+      `render_mesh` and anything else not from a model get `mbi.model_settings.default_material`.
+    - mbsc's PC reflection now lists the lights block (`block lights 3 3104` and its five values) whenever a shader
+      calls a light built-in, found by walking the IR (`calls_light_builtin`), plus `render` when the shader left it
+      out. The engine reads `lights` as a `Block_Kind` and checks it against `Lights_Block` at start, like `frame` and
+      `render`. The vertex attribute table has `normal` at `Lit_Vertex`'s offset, marked lit-only: the unlit pipeline
+      is refused it, since it also draws 36-byte vertices that have none.
+    - Measured on screen (a scratch copy of model-check with one sun, captured from the window; the framebuffer is
+      sRGB, so expected values were converted): with a light from (1, 2, 1) and 0.2 ambient, the cube's front and
+      right faces are both (135, 163, 205) against (135, 161, 205) worked by hand, the top and the floor saturate to
+      exactly the tint. A light from +x alone lights only right-facing sides, from +z only front-facing ones.
+      I first read the cube's faces as different and the scene as mirrored in x; the pixels showed it wasn't.
+    - Not done here: model-check itself still turns no light on (L4-6).
   - L4-5. 3DS and Vita runtimes (each file shown to the user first): a second pipeline; on the 3DS `C3D_LightEnv`,
     the lights, one D0 table per distinct shininess, bound for lit draws and unbound after.
   - L4-6. `examples/model-check` lit on all three targets.

@@ -91,3 +91,100 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintfln(builder, "    return float4(saturate(sum * %s_specular_strength), 0.0);", render_block)
 	fmt.sbprintln(builder, "}")
 }
+
+// calls_light_builtin says whether any procedure of the module calls `light_diffuse` or `light_specular`, which is
+// what brings in the lights block. The HLSL and Cg backends notice it while they write the call; the reflection file
+// is written without writing the shader, so it walks the IR instead.
+calls_light_builtin :: proc(ir: ^IR_Module) -> bool {
+	for info in ir.procs {
+		if statements_call_light(info.body) {
+			return true
+		}
+	}
+	return false
+}
+
+@(private = "file")
+statements_call_light :: proc(statements: []^IR_Stmt) -> bool {
+	for statement in statements {
+		switch s in statement.variant {
+		case IR_Declare:
+			if expression_calls_light(s.init) do return true
+		case IR_Assign:
+			if expression_calls_light(s.target) || expression_calls_light(s.value) do return true
+		case IR_If:
+			if expression_calls_light(s.condition) || statements_call_light(s.then) || statements_call_light(s.otherwise) do return true
+		case IR_For:
+			if expression_calls_light(s.from) || expression_calls_light(s.to) || statements_call_light(s.body) do return true
+		case IR_Return:
+			if expression_calls_light(s.value) do return true
+		case IR_Eval:
+			if expression_calls_light(s.call) do return true
+		case IR_Block:
+			if statements_call_light(s.body) do return true
+		}
+	}
+	return false
+}
+
+@(private = "file")
+expression_calls_light :: proc(expression: ^IR_Expr) -> bool {
+	if expression == nil {
+		return false
+	}
+	switch e in expression.variant {
+	case IR_Float, IR_Int, IR_Bool, IR_Zero, IR_Var_Ref, IR_Uniform_Ref, IR_Texture_Ref:
+		return false
+	case IR_Unary:
+		return expression_calls_light(e.operand)
+	case IR_Binary:
+		return expression_calls_light(e.left) || expression_calls_light(e.right)
+	case IR_Swizzle:
+		return expression_calls_light(e.base)
+	case IR_Field:
+		return expression_calls_light(e.base)
+	case IR_Index:
+		return expression_calls_light(e.base) || expression_calls_light(e.index)
+	case IR_Convert:
+		return expression_calls_light(e.operand)
+	case IR_Construct:
+		return any_calls_light(e.args)
+	case IR_Builtin_Call:
+		return e.name == "light_diffuse" || e.name == "light_specular" || any_calls_light(e.args)
+	case IR_Proc_Call:
+		// the callee is in ir.procs too, so its body is walked there
+		return any_calls_light(e.args)
+	}
+	return false
+}
+
+@(private = "file")
+any_calls_light :: proc(expressions: []^IR_Expr) -> bool {
+	for expression in expressions {
+		if expression_calls_light(expression) do return true
+	}
+	return false
+}
+
+/*
+	write_light_reflection writes the PC lights block's `block` line, or its `value` lines, into a reflection file, so
+	the engine can check its own Lights_Block against what the HLSL declares when it starts, as it does `frame` and
+	`render`. The layout is HLSL's: the ambient row, then each array at one row a slot, then `lights_count` on a row
+	of its own, the block rounded up to whole rows.
+*/
+write_light_reflection :: proc(builder: ^strings.Builder, values: bool) {
+	slots := get_max_lights(.PC)
+	row := 16
+	array_size := slots * row
+	count_offset := row + (len(LIGHT_UNIFORM_NAMES) - 1) * array_size
+	if values == false {
+		fmt.sbprintfln(builder, "block lights %d %d", LIGHTS_REGISTER, count_offset + row)
+		return
+	}
+	fmt.sbprintfln(builder, "value lights ambient [4]f32 0 %d 0 0", row)
+	for name, index in LIGHT_UNIFORM_NAMES[1:] {
+		// the reflection names a field without the block's `lights_` in front, as frame's and render's are
+		fmt.sbprintfln(builder, "value lights %s [4]f32 %d %d %d %d", strings.trim_prefix(name, "lights_"), row + index * array_size, array_size, slots, row)
+	}
+	fmt.sbprintfln(builder, "value lights count i32 %d 4 0 0", count_offset)
+}

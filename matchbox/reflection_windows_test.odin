@@ -44,13 +44,13 @@ every_attribute_the_mesh_shader_reads_is_in_a_vertex :: proc(t:^testing.T) {
 
 	testing.expect_value(t, len(reflection.attributes), 3)
 	for attribute in reflection.attributes {
-		_, problem := find_vertex_attribute(attribute)
+		_, problem := find_vertex_attribute(attribute, false)
 		testing.expect_value(t, problem, "")
 	}
 	// the offsets are the ones of Vertex, not numbers written down twice
-	position, _ := find_vertex_attribute(reflection.attributes[0])
-	uv, _ := find_vertex_attribute(reflection.attributes[1])
-	color, _ := find_vertex_attribute(reflection.attributes[2])
+	position, _ := find_vertex_attribute(reflection.attributes[0], false)
+	uv, _ := find_vertex_attribute(reflection.attributes[1], false)
+	color, _ := find_vertex_attribute(reflection.attributes[2], false)
 	testing.expect_value(t, position.offset, u32(offset_of(Vertex, position)))
 	testing.expect_value(t, uv.offset, u32(offset_of(Vertex, uv)))
 	testing.expect_value(t, color.offset, u32(offset_of(Vertex, color)))
@@ -58,10 +58,33 @@ every_attribute_the_mesh_shader_reads_is_in_a_vertex :: proc(t:^testing.T) {
 
 @(test)
 an_attribute_the_vertices_lack_is_named_in_the_message :: proc(t:^testing.T) {
-	_, message := find_vertex_attribute({name = "normal", type = "[3]f32"})
+	// a plain Vertex has no normal: a shader drawing those meshes that read one would read into the next vertex
+	_, message := find_vertex_attribute({name = "normal", type = "[3]f32"}, false)
 	testing.expect(t, len(message) > 0)
-	_, message = find_vertex_attribute({name = "texcoord", type = "[3]f32"})
+	_, message = find_vertex_attribute({name = "texcoord", type = "[3]f32"}, false)
 	testing.expect(t, len(message) > 0)
+	_, message = find_vertex_attribute({name = "tangent", type = "[4]f32"}, true)
+	testing.expect(t, len(message) > 0)
+}
+
+// The lit shader's reflection agrees with the engine: the lights block where mbsc put it and as big as Lights_Block,
+// and the normal found in a Lit_Vertex at the offset Lit_Vertex has, not one written down twice
+@(test)
+the_lit_mesh_reflection_matches_the_engines_structs :: proc(t:^testing.T) {
+	reflection, ok, message := parse_reflection(#load("shaders/mesh_lit.pc.refl", string))
+	defer destroy_reflection(&reflection)
+	testing.expectf(t, ok, "%s", message)
+
+	testing.expect_value(t, check_engine_blocks(&reflection), "")
+	testing.expect_value(t, reflection.blocks[.LIGHTS], Reflected_Block{present = true, register = 3, size = size_of(Lights_Block)})
+	testing.expect_value(t, reflection.blocks[.FRAME].size, size_of(Frame_Constants))
+	testing.expect_value(t, len(reflection.attributes), 4)
+	for attribute in reflection.attributes {
+		_, problem := find_vertex_attribute(attribute, true)
+		testing.expect_value(t, problem, "")
+	}
+	normal, _ := find_vertex_attribute(reflection.attributes[3], true)
+	testing.expect_value(t, normal.offset, u32(offset_of(Lit_Vertex, normal)))
 }
 
 @(test)

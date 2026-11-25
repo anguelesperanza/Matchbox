@@ -38,6 +38,7 @@ Render_Item :: struct {
 	texture:Texture,
 	uv_rectangle:[4]f32,
 	alpha_cutoff:f32,
+	material:Material, // how a lit mesh takes a highlight; an unlit one ignores it
 }
 
 /*Queues a mesh to be drawn at camera_end. `model` places it in the world.
@@ -53,12 +54,16 @@ render_mesh :: proc(
 	queue_render(mesh, model, tint, blend, cull, texture, {0, 0, 1, 1}, 0)
 }
 
-/*Records one draw. Shared by render_mesh, render_sprite and the shapes*/
+/*
+	Records one draw. Shared by render_mesh, render_sprite and the shapes. `material` is a model part's; the
+	default is what a part without one gets, so a lit mesh drawn with render_mesh shines like a default model part
+	rather than not at all. Sprites and shapes aren't lit and leave it
+*/
 @(private)
-queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32) {
+queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32, material:Material = mbi.model_settings.default_material) {
 	ensure(mbi.camera_active == true, "Drawing must happen between camera_start and camera_end")
 
-	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff}
+	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff, material = material}
 
 	switch blend {
 	case .NONE:

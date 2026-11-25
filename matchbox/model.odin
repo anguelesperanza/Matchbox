@@ -151,7 +151,7 @@ render_model_transform :: proc(model:Model, transform:Transform, tint:[4]f32 = {
 		color := part.color * tint
 		blend := part.blend
 		if color.a < 1 do blend = .ALPHA
-		queue_render(part.mesh, model_matrix, color, blend, part.cull, part.texture, {0, 0, 1, 1}, part.alpha_cutoff)
+		queue_render(part.mesh, model_matrix, color, blend, part.cull, part.texture, {0, 0, 1, 1}, part.alpha_cutoff, part.material)
 	}
 }
 

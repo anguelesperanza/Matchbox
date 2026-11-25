@@ -73,19 +73,18 @@ Backend_State :: struct {
 	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
 	samplers:[Filter_Mode]^d3d11.ISamplerState,
 
-	// 3D Pipeline | shaders/mesh.pc.hlsl (generated from shaders/mesh.mbs)
-	shader_src:[]u8,
-	vertex_shader:^d3d11.IVertexShader,
-	vertex_shader_blob: ^d3d11.IBlob,
-	pixel_shader:^d3d11.IPixelShader,
-	pixel_shader_blob:^d3d11.IBlob,
-	input_layout:^d3d11.IInputLayout,
+	// The two shaders, each with what it reads (render_windows.odin). `pipeline` (shaders/mesh.mbs) draws
+	// everything unlit; `lit_pipeline` (shaders/mesh_lit.mbs) draws lit meshes while lighting is on
+	pipeline:Render_Pipeline,
+	lit_pipeline:Render_Pipeline,
+
+	// The constant buffers, shared by both pipelines: each binds the ones its reflection lists
 	frame_constants:^d3d11.IBuffer,
 	render_constants:^d3d11.IBuffer,
-	game_constants:^d3d11.IBuffer, // the game's own uniforms, set by name with set_shader_value
+	game_constants:^d3d11.IBuffer, // the game's own uniforms, set by name with set_shader_value (mesh.mbs's)
 	game_shadow:[]byte, // what game_constants holds, kept on the CPU so one value can change
 	game_dirty:bool,
-	reflection:Shader_Reflection, // what the shader needs, from shaders/mesh.pc.refl
+	lights_constants:^d3d11.IBuffer, // the lights block, filled from mbi.lighting at camera_end (light.odin)
 
 	// Fixed values the PC backend works with
 	shader_format:Shader_Format,
@@ -100,9 +99,10 @@ BACKEND_DEFAULTS :: Backend_State {
 	shader_format = {
 		reflection_version = 1,
 		vertex_attributes = {
-			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position))},
-			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv))},
-			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color))},
+			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position)), false},
+			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv)), false},
+			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color)), false},
+			{"normal", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Lit_Vertex, normal)), true},
 		},
 	},
 }

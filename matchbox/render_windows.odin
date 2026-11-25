@@ -41,6 +41,21 @@ Render_Constants :: struct {
 // D3D constant buffers must be a multiple of 16 bytes
 #assert(size_of(Frame_Constants) % 16 == 0)
 #assert(size_of(Render_Constants) % 16 == 0)
+#assert(size_of(Lights_Block) % 16 == 0)
+
+/*
+	One compiled shader and what it reads. PC has two, as the handhelds do: mbi.pipeline (mesh.mbs) and
+	mbi.lit_pipeline (mesh_lit.mbs). The constant buffers are shared, and each pipeline binds the ones its
+	reflection lists, so the unlit shader never sees the lights block it doesn't declare
+*/
+Render_Pipeline :: struct {
+	vertex_shader:^d3d11.IVertexShader,
+	vertex_shader_blob:^d3d11.IBlob,
+	pixel_shader:^d3d11.IPixelShader,
+	pixel_shader_blob:^d3d11.IBlob,
+	input_layout:^d3d11.IInputLayout,
+	reflection:Shader_Reflection, // where everything the shader needs is bound, from its .pc.refl
+}
 
 // linalg builds OpenGL clip space (depth -1..1); D3D wants 0..1: z_new = 0.5 * z + 0.5 * w
 GL_TO_D3D_DEPTH :: matrix[4, 4]f32 {
@@ -121,27 +136,32 @@ calculate_render_item_sort_key :: proc(item:Render_Item) -> [2]uintptr {
 /*Issues the draw call for one queued item. The render state is already set*/
 @(private)
 render_item :: proc(item:Render_Item) {
-	set_render_constants(item.model, item.tint, item.uv_rectangle, item.alpha_cutoff)
+	// A lit mesh is shaded only while lighting is on. Off, it goes through the unlit shader like everything else,
+	// as models drew before lighting existed: a Lit_Vertex starts with a whole Vertex, so the unlit input layout
+	// reads it unchanged with the longer stride. A separate switch rather than "lit when there are lights", so a
+	// scene whose lights are all removed goes dark instead of flipping back to unlit (light.odin)
+	pipeline := &mbi.pipeline
+	if item.mesh.lit && mbi.lighting.settings.enabled do pipeline = &mbi.lit_pipeline
+
+	set_render_constants(item)
 
 	vertex_buffer := item.mesh.vertex_buffer
-	// A lit mesh's vertices start with a whole Vertex, so the input layout reads it unchanged
-	// with the longer stride; the normal after it waits for the lit pipeline (L4-4)
 	stride:u32 = size_of(Lit_Vertex) if item.mesh.lit else size_of(Vertex)
 	offset:u32 = 0
 
 	upload_game_constants()
 
 	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
-	mbi.device_context->IASetInputLayout(mbi.input_layout)
+	mbi.device_context->IASetInputLayout(pipeline.input_layout)
 	mbi.device_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset)
 	mbi.device_context->IASetIndexBuffer(item.mesh.index_buffer, .R16_UINT, 0)
 
-	mbi.device_context->VSSetShader(mbi.vertex_shader, nil, 0)
-	mbi.device_context->PSSetShader(mbi.pixel_shader, nil, 0)
+	mbi.device_context->VSSetShader(pipeline.vertex_shader, nil, 0)
+	mbi.device_context->PSSetShader(pipeline.pixel_shader, nil, 0)
 
 	// Each constant buffer goes to the register the shader's reflection file names
-	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = mbi.game_constants}
-	for block, kind in mbi.reflection.blocks {
+	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = mbi.game_constants, .LIGHTS = mbi.lights_constants}
+	for block, kind in pipeline.reflection.blocks {
 		if block.present == false do continue
 		buffer := buffers[kind]
 		mbi.device_context->VSSetConstantBuffers(u32(block.register), 1, &buffer)
@@ -150,13 +170,13 @@ render_item :: proc(item:Render_Item) {
 
 	// The draw's texture goes to the first texture the shader declares; any others get plain white, which leaves
 	// the colour as it is when it is multiplied in
-	for texture, index in mbi.reflection.textures {
+	for texture, index in pipeline.reflection.textures {
 		texture_view := item.texture.view if index == 0 else nil
 		if texture_view == nil do texture_view = mbi.white_texture_view
 		mbi.device_context->PSSetShaderResources(u32(texture.slot), 1, &texture_view)
 	}
-	if mbi.reflection.has_sampler {
-		mbi.device_context->PSSetSamplers(u32(mbi.reflection.sampler), 1, &mbi.samplers[item.texture.filter])
+	if pipeline.reflection.has_sampler {
+		mbi.device_context->PSSetSamplers(u32(pipeline.reflection.sampler), 1, &mbi.samplers[item.texture.filter])
 	}
 
 	mbi.device_context->DrawIndexed(item.mesh.index_count, 0, 0)
@@ -331,7 +351,7 @@ set_frame_constants :: proc(view_projection:matrix[4, 4]f32, view:matrix[4, 4]f3
 `value` has the uniform's type: 0.5 for an f32, a [3]f32 for a [3]f32, a matrix[4, 4]f32 for a matrix, and a slice or
 array with every element for an array uniform. A struct's field is named as in the shader: "key_light.strength"*/
 set_shader_value :: proc(name:string, value:any) {
-	ok, message := write_shader_value(&mbi.reflection, mbi.game_shadow, name, value)
+	ok, message := write_shader_value(&mbi.pipeline.reflection, mbi.game_shadow, name, value)
 	ensure(ok, message)
 	mbi.game_dirty = true
 }
@@ -344,11 +364,29 @@ upload_game_constants :: proc() {
 	mbi.game_dirty = false
 }
 
-/*Sets the model matrix, tint, texture region and alpha cut-off used by the next draw*/
+/*Sets the model matrix, tint, texture region, alpha cut-off and material used by the next draw*/
 @(private)
-set_render_constants :: proc(model:matrix[4, 4]f32, tint:[4]f32, uv_rectangle:[4]f32, alpha_cutoff:f32) {
-	constants := Render_Constants{model = model, tint = tint, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff}
+set_render_constants :: proc(item:Render_Item) {
+	constants := Render_Constants {
+		model = item.model,
+		tint = item.tint,
+		uv_rectangle = item.uv_rectangle,
+		alpha_cutoff = item.alpha_cutoff,
+		shininess = item.material.shininess,
+		specular_strength = item.material.specular_strength,
+	}
 	if mbi.render_constants != nil do update_buffer(mbi.render_constants, &constants, size_of(Render_Constants))
+}
+
+/*
+	Fills the lights block for the camera being drawn: the lights' directions are in eye space, so they change with
+	the view, once per camera rather than once per frame. Skipped while lighting is off, when nothing reads it
+*/
+@(private)
+set_lights_constants :: proc() {
+	if mbi.lights_constants == nil || mbi.lighting.settings.enabled == false do return
+	block := calculate_lights_block(mbi.lighting, mbi.view)
+	update_buffer(mbi.lights_constants, &block, size_of(Lights_Block))
 }
 
 /*Starts a frame. Call once per frame before drawing anything*/
@@ -431,13 +469,13 @@ destroy_depth_buffer :: proc() {
 }
 
 @(private)
-compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) {
+compile_shader :: proc(source:[]u8, name:cstring, entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) {
 	errors: ^d3d11.IBlob
 
 	result := d3d_compiler.Compile(
-		pSrcData = raw_data(mbi.shader_src),
-		SrcDataSize = uint(len(mbi.shader_src)),
-		pSourceName = "shaders/mesh.pc.hlsl", // for debug messages
+		pSrcData = raw_data(source),
+		SrcDataSize = uint(len(source)),
+		pSourceName = name, // for debug messages
 		pDefines = nil,
 		pInclude = nil,
 		pEntrypoint = entry_point,
@@ -456,44 +494,70 @@ compile_shader :: proc(entry_point:cstring, target:cstring, blob:^^d3d11.IBlob) 
 	ensure(win.SUCCEEDED(result), "Shader Compilation failed")
 }
 
-/*Compiles the shaders and creates the input layout, constant buffers and render states*/
+/*Compiles both shaders and creates the constant buffers and render states*/
 @(private)
 create_pipeline :: proc() {
-	// Generated by mbsc from shaders/mesh.mbs; see tools/mbsc and docs/shader_hlsl.md
-	mbi.shader_src = #load("shaders/mesh.pc.hlsl")
+	// Generated by mbsc from shaders/mesh.mbs and mesh_lit.mbs; see tools/mbsc and docs/shader_hlsl.md. Each comes
+	// with its reflection file, which says where everything the shader needs is bound
+	mbi.pipeline = create_render_pipeline(#load("shaders/mesh.pc.hlsl"), #load("shaders/mesh.pc.refl", string), "shaders/mesh.pc.hlsl", lit = false)
+	mbi.lit_pipeline = create_render_pipeline(#load("shaders/mesh_lit.pc.hlsl"), #load("shaders/mesh_lit.pc.refl", string), "shaders/mesh_lit.pc.hlsl", lit = true)
 
-	// ...together with its reflection file, which says where everything the shader needs is bound
+	// The engine's blocks are the size of its structs (check_engine_blocks made sure each shader agrees), made when
+	// either shader reads them. The game's block is as big as mesh.mbs says, and starts out as zeros: set_shader_value
+	// writes mesh.mbs's uniforms, so a game block in the lit shader would be one nothing fills
+	uses :: proc(kind:Block_Kind) -> bool {
+		return mbi.pipeline.reflection.blocks[kind].present || mbi.lit_pipeline.reflection.blocks[kind].present
+	}
+	ensure(mbi.lit_pipeline.reflection.blocks[.GAME].present == false, "mesh_lit.mbs declares game uniforms, which set_shader_value can't reach")
+	if uses(.FRAME) do mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
+	if uses(.RENDER) do mbi.render_constants = create_constant_buffer(size_of(Render_Constants))
+	if uses(.LIGHTS) do mbi.lights_constants = create_constant_buffer(size_of(Lights_Block))
+	if mbi.pipeline.reflection.blocks[.GAME].present {
+		mbi.game_shadow = make([]byte, mbi.pipeline.reflection.blocks[.GAME].size)
+		mbi.game_constants = create_constant_buffer(u32(len(mbi.game_shadow)))
+		mbi.game_dirty = true
+	}
+
+	create_states()
+}
+
+/*
+	Compiles one shader and makes its input layout. `lit` says it draws Lit_Vertex meshes, so its layout may read
+	the normal; the unlit shader is refused one, since it also draws plain Vertex meshes that have none
+*/
+@(private)
+create_render_pipeline :: proc(source:[]u8, reflection_text:string, name:cstring, lit:bool) -> (pipeline:Render_Pipeline) {
 	reflection_ok:bool
 	reflection_message:string
-	mbi.reflection, reflection_ok, reflection_message = parse_reflection(#load("shaders/mesh.pc.refl", string))
+	pipeline.reflection, reflection_ok, reflection_message = parse_reflection(reflection_text)
 	ensure(reflection_ok, reflection_message)
-	check_message := check_engine_blocks(&mbi.reflection)
+	check_message := check_engine_blocks(&pipeline.reflection)
 	ensure(check_message == "", check_message)
 
-	compile_shader("vertex_main", "vs_5_0", &mbi.vertex_shader_blob)
-	compile_shader("fragment_main", "ps_5_0", &mbi.pixel_shader_blob)
+	compile_shader(source, name, "vertex_main", "vs_5_0", &pipeline.vertex_shader_blob)
+	compile_shader(source, name, "fragment_main", "ps_5_0", &pipeline.pixel_shader_blob)
 
 	result := mbi.device->CreateVertexShader(
-		pShaderBytecode = mbi.vertex_shader_blob->GetBufferPointer(),
-		BytecodeLength = mbi.vertex_shader_blob->GetBufferSize(),
+		pShaderBytecode = pipeline.vertex_shader_blob->GetBufferPointer(),
+		BytecodeLength = pipeline.vertex_shader_blob->GetBufferSize(),
 		pClassLinkage = nil,
-		ppVertexShader = &mbi.vertex_shader,
+		ppVertexShader = &pipeline.vertex_shader,
 	)
 
 	ensure(win.SUCCEEDED(result), "Vertex shader creation failed")
 
 	result = mbi.device->CreatePixelShader(
-		pShaderBytecode = mbi.pixel_shader_blob->GetBufferPointer(),
-		BytecodeLength = mbi.pixel_shader_blob->GetBufferSize(),
+		pShaderBytecode = pipeline.pixel_shader_blob->GetBufferPointer(),
+		BytecodeLength = pipeline.pixel_shader_blob->GetBufferSize(),
 		pClassLinkage = nil,
-		ppPixelShader = &mbi.pixel_shader,
+		ppPixelShader = &pipeline.pixel_shader,
 	)
 	ensure(win.SUCCEEDED(result), "Pixel shader creation failed")
 
-	// The input layout is what the shader reads, each attribute found in the engine's Vertex
-	input_element_descs := make([]d3d11.INPUT_ELEMENT_DESC, len(mbi.reflection.attributes), context.temp_allocator)
-	for attribute, index in mbi.reflection.attributes {
-		found, message := find_vertex_attribute(attribute)
+	// The input layout is what the shader reads, each attribute found in the engine's Vertex or Lit_Vertex
+	input_element_descs := make([]d3d11.INPUT_ELEMENT_DESC, len(pipeline.reflection.attributes), context.temp_allocator)
+	for attribute, index in pipeline.reflection.attributes {
+		found, message := find_vertex_attribute(attribute, lit)
 		ensure(message == "", message)
 		input_element_descs[index] = {
 			SemanticName = strings.clone_to_cstring(attribute.name, context.temp_allocator),
@@ -506,24 +570,24 @@ create_pipeline :: proc() {
 	result = mbi.device->CreateInputLayout(
 		pInputElementDescs = raw_data(input_element_descs),
 		NumElements = u32(len(input_element_descs)),
-		pShaderBytecodeWithInputSignature = mbi.vertex_shader_blob->GetBufferPointer(),
-		BytecodeLength = mbi.vertex_shader_blob->GetBufferSize(),
-		ppInputLayout = &mbi.input_layout,
+		pShaderBytecodeWithInputSignature = pipeline.vertex_shader_blob->GetBufferPointer(),
+		BytecodeLength = pipeline.vertex_shader_blob->GetBufferSize(),
+		ppInputLayout = &pipeline.input_layout,
 	)
 
 	ensure(win.SUCCEEDED(result), "Input layout creation failed")
+	return
+}
 
-	// The engine's blocks are the size of its structs (check_engine_blocks made sure the shader agrees); the game's
-	// block is as big as the shader says, and starts out as zeros
-	if mbi.reflection.blocks[.FRAME].present do mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
-	if mbi.reflection.blocks[.RENDER].present do mbi.render_constants = create_constant_buffer(size_of(Render_Constants))
-	if mbi.reflection.blocks[.GAME].present {
-		mbi.game_shadow = make([]byte, mbi.reflection.blocks[.GAME].size)
-		mbi.game_constants = create_constant_buffer(u32(len(mbi.game_shadow)))
-		mbi.game_dirty = true
-	}
-
-	create_states()
+@(private)
+destroy_render_pipeline :: proc(pipeline:^Render_Pipeline) {
+	destroy_reflection(&pipeline.reflection)
+	pipeline.input_layout->Release()
+	pipeline.pixel_shader_blob->Release()
+	pipeline.pixel_shader->Release()
+	pipeline.vertex_shader_blob->Release()
+	pipeline.vertex_shader->Release()
+	pipeline^ = {}
 }
 
 /*Everything drawn until camera_end is seen through this camera*/
@@ -573,6 +637,7 @@ camera_end :: proc() {
 	}
 
 	sort_render_queue()
+	set_lights_constants()
 
 	for item in mbi.opaque_items {
 		set_render_state(depth_opaque, .NONE, item.cull)
@@ -595,17 +660,14 @@ destroy_pipeline :: proc() {
 	delete(mbi.opaque_items)
 	delete(mbi.transparent_items)
 
+	if mbi.lights_constants != nil do mbi.lights_constants->Release()
 	if mbi.game_constants != nil do mbi.game_constants->Release()
 	if mbi.render_constants != nil do mbi.render_constants->Release()
 	if mbi.frame_constants != nil do mbi.frame_constants->Release()
 	delete(mbi.game_shadow)
-	destroy_reflection(&mbi.reflection)
 
 	destroy_states()
 
-	mbi.input_layout->Release()
-	mbi.pixel_shader_blob->Release()
-	mbi.pixel_shader->Release()
-	mbi.vertex_shader_blob->Release()
-	mbi.vertex_shader->Release()
+	destroy_render_pipeline(&mbi.lit_pipeline)
+	destroy_render_pipeline(&mbi.pipeline)
 }

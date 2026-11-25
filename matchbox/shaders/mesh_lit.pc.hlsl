@@ -38,6 +38,8 @@ cbuffer mbs_lights_block : register(b3) {
     float4 lights_direction[64];
     float4 lights_diffuse[64];
     float4 lights_specular[64];
+    float4 lights_position[64];
+    float4 lights_cone[64];
     int lights_count;
 };
 
@@ -51,12 +53,31 @@ float3 mbs_light_unit(float3 d) {
     return d * rsqrt(max(dot(d, d), 1e-12));
 }
 
+float mbs_light_sample(int i, float3 position, out float3 l) {
+    float kind = lights_position[i].w;
+    float fade = 1.0;
+    float3 axis = mbs_light_unit(lights_direction[i].xyz);
+    l = axis;
+    if (kind > 0.5) {
+        float3 to = lights_position[i].xyz - position;
+        float d = sqrt(dot(to, to));
+        l = mbs_light_unit(to);
+        fade = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
+        if (kind > 1.5) {
+            float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);
+            fade *= t * t * (3.0 - 2.0 * t);
+        }
+    }
+    return fade;
+}
+
 float4 mbs_light_diffuse(float4 q, float3 view) {
     float3 n = mbs_light_normal(q);
     float3 sum = lights_ambient.rgb;
     for (int i = 0; i < lights_count; i++) {
-        float3 l = mbs_light_unit(lights_direction[i].xyz);
-        sum += lights_diffuse[i].rgb * max(dot(l, n), 0.0);
+        float3 l;
+        float fade = mbs_light_sample(i, -view, l);
+        sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);
     }
     return float4(saturate(sum), 1.0);
 }
@@ -66,10 +87,11 @@ float4 mbs_light_specular(float4 q, float3 view) {
     float3 v = mbs_light_unit(view);
     float3 sum = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < lights_count; i++) {
-        float3 l = mbs_light_unit(lights_direction[i].xyz);
+        float3 l;
+        float fade = mbs_light_sample(i, -view, l);
         float3 h = mbs_light_unit(l + v);
         float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;
-        sum += lights_specular[i].rgb * (facing * pow(max(dot(n, h), 1e-8), render_shininess));
+        sum += lights_specular[i].rgb * (facing * fade * pow(max(dot(n, h), 1e-8), render_shininess));
     }
     return float4(saturate(sum * render_specular_strength), 0.0);
 }

@@ -53,10 +53,10 @@ render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32,
 	draw := make([]f32, 28, context.temp_allocator)
 	draw[25] = scene.shininess
 	draw[26] = scene.specular_strength
-	// the lights block: the ambient colour, then the slots' directions, diffuse colours and specular colours, a [4]f32
+	// the lights block: the ambient colour, then the slots' directions, diffuse colours, specular colours, positions and cones, a [4]f32
 	// each, then the count as an int in the next row
 	slots := get_max_lights(.PC)
-	lights := make([]f32, 4 + 3 * slots * 4 + 4, context.temp_allocator)
+	lights := make([]f32, 4 + 5 * slots * 4 + 4, context.temp_allocator)
 	ambient := scene.ambient
 	copy(lights[0:3], ambient[:])
 	for slot in 0 ..< 8 {
@@ -64,6 +64,10 @@ render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32,
 		copy(lights[4 + slot * 4:], direction[:])
 		copy(lights[4 + slots * 4 + slot * 4:], diffuse[:])
 		copy(lights[4 + 2 * slots * 4 + slot * 4:], specular[:])
+		position := [4]f32{scene.position[slot].x, scene.position[slot].y, scene.position[slot].z, f32(scene.kind[slot])}
+		copy(lights[4 + 3 * slots * 4 + slot * 4:], position[:])
+		cone := scene.cone[slot]
+		copy(lights[4 + 4 * slots * 4 + slot * 4:], cone[:])
 	}
 	// A bright light in the first slot past the count, shining from where the eye is (so on the side the normal
 	// faces): it would show in both results if the loops read past `lights_count`
@@ -72,7 +76,7 @@ render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32,
 	copy(lights[4 + past * 4:], view_direction[:])
 	copy(lights[4 + slots * 4 + past * 4:], []f32{1, 1, 1})
 	copy(lights[4 + 2 * slots * 4 + past * 4:], []f32{1, 1, 1})
-	lights[4 + 3 * slots * 4] = transmute(f32)i32(count)
+	lights[4 + 5 * slots * 4] = transmute(f32)i32(count)
 	game := make([]f32, 8, context.temp_allocator)
 	quat_in, view_in := quat, view
 	copy(game[0:4], quat_in[:])
@@ -109,7 +113,8 @@ the_generated_hlsl_lights_as_the_formula_says :: proc(t: ^testing.T) {
 	worst: f64
 	for case_index in 0 ..< 24 {
 		count := 1 + case_index % 8
-		scene, quat, view := create_light_case(&random, count)
+		// every third case mixes suns, point lights and spots
+		scene, quat, view := create_light_case(&random, count, case_index % 3 == 2)
 		want := calculate_light_reference(scene, quat, view)
 		diffuse, diffuse_message := render_light(scene, count, quat, view, "light_diffuse(v.quat, v.view)")
 		specular, specular_message := render_light(scene, count, quat, view, "light_specular(v.quat, v.view)")

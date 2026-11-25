@@ -41,6 +41,8 @@ LIGHTS_FIELDS := [?]Engine_Field {
 	{"direction", "[LIGHT_SLOT_COUNT][4]f32"},
 	{"diffuse", "[LIGHT_SLOT_COUNT][4]f32"},
 	{"specular", "[LIGHT_SLOT_COUNT][4]f32"},
+	{"position", "[LIGHT_SLOT_COUNT][4]f32"},
+	{"cone", "[LIGHT_SLOT_COUNT][4]f32"},
 }
 
 // get_engine_fields is an engine block's fields in the engine's order; a game's own uniforms have none.

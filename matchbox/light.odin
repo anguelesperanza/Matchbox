@@ -1,12 +1,13 @@
 package matchbox
 
 import "core:fmt"
+import "core:math"
 
 /*
 	light
 	=====
 
-	Directional lights and the scene's ambient, shared by every target (G2 L4-1,
+	Directional, point and spot lights and the scene's ambient, shared by every target (G2 L4-1,
 	docs/3ds_fragment_lighting_plan.md). A game sets them whenever it likes; each camera_end
 	turns them into the lights block its shaders read (`calculate_lights_block`), so a light
 	stays put in the world while the camera moves.
@@ -45,16 +46,30 @@ when ODIN_OS == .Windows {
 	LIGHT_SLOT_COUNT :: MAX_LIGHTS
 }
 
+// What a light is: a sun, a bulb, or a torch with a cone.
+Light_Kind :: enum {
+	DIRECTIONAL, // a sun: a direction and no place, everything is lit from the same angle (the zero value)
+	POINT, // a bulb: a place, shining every way, fading with distance
+	SPOT, // a torch: a place and a direction, lit inside a cone, fading with distance and towards the cone's edge
+}
+
 /*
-	A light shining along `direction`, from nowhere in particular: a sun. `diffuse` is the
-	colour it gives a surface facing it, `specular` the colour of its highlights. Two colours
-	rather than one because the 3DS's unit holds them apart for free, and a warm sun with white
-	highlights is a common look; create_directional_light sets both from one colour.
+	A light. `diffuse` is the colour it gives a surface facing it, `specular` the colour of its highlights: two
+	colours rather than one because the 3DS's unit holds them apart for free, and a warm light with white highlights
+	is a common look. Which other fields count depends on `kind`; the create_ procedures fill them in.
+
+	A point or spot light fades with distance as 1 / (1 + 0.09 d + 0.032 d^2), d in world units, the same on every
+	light (the curve main's PsxGame lighting uses); there is no per-light range. Its highlight fades with it. A spot
+	adds a smoothstep from full brightness at `inner_angle` to nothing at `outer_angle`.
 */
 Light :: struct {
-	direction:[3]f32, // the way the light travels, world space; need not be unit length
+	kind:Light_Kind,
+	direction:[3]f32, // DIRECTIONAL and SPOT: the way the light travels, world space; need not be unit length
+	position:[3]f32, // POINT and SPOT: world space
 	diffuse:[4]f32,
 	specular:[4]f32,
+	inner_angle:f32, // SPOT only, degrees from the axis: full brightness inside it
+	outer_angle:f32, // SPOT only, degrees from the axis: faded to nothing by it
 }
 
 /*
@@ -89,17 +104,18 @@ Lighting_State :: struct {
 }
 
 /*
-	The lights block as each target uploads it, in the order and layout of mbsc's
-	(`lights_ambient`, `lights_direction`, `lights_diffuse`, `lights_specular`, and on PC
-	`lights_count`). Every row is four floats, which suits HLSL's constant buffer packing and the
-	PICA's vec4 registers alike.
+	The lights block as each target uploads it, in the order and layout of mbsc's (`lights_ambient`, then
+	`lights_direction`, `_diffuse`, `_specular`, `_position` and `_cone`, and on PC `lights_count`). Every row is four
+	floats, which suits HLSL's constant buffer packing and the PICA's vec4 registers alike.
 */
 @(private)
 Lights_Block :: struct {
 	ambient:[4]f32,
-	direction:[LIGHT_SLOT_COUNT][4]f32, // towards the light, eye space, w = 0; zero in an unused slot
+	direction:[LIGHT_SLOT_COUNT][4]f32, // DIRECTIONAL: towards the light; SPOT: back along its axis, the way a sun's is; eye space, w = 0, unit length (the 3DS's vertex program has no instructions to spare for normalizing); zero when unused
 	diffuse:[LIGHT_SLOT_COUNT][4]f32,
 	specular:[LIGHT_SLOT_COUNT][4]f32,
+	position:[LIGHT_SLOT_COUNT][4]f32, // eye space, w = the kind: 0 directional, 1 point, 2 spot
+	cone:[LIGHT_SLOT_COUNT][4]f32, // SPOT: cos(outer angle), cos(inner angle), then k = 1 / (the difference) and -outer * k, so a shader works the cone out as cos * k + (-outer * k), two instructions on the 3DS where subtracting and scaling is three; zero otherwise
 	/*
 		Where PC's shader loops stop, so a scene with one sun doesn't pay for 64 slots. The
 		handhelds' loops run all 8 and don't read it. The padding fills the row, as HLSL rounds
@@ -111,7 +127,17 @@ Lights_Block :: struct {
 
 // create_directional_light makes a sun shining along `direction`, `color` used for both its diffuse and highlights.
 create_directional_light :: proc(direction:[3]f32, color:[4]f32 = WHITE) -> Light {
-	return Light{direction = direction, diffuse = color, specular = color}
+	return Light{kind = .DIRECTIONAL, direction = direction, diffuse = color, specular = color}
+}
+
+// create_point_light makes a bulb at `position` shining every way, `color` used for both its diffuse and highlights.
+create_point_light :: proc(position:[3]f32, color:[4]f32 = WHITE) -> Light {
+	return Light{kind = .POINT, position = position, diffuse = color, specular = color}
+}
+
+// create_spot_light makes a torch at `position` shining along `direction`, full brightness inside `inner_angle` degrees of the axis and none past `outer_angle`.
+create_spot_light :: proc(position, direction:[3]f32, color:[4]f32 = WHITE, inner_angle:f32 = 20, outer_angle:f32 = 30) -> Light {
+	return Light{kind = .SPOT, position = position, direction = direction, diffuse = color, specular = color, inner_angle = inner_angle, outer_angle = outer_angle}
 }
 
 /*
@@ -146,12 +172,16 @@ get_max_lights :: proc() -> int {
 	return LIGHT_SLOT_COUNT
 }
 
-/*
-	calculate_lights_block turns the scene's lights into the block a camera's shaders read.
-	A light's direction is reversed to point towards it, then turned by the view's rotation;
-	w = 0 keeps the view's translation out, as a direction has no position to move. Takes the
-	state rather than reading mbi so it is the same maths on every target and in a test.
-*/
+// calculate_unit_direction makes a direction unit length, a zero one staying zero rather than becoming a NaN.
+@(private)
+calculate_unit_direction :: proc(direction:[3]f32) -> [4]f32 {
+	length_squared := direction.x * direction.x + direction.y * direction.y + direction.z * direction.z
+	if length_squared < 1e-24 do return {}
+	unit := direction / math.sqrt(length_squared)
+	return {unit.x, unit.y, unit.z, 0}
+}
+
+// calculate_lights_block turns the scene's lights into the block a camera's shaders read, in eye space: a direction with w = 0 so the view's translation stays out, a position with w = 1.
 @(private)
 calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> Lights_Block {
 	block:Lights_Block
@@ -159,10 +189,27 @@ calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> 
 	block.count = i32(lighting.light_count)
 	for slot in 0 ..< lighting.light_count {
 		light := lighting.lights[slot]
-		towards := view * [4]f32{-light.direction.x, -light.direction.y, -light.direction.z, 0}
-		block.direction[slot] = {towards.x, towards.y, towards.z, 0}
 		block.diffuse[slot] = light.diffuse
 		block.specular[slot] = light.specular
+		kind := f32(int(light.kind))
+		block.position[slot].w = kind
+		switch light.kind {
+		case .DIRECTIONAL:
+			// reversed, to point towards the light
+			towards := view * [4]f32{-light.direction.x, -light.direction.y, -light.direction.z, 0}
+			block.direction[slot] = calculate_unit_direction(towards.xyz)
+		case .POINT, .SPOT:
+			place := view * [4]f32{light.position.x, light.position.y, light.position.z, 1}
+			block.position[slot] = {place.x, place.y, place.z, kind}
+			if light.kind == .SPOT {
+				// reversed, like a sun's, so a shader reads the cosine of the angle from the axis as one dot product
+				axis := view * [4]f32{-light.direction.x, -light.direction.y, -light.direction.z, 0}
+				block.direction[slot] = calculate_unit_direction(axis.xyz)
+				outer, inner := math.cos(math.to_radians(light.outer_angle)), math.cos(math.to_radians(light.inner_angle))
+				scale := 1 / max(inner - outer, 1e-6)
+				block.cone[slot] = {outer, inner, scale, -outer * scale}
+			}
+		}
 	}
 	return block
 }

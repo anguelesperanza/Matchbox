@@ -4,8 +4,8 @@
 // lighting is on and the part asks for per-vertex.
 //
 // The same model as the light built-ins (tools/mbsc/lighting.odin), in eye space as they are: ambient + each light's
-// diffuse * max(L.N, 0), and each light's specular * (N.H)^shininess where L.N > 0, times the part's strength, each
-// clamped. One difference, decided with the user: the highlight is added to the colour *before* the texture, as
+// diffuse * max(L.N, 0) * its fade, and each light's specular * (N.H)^shininess * its fade where L.N > 0, times the
+// part's strength, each clamped. A point or spot light's fade is distance and, for a spot, cone. One difference, decided with the user: the highlight is added to the colour *before* the texture, as
 // (tint x vertex colour x (ambient + diffuse) + specular) x texture. The 3DS hands the TexEnv stages one interpolated
 // colour, so a highlight can't be added after the texture there, and doing the same on every target keeps them
 // alike. Untextured, it is exactly the per-pixel result at the corners; textured, the highlight takes the texture's
@@ -46,6 +46,8 @@ Varying :: struct {
 	direction: [LIGHT_SLOT_COUNT][4]f32,
 	diffuse: [LIGHT_SLOT_COUNT][4]f32,
 	specular: [LIGHT_SLOT_COUNT][4]f32,
+	position: [LIGHT_SLOT_COUNT][4]f32,
+	cone: [LIGHT_SLOT_COUNT][4]f32,
 }
 
 vertex_main :: proc(input: Vertex_In) -> Varying {
@@ -65,21 +67,42 @@ vertex_main :: proc(input: Vertex_In) -> Varying {
 	diffuse := lights.ambient.xyz
 	specular := [3]f32{0.0, 0.0, 0.0}
 	for i in 0 ..< LIGHT_SLOT_COUNT {
-		// An empty slot's direction is zero; kept zero rather than normalized into a NaN, so it adds nothing
-		to_light := lights.direction[i].xyz * inverse_sqrt(max(dot(lights.direction[i].xyz, lights.direction[i].xyz), 1e-12))
+		// The engine hands over unit directions (zero for an empty slot, which adds nothing): this program has no
+		// instructions to spare to normalize eight of them
+		axis := lights.direction[i].xyz
+		to_light := axis
+		fade := 1.0
+		if lights.position[i].w > 0.5 {
+			// A point or spot light: the way to it from this vertex, and the fade main's lighting uses, 1 / (1 + 0.09 d
+			// + 0.032 d^2) with d in world units (eye space has the world's scale)
+			to := lights.position[i].xyz - eye.xyz
+			squared := max(dot(to, to), 1e-12)
+			inverse := inverse_sqrt(squared)
+			distance := squared * inverse
+			to_light = to * inverse
+			fade = 1.0 / (1.0 + distance * (0.09 + 0.032 * distance))
+			if lights.position[i].w > 1.5 {
+				// A spot: a smoothstep from full brightness at the inner cone to nothing at the outer, on the cosine of
+				// the angle from the axis. The engine gives k = 1 / (inner - outer) in cone.z and -outer * k in cone.w, so the
+				// ramp is two instructions here
+				t := saturate(dot(to_light, axis) * lights.cone[i].z + lights.cone[i].w)
+				fade = fade * t * t * (3.0 - 2.0 * t)
+			}
+		}
 		facing := dot(to_light, normal)
-		diffuse = diffuse + lights.diffuse[i].xyz * max(facing, 0.0)
+		diffuse = diffuse + lights.diffuse[i].xyz * (max(facing, 0.0) * fade)
 
 		// Blinn-Phong, and only on the side the light reaches: the 3DS unit's "clamp highlights", which the
 		// per-pixel path follows. 1 - step(facing, 0) is 1 where facing > 0. The base stays just above 0, as pow
 		// of 0 to a power of 0 is a NaN
 		shine := pow(max(dot(normal, normalize(to_light + towards_eye)), 1e-8), render.shininess)
-		specular = specular + lights.specular[i].xyz * ((1.0 - step(facing, 0.0)) * shine)
+		specular = specular + lights.specular[i].xyz * (step(0.0, facing) * shine * fade)
 	}
 
 	surface := input.color * render.tint
 	lit := saturate(diffuse) * surface.xyz + saturate(specular * render.specular_strength)
-	output.color = [4]f32{saturate(lit.x), saturate(lit.y), saturate(lit.z), surface.w}
+	clamped := saturate(lit) // as a vector: two instructions on the 3DS, where one a channel is six
+	output.color = [4]f32{clamped.x, clamped.y, clamped.z, surface.w}
 	return output
 }
 

@@ -10,14 +10,19 @@ import "core:strings"
 	computes, so a scene lights the same on all three targets, within the 8-bit and table rounding the 3DS adds:
 
 	- the normal is +Z turned by the interpolated quaternion, normalized first, as the unit renormalizes it
-	- primary = the scene's ambient + each light's diffuse colour * max(L.N, 0)
-	- secondary = (each light's specular colour * (N.H)^shininess, only where L.N > 0) * the part's specular strength.
+	- primary = the scene's ambient + each light's diffuse colour * max(L.N, 0) * its fade
+	- secondary = (each light's specular colour * (N.H)^shininess * its fade, only where L.N > 0) * the part's specular strength.
 	  The `L.N > 0` gate is the unit's "clamp highlights", without which a light behind a surface still leaves a
 	  highlight on it. The power is the D0 table the 3DS builds with LightLut_Phong
 	- each result clamped to [0, 1]; the diffuse's alpha is 1 and the specular's 0. The `.tev` plan combines whole
 	  colours, so `diffuse * texture + specular` adds the alphas too: a highlight of alpha 1 would make every lit pixel
 	  opaque and break cut-outs and blending. At 0 a highlight adds colour and leaves the texture's alpha alone (the
 	  3DS gets the same from an all-zero Fresnel table in the secondary alpha, measured on hardware in G2 L4-0)
+
+	- a point or spot light's L is the way to its eye-space position (a sun's is its direction), and its fade is
+	  1 / (1 + 0.09 d + 0.032 d^2) with d the distance in world units, times for a spot smoothstep(cos outer, cos inner,
+	  cos of the angle from its axis). The curve is main's, fixed, no per-light range; the 3DS's DA and SP tables give
+	  it to the level (G2 L8-0, measured on the real unit)
 
 	The values arrive in the engine's lights block, filled once a frame with directions already in eye space (the
 	unit's convention: the quaternion and `view` are eye space, see docs/shader_pica.md, "Fragment lighting (L0)"),
@@ -48,10 +53,11 @@ get_max_lights :: proc(target: Target) -> int {
 }
 
 // LIGHT_UNIFORM_NAMES are the lights block's fields, in the order the engine fills them: the ambient colour, then
-// for every slot the direction towards the light, its diffuse colour and its specular colour, each a [4]f32. PC's
+// for every slot the direction (towards the light for a sun, back along the axis for a spot), its diffuse and specular
+// colours, its position (w = kind: 0 directional, 1 point, 2 spot) and its cone (cos outer, cos inner, k = 1 / their difference, -outer * k), each a [4]f32. PC's
 // block adds `lights_count` (an int) after them (hlsl.odin).
 @(rodata)
-LIGHT_UNIFORM_NAMES := [?]string{"lights_ambient", "lights_direction", "lights_diffuse", "lights_specular"}
+LIGHT_UNIFORM_NAMES := [?]string{"lights_ambient", "lights_direction", "lights_diffuse", "lights_specular", "lights_position", "lights_cone"}
 
 // write_light_functions writes the functions the light built-ins call. HLSL and Cg read them the same way, so both
 // backends share this text; each declares the uniforms it reads in its own way first. `render_block` is the name the
@@ -67,12 +73,34 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintln(builder, "    return d * rsqrt(max(dot(d, d), 1e-12));")
 	fmt.sbprintln(builder, "}")
 
+	// One light seen from a pixel: the way to it in `l`, and how much of it arrives (the distance fade and a spot's
+	// cone), 1 for a sun. `position` is the pixel in eye space, which is the view vector negated
+	fmt.sbprintln(builder, "\nfloat mbs_light_sample(int i, float3 position, out float3 l) {")
+	fmt.sbprintln(builder, "    float kind = lights_position[i].w;")
+	fmt.sbprintln(builder, "    float fade = 1.0;")
+	fmt.sbprintln(builder, "    float3 axis = mbs_light_unit(lights_direction[i].xyz);")
+	fmt.sbprintln(builder, "    l = axis;")
+	fmt.sbprintln(builder, "    if (kind > 0.5) {")
+	fmt.sbprintln(builder, "        float3 to = lights_position[i].xyz - position;")
+	fmt.sbprintln(builder, "        float d = sqrt(dot(to, to));")
+	fmt.sbprintln(builder, "        l = mbs_light_unit(to);")
+	fmt.sbprintln(builder, "        fade = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);")
+	fmt.sbprintln(builder, "        if (kind > 1.5) {")
+	// smoothstep(cos outer, cos inner, cos angle), written out: HLSL's is undefined for equal edges
+	fmt.sbprintln(builder, "            float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);")
+	fmt.sbprintln(builder, "            fade *= t * t * (3.0 - 2.0 * t);")
+	fmt.sbprintln(builder, "        }")
+	fmt.sbprintln(builder, "    }")
+	fmt.sbprintln(builder, "    return fade;")
+	fmt.sbprintln(builder, "}")
+
 	fmt.sbprintln(builder, "\nfloat4 mbs_light_diffuse(float4 q, float3 view) {")
 	fmt.sbprintln(builder, "    float3 n = mbs_light_normal(q);")
 	fmt.sbprintln(builder, "    float3 sum = lights_ambient.rgb;")
 	fmt.sbprintfln(builder, "    for (int i = 0; i < %s; i++) {{", loop_end)
-	fmt.sbprintln(builder, "        float3 l = mbs_light_unit(lights_direction[i].xyz);")
-	fmt.sbprintln(builder, "        sum += lights_diffuse[i].rgb * max(dot(l, n), 0.0);")
+	fmt.sbprintln(builder, "        float3 l;")
+	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
+	fmt.sbprintln(builder, "        sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);")
 	fmt.sbprintln(builder, "    }")
 	fmt.sbprintln(builder, "    return float4(saturate(sum), 1.0);")
 	fmt.sbprintln(builder, "}")
@@ -83,10 +111,11 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintln(builder, "    float3 v = mbs_light_unit(view);")
 	fmt.sbprintln(builder, "    float3 sum = float3(0.0, 0.0, 0.0);")
 	fmt.sbprintfln(builder, "    for (int i = 0; i < %s; i++) {{", loop_end)
-	fmt.sbprintln(builder, "        float3 l = mbs_light_unit(lights_direction[i].xyz);")
+	fmt.sbprintln(builder, "        float3 l;")
+	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
 	fmt.sbprintln(builder, "        float3 h = mbs_light_unit(l + v);")
 	fmt.sbprintln(builder, "        float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;")
-	fmt.sbprintfln(builder, "        sum += lights_specular[i].rgb * (facing * pow(max(dot(n, h), 1e-8), %s_shininess));", render_block)
+	fmt.sbprintfln(builder, "        sum += lights_specular[i].rgb * (facing * fade * pow(max(dot(n, h), 1e-8), %s_shininess));", render_block)
 	fmt.sbprintln(builder, "    }")
 	fmt.sbprintfln(builder, "    return float4(saturate(sum * %s_specular_strength), 0.0);", render_block)
 	fmt.sbprintln(builder, "}")

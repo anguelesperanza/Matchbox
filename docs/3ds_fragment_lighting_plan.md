@@ -477,3 +477,14 @@ The five asked on 2026-11-23 are answered under "What was decided". Still open, 
 - **The real limits on PC and the Vita:** measured, not guessed, before either is raised above 8.
 - *Closed (D6):* the built-ins are `light_diffuse` and `light_specular`, in use and tested since L2; nothing left to
   revisit.
+
+**L8-5, Vita speed (2026-11-25).** The user found per-pixel lighting slow on the real Vita (worse with the bulbs, and slow
+before W4 too); per vertex was smooth. Cause by the numbers, not measured on hardware: the loops ran all 8 slots in two
+passes (diffuse, specular), each turn a normalize, a pow and, since W4, the kind terms. Changes, per-pixel Cg and HLSL only:
+the loops stop at the live light count (a float uniform `lights_count` on the Vita, set by the engine; PC already had it),
+the sent directions are not normalized again, and the distance comes from one `rsqrt`. Static size of `mesh_lit_f.gxp`:
+202 instructions at L4, 162 after W4, 152 now; the loop body is what repeats, so a scene of 3 lights runs 3 turns, not 8.
+PC and 3DS: mbsc's f64 and GPU tests still pass (the test scenes now send unit directions, as the engine does); the 3DS
+files did not change. Open: whether this is enough on the real Vita; per vertex stays the cheaper path, and making it the
+Vita's default is an API decision for the user. Test build: `build/hardware/model_check_bulbs2.vpk` (MBOX00062), M or
+Square switches per pixel and per vertex, P (Circle) the two bulbs, L (Cross) all lighting.

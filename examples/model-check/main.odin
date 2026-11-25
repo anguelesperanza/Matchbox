@@ -23,7 +23,8 @@ package model_check
 	Cross on the Vita), switches lighting off and on: off, every model draws as it did before
 	lighting existed, texture times tint. P, or the right face button (A on the 3DS, Circle on the Vita),
 	switches two more lights off and on (G2 L8): a warm point light low between the cube and the crate, and a
-	spot light from above on the cylinder. The sun stays.
+	spot light from above on the cylinder. The sun stays. M, or the left face button (Y on the 3DS, Square on the
+Vita), switches between lighting per pixel and per vertex.
 
 	The checkerboard is the lit cut-out. A highlight has alpha 0 on every target, so the holes
 	stay holes under the light (G2 L4-0); were it 1, the board would be a solid square lit grey.
@@ -64,6 +65,7 @@ main :: proc() {
 	board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
 
 	lighting_on := true
+	per_vertex := false
 	bulbs_on := true
 	bulbs := [2]mb.Light {
 		mb.create_point_light({-2, 0.8, 1.5}, {1, 0.7, 0.4, 1}),
@@ -90,7 +92,11 @@ main :: proc() {
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
 		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			lighting_on = !lighting_on
-			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}})
+			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}, mode = .PER_VERTEX if per_vertex else .PER_PIXEL})
+		}
+		if mb.is_key_pressed(.M) || mb.is_gamepad_pressed(.FACE_LEFT) {
+			per_vertex = !per_vertex
+			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}, mode = .PER_VERTEX if per_vertex else .PER_PIXEL})
 		}
 		if mb.is_key_pressed(.P) || mb.is_gamepad_pressed(.FACE_RIGHT) {
 			bulbs_on = !bulbs_on
@@ -124,6 +130,8 @@ main :: proc() {
 		mb.render_text(font, switch_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -1.4}))
 		bulb_label := "point and spot lights on (P or right button: off)" if bulbs_on else "point and spot lights off (P or right button: on)"
 		mb.render_text(font, bulb_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -2.2}))
+		mode_label := "lit per vertex (M or left button: per pixel)" if per_vertex else "lit per pixel (M or left button: per vertex)"
+		mb.render_text(font, mode_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -3.0}))
 		mb.screen_end()
 
 		mb.render_end()

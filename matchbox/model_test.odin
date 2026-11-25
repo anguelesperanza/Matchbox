@@ -9,10 +9,11 @@ import "core:testing"
 /*
 	Every triangle of a convex shape centred on the origin faces away from the centre, and the
 	signed volume of the whole is the shape's volume. A triangle wound the wrong way would show
-	as a negative contribution: culled on every target, a hole in the model
+	as a negative contribution: culled on every target, a hole in the model. Each corner's
+	normal is unit length and on the side the triangle faces, so the lit side is the outside
 */
 @(private = "file")
-expect_wound_outward :: proc(t:^testing.T, name:string, vertices:[]Vertex, indices:[]u16, expected_volume, tolerance:f32) {
+expect_wound_outward :: proc(t:^testing.T, name:string, vertices:[]Lit_Vertex, indices:[]u16, expected_volume, tolerance:f32) {
 	volume:f32
 	for i := 0; i < len(indices); i += 3 {
 		a := vertices[indices[i]].position
@@ -23,6 +24,11 @@ expect_wound_outward :: proc(t:^testing.T, name:string, vertices:[]Vertex, indic
 		if linalg.length(normal) < 1e-6 do continue // a sphere's pole: no area, no direction
 		centre := (a + b + c) / 3
 		testing.expectf(t, linalg.dot(normal, centre) > 0, "%s: triangle %v faces inward", name, i / 3)
+		for corner in 0 ..< 3 {
+			vertex_normal := vertices[indices[i + corner]].normal
+			testing.expectf(t, abs(linalg.length(vertex_normal) - 1) < 1e-5, "%s: a normal of length %v", name, linalg.length(vertex_normal))
+			testing.expectf(t, linalg.dot(vertex_normal, normal) > 0, "%s: triangle %v has a normal pointing in", name, i / 3)
+		}
 	}
 	testing.expectf(t, abs(volume - expected_volume) < tolerance, "%s: volume %v, expected about %v", name, volume, expected_volume)
 }
@@ -52,6 +58,7 @@ the_plane_faces_up :: proc(t:^testing.T) {
 		c := vertices[indices[i + 2]].position
 		testing.expect(t, linalg.cross(b - a, c - a).y > 0)
 	}
+	for vertex in vertices do testing.expect_value(t, vertex.normal, [3]f32{0, 1, 0})
 	minimum, maximum := calculate_vertex_bounds(vertices)
 	testing.expect_value(t, minimum, [3]f32{-2, 0, -2})
 	testing.expect_value(t, maximum, [3]f32{2, 0, 2})
@@ -69,4 +76,22 @@ a_pivoted_transform_puts_the_pivot_on_the_position :: proc(t:^testing.T) {
 @(test)
 the_identity_transform_changes_nothing :: proc(t:^testing.T) {
 	testing.expect_value(t, calculate_transform_matrix(create_transform()), linalg.MATRIX4F32_IDENTITY)
+}
+
+/*
+	The glTF mapping at the values its comment promises: Blender's default material reads as
+	the engine's default strength, a fully rough surface has no highlight, a mirror is kept to
+	max_shininess, and metal shines twice as hard as plastic
+*/
+@(test)
+a_gltf_roughness_becomes_a_highlight :: proc(t:^testing.T) {
+	blender := calculate_material_from_roughness(0.5, 0)
+	testing.expect_value(t, blender.shininess, 30)
+	testing.expect_value(t, blender.specular_strength, mbi.model_settings.default_material.specular_strength)
+
+	testing.expect_value(t, calculate_material_from_roughness(1, 1), Material{shininess = 1, specular_strength = 0})
+	testing.expect_value(t, calculate_material_from_roughness(0, 0), Material{shininess = mbi.model_settings.max_shininess, specular_strength = 1})
+	testing.expect_value(t, calculate_material_from_roughness(0.5, 1).specular_strength, 1)
+	testing.expect_value(t, calculate_material_from_roughness(0.75, 0).specular_strength, 0.25)
+	testing.expect_value(t, calculate_material_from_roughness(0.75, 1).specular_strength, 0.5)
 }

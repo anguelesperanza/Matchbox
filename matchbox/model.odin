@@ -11,9 +11,13 @@ package matchbox
 
 	Ported from main's model.odin and render3d.odin with the names brought to the house rules:
 	draw_model -> render_model, model_center -> calculate_model_center, transform_matrix ->
-	calculate_transform_matrix. Left out until their phases: lighting and normals (G2),
-	skinning and the animator (G6), shadows, and the line models (wire cube, grid), which need
-	a line topology no backend has yet.
+	calculate_transform_matrix. Left out until their phases: skinning and the animator (G6),
+	shadows, and the line models (wire cube, grid), which need a line topology no backend has
+	yet.
+
+	Every part is a lit mesh (Lit_Vertex, create_lit_mesh) with a Material, loaded or generated
+	alike (G2 L4-2), so a model lights whenever the scene does (set_lighting) and draws as it
+	always did when it doesn't.
 
 	A Mesh holds 16-bit indices, because the 3DS and the Vita draw with them, so a part has at
 	most 65536 vertices. The glTF loader splits nothing: a bigger primitive stops with a message
@@ -60,9 +64,26 @@ calculate_transform_pivoted :: proc(transform:Transform, pivot:[3]f32) -> Transf
 	return result
 }
 
+/*
+	How a part takes a light's highlight. Per part rather than per light, so two models under
+	one sun can shine differently, as a varnished crate and a cloth sack do. Diffuse needs no
+	setting: it is the part's colour and texture.
+*/
+Material :: struct {
+	shininess:f32, // the highlight's power: higher is smaller and sharper
+	specular_strength:f32, // 0 for no highlight, 1 for the light's whole specular colour
+}
+
+/*Fixed values the engine uses for models, held in mbi.model_settings*/
+Model_Settings :: struct {
+	default_material:Material, // a part with no material of its own: a glTF primitive without one, and the generated models
+	max_shininess:f32, // the sharpest highlight a glTF roughness turns into; a roughness of 0 would otherwise be infinite
+}
+
 /*One lump of geometry with one look. The texture is the model's (Model.textures); the part only names it*/
 Model_Part :: struct {
-	mesh:Mesh,
+	mesh:Mesh, // a lit mesh (create_lit_mesh)
+	material:Material,
 	texture:Texture, // zero for an untextured part, which draws in `color` alone
 	color:[4]f32, // multiplied with the texture and the tint: a glTF material's base colour factor
 	blend:Blend_Mode, // .ALPHA for a glTF material whose alpha mode is BLEND
@@ -144,13 +165,17 @@ render_model_pivoted :: proc(model:Model, pivot:[3]f32, transform:Transform, tin
 }
 
 /*
-	A model of one untextured white part, from geometry made in code. Bounds are measured off
-	the vertices on the way past, since they are here now and will not be later. The slices
-	can be freed afterwards
+	A model of one untextured white part, from geometry made in code, with the default
+	material. Bounds are measured off the vertices on the way past, since they are here now and
+	will not be later. The slices can be freed afterwards
 */
-create_model_from_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (model:Model) {
+create_model_from_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (model:Model) {
 	model.parts = make([]Model_Part, 1)
-	model.parts[0] = Model_Part{mesh = create_mesh(vertices, indices), color = {1, 1, 1, 1}}
+	model.parts[0] = Model_Part {
+		mesh = create_lit_mesh(vertices, indices),
+		material = mbi.model_settings.default_material,
+		color = {1, 1, 1, 1},
+	}
 	model.bounds_min, model.bounds_max = calculate_vertex_bounds(vertices)
 	return
 }
@@ -170,7 +195,8 @@ create_model_from_data :: proc(data:Model_Data, textures:[]Texture) -> (model:Mo
 	model.parts = make([]Model_Part, len(data.parts))
 	for part, index in data.parts {
 		model.parts[index] = Model_Part {
-			mesh = create_mesh(part.vertices, part.indices),
+			mesh = create_lit_mesh(part.vertices, part.indices),
+			material = part.material,
 			color = part.color,
 			blend = part.blend,
 			alpha_cutoff = part.alpha_cutoff,
@@ -191,9 +217,32 @@ destroy_model :: proc(model:Model) {
 	delete(model.textures)
 }
 
+/*
+	A glTF material's roughness and metallic factors as the Blinn-Phong highlight Matchbox
+	draws. glTF describes a physically based surface that no target here shades, so this is an
+	approximation, chosen so the common cases read right rather than to match a PBR renderer:
+
+	- shininess = 2 / roughness^4 - 2, the usual Blinn-Phong power for a microfacet roughness
+	  (alpha = roughness^2): 0.5 gives 30, 0.3 gives 245 (kept to max_shininess), 1 gives 0
+	  (kept to 1, a highlight spread over the whole lit side)
+	- strength = (1 - roughness) * (1 + metallic), kept to 0..1: a fully rough surface has no
+	  highlight, and a metal's is twice a plastic's. Blender's default material (roughness 0.5,
+	  metallic 0) comes out at 0.5, the strength of the default material. A physically based
+	  dielectric reflects only 4% head-on, but at that a plastic would show no highlight at all
+	  in a Blinn-Phong scene
+*/
+calculate_material_from_roughness :: proc(roughness, metallic:f32) -> Material {
+	roughness := clamp(roughness, 0, 1)
+	metallic := clamp(metallic, 0, 1)
+	power := roughness * roughness * roughness * roughness
+	shininess := mbi.model_settings.max_shininess
+	if power > 0 do shininess = clamp(2 / power - 2, 1, mbi.model_settings.max_shininess)
+	return Material{shininess = shininess, specular_strength = clamp((1 - roughness) * (1 + metallic), 0, 1)}
+}
+
 /*The smallest box holding every vertex. Zero for no vertices*/
 @(private)
-calculate_vertex_bounds :: proc(vertices:[]Vertex) -> (min_corner, max_corner:[3]f32) {
+calculate_vertex_bounds :: proc(vertices:[]Lit_Vertex) -> (min_corner, max_corner:[3]f32) {
 	if len(vertices) == 0 do return
 	min_corner = vertices[0].position
 	max_corner = vertices[0].position

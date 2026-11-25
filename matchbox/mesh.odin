@@ -3,17 +3,30 @@ package matchbox
 import "core:math"
 
 
-/*Vertex used by every mesh*/
+/*Vertex used by sprites, shapes and text: what an unlit draw reads (36 bytes)*/
 Vertex :: struct {
 	position:[3]f32,
 	uv:[2]f32,
 	color:[4]f32,
 }
 
+/*
+	Vertex used by models: a Vertex and the normal lighting needs (48 bytes, G2 L4-2). Kept
+	apart from Vertex so 2D, which never lights, uploads no normals. Vertex comes first, whole,
+	so `v.position` still reads and the first 36 bytes are laid out as a Vertex's: the unlit
+	shaders' input layout reads a lit mesh unchanged, given the longer stride. A normal is unit
+	length, in the model's own space
+*/
+Lit_Vertex :: struct {
+	using vertex:Vertex,
+	normal:[3]f32,
+}
 
-/*A cube centred on the origin, `size` units on each side. Each face has its own colour.
-The caller frees both slices (after create_mesh has copied them to the GPU)*/
-mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+
+/*A cube centred on the origin, `size` units on each side. Each face has its own colour, and its own
+vertices so each corner carries that face's normal. The caller frees both slices (after
+create_lit_mesh has copied them to the GPU)*/
+mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 
 	// A face is described by its outward normal, and two axes along it:
 	// `u` points right and `v` points up as seen from outside. u x v == normal.
@@ -39,7 +52,7 @@ mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.alloca
 
 	half := size / 2
 
-	vertices = make([]Vertex, 24, allocator)
+	vertices = make([]Lit_Vertex, 24, allocator)
 	indices = make([]u16, 36, allocator)
 
 	for face, i in faces {
@@ -55,7 +68,7 @@ mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.alloca
 		// White when not colored, so a texture on the cube shows in its own colours
 		color := face.color if colored else [4]f32{1, 1, 1, 1}
 		for corner, c in corners {
-			vertices[first + c] = {position = corner * half, uv = uvs[c], color = color}
+			vertices[first + c] = {vertex = {position = corner * half, uv = uvs[c], color = color}, normal = face.normal}
 		}
 
 		for index, k in quad_indices {
@@ -128,15 +141,16 @@ mesh_circle :: proc(segments:int = 48, allocator := context.allocator) -> (verti
 	A flat square of `size` units on the ground plane (x and z), facing up: the same four
 	corners as the cube's top face, wound the same way. The caller frees both slices
 */
-mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 	half := size * 0.5
 	white := [4]f32{1, 1, 1, 1}
-	vertices = make([]Vertex, 4, allocator)
+	up := [3]f32{0, 1, 0}
+	vertices = make([]Lit_Vertex, 4, allocator)
 	indices = make([]u16, 6, allocator)
-	vertices[0] = {position = {-half, 0, half}, uv = {0, 1}, color = white}
-	vertices[1] = {position = {half, 0, half}, uv = {1, 1}, color = white}
-	vertices[2] = {position = {half, 0, -half}, uv = {1, 0}, color = white}
-	vertices[3] = {position = {-half, 0, -half}, uv = {0, 0}, color = white}
+	vertices[0] = {vertex = {position = {-half, 0, half}, uv = {0, 1}, color = white}, normal = up}
+	vertices[1] = {vertex = {position = {half, 0, half}, uv = {1, 1}, color = white}, normal = up}
+	vertices[2] = {vertex = {position = {half, 0, -half}, uv = {1, 0}, color = white}, normal = up}
+	vertices[3] = {vertex = {position = {-half, 0, -half}, uv = {0, 0}, color = white}, normal = up}
 	indices[0], indices[1], indices[2] = 0, 1, 2
 	indices[3], indices[4], indices[5] = 0, 2, 3
 	return
@@ -146,13 +160,14 @@ mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]
 	A sphere of `radius`, in rings of latitude and sectors of longitude, wound counter-clockwise
 	from outside. Both loops run to `<=` their count, so the seam where longitude wraps has two
 	vertices in the same place with different uvs: otherwise the last sector would stretch the
-	whole texture back across itself. The caller frees both slices
+	whole texture back across itself. The normal is the direction from the centre, so the
+	shading is round however coarse the rings are. The caller frees both slices
 */
-mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 	rings := max(rings, 2)
 	sectors := max(sectors, 3)
 	assert((rings + 1) * (sectors + 1) <= 65536, "A sphere this fine needs more than 16-bit indices")
-	vertices = make([]Vertex, (rings + 1) * (sectors + 1), allocator)
+	vertices = make([]Lit_Vertex, (rings + 1) * (sectors + 1), allocator)
 	indices = make([]u16, rings * sectors * 6, allocator)
 
 	for ring in 0 ..= rings {
@@ -162,10 +177,13 @@ mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator 
 		for sector in 0 ..= sectors {
 			theta := 2 * math.PI * f32(sector) / f32(sectors)
 			direction := [3]f32{ring_radius * math.cos(theta), y, ring_radius * math.sin(theta)}
-			vertices[ring * (sectors + 1) + sector] = Vertex {
-				position = direction * radius,
-				uv = {f32(sector) / f32(sectors), f32(ring) / f32(rings)},
-				color = {1, 1, 1, 1},
+			vertices[ring * (sectors + 1) + sector] = Lit_Vertex {
+				vertex = {
+					position = direction * radius,
+					uv = {f32(sector) / f32(sectors), f32(ring) / f32(rings)},
+					color = {1, 1, 1, 1},
+				},
+				normal = direction,
 			}
 		}
 	}
@@ -184,38 +202,41 @@ mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator 
 
 /*
 	A cylinder of `radius` and `height`, upright about Y and centred on its own origin, wound
-	counter-clockwise from outside. The side and the two caps share no vertices: once normals
-	arrive (G2) a shared rim vertex would have to average a cap's and the side's and round the
-	edge off. The caller frees both slices
+	counter-clockwise from outside. The side and the two caps share no vertices: a shared rim
+	vertex would have to average a cap's normal and the side's, and light the edge as if it
+	were rounded off. The caller frees both slices
 */
-mesh_cylinder :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+mesh_cylinder :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 	sectors := max(sectors, 3)
 	half := height * 0.5
 	white := [4]f32{1, 1, 1, 1}
+	up := [3]f32{0, 1, 0}
+	down := [3]f32{0, -1, 0}
 
 	// The side: two rings of sectors + 1. Each cap: a middle vertex and a ring of sectors
 	side_count := (sectors + 1) * 2
-	vertices = make([]Vertex, side_count + (sectors + 1) * 2, allocator)
+	vertices = make([]Lit_Vertex, side_count + (sectors + 1) * 2, allocator)
 	indices = make([]u16, sectors * 12, allocator)
 
 	for sector in 0 ..= sectors {
 		theta := 2 * math.PI * f32(sector) / f32(sectors)
-		x, z := math.cos(theta) * radius, math.sin(theta) * radius
+		outward := [3]f32{math.cos(theta), 0, math.sin(theta)}
+		x, z := outward.x * radius, outward.z * radius
 		u := f32(sector) / f32(sectors)
-		vertices[sector] = {position = {x, half, z}, uv = {u, 0}, color = white}
-		vertices[sectors + 1 + sector] = {position = {x, -half, z}, uv = {u, 1}, color = white}
+		vertices[sector] = {vertex = {position = {x, half, z}, uv = {u, 0}, color = white}, normal = outward}
+		vertices[sectors + 1 + sector] = {vertex = {position = {x, -half, z}, uv = {u, 1}, color = white}, normal = outward}
 	}
 
 	top_middle := side_count
 	bottom_middle := side_count + sectors + 1
-	vertices[top_middle] = {position = {0, half, 0}, uv = {0.5, 0.5}, color = white}
-	vertices[bottom_middle] = {position = {0, -half, 0}, uv = {0.5, 0.5}, color = white}
+	vertices[top_middle] = {vertex = {position = {0, half, 0}, uv = {0.5, 0.5}, color = white}, normal = up}
+	vertices[bottom_middle] = {vertex = {position = {0, -half, 0}, uv = {0.5, 0.5}, color = white}, normal = down}
 	for sector in 0 ..< sectors {
 		theta := 2 * math.PI * f32(sector) / f32(sectors)
 		x, z := math.cos(theta), math.sin(theta)
 		uv := [2]f32{x * 0.5 + 0.5, z * 0.5 + 0.5}
-		vertices[top_middle + 1 + sector] = {position = {x * radius, half, z * radius}, uv = uv, color = white}
-		vertices[bottom_middle + 1 + sector] = {position = {x * radius, -half, z * radius}, uv = uv, color = white}
+		vertices[top_middle + 1 + sector] = {vertex = {position = {x * radius, half, z * radius}, uv = uv, color = white}, normal = up}
+		vertices[bottom_middle + 1 + sector] = {vertex = {position = {x * radius, -half, z * radius}, uv = uv, color = white}, normal = down}
 	}
 
 	next := 0

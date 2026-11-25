@@ -53,6 +53,7 @@ when VITA {
 		indices:rawptr, // inside the same block, just after the vertices
 		index_count:u32,
 		uid:sce.UID, // the block, for gfx.free
+		lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
 	}
 
 	/*

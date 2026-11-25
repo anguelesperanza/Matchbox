@@ -31,9 +31,9 @@ a_model_file_reads_back_what_was_written :: proc(t:^testing.T) {
 		testing.expect_value(t, read.blend, part.blend)
 		testing.expect_value(t, read.cull, part.cull)
 		testing.expect_value(t, read.alpha_cutoff, part.alpha_cutoff)
+		testing.expect_value(t, read.material, part.material)
 		if testing.expect_value(t, len(read.vertices), len(part.vertices)) {
 			for vertex, v in part.vertices do testing.expect_value(t, read.vertices[v], vertex)
-			for normal, v in part.normals do testing.expect_value(t, read.normals[v], normal)
 		}
 		if testing.expect_value(t, len(read.indices), len(part.indices)) {
 			for value, i in part.indices do testing.expect_value(t, read.indices[i], value)

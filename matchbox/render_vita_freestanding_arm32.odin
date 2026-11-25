@@ -33,6 +33,7 @@ when VITA {
 		vertex_shader:gfx.Program,
 		fragment_shader:gfx.Program,
 		vertex_program:^sce.GxmVertexProgram,
+		lit_vertex_program:^sce.GxmVertexProgram, // the same shader reading Lit_Vertex: GXM fixes a stream's stride in the vertex program
 		fragment_programs:[Blend_Mode]^sce.GxmFragmentProgram,
 
 		// Each engine uniform, found by name. mbsc names them <block>_<field>
@@ -56,10 +57,23 @@ when VITA {
 		freed afterwards
 	*/
 	create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
-		assert(len(vertices) > 0 && len(indices) > 0, "A mesh needs vertices and indices")
-		assert(len(vertices) <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
+		return create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+	}
 
-		vertex_size := len(vertices) * size_of(Vertex) // a multiple of 4, so the indices after it are aligned
+	/*Copies vertices with normals and indices into GPU-mapped memory, for a model part. The slices can be freed afterwards*/
+	create_lit_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (mesh:Mesh) {
+		mesh = create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+		mesh.lit = true
+		return
+	}
+
+	/*The two kinds of mesh differ only in how many bytes a vertex has; the memory is filled the same way*/
+	@(private = "file")
+	create_mesh_from_bytes :: proc(vertex_bytes:[]u8, vertex_count:int, indices:[]u16) -> (mesh:Mesh) {
+		assert(vertex_count > 0 && len(indices) > 0, "A mesh needs vertices and indices")
+		assert(vertex_count <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
+
+		vertex_size := len(vertex_bytes) // a multiple of 4, so the indices after it are aligned
 		index_size := len(indices) * size_of(u16)
 		memory, uid := gfx.alloc(uint(vertex_size + index_size))
 		ensure(memory != nil, "Out of GPU memory for a mesh")
@@ -69,7 +83,7 @@ when VITA {
 		mesh.index_count = u32(len(indices))
 		mesh.uid = uid
 		// Uncached memory (gfx.alloc's default): no cache flush, unlike the 3DS
-		mem.copy(mesh.vertices, raw_data(vertices), vertex_size)
+		mem.copy(mesh.vertices, raw_data(vertex_bytes), vertex_size)
 		mem.copy(mesh.indices, raw_data(indices), index_size)
 		return
 	}
@@ -114,6 +128,9 @@ when VITA {
 		}
 		pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:], size_of(Vertex))
 		if pipeline.vertex_program == nil do fail_pipeline("The mesh vertex program could not be made")
+		// A lit mesh's vertices start with a whole Vertex, so the same attributes read it with the longer stride
+		pipeline.lit_vertex_program = gfx.create_vertex_program(vertex, attributes[:], size_of(Lit_Vertex))
+		if pipeline.lit_vertex_program == nil do fail_pipeline("The lit mesh vertex program could not be made")
 
 		blends := [Blend_Mode]gfx.Blend {
 			.NONE = .None,
@@ -163,6 +180,7 @@ when VITA {
 			if program != nil do sce.sceGxmShaderPatcherReleaseFragmentProgram(gfx.patcher, program)
 		}
 		if pipeline.vertex_program != nil do sce.sceGxmShaderPatcherReleaseVertexProgram(gfx.patcher, pipeline.vertex_program)
+		if pipeline.lit_vertex_program != nil do sce.sceGxmShaderPatcherReleaseVertexProgram(gfx.patcher, pipeline.lit_vertex_program)
 		gfx.unregister_program(&pipeline.fragment_shader)
 		gfx.unregister_program(&pipeline.vertex_shader)
 		delete(mbi.opaque_items)
@@ -176,7 +194,8 @@ when VITA {
 	@(private)
 	render_item :: proc(item:Render_Item, blend:Blend_Mode) {
 		pipeline := &mbi.pipeline
-		vertex_uniforms, fragment_uniforms := gfx.use_programs(pipeline.vertex_program, pipeline.fragment_programs[blend])
+		vertex_program := pipeline.lit_vertex_program if item.mesh.lit else pipeline.vertex_program
+		vertex_uniforms, fragment_uniforms := gfx.use_programs(vertex_program, pipeline.fragment_programs[blend])
 
 		// Odin's matrix memory goes in unchanged: mbsc wrote the Cg with mul(v, m) to match
 		// (docs/shader_cg.md, "Matrices")

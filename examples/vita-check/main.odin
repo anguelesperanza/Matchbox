@@ -65,7 +65,7 @@ make_cube :: proc(colored:bool) -> mb.Mesh {
 	vertices, indices := mb.mesh_cube(colored = colored)
 	defer delete(vertices)
 	defer delete(indices)
-	return mb.create_mesh(vertices, indices)
+	return mb.create_lit_mesh(vertices, indices)
 }
 
 main :: proc() {

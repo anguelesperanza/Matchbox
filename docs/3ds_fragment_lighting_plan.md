@@ -197,6 +197,18 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
     the HLSL is 3e-7 from the formula; with the loop made to run all 64 it was 0.79 off, so the test sees the count.
   - L4-2. `Lit_Vertex`, `create_lit_mesh` per target, `Model_Part.material`, `.mbm` version 2 (the normals it already
     stores are uploaded; the material is added), the glTF loader building lit meshes.
+    **DONE 2026-11-25 (models still draw unlit; the lit pipelines are L4-4 and L4-5).** Decided with the user first:
+    every model lights, generated ones too; `Lit_Vertex` is `using vertex:Vertex` plus `normal`, and `mesh_cube`,
+    `mesh_plane`, `mesh_sphere`, `mesh_cylinder` return it with exact normals; `Mesh` has a `lit` field on every
+    target. `Material{shininess, specular_strength}` per part, default (16, 0.5) in `mbi.model_settings`; a glTF
+    material maps by `calculate_material_from_roughness` (2/r^4 - 2 kept to 1..128; (1 - r)(1 + m) kept to 0..1).
+    glTF without normals is split and lit flat, as the spec asks. `.mbm` version 2 stores whole `Lit_Vertex` and
+    the material. A lit mesh draws through the unlit pipeline with stride 48: PC sets the stride, the Vita has a
+    second vertex program of the same shader, the 3DS steps over the normal with a 12-byte padding component
+    (`0xE210`, 4 components). model-check on Azahar draws the crate (from a version 2 `.mbm`) and the cylinder
+    as before. **Not caused by L4-2, found while checking:** on Azahar the floor, cube and sphere don't show,
+    before this change as after (the commit before it built and run side by side). Not looked into yet; L4-6
+    needs it. Not run on Vita3K or hardware.
   - L4-3. `mesh_lit.mbs`, per pixel, generated for all three targets; `frame` gains `view`, which the lit vertex
     stage needs for eye space.
   - L4-4. PC: a second pipeline, the lights buffer at b3, lit items drawn with it.

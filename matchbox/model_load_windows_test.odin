@@ -2,6 +2,7 @@
 
 package matchbox
 
+import "core:math"
 import "core:testing"
 
 /*
@@ -25,6 +26,9 @@ expect_test_crate :: proc(t:^testing.T, path:string) {
 	testing.expect_value(t, crate.cull, Cull_Mode.BACK)
 	testing.expect_value(t, crate.blend, Blend_Mode.NONE)
 	testing.expect_value(t, crate.alpha_cutoff, 0)
+	// Its material names no roughness or metallic, so both are glTF's default 1: no highlight
+	testing.expect_value(t, crate.material, Material{shininess = 1, specular_strength = 0})
+	testing.expect_value(t, crate.vertices[0].normal, [3]f32{0, 0, 1})
 
 	// The flag's node transform is baked into its vertices: the quad's corner (-0.5, -0.5, 0)
 	// lands at 0.5 * corner + (0, 1, 0)
@@ -33,7 +37,7 @@ expect_test_crate :: proc(t:^testing.T, path:string) {
 	testing.expect_value(t, flag.vertices[0].position, [3]f32{-0.25, 0.75, 0})
 	testing.expect_value(t, flag.vertices[2].position, [3]f32{0.25, 1.25, 0})
 	testing.expect_value(t, flag.vertices[0].color, [4]f32{1, 0, 0, 1}) // normalised bytes
-	testing.expect_value(t, flag.normals[0], [3]f32{0, 0, 1})
+	testing.expect_value(t, flag.vertices[0].normal, [3]f32{0, 0, 1})
 	testing.expect_value(t, flag.image, -1)
 	testing.expect_value(t, flag.color, [4]f32{0.5, 1, 1, 1})
 	testing.expect_value(t, flag.cull, Cull_Mode.NONE)
@@ -60,6 +64,40 @@ a_gltf_with_embedded_data_reads_as_its_numbers_say :: proc(t:^testing.T) {
 a_glb_reads_the_same_as_its_gltf :: proc(t:^testing.T) {
 	expect_test_crate(t, "tools/testdata/models/test_crate.glb")
 	free_all(context.temp_allocator)
+}
+
+/*
+	A primitive with no normals is lit flat, as glTF asks: each triangle gets three vertices of
+	its own carrying its face's normal, and the indices count straight up. Two triangles of a
+	bent quad share an edge, which flat lighting has to split
+*/
+@(test)
+a_primitive_without_normals_is_split_and_lit_flat :: proc(t:^testing.T) {
+	part:Model_Data_Part
+	part.vertices = make([]Lit_Vertex, 4)
+	part.vertices[0].position = {0, 0, 0}
+	part.vertices[1].position = {1, 0, 0}
+	part.vertices[2].position = {1, 1, 0} // the first triangle lies in z = 0, facing +Z
+	part.vertices[3].position = {0, 1, 1} // the second leans back
+	part.indices = make([]u16, 6)
+	copy(part.indices, []u16{0, 1, 2, 0, 2, 3})
+	defer {
+		delete(part.vertices)
+		delete(part.indices)
+	}
+
+	testing.expect(t, split_gltf_flat_normals(&part))
+	if testing.expect_value(t, len(part.vertices), 6) == false do return
+	for index, i in part.indices do testing.expect_value(t, int(index), i)
+	for v in 0 ..< 3 do testing.expect_value(t, part.vertices[v].normal, [3]f32{0, 0, 1})
+	// (1,1,0) - (0,0,0) crossed with (0,1,1) - (0,0,0) is (1,-1,1), unit length 1/sqrt(3) each
+	third := f32(1) / f32(math.sqrt(f32(3)))
+	for v in 3 ..< 6 {
+		normal := part.vertices[v].normal
+		testing.expectf(t, abs(normal.x - third) < 1e-6 && abs(normal.y + third) < 1e-6 && abs(normal.z - third) < 1e-6, "normal %v", normal)
+	}
+	testing.expect_value(t, part.vertices[3].position, [3]f32{0, 0, 0})
+	testing.expect_value(t, part.vertices[5].position, [3]f32{0, 1, 1})
 }
 
 @(test)

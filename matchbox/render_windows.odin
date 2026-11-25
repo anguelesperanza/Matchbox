@@ -57,20 +57,34 @@ Mesh :: struct {
 	vertex_buffer:^d3d11.IBuffer,
 	index_buffer:^d3d11.IBuffer,
 	index_count:u32,
+	lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
 }
 
 
 /*Copies vertices and indices to the GPU. The slices can be freed afterwards*/
 create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
-	assert(len(vertices) > 0 && len(indices) > 0, "A mesh needs vertices and indices")
-	assert(len(vertices) <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
+	return create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+}
+
+/*Copies vertices with normals and indices to the GPU, for a model part. The slices can be freed afterwards*/
+create_lit_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (mesh:Mesh) {
+	mesh = create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+	mesh.lit = true
+	return
+}
+
+/*The two kinds of mesh differ only in how many bytes a vertex has; the buffers are made the same way*/
+@(private = "file")
+create_mesh_from_bytes :: proc(vertex_bytes:[]u8, vertex_count:int, indices:[]u16) -> (mesh:Mesh) {
+	assert(vertex_count > 0 && len(indices) > 0, "A mesh needs vertices and indices")
+	assert(vertex_count <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
 
 	vertex_description := d3d11.BUFFER_DESC {
-		ByteWidth = u32(len(vertices) * size_of(Vertex)),
+		ByteWidth = u32(len(vertex_bytes)),
 		Usage = .IMMUTABLE,
 		BindFlags = {.VERTEX_BUFFER},
 	}
-	vertex_data := d3d11.SUBRESOURCE_DATA{pSysMem = raw_data(vertices)}
+	vertex_data := d3d11.SUBRESOURCE_DATA{pSysMem = raw_data(vertex_bytes)}
 
 	result := mbi.device->CreateBuffer(&vertex_description, &vertex_data, &mesh.vertex_buffer)
 	ensure(win.SUCCEEDED(result), "Create mesh vertex buffer failed")
@@ -109,7 +123,9 @@ render_item :: proc(item:Render_Item) {
 	set_render_constants(item.model, item.tint, item.uv_rectangle, item.alpha_cutoff)
 
 	vertex_buffer := item.mesh.vertex_buffer
-	stride:u32 = size_of(Vertex)
+	// A lit mesh's vertices start with a whole Vertex, so the input layout reads it unchanged
+	// with the longer stride; the normal after it waits for the lit pipeline (L4-4)
+	stride:u32 = size_of(Lit_Vertex) if item.mesh.lit else size_of(Vertex)
 	offset:u32 = 0
 
 	upload_game_constants()

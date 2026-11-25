@@ -12,27 +12,32 @@ package matchbox
 	Shared and free of file I/O, so the PC's tests check that what is written reads back.
 
 	Layout, little-endian, as every Matchbox target is, so values are copied as they are:
-		"MBM1", u32 version (1)
+		"MBM1", u32 version (2)
 		u32 part count, u32 image count
 		[3]f32 bounds_min, [3]f32 bounds_max
 		per image: u16 name length, the name (an image asset name, e.g. "models/crate_0.png"),
 		           padded to 4 bytes
 		per part:  u32 vertex count, u32 index count, [4]f32 colour, i32 image (-1 for none),
 		           u8 blend (0 none, 1 alpha), u8 cull (0 back, 1 none), u16 0, f32 alpha cutoff,
-		           the vertices as Vertex (36 bytes each), the normals ([3]f32 each),
-		           the indices (u16 each), padded to 4 bytes
+		           f32 shininess, f32 specular strength (the Material),
+		           the vertices as Lit_Vertex (48 bytes each), the indices (u16 each),
+		           padded to 4 bytes
 	Images are names, not bytes: the build writes each beside the model as its own image, so
 	each target's usual image path converts it (tritex for the 3DS) and load_texture reads it.
-	The normals are stored now, unused until G2 (lighting), so G2 needs no new format
+
+	Version 2 (G2 L4-2) stores each vertex whole with its normal, as create_lit_mesh uploads it,
+	where version 1 kept the normals in a run of their own after the vertices; and the
+	material. Version 1 is refused rather than read: the build makes every .mbm from its glTF
+	each time, so an old one only means a stale build
 */
 
 import "core:mem"
 
 /*One primitive of a model, on the CPU, in the model's own space*/
 Model_Data_Part :: struct {
-	vertices:[]Vertex,
-	normals:[][3]f32, // one per vertex, kept for G2 (lighting)
+	vertices:[]Lit_Vertex,
 	indices:[]u16,
+	material:Material,
 	color:[4]f32, // the material's base colour factor
 	image:int, // index into the model's images, or -1 for no texture
 	blend:Blend_Mode,
@@ -56,7 +61,6 @@ Model_Data :: struct {
 destroy_model_data :: proc(data:Model_Data) {
 	for part in data.parts {
 		delete(part.vertices)
-		delete(part.normals)
 		delete(part.indices)
 	}
 	for encoded in data.images do delete(encoded)
@@ -93,8 +97,9 @@ write_model_file :: proc(data:Model_Data, image_names:[]string) -> []u8 {
 		write_value(&out, u8(1) if part.cull == .NONE else u8(0))
 		write_value(&out, u16(0))
 		write_value(&out, part.alpha_cutoff)
+		write_value(&out, part.material.shininess)
+		write_value(&out, part.material.specular_strength)
 		append(&out, ..mem.slice_to_bytes(part.vertices))
-		append(&out, ..mem.slice_to_bytes(part.normals))
 		append(&out, ..mem.slice_to_bytes(part.indices))
 		pad_to_four(&out)
 	}
@@ -103,7 +108,7 @@ write_model_file :: proc(data:Model_Data, image_names:[]string) -> []u8 {
 
 /*
 	The model a .mbm holds. `ok` is false, with `problem` saying why, for anything that isn't a
-	whole version-1 file: a model that half-read would draw garbage with no sign why. Every array
+	whole version-2 file: a model that half-read would draw garbage with no sign why. Every array
 	is copied out rather than pointed into `bytes`, which may be freed after, and which on ARM may
 	not be aligned for the floats inside it. Free the result with destroy_model_data
 */
@@ -135,8 +140,9 @@ read_model_file :: proc(bytes:[]u8) -> (data:Model_Data, ok:bool, problem:string
 		part.cull = .NONE if read_value(&reader, u8) == 1 else .BACK
 		_ = read_value(&reader, u16)
 		part.alpha_cutoff = read_value(&reader, f32)
-		part.vertices = read_slice(&reader, Vertex, vertex_count)
-		part.normals = read_slice(&reader, [3]f32, vertex_count)
+		part.material.shininess = read_value(&reader, f32)
+		part.material.specular_strength = read_value(&reader, f32)
+		part.vertices = read_slice(&reader, Lit_Vertex, vertex_count)
 		part.indices = read_slice(&reader, u16, index_count)
 		skip_to_four(&reader)
 		append(&data.parts, part) // appended even when short, so destroy_model_data frees it
@@ -159,7 +165,7 @@ read_model_file :: proc(bytes:[]u8) -> (data:Model_Data, ok:bool, problem:string
 */
 @(private = "file")
 get_model_file_version :: proc() -> u32 {
-	return 1
+	return 2
 }
 
 @(private = "file")

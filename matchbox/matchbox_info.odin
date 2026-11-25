@@ -41,6 +41,7 @@ Matchbox_Info :: struct {
 	circle_mesh:Mesh,
 
 	lighting:Lighting_State, // set_lights and set_lighting; off and empty until a game calls them (light.odin)
+	model_settings:Model_Settings,
 
 	font_settings:Font_Settings,
 	screen_settings:Screen_Settings,
@@ -55,6 +56,10 @@ mbi := Matchbox_Info {
 		atlas_max_size = 4096,
 		first_glyph = 32,
 		line_spacing = 0.15,
+	},
+	model_settings = {
+		default_material = {shininess = 16, specular_strength = 0.5}, // a soft highlight, neither matte nor glossy
+		max_shininess = 128,
 	},
 	screen_settings = {
 		default_height = 12,

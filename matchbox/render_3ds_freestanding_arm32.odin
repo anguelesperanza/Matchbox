@@ -32,6 +32,7 @@ when !VITA {
 		vertices:rawptr,
 		indices:rawptr,
 		index_count:u32,
+		lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
 	}
 
 	/*Everything one shader needs to draw. Lives in `mbi.pipeline` (Backend_State)*/
@@ -76,16 +77,29 @@ when !VITA {
 
 	/*Copies vertices and indices into linear memory. The slices can be freed afterwards*/
 	create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
-		assert(len(vertices) > 0 && len(indices) > 0, "A mesh needs vertices and indices")
-		assert(len(vertices) <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
+		return create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+	}
 
-		vertex_size := len(vertices) * size_of(Vertex)
+	/*Copies vertices with normals and indices into linear memory, for a model part. The slices can be freed afterwards*/
+	create_lit_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (mesh:Mesh) {
+		mesh = create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+		mesh.lit = true
+		return
+	}
+
+	/*The two kinds of mesh differ only in how many bytes a vertex has; the memory is filled the same way*/
+	@(private = "file")
+	create_mesh_from_bytes :: proc(vertex_bytes:[]u8, vertex_count:int, indices:[]u16) -> (mesh:Mesh) {
+		assert(vertex_count > 0 && len(indices) > 0, "A mesh needs vertices and indices")
+		assert(vertex_count <= 65536, "A mesh with 16-bit indices can have at most 65536 vertices")
+
+		vertex_size := len(vertex_bytes)
 		index_size := len(indices) * size_of(u16)
 		mesh.vertices = ctru.linearAlloc(uint(vertex_size))
 		mesh.indices = ctru.linearAlloc(uint(index_size))
 		ensure(mesh.vertices != nil && mesh.indices != nil, "Out of linear memory for a mesh")
 
-		mem.copy(mesh.vertices, raw_data(vertices), vertex_size)
+		mem.copy(mesh.vertices, raw_data(vertex_bytes), vertex_size)
 		mem.copy(mesh.indices, raw_data(indices), index_size)
 
 		// The CPU wrote through its cache; the GPU reads memory. Without this the first frames
@@ -300,7 +314,13 @@ when !VITA {
 
 		buffers := c3d.C3D_GetBufInfo()
 		c3d.BufInfo_Init(buffers)
-		c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Vertex), 3, 0x210) // attributes 0, 1, 2 in order
+		if item.mesh.lit {
+			// 0xE is a 12-byte padding component: it steps over the normal, so the unlit shader's
+			// three attributes load as before. The lit pipeline (L4-5) loads it as attribute 3
+			c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Lit_Vertex), 4, 0xE210)
+		} else {
+			c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Vertex), 3, 0x210) // attributes 0, 1, 2 in order
+		}
 
 		c3d.C3D_DrawElements(.TRIANGLES, i32(item.mesh.index_count), 1, item.mesh.indices) // 1: 16-bit indices
 	}

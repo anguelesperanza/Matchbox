@@ -29,8 +29,12 @@ Vita), switches between lighting per pixel and per vertex.
 	The checkerboard is the lit cut-out. A highlight has alpha 0 on every target, so the holes
 	stay holes under the light (G2 L4-0); were it 1, the board would be a solid square lit grey.
 
-	A HUD line names the crate and its size from calculate_model_size, and one says whether
-	lighting is on. SELECT or Escape quits
+	M, or the left face button (Y on the 3DS, Square on the Vita), cycles the scene's lighting
+	mode between per pixel and per vertex (G2 L5-4). The sphere's material always asks for the
+	other one, so every frame draws both pipelines side by side; the HUD names both modes.
+
+	A HUD line names the crate and its size from calculate_model_size, one says whether
+	lighting is on, and one names the modes. SELECT or Escape quits
 */
 
 import "core:fmt"
@@ -65,15 +69,20 @@ main :: proc() {
 	board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
 
 	lighting_on := true
-	per_vertex := false
+	scene_mode := mb.Lighting_Mode.PER_PIXEL
 	bulbs_on := true
 	bulbs := [2]mb.Light {
 		mb.create_point_light({-2, 0.8, 1.5}, {1, 0.7, 0.4, 1}),
 		mb.create_spot_light({3, 3.5, 1.5}, {0, -1, -0.3}, {1, 1, 1, 1}, 15, 30),
 	}
 	sun := mb.create_directional_light({-1, -2, -1})
-	mb.set_lighting()
 	mb.set_lights({sun, bulbs[0], bulbs[1]})
+	// The sphere always takes the other pipeline from the scene, so every frame mixes both
+	apply_lighting :: proc(sphere:mb.Model, enabled:bool, mode:mb.Lighting_Mode) {
+		mb.set_lighting({enabled = enabled, ambient = {0.2, 0.2, 0.2, 1}, mode = mode})
+		sphere.parts[0].material.lighting = .PER_VERTEX if mode == .PER_PIXEL else .PER_PIXEL
+	}
+	apply_lighting(sphere, lighting_on, scene_mode)
 
 	camera := mb.Camera {
 		position = {0, 2.5, 6},
@@ -95,11 +104,12 @@ main :: proc() {
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
 		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			lighting_on = !lighting_on
-			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}, mode = .PER_VERTEX if per_vertex else .PER_PIXEL})
+			apply_lighting(sphere, lighting_on, scene_mode)
 		}
+		// FACE_LEFT: Y on the 3DS, Square on the Vita
 		if mb.is_key_pressed(.M) || mb.is_gamepad_pressed(.FACE_LEFT) {
-			per_vertex = !per_vertex
-			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}, mode = .PER_VERTEX if per_vertex else .PER_PIXEL})
+			scene_mode = .PER_VERTEX if scene_mode == .PER_PIXEL else .PER_PIXEL
+			apply_lighting(sphere, lighting_on, scene_mode)
 		}
 		if mb.is_key_pressed(.P) || mb.is_gamepad_pressed(.FACE_RIGHT) {
 			bulbs_on = !bulbs_on
@@ -141,7 +151,8 @@ main :: proc() {
 			fmt.tprintf("crate %.2f x %.2f x %.2f", size.x, size.y, size.z),
 			"lighting on [L / down]" if lighting_on else "lighting off [L / down]",
 			"bulbs on [P / right]" if bulbs_on else "bulbs off [P / right]",
-			"per vertex [M / left]" if per_vertex else "per pixel [M / left]",
+			"scene per vertex [M / left]" if scene_mode == .PER_VERTEX else "scene per pixel [M / left]",
+			"sphere per vertex" if mb.get_lighting_mode(sphere.parts[0].material) == .PER_VERTEX else "sphere per pixel",
 			fmt.tprintf("fps %.0f (%.1f ms)", fps, 1000 / max(fps, 0.001)),
 		}
 

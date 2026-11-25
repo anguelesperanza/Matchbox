@@ -10,6 +10,8 @@ package vita_check
 	line names the step: "started" with no "drew a frame" means it never finished a frame. A
 	crash's own message lands in the same file.
 
+	The lighting steps (G2 L7) draw model-check's scene lit per pixel, lit per vertex and with lighting off.
+
 	Vita only: the memory step reads the kernel's free memory through vito.
 */
 
@@ -30,6 +32,9 @@ Step :: enum {
 	TEXTURES,
 	ANIMATION,
 	SCENE_3D,
+	LIGHT_PER_PIXEL,
+	LIGHT_PER_VERTEX,
+	LIGHT_OFF,
 	TEXT,
 	TOUCH,
 	MEMORY,
@@ -45,6 +50,9 @@ step_descriptions := [Step]string {
 	.TEXTURES = "Orange/white checker: blocky on the left, smooth on the right. In the middle the top-left frame of the cat sheet (a PNG from the .vpk).",
 	.ANIMATION = "The swordswoman playing through her frames.",
 	.SCENE_3D = "A spinning orange/white checker cube, a see-through green pane sliding through it. The cube hides the pane where in front.",
+	.LIGHT_PER_PIXEL = "Lit per pixel: blue cube, front and right sides alike, top lighter. Green sphere, small sharp white highlight. Pale grey checker board behind, holes see through.",
+	.LIGHT_PER_VERTEX = "Lit per vertex: the same scene. Cube, floor and board look as before; only the sphere changes, its highlight softer and dimmer.",
+	.LIGHT_OFF = "Lighting off: no shading. The cube is one bright blue on every side, the sphere one flat green with no highlight, the board and floor plain.",
 	.TEXT = "Three sizes of clean text. Letters with tails (g j p q y) should not be cut off.",
 	.TOUCH = "Touch the front screen: a green square follows your finger, and the numbers show where.",
 	.MEMORY = "Creates and destroys a cube and a texture 1000 times. Free memory after should equal before.",
@@ -70,7 +78,7 @@ make_cube :: proc(colored:bool) -> mb.Mesh {
 
 main :: proc() {
 	mb.init("vita check", 960, 544)
-	mb.print("vita check: started")
+	mb.print("vita check lit (G2 L7): started")
 
 	// The 2D camera's units are screen pixels: the window is 544 tall, 0, 0 the centre, +y up
 	camera_2d := mb.create_camera_2d()
@@ -125,6 +133,33 @@ main :: proc() {
 	pane := mb.create_mesh(quad_vertices, quad_indices)
 	delete(quad_vertices)
 	delete(quad_indices)
+
+	// The lighting steps (G2 L7): model-check's scene, one sun from (1, 2, 1) and 0.2 ambient
+	light_camera := mb.Camera {
+		position = {0, 2.5, 6},
+		target = {0, 0.5, 0},
+		up = {0, 1, 0},
+		fov_y = 50,
+		near = 0.1,
+		far = 100,
+		zoom = 1,
+		projection = .PERSPECTIVE,
+	}
+	light_floor := mb.create_plane_model(12)
+	light_cube := mb.create_cube_model()
+	light_sphere := mb.create_sphere_model(0.5)
+	light_holes:[8 * 8][4]u8
+	for &pixel, index in light_holes {
+		pixel = {255, 255, 255, 255} if (index % 8 + index / 8) % 2 == 0 else {0, 0, 0, 0}
+	}
+	light_board_texture := mb.create_texture_from_pixels(&light_holes, 8, 8, .POINT)
+	light_board := mb.create_plane_model(1.5)
+	light_board.parts[0].texture = light_board_texture
+	light_board.parts[0].alpha_cutoff = 0.5
+	light_board.parts[0].cull = .NONE
+	// The plane faces up; a quarter turn about X stands it up facing the camera
+	light_board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
+	mb.set_lights({mb.create_directional_light({-1, -2, -1})})
 
 	leak_pixels := make([]u8, 64 * 64 * 4)
 	defer delete(leak_pixels)
@@ -230,6 +265,16 @@ main :: proc() {
 			mb.render_mesh(pane, mb.calculate_model_matrix({0, 0, slide}, scale = {3, 3, 1}), tint = {0.2, 1, 0.4, 0.5}, blend = .ALPHA, cull = .NONE)
 			mb.camera_end()
 
+		case .LIGHT_PER_PIXEL, .LIGHT_PER_VERTEX, .LIGHT_OFF:
+			mode := mb.Lighting_Mode.PER_VERTEX if step == .LIGHT_PER_VERTEX else .PER_PIXEL
+			mb.set_lighting({enabled = step != .LIGHT_OFF, ambient = {0.2, 0.2, 0.2, 1}, mode = mode})
+			mb.camera_start(light_camera)
+			mb.render_model(light_floor, [3]f32{0, -0.5, 0}, tint = {0.4, 0.4, 0.45, 1})
+			mb.render_model(light_board, light_board_transform)
+			mb.render_model(light_cube, [3]f32{-1.6, 0, 0}, tint = {0.4, 0.6, 1, 1})
+			mb.render_model(light_sphere, [3]f32{1.6, 0, 0}, tint = {0.4, 1, 0.5, 1})
+			mb.camera_end()
+
 		case .TEXT:
 			mb.camera_start(camera_2d)
 			mb.render_text(text_fonts[2], "Matchbox gjpqy!", {-440, 120, 0})
@@ -287,5 +332,10 @@ main :: proc() {
 	mb.destroy(clockwise)
 	mb.destroy(textured_cube)
 	mb.destroy(pane)
+	mb.destroy(light_floor)
+	mb.destroy(light_cube)
+	mb.destroy(light_sphere)
+	mb.destroy(light_board)
+	mb.destroy(light_board_texture)
 	mb.cleanup()
 }

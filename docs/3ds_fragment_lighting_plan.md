@@ -383,6 +383,33 @@ both ways on each target.
       The crate and cylinder turn, so two runs of the *same* build differ by as much as old against new does;
       the old/new comparison there is the machine-model test's.
   - L5-4. model-check lit both ways on every target; hardware builds.
+    **DONE 2026-11-25 on PC and in the emulators (hardware not yet asked, builds below).** model-check gains M, or
+    FACE_LEFT (Y on the 3DS, Square on the Vita), which cycles `Lighting_Settings.mode`; the sphere's material always
+    asks for the other mode (`Material.lighting`), so every frame draws both pipelines, and a HUD line names both. L4-6's
+    lighting switch and the cut-out board stay. `apply_lighting` sets the scene and the sphere together.
+    - Measured, linear (PC's sRGB converted back); the cube's front and right (61, 93, 155) and the top (102, 153, 255)
+      are worked out by hand, the sphere's peak red is the brightest pixel:
+
+      | scene mode (sphere the other) | cube front/right | cube top | sphere peak red |
+      |---|---|---|---|
+      | PC, per pixel (sphere per vertex) | 62, 93, 156 | 103, 152, 255 | 216 |
+      | PC, per vertex (sphere per pixel) | 62, 93, 156 | 103, 152, 255 | 229 (reference 229) |
+      | Azahar, per pixel | 62, 93, 155 | 102, 153, 255 | 215 |
+      | Azahar, per vertex | 62, 93, 155 | 102, 153, 255 | 228 (reference 228) |
+      | Vita3K, per pixel | 62, 93, 155 | 102, 153, 255 | 217 |
+      | Vita3K, per vertex | 62, 93, 155 | 102, 153, 255 | 229 (L4-6: 230) |
+
+      A flat face is the same both ways, as L5-2 found; the per-vertex highlight peaks lower (216 against 229) because it
+      is blended from the corners. On the floor the per-vertex scene is a few levels brighter (Azahar 108 against 102,
+      Vita3K 105 against 103). The board's holes show what is behind in both modes (seen, not measured).
+    - Keys: Azahar's Y (`x`) switched the mode in one run. Vita3K's did not take a synthetic Z press, so its per-vertex
+      scene was measured from a build starting in that mode instead (same code, a scratch copy).
+    - Hardware builds, own names and first printed line "model check lit both ways (G2 L5-4)":
+      `build/hardware/model_check_both.3dsx` (title ModelCheckBoth) and `build/hardware/model_check_both.vpk` (Model
+      Check Both, MBOX00047). To check on hardware: both modes look alike on the faces, the sphere differs, Y/Square
+      cycles, B/Cross still switches lighting off.
+- **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
+  laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 - **W7. o3dx's `C3D_FVec` fixed (decision D7).**
   **DONE 2026-11-25 in Azahar; hardware check pending.** o3dx declared `C3D_FVec` as `{x, y, z, w}` over citro3d's
   `{w, z, y, x}`, so `.x` wrote citro3d's w. Fixed in O3DX on its own branch (`fix-c3d-fvec-field-order`, PR
@@ -393,8 +420,6 @@ both ways on each target.
     white squares have identical pixel counts at their reference values (4101, 848, 81210 against 81203, 1611); the
     rest of the frame differs only where parts rotate. Hardware build: `build/hardware/w7_fvec_fix.3dsx` (title
     `W7FVecFix`, model-check, which prints no test name of its own).
-- **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
-  laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 
 **L6. The API's remainder.** *DONE 2026-11-25 (W3).* The API itself came forward into L4 and the per-part choice into
 L5-2; what was left:
@@ -425,6 +450,7 @@ kinds together.
   main's curve (if not, the nearest curve comes to the user before the formula changes), the SP table's input and
   signed layout, and the distance beyond the table. **Stops here until the user's result.**
   **DONE 2026-11-25: passed on the New 3DS LL (the user ran it), after passing 31 of 31 in Azahar.** Built as `build/hardware/light_test4.3dsx` (title LightTest4; source kept in `docs/spikes/light_test4_main.odin.txt`). In Azahar all 31 probes are within 3 of the formula: a positional light (w = 1) with no table gives L.N exactly; `LightLutDA_Quadratic(0, 100, 0.09, 0.032)` on DA reproduces main's curve to the level (164, 121, 68, 37 against 164, 121, 67, 37), so **the 3DS tables do reproduce main's curve and no nearest curve is needed**; a DA table ending at 6 holds its last value past the end (the clamp, not a wrap or a zero); a spot table of 256 entries (signed: entries 0 to 127 are cos 0 to 1, 128 to 255 zero) with `C3D_LightEnvLut(.SP, .SP, negative = true)`, `C3D_LightSpotDir` given the way the spot points (the reverse is dark) and `C3D_LightSpotLut` gives main's smoothstep (255, 241, 119, 0, 0 against 255, 241, 117, 0, 0), and spot with DA multiplies. Resolution to remember: the SP input has 128 steps over cos 0 to 1, so a cone narrower than about 7 degrees degrades to a step. The app reads its own framebuffer back and prints got and expected per step.
+- **Real-hardware result, 2026-11-25 (user):** point and spot lights work on the New 3DS LL (no frame drop) and the real Vita. Vita frame rates, `model_check_bulbs4`: per vertex 60 fps with and without the bulbs; per pixel 52 with the sun alone and 24 with the two bulbs on (26 and 11 before the Vita's per-pixel pass was rebuilt: one pass over the lights, sorted by kind). **Accepted for now: 24 fps per pixel with bulbs on; the user will revisit it in a later optimization pass** (options then: fewer pixels lit, simpler point and spot terms, per vertex as the Vita's default, which is an API change).
 - L8-1. mbsc and the block: `LIGHT_UNIFORM_NAMES`, `LIGHTS_FIELDS`, `write_light_functions`, the f64 model in
   `lighting_model_test.odin` and the engine's `Lights_Block` layout check change together (a per-slot position and
   spot rows); the stale-file guards name every generated file to regenerate. `Light`, `Light_Kind` and the two
@@ -452,6 +478,29 @@ kinds together.
 - To check on the hardware: whether the unit's DA and SP tables also scale the specular highlight (the PC and Vita shaders do
   fade it); the SP table's 128 steps limit a cone narrower than about 7 degrees. The user's build is
   `build/hardware/model_check_bulbs.3dsx` and `.vpk`; P or the right face button switches the two lights.
+  - **DONE 2026-11-25 in Azahar and Vita3K (hardware not yet asked, builds below).** `examples/render-check` gains seven
+    probes, 28 in all, on four 24-pixel lit patches along its bottom edge (flat planes facing the camera, no highlight,
+    one sun from (1, 2, 1), 0.2 ambient), each worked by hand: per pixel and per vertex a (0.4, 0.6, 1) face, (62, 93, 155)
+    by hand and measured (62, 93, 155) in Azahar on both; a cut-out (a 2 x 2 texture, only its top left opaque, cut at 0.5)
+    whose opaque square is (155, 155, 155) and whose three holes show the background (0, 0, 255); the same face with
+    lighting off (102, 153, 255) as measured. The probes' tolerance is 2. `examples/vita-check` gains three steps,
+    LIGHT_PER_PIXEL, LIGHT_PER_VERTEX and LIGHT_OFF, each drawing model-check's scene and saying on screen what it should
+    look like. Measured in Vita3K (medians of the cube, floor and sphere in a screenshot): per vertex cube front and right
+    (61, 93, 154), top (101, 153, 254), floor (100, 102, 114); lighting off the cube is (101, 153, 254) on every side, the
+    floor unchanged (it saturates to its tint). The sphere's highlight is visibly softer per vertex, as in L5-4.
+  - Broken once on purpose: with the lit probes' expected values wrong, the 3DS check printed each measured value and
+    reported seven failures, so the probes do see. **Found on the way:** the check's old failure line,
+    `fmt.tprintf("... %v", got, ...)` with a `[3]u8`, panics on the 3DS (a bare PANIC in Azahar); the line now passes the
+    values as plain ints. Not looked into further: `%v` of an array in freestanding arm32 `fmt`.
+  - The vita-check build needs `assets/images` (meme_cat.png, shia.png), which git ignores: without them it panics in
+    `load_texture` ("No such image"), as it did in a fresh worktree until they were copied in.
+  - Hardware builds, own names, titles and first printed lines: `build/hardware/render_check_lit.3dsx` (title
+    RenderCheckLit, first line "check: started (render check lit, G2 L7)"; it prints "28 probes ... failures 0" on its
+    bottom screen) and `build/hardware/vita_check_lit.vpk` (Vita Check Lit, MBOX00048, first log line "vita check lit (G2 L7):
+    started"; steps 8 to 10 of 14, ~42 s in, L / R move between steps). To check on hardware: the 3DS says failures 0;
+    the Vita's three steps look as each describes.
+  - **Hardware pass 2026-11-25:** the user ran both builds on the New 3DS LL and the real Vita and reported they work (passed).
+    L7 is done on hardware.
 
 ## What the same unit opens (after the G2 core)
 

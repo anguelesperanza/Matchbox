@@ -48,12 +48,6 @@ Varying :: struct {
 	specular: [LIGHT_SLOT_COUNT][4]f32,
 }
 
-/*
-	Written for the 3DS's 16 temporary registers: mbsc's PICA backend lets a variable's register go when its block
-	ends, not after its last use, and unrolls the loop into the same block. So the eye-space values are worked out in
-	a block of their own, which lets `world`, `eye` and `turned` go before the loop, and the loop keeps only what more
-	than one line reads. Written the obvious way, it needed more than 16
-*/
 vertex_main :: proc(input: Vertex_In) -> Varying {
 	output: Varying
 	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
@@ -61,16 +55,12 @@ vertex_main :: proc(input: Vertex_In) -> Varying {
 	// Eye space, as the lights' directions are. The eye is at its origin, so the way to it is the position negated.
 	// The normal is turned by the model matrix itself, as in mesh_lit.mbs: exact for an even scale, which normalize
 	// undoes
-	towards_eye: [3]f32
-	normal: [3]f32
-	{
-		world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
-		output.position = frame.view_projection * world
-		eye := frame.view * world
-		towards_eye = normalize([3]f32{-eye.x, -eye.y, -eye.z})
-		turned := frame.view * (render.model * [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0})
-		normal = normalize(turned.xyz)
-	}
+	world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.position = frame.view_projection * world
+	eye := frame.view * world
+	towards_eye := normalize([3]f32{-eye.x, -eye.y, -eye.z})
+	turned := frame.view * (render.model * [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0})
+	normal := normalize(turned.xyz)
 
 	diffuse := lights.ambient.xyz
 	specular := [3]f32{0.0, 0.0, 0.0}

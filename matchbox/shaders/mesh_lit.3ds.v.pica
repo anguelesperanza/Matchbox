@@ -42,39 +42,39 @@
 	dp4 r5.y, frame_view[1].xyzw, r6.xyzw
 	dp4 r5.z, frame_view[2].xyzw, r6.xyzw
 	dp4 r5.w, frame_view[3].xyzw, r6.xyzw
-	mov r7.xyz, -r5.xyzw
-	mov r4.xyz, r7.xyzw
-	mov r7.xyz, v3.xyzw
-	mov r7.w, mbs_k0.xyzx
-	dp4 r8.x, render_model[0].xyzw, r7.xyzw
-	dp4 r8.y, render_model[1].xyzw, r7.xyzw
-	dp4 r8.z, render_model[2].xyzw, r7.xyzw
-	dp4 r8.w, render_model[3].xyzw, r7.xyzw
-	dp4 r7.x, frame_view[0].xyzw, r8.xyzw
-	dp4 r7.y, frame_view[1].xyzw, r8.xyzw
-	dp4 r7.z, frame_view[2].xyzw, r8.xyzw
-	dp4 r7.w, frame_view[3].xyzw, r8.xyzw
-	dp3 r8.x, r7.xyzz, r7.xyzz
+	mov r6.xyz, -r5.xyzw
+	mov r4.xyz, r6.xyzw
+	mov r5.xyz, v3.xyzw
+	mov r5.w, mbs_k0.xyzx
+	dp4 r6.x, render_model[0].xyzw, r5.xyzw
+	dp4 r6.y, render_model[1].xyzw, r5.xyzw
+	dp4 r6.z, render_model[2].xyzw, r5.xyzw
+	dp4 r6.w, render_model[3].xyzw, r5.xyzw
+	dp4 r5.x, frame_view[0].xyzw, r6.xyzw
+	dp4 r5.y, frame_view[1].xyzw, r6.xyzw
+	dp4 r5.z, frame_view[2].xyzw, r6.xyzw
+	dp4 r5.w, frame_view[3].xyzw, r6.xyzw
+	dp3 r6.x, r5.xyzz, r5.xyzz
+	rsq r7.x, r6.xxxx
+	mul r6.xyz, r5.xyzz, r7.xxxx
+	mov r7.xyz, r6.xyzw
+	mov r6.x, -r7.yyyy
+	mov r6.y, r7.xxxx
+	mov r6.z, mbs_k0.xxxx
+	add r6.w, mbs_k1.xxxx, r7.zzzz
+	max r6.w, mbs_k3.xxxx, r6.wwww
+	dp4 r8.x, r6.xyzw, r6.xyzw
 	rsq r9.x, r8.xxxx
-	mul r8.xyz, r7.xyzz, r9.xxxx
-	mov r9.xyz, r8.xyzw
-	mov r8.x, -r9.yyyy
-	mov r8.y, r9.xxxx
-	mov r8.z, mbs_k0.xxxx
-	add r8.w, mbs_k1.xxxx, r9.zzzz
-	max r8.w, mbs_k3.xxxx, r8.wwww
-	dp4 r10.x, r8.xyzw, r8.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyzw, r8.xyzw, r11.xxxx
-	mov r3.xyzw, r10.xyzw
+	mul r8.xyzw, r6.xyzw, r9.xxxx
+	mov r3.xyzw, r8.xyzw
 	mov mbs_out_position.xyzw, r0.xyzw
-	mov r8.xyzw, mbs_k4.xyzw
-	mov r8.xy, r1.xyzw
-	mov mbs_out_texcoord0.xyzw, r8.xyzw
+	mov r5.xyzw, mbs_k4.xyzw
+	mov r5.xy, r1.xyzw
+	mov mbs_out_texcoord0.xyzw, r5.xyzw
 	mov mbs_out_color.xyzw, r2.xyzw
 	mov mbs_out_normalquat.xyzw, r3.xyzw
-	mov r8.xyzw, mbs_k4.xyzw
-	mov r8.xyz, r4.xyzw
-	mov mbs_out_view.xyzw, r8.xyzw
+	mov r5.xyzw, mbs_k4.xyzw
+	mov r5.xyz, r4.xyzw
+	mov mbs_out_view.xyzw, r5.xyzw
 	end
 .end

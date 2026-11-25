@@ -28,43 +28,39 @@
 	mul r3.xy, r4.xyzw, v1.xyzw
 	add r4.xy, render_uv_rectangle.xyyy, r3.xyzw
 	mov r1.xy, r4.xyzw
-	mov r3.xyz, mbs_k0.xxxx
-	mov r4.xyz, mbs_k0.xxxx
-	mov r5.xyz, v0.xyzw
-	mov r5.w, mbs_k1.xyzx
-	dp4 r6.x, render_model[0].xyzw, r5.xyzw
-	dp4 r6.y, render_model[1].xyzw, r5.xyzw
-	dp4 r6.z, render_model[2].xyzw, r5.xyzw
-	dp4 r6.w, render_model[3].xyzw, r5.xyzw
-	dp4 r5.x, frame_view_projection[0].xyzw, r6.xyzw
-	dp4 r5.y, frame_view_projection[1].xyzw, r6.xyzw
-	dp4 r5.z, frame_view_projection[2].xyzw, r6.xyzw
-	dp4 r5.w, frame_view_projection[3].xyzw, r6.xyzw
-	mov r0.xyzw, r5.xyzw
-	dp4 r5.x, frame_view[0].xyzw, r6.xyzw
-	dp4 r5.y, frame_view[1].xyzw, r6.xyzw
-	dp4 r5.z, frame_view[2].xyzw, r6.xyzw
-	dp4 r5.w, frame_view[3].xyzw, r6.xyzw
-	mov r7.xyz, -r5.xyzw
-	dp3 r8.x, r7.xyzw, r7.xyzw
-	rsq r9.x, r8.xxxx
-	mul r8.xyz, r7.xyzw, r9.xxxx
-	mov r3.xyz, r8.xyzw
-	mov r7.xyz, v3.xyzw
-	mov r7.w, mbs_k0.xyzx
-	dp4 r8.x, render_model[0].xyzw, r7.xyzw
-	dp4 r8.y, render_model[1].xyzw, r7.xyzw
-	dp4 r8.z, render_model[2].xyzw, r7.xyzw
-	dp4 r8.w, render_model[3].xyzw, r7.xyzw
-	dp4 r7.x, frame_view[0].xyzw, r8.xyzw
-	dp4 r7.y, frame_view[1].xyzw, r8.xyzw
-	dp4 r7.z, frame_view[2].xyzw, r8.xyzw
-	dp4 r7.w, frame_view[3].xyzw, r8.xyzw
-	dp3 r8.x, r7.xyzz, r7.xyzz
-	rsq r9.x, r8.xxxx
-	mul r8.xyz, r7.xyzz, r9.xxxx
-	mov r4.xyz, r8.xyzw
-	mov r5.xyz, lights_ambient.xyzz
+	mov r3.xyz, v0.xyzw
+	mov r3.w, mbs_k1.xyzx
+	dp4 r4.x, render_model[0].xyzw, r3.xyzw
+	dp4 r4.y, render_model[1].xyzw, r3.xyzw
+	dp4 r4.z, render_model[2].xyzw, r3.xyzw
+	dp4 r4.w, render_model[3].xyzw, r3.xyzw
+	dp4 r3.x, frame_view_projection[0].xyzw, r4.xyzw
+	dp4 r3.y, frame_view_projection[1].xyzw, r4.xyzw
+	dp4 r3.z, frame_view_projection[2].xyzw, r4.xyzw
+	dp4 r3.w, frame_view_projection[3].xyzw, r4.xyzw
+	mov r0.xyzw, r3.xyzw
+	dp4 r3.x, frame_view[0].xyzw, r4.xyzw
+	dp4 r3.y, frame_view[1].xyzw, r4.xyzw
+	dp4 r3.z, frame_view[2].xyzw, r4.xyzw
+	dp4 r3.w, frame_view[3].xyzw, r4.xyzw
+	mov r4.xyz, -r3.xyzw
+	dp3 r5.x, r4.xyzw, r4.xyzw
+	rsq r6.x, r5.xxxx
+	mul r5.xyz, r4.xyzw, r6.xxxx
+	mov r3.xyz, v3.xyzw
+	mov r3.w, mbs_k0.xyzx
+	dp4 r4.x, render_model[0].xyzw, r3.xyzw
+	dp4 r4.y, render_model[1].xyzw, r3.xyzw
+	dp4 r4.z, render_model[2].xyzw, r3.xyzw
+	dp4 r4.w, render_model[3].xyzw, r3.xyzw
+	dp4 r3.x, frame_view[0].xyzw, r4.xyzw
+	dp4 r3.y, frame_view[1].xyzw, r4.xyzw
+	dp4 r3.z, frame_view[2].xyzw, r4.xyzw
+	dp4 r3.w, frame_view[3].xyzw, r4.xyzw
+	dp3 r4.x, r3.xyzz, r3.xyzz
+	rsq r6.x, r4.xxxx
+	mul r4.xyz, r3.xyzz, r6.xxxx
+	mov r3.xyz, lights_ambient.xyzz
 	mov r6.xyz, mbs_k0.xyzw
 	mov r7.xyz, lights_direction[0].xyzz
 	dp3 r8.x, lights_direction[0].xyzz, r7.xyzw
@@ -74,9 +70,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[0].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -85,12 +81,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[0].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[0].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[1].xyzz
 	dp3 r8.x, lights_direction[1].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -99,9 +95,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[1].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -110,12 +106,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[1].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[1].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[2].xyzz
 	dp3 r8.x, lights_direction[2].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -124,9 +120,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[2].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -135,12 +131,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[2].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[2].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[3].xyzz
 	dp3 r8.x, lights_direction[3].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -149,9 +145,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[3].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -160,12 +156,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[3].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[3].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[4].xyzz
 	dp3 r8.x, lights_direction[4].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -174,9 +170,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[4].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -185,12 +181,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[4].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[4].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[5].xyzz
 	dp3 r8.x, lights_direction[5].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -199,9 +195,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[5].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -210,12 +206,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[5].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[5].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[6].xyzz
 	dp3 r8.x, lights_direction[6].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -224,9 +220,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[6].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -235,12 +231,12 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[6].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[6].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
 	mov r7.xyz, lights_direction[7].xyzz
 	dp3 r8.x, lights_direction[7].xyzz, r7.xyzw
 	max r7.x, mbs_k3.xxxx, r8.xxxx
@@ -249,9 +245,9 @@
 	dp3 r8.x, r7.xyzw, r4.xyzw
 	max r9.x, mbs_k0.xxxx, r8.xxxx
 	mul r10.xyz, lights_diffuse[7].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
+	add r9.xyz, r3.xyzw, r10.xyzw
+	mov r3.xyz, r9.xyzw
+	add r9.xyz, r7.xyzw, r5.xyzw
 	dp3 r10.x, r9.xyzw, r9.xyzw
 	rsq r11.x, r10.xxxx
 	mul r10.xyz, r9.xyzw, r11.xxxx
@@ -260,35 +256,35 @@
 	lg2 r9.x, r10.xxxx
 	mul r10.x, render_shininess.xxxx, r9.xxxx
 	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[7].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mul r7.xyzw, render_tint.xyzw, v2.xyzw
-	max r8.xyz, mbs_k0.xxxx, r5.xyzw
-	min r9.xyz, mbs_k1.xxxx, r8.xyzw
-	mul r8.xyz, r9.xyzw, r7.xyzz
-	mul r9.xyz, render_specular_strength.xxxx, r6.xyzw
-	max r10.xyz, mbs_k0.xxxx, r9.xyzw
-	min r9.xyz, mbs_k1.xxxx, r10.xyzw
-	add r10.xyz, r8.xyzw, r9.xyzw
-	max r8.x, mbs_k0.xxxx, r10.xxxx
-	min r9.x, mbs_k1.xxxx, r8.xxxx
-	max r8.x, mbs_k0.xxxx, r10.yyyy
-	min r11.x, mbs_k1.xxxx, r8.xxxx
-	max r8.x, mbs_k0.xxxx, r10.zzzz
-	min r12.x, mbs_k1.xxxx, r8.xxxx
-	mov r8.x, r9.xyzw
-	mov r8.y, r11.xxzw
-	mov r8.z, r12.xyxw
-	mov r8.w, r7.xyzw
-	mov r2.xyzw, r8.xyzw
+	sge r7.x, mbs_k0.xxxx, r8.xxxx
+	add r10.x, mbs_k1.xxxx, -r7.xxxx
+	mul r7.x, r10.xxxx, r9.xxxx
+	mul r10.xyz, lights_specular[7].xyzz, r7.xxxx
+	add r7.xyz, r6.xyzw, r10.xyzw
+	mov r6.xyz, r7.xyzw
+	mul r4.xyzw, render_tint.xyzw, v2.xyzw
+	max r5.xyz, mbs_k0.xxxx, r3.xyzw
+	min r7.xyz, mbs_k1.xxxx, r5.xyzw
+	mul r5.xyz, r7.xyzw, r4.xyzz
+	mul r7.xyz, render_specular_strength.xxxx, r6.xyzw
+	max r8.xyz, mbs_k0.xxxx, r7.xyzw
+	min r7.xyz, mbs_k1.xxxx, r8.xyzw
+	add r8.xyz, r5.xyzw, r7.xyzw
+	max r3.x, mbs_k0.xxxx, r8.xxxx
+	min r5.x, mbs_k1.xxxx, r3.xxxx
+	max r3.x, mbs_k0.xxxx, r8.yyyy
+	min r6.x, mbs_k1.xxxx, r3.xxxx
+	max r3.x, mbs_k0.xxxx, r8.zzzz
+	min r7.x, mbs_k1.xxxx, r3.xxxx
+	mov r3.x, r5.xyzw
+	mov r3.y, r6.xxzw
+	mov r3.z, r7.xyxw
+	mov r3.w, r4.xyzw
+	mov r2.xyzw, r3.xyzw
 	mov mbs_out_position.xyzw, r0.xyzw
-	mov r8.xyzw, mbs_k5.xyzw
-	mov r8.xy, r1.xyzw
-	mov mbs_out_texcoord0.xyzw, r8.xyzw
+	mov r3.xyzw, mbs_k5.xyzw
+	mov r3.xy, r1.xyzw
+	mov mbs_out_texcoord0.xyzw, r3.xyzw
 	mov mbs_out_color.xyzw, r2.xyzw
 	end
 .end

@@ -28,10 +28,10 @@
 	mul r3.xyzw, render_tint.xyzw, v2.xyzw
 	mov r2.xyzw, r3.xyzw
 	mov r3.xy, -render_uv_rectangle.xyyy
-	add r5.xy, render_uv_rectangle.zwww, r3.xyzw
-	mul r3.xy, r5.xyzw, v1.xyzw
-	add r5.xy, render_uv_rectangle.xyyy, r3.xyzw
-	mov r1.xy, r5.xyzw
+	add r4.xy, render_uv_rectangle.zwww, r3.xyzw
+	mul r3.xy, r4.xyzw, v1.xyzw
+	add r4.xy, render_uv_rectangle.xyyy, r3.xyzw
+	mov r1.xy, r4.xyzw
 	mov mbs_out_position.xyzw, r0.xyzw
 	mov r3.xyzw, mbs_k3.xyzw
 	mov r3.xy, r1.xyzw

@@ -37,16 +37,12 @@ uniform float4 lights_specular[8];
 Varying vertex_main(Vertex_In input) {
     Varying output = (Varying)0;
     output.uv = lerp(render_uv_rectangle.xy, render_uv_rectangle.zw, input.uv);
-    float3 towards_eye = (float3)0;
-    float3 normal = (float3)0;
-    {
-        float4 world = mul(float4(input.position.x, input.position.y, input.position.z, 1.0), render_model);
-        output.position = mul(world, frame_view_projection);
-        float4 eye = mul(world, frame_view);
-        towards_eye = normalize(float3((-eye.x), (-eye.y), (-eye.z)));
-        float4 turned = mul(mul(float4(input.normal.x, input.normal.y, input.normal.z, 0.0), render_model), frame_view);
-        normal = normalize(turned.xyz);
-    }
+    float4 world = mul(float4(input.position.x, input.position.y, input.position.z, 1.0), render_model);
+    output.position = mul(world, frame_view_projection);
+    float4 eye = mul(world, frame_view);
+    float3 towards_eye = normalize(float3((-eye.x), (-eye.y), (-eye.z)));
+    float4 turned = mul(mul(float4(input.normal.x, input.normal.y, input.normal.z, 0.0), render_model), frame_view);
+    float3 normal = normalize(turned.xyz);
     float3 diffuse = lights_ambient.xyz;
     float3 specular = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < 8; i++) {

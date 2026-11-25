@@ -154,8 +154,9 @@ after more is stable and tested. Don't measure or change them now.
 
 ### W5. Back faces on two-sided parts (3DS)
 
-- **Depends on:** everything else being done (D5). Then: a hardware spike of a signed D0 table plus two-sided
-  diffuse, and the runtime change.
+- **DONE 2026-11-25, no runtime change (the user's decision).** The hardware spike `light_test5` showed the 3DS already
+  draws no highlight on a back face lit through the plane, as PC does; signed D0 and two-sided diffuse are not used. See
+  the plan's L9.
 
 ### W6. mbsc: a liveness-based register allocator for the PICA backend
 
@@ -277,3 +278,11 @@ both in, and convert the `.bat` files to CRLF (the worktree checks them out LF, 
 Normal and bump maps, environment mapping, procedural textures and fog, each with its own steps and a hardware spike;
 the plan's "What the same unit opens" has the notes. Stereoscopic 3D is deferred. The cheatsheet (D1) and
 target-specific light limits (D8) once the API is stable.
+
+**G2 is complete (2026-11-25).** W1 to W7 are done and W5 closed with no change. Deferred:
+- Flip the normal for back faces on all three targets (`mesh_lit.mbs`; hardware `light_test5` S7 to S10 support it; changes what
+  PC and the Vita draw, not the API).
+- The cheatsheet (D1), once the API has stabilised.
+- Target-specific light limits (D8).
+- The Vita's per-pixel lighting with the two bulbs on, 24 fps on the real console: to revisit in the optimization pass (L8-6).
+- Normal and bump maps, environment mapping, procedural textures and fog (the plan's "What the same unit opens"); stereoscopic 3D.

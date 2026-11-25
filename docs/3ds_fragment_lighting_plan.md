@@ -517,6 +517,7 @@ so the G2 design doesn't close them off:
   enter the `.tev` plan.
 - **Stereoscopic 3D (C6), deferred:** the unit works in eye space, so each eye needs its light directions in that eye's
   space, or both eyes share the centre eye's and accept the small difference. Decided if C6 is ever taken up.
+- **Flip the normal for back faces, on all three targets (after G2, from L9):** `mesh_lit.mbs` turns the normal to face the eye when the part is seen from behind (the sign of N.V at the vertex, exact for a flat part), so a two-sided part is lit from the viewer's side and not through the plane. Hardware `light_test5` S7 to S10 support it on the 3DS (back faces lit by the flipped normal, front faces unchanged). It changes what PC and the Vita draw, not the API; the Vita's `.gxp` files and the 3DS `.pica` are regenerated.
 - **Resource use:** per-pixel quality with no per-pixel program, and the vertex unit freed of lighting maths.
 
 ## Open questions
@@ -549,3 +550,42 @@ pass is 45 instructions straight-line against 79 for the two-loop form, and the 
 gave no saving in the count (47 against 45) and was not used. Not changed: the floor is shaded at full cost (overdraw).
 Per-vertex remains the Vita's smooth path; whether it becomes the Vita's default is the user's call. Test build
 `build/hardware/model_check_bulbs4.vpk` (MBOX00064).
+
+**L9. Back faces on two-sided parts, 3DS (W5 of `docs/g2_remaining_work.md`, decision D5).** Written 2026-11-25 before any
+runtime code. **What PC and the Vita do today, measured:** neither flips the normal for a back face. `light_diffuse` and
+`light_specular` take the interpolated normal as it is (nothing in mbsc reads a facing), so a part seen from behind is lit as
+if the normal were still the front's: diffuse `max(L.N, 0)`, highlight only where `L.N > 0` and `N.H > 0`. The brief's "PC
+and the Vita flip" does not match the code. PC's generated HLSL on the D3D software device (plane normal toward or away from the
+eye, one sun, shininess 20, strength 1, no ambient; scratch test, not kept): front view, light on the normal's side diffuse
+0.864, specular 0.494; back view, light on the normal's side (L.N > 0, i.e. through the plane) diffuse 0.651, specular 0.000;
+back view, light on the viewer's side (L.N < 0) diffuse 0.000, specular 0.000; all equal to the f64 formula. So a lit board
+seen from behind is lit by lights *behind it* and dark under lights on the viewer's side. The Vita's Cg is the same maths in
+the source (`facing`, `max(dot(n, h), 1e-8)`); it was not run in Vita3K for this.
+The 3DS today differs from PC only in the highlight: the unit indexes D0 by |N.H|, so a back face gets a highlight where PC gives 0.
+Two targets are possible, and which one is wanted is the user's call: (a) **match PC as it is**: a signed D0 table (negative N.H
+gives 0); (b) **a true back face on all three**: flip the normal when the part is seen from behind (light on the viewer's side
+lights it, light through the plane does not), which changes PC and the Vita's shader as well (`mesh_lit.mbs`).
+- L9-0. **3DS hardware spike**, `light_test5` (source `docs/spikes/light_test5_main.odin.txt` and `light_test5.mbs.txt`; build
+  `build/hardware/light_test5.3dsx`, title LightTest5): a plane, culling off, tilted so no normal is exactly +Z/-Z (the quaternion's
+  degenerate case), seen from the front and the back by a sun on the viewer's side ("near") or the other ("far"); two probes, diffuse
+  and specular read back from its own framebuffer, got/expected per step. Steps: S0 front near (control); S1 back far; S2 back near;
+  S3 back far with a signed D0; S4 front near signed; S5 back near with two-sided diffuse; S6 front far two-sided; S7 to S10 the
+  vertex shader turns the normal to face the eye (sign of N.V, a uniform switches it) on back near, back far, front near, front far.
+  **Azahar, 2026-11-25: within 3 of the formula, 38 of 44.** S0, S3, S4 and S7 to S10 all pass, so a signed D0 table works (the
+  highlight through the plane is gone) and **flipping the normal in the vertex shader gives a back face the front face's lighting,
+  front faces unchanged**. The six misses: S1 back far, unsigned D0: the formula (|N.H|) says 35 and 46, Azahar draws 0 (Azahar
+  does not highlight there; hardware may); S5 and S6, two-sided diffuse: the highlight appears where the clamp should remove it
+  (222 and 213 on S5, 61 and 123 on S6, expected 0), so **two-sided diffuse lights a front face from behind and lets the
+  highlight through; it is not a flipped normal and is not the way**. **Stops here until the user's hardware result.**
+  **New 3DS LL, 2026-11-25 (the user's photo of the bottom screen): also 38 of 44, the same six misses as Azahar.** The photo's rows are
+  shifted by one step (each `s` pair sits on the line above its step), so by the step table: S0, S2, S3, S4, S7 to S10 pass; the
+  misses are S1, S5 and S6, as in Azahar. Hardware against Azahar, step by step: every value agrees within 2 levels (S0 specular
+  244 and 236 against 245 and 237, S1 diffuse 132 against 133, S5 specular 222 and 212, S6 specular 60 and 123 against 61 and 123,
+  S7 specular 221 and 211 against 222 and 213). **The unsigned D0 step (S1, back, light through the plane) gave highlight 0 on
+  hardware, as in Azahar, not the formula's 35 and 46: this unit already gives no highlight on a back face there, so the `|N.H|`
+  suspicion in L3's note does not show at shininess 2 with clamp on, and the signed table (S3, also 0) is not needed to match PC
+  in this case.** Two-sided diffuse leaks light and highlight as in Azahar (S5, S6), so it is out. Flipping the normal in the vertex
+  shader works on hardware: back faces get the flipped normal's lighting (S7 lit, S8 dark), front faces unchanged (S9, S10).
+  **L9 closed 2026-11-25 (the user's decision): no runtime change.** D5 needs nothing on the 3DS: on hardware the unsigned D0 table already
+  draws highlight 0 on a back face lit through the plane, which is what PC draws. The signed D0 table and two-sided diffuse are not
+  used. The spike sources stay in `docs/spikes/`. Flipping the normal for back faces is a post-G2 item (below).

@@ -49,7 +49,13 @@ when !VITA {
 		// it lifted from
 		touch_position:[2]f32,
 
-		pipeline:Render_Pipeline, // the shader, its uniforms and its TexEnv plan (render_3ds_freestanding_arm32.odin)
+		// The two shaders, their uniforms and TexEnv plans (render_3ds_freestanding_arm32.odin): `pipeline` draws
+		// everything unlit, `lit_pipeline` draws lit meshes while lighting is on, with the lighting unit
+		pipeline:Render_Pipeline,
+		lit_pipeline:Render_Pipeline,
+		bound_pipeline:^Render_Pipeline, // the one citro3d has now, so a draw only switches when it changes
+		camera_view_projection:matrix[4, 4]f32, // set again after each switch: the programs' registers are shared
+		lighting_unit:Lighting_Unit, // the fragment lighting unit's state, for lit_pipeline
 
 		print_log:Print_Log, // what `print` wrote, drawn on the bottom screen (bottom_screen_3ds_freestanding_arm32.odin)
 

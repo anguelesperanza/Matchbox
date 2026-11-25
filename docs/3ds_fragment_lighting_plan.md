@@ -265,6 +265,26 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
     - Not done here: model-check itself still turns no light on (L4-6).
   - L4-5. 3DS and Vita runtimes (each file shown to the user first): a second pipeline; on the 3DS `C3D_LightEnv`,
     the lights, one D0 table per distinct shininess, bound for lit draws and unbound after.
+    **DONE 2026-11-25 in the emulators (drafts shown to the user and applied on their OK; not on hardware yet).**
+    - 3DS: `mbi.pipeline` and `mbi.lit_pipeline`, each with its `.shbin` and `.tev` plan; `3ds_build.bat` assembles
+      `mesh_lit.shbin` too. `Lighting_Unit` (in `mbi.lighting_unit`) is set from the lit plan: clamped highlights, the
+      zero FR table on the secondary's alpha, a light per slot with no ambient of its own. Lights are filled at
+      `camera_end`, made unit length; a part's material goes in as ambient 1, diffuse 1, specular0 = strength, with
+      a D0 table per shininess kept in a map and set only when the material changes. A pipeline is bound only when
+      the next draw needs the other one; binding the unlit one unbinds the environment.
+    - **citro3d's vertex uniforms are one array shared by both programs**, and the unlit program's constants start at
+      c10, where the lit one keeps `frame_view`. The camera's matrices are set again after every switch. In Azahar
+      the HUD and the print log drew correctly after lit draws; hardware has not been asked.
+    - **o3dx's `C3D_FVec` binding names its fields x, y, z, w; citro3d lays it out w, z, y, x** (c3d/types.h), so
+      `.x` through the binding is citro3d's w. The light position is built in citro3d's order by a helper in the
+      render file; o3dx itself is unchanged, left for the user.
+    - Vita: the same two pipelines, the lit one reading `a_normal` at stride 48. The camera's matrix and this
+      camera's lights block live in `Backend_State` and are written into every lit draw's uniform buffers (GXM keeps
+      none between draws), 400 bytes a draw. mbsc's Vita reflection now lists the lights uniforms.
+    - Measured, one sun from (1, 2, 1) with 0.2 ambient, against the formula in linear colour: cube front and right
+      (61, 93, 155) expected, (61, 93, 154) in both Azahar and Vita3K; top (102, 153, 255) expected, (101, 153, 254)
+      in both; floor (102, 102, 115) expected, (100, 102, 114) and (101, 103, 115). Not checked: the highlight's
+      value, a lit cut-out, lighting switched off with this code, and real hardware.
   - L4-6. `examples/model-check` lit on all three targets.
 
 **L5. Per-vertex lighting** in `mesh.mbs` on all three targets, from the same uniforms. Done when: the same scene lit

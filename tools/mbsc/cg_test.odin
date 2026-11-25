@@ -258,3 +258,24 @@ the_committed_vita_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 		testing.expectf(t, text == no_carriage_returns(shader[2]), "matchbox/shaders/%s.vita.refl is out of date; generate it again (see the comment in this test)", shader[0])
 	}
 }
+
+// A shader that lights lists the lights uniforms the Vita runtime sets by name, eight slots each, and the material in
+// `render` even when the shader left that block out (lit_shader declares neither block)
+@(test)
+a_lit_shader_lists_the_lights_uniforms_for_the_vita :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	ir, parsed, message := build_ir_for(lit_shader("return light_diffuse(v.quat, v.view) * sample(a, v.uv) + light_specular(v.quat, v.view)"), .VITA)
+	defer destroy_parsed(parsed)
+	if message != "" {
+		testing.expect(t, false, message)
+		return
+	}
+	text, _ := generate_reflection_vita(ir, context.temp_allocator)
+	expect_has(t, text, "uniform lights_ambient [4]f32 0\n")
+	expect_has(t, text, "uniform lights_direction [4]f32 8\n")
+	expect_has(t, text, "uniform lights_diffuse [4]f32 8\n")
+	expect_has(t, text, "uniform lights_specular [4]f32 8\n")
+	expect_has(t, text, "uniform render_shininess f32 0\n")
+	expect_has(t, text, "uniform render_specular_strength f32 0\n")
+}

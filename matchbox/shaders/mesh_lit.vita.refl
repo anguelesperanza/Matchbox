@@ -15,5 +15,9 @@ uniform render_uv_rectangle [4]f32 0
 uniform render_alpha_cutoff f32 0
 uniform render_shininess f32 0
 uniform render_specular_strength f32 0
+uniform lights_ambient [4]f32 0
+uniform lights_direction [4]f32 8
+uniform lights_diffuse [4]f32 8
+uniform lights_specular [4]f32 8
 
 texture tex 0

@@ -179,6 +179,23 @@ generate_reflection_vita :: proc(ir: ^IR_Module, allocator := context.allocator)
 	for entry in game_layout(ir).entries {
 		fmt.sbprintfln(&builder, "uniform %s %s %d", entry.name, reflection_type(entry.type), entry.count)
 	}
+	// A shader that lights reads the lights uniforms mbsc declares for it (cg.odin), and `render`'s material, which the
+	// Cg declares as `render_*` when the shader left the block out. The runtime finds them all by these names
+	if calls_light_builtin(ir) {
+		declared_render := false
+		for uniform in ir.uniforms {
+			declared_render ||= uniform.kind == .RENDER
+		}
+		if declared_render == false {
+			for entry in engine_layout(ir, .RENDER).entries {
+				fmt.sbprintfln(&builder, "uniform render_%s %s %d", entry.name, reflection_type(entry.type), entry.count)
+			}
+		}
+		fmt.sbprintfln(&builder, "uniform %s [4]f32 0", LIGHT_UNIFORM_NAMES[0])
+		for name in LIGHT_UNIFORM_NAMES[1:] {
+			fmt.sbprintfln(&builder, "uniform %s [4]f32 %d", name, get_max_lights(.VITA))
+		}
+	}
 
 	if len(ir.textures) > 0 {
 		fmt.sbprintln(&builder)

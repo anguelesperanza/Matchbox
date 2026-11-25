@@ -1,5 +1,6 @@
 package mbsc
 
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -181,17 +182,28 @@ the_shipped_shaders_give_cg_that_compiles :: proc(t: ^testing.T) {
 the_committed_mesh_cg_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	// matchbox/shaders/mesh_v.cg and mesh_f.cg are generated from mesh.mbs and committed, with the .gxp programs
-	// psp2cgc makes from them (the Vita runtime loads those). When the shader or the compiler changes, run:
-	//     mbsc matchbox/shaders/mesh.mbs -target:vita --emit-cg -o:matchbox/shaders/mesh
-	programs, ok := mesh_cg(t)
-	if ok == false {
-		return
+	// matchbox/shaders/<name>_v.cg and <name>_f.cg are generated from <name>.mbs and committed, with the .gxp
+	// programs psp2cgc makes from them (the Vita runtime loads those). When a shader or the compiler changes, run:
+	//     mbsc matchbox/shaders/<name>.mbs -target:vita --emit-cg -o:matchbox/shaders/<name>
+	// and compile both with psp2cgc (docs/shader_cg.md) if the program, not just a comment, changed
+	Committed_Cg :: struct {
+		name: string,
+		source: string,
+		vertex: string,
+		fragment: string,
 	}
-	vertex := no_carriage_returns(#load("../../matchbox/shaders/mesh_v.cg", string))
-	fragment := no_carriage_returns(#load("../../matchbox/shaders/mesh_f.cg", string))
-	testing.expect(t, programs.vertex == vertex, "matchbox/shaders/mesh_v.cg is out of date; generate it again (see the comment in this test)")
-	testing.expect(t, programs.fragment == fragment, "matchbox/shaders/mesh_f.cg is out of date; generate it again (see the comment in this test)")
+	shaders := [?]Committed_Cg {
+		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh_v.cg", string), #load("../../matchbox/shaders/mesh_f.cg", string)},
+		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit_v.cg", string), #load("../../matchbox/shaders/mesh_lit_f.cg", string)},
+	}
+	for shader in shaders {
+		programs, ok := generate_cg_text(t, no_carriage_returns(shader.source), fmt.tprintf("%s.mbs", shader.name))
+		if ok == false {
+			continue
+		}
+		testing.expectf(t, programs.vertex == no_carriage_returns(shader.vertex), "matchbox/shaders/%s_v.cg is out of date; generate it again (see the comment in this test)", shader.name)
+		testing.expectf(t, programs.fragment == no_carriage_returns(shader.fragment), "matchbox/shaders/%s_f.cg is out of date; generate it again (see the comment in this test)", shader.name)
+	}
 }
 
 @(test)
@@ -230,14 +242,19 @@ the_vita_reflection_names_the_parameters_of_the_programs :: proc(t: ^testing.T) 
 the_committed_vita_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	// regenerate with: mbsc matchbox/shaders/mesh.mbs -target:vita --emit-reflection -o:matchbox/shaders/mesh.vita.refl
-	ir, parsed, message := build_ir_for(no_carriage_returns(#load("../../matchbox/shaders/mesh.mbs", string)), .VITA)
-	defer destroy_parsed(parsed)
-	if message != "" {
-		testing.expect(t, false, message)
-		return
+	// regenerate with: mbsc matchbox/shaders/<name>.mbs -target:vita --emit-reflection -o:matchbox/shaders/<name>.vita.refl
+	shaders := [?][3]string {
+		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.vita.refl", string)},
+		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.vita.refl", string)},
 	}
-	text, _ := generate_reflection_vita(ir, context.temp_allocator)
-	committed := no_carriage_returns(#load("../../matchbox/shaders/mesh.vita.refl", string))
-	testing.expect(t, text == committed, "matchbox/shaders/mesh.vita.refl is out of date; generate it again (see the comment in this test)")
+	for shader in shaders {
+		ir, parsed, message := build_ir_for(no_carriage_returns(shader[1]), .VITA)
+		defer destroy_parsed(parsed)
+		if message != "" {
+			testing.expectf(t, false, "%s.mbs: %s", shader[0], message)
+			continue
+		}
+		text, _ := generate_reflection_vita(ir, context.temp_allocator)
+		testing.expectf(t, text == no_carriage_returns(shader[2]), "matchbox/shaders/%s.vita.refl is out of date; generate it again (see the comment in this test)", shader[0])
+	}
 }

@@ -222,6 +222,27 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
     it would mean copies per drawn thing and a double free on destroy.
   - L4-3. `mesh_lit.mbs`, per pixel, generated for all three targets; `frame` gains `view`, which the lit vertex
     stage needs for eye space.
+    **DONE 2026-11-25 (generated and tested; no runtime loads it yet, that is L4-4 and L4-5).**
+    - `matchbox/shaders/mesh_lit.mbs`: `mesh.mbs` plus a `normal` attribute, fourth, in `Lit_Vertex`'s order (the 3DS
+      loads it as attribute 3). The vertex stage writes the eye-space normal as a quaternion (`normalquat`) and the
+      way back to the eye (`view`); the fragment is `light_diffuse * (texture * colour) + light_specular`, then the
+      alpha cut. Normals are turned by the model matrix itself, not its inverse transpose: exact for a uniform scale,
+      slightly off for a model stretched along one axis (said in the shader).
+    - The 3DS plan came out as intended: stage 0 `texture * vertex colour`, stage 1 `MULTIPLY_ADD FRAGMENT_PRIMARY
+      PREVIOUS FRAGMENT_SECONDARY`, the D0 table on N.H, highlights clamped, one-sided, `secondary_alpha_zero`.
+    - `frame.view` is in mbsc's `FRAME_FIELDS` after `time`, at offset 80 (HLSL starts a matrix on a new row), so the
+      block is 144 bytes and nothing before it moved. PC's `Frame_Constants` has it and `camera_start` fills it; the
+      startup layout check (`reflection_windows.odin`) knows it. The 3DS and the Vita find uniforms by name and fill
+      `frame_view` in L4-5. The unlit `mesh` outputs gained the declaration only: its `.gxp` programs are unchanged
+      (psp2cgc does not reproduce a `.gxp` byte for byte, even from the old Cg; the 4 bytes that differ are the same
+      header ones), so they were not rebuilt.
+    - `mesh_lit_v.gxp` and `mesh_lit_f.gxp` compiled with psp2cgc and committed.
+    - Fixed on the way in mbsc: the Cg backend wrote the lights uniforms and functions into the vertex program too
+      (the built-ins are fragment only), and a local named `lit` shadowed Cg's built-in `lit()`; now `facing`.
+    - Every committed generated file is guarded by a test for both shaders, the 3DS's `.v.pica` and `.tev` for the
+      first time (`the_committed_3ds_shaders_are_what_mbsc_writes_now`, which also assembles with picasso).
+    - Left for L4-5: `3ds_build.bat` assembles only `mesh.shbin`; `mesh_lit.shbin` needs a line there (a handheld
+      file, shown to the user first).
   - L4-4. PC: a second pipeline, the lights buffer at b3, lit items drawn with it.
   - L4-5. 3DS and Vita runtimes (each file shown to the user first): a second pipeline; on the 3DS `C3D_LightEnv`,
     the lights, one D0 table per distinct shininess, bound for lit draws and unbound after.

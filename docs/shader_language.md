@@ -140,6 +140,7 @@ The engine fills these. A shader declares them with exactly this shape so every 
 @(uniform = .FRAME) frame: struct {
 	view_projection: matrix[4, 4]f32,
 	time:            f32, // seconds since the game started
+	view:            matrix[4, 4]f32, // the camera's view alone: eye space, where lighting is worked out
 }
 
 @(uniform = .RENDER) render: struct {

@@ -24,7 +24,8 @@ import "vendor:directx/d3d_compiler"
 Frame_Constants :: struct {
 	view_projection:matrix[4,4]f32,
 	time:f32, // seconds; the shader language's frame.time. Not filled in yet, so it is 0
-	_pad:[3]f32,
+	_pad:[3]f32, // HLSL starts a matrix on a whole row of 16 bytes
+	view:matrix[4,4]f32, // the camera's view alone: a lit shader's eye space, where the lights block's directions are
 }
 
 Render_Constants :: struct {
@@ -319,10 +320,10 @@ update_buffer :: proc(buffer:^d3d11.IBuffer, data:rawptr, size:int) {
 
 /*Sets the combined view * projection matrix used by everything drawn until it is called again*/
 @(private)
-set_frame_constants :: proc(view_projection:matrix[4, 4]f32) {
+set_frame_constants :: proc(view_projection:matrix[4, 4]f32, view:matrix[4, 4]f32) {
 	seconds := f32(get_time())
 
-	constants := Frame_Constants{view_projection = view_projection, time = seconds}
+	constants := Frame_Constants{view_projection = view_projection, time = seconds, view = view}
 	if mbi.frame_constants != nil do update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
 }
 
@@ -546,7 +547,7 @@ camera_start :: proc(camera:Camera) {
 
 	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
 	view_projection := GL_TO_D3D_DEPTH * calculate_camera_projection_gl(used, aspect) * mbi.view
-	set_frame_constants(view_projection)
+	set_frame_constants(view_projection, mbi.view)
 }
 
 /*Sorts and draws everything queued since camera_start*/

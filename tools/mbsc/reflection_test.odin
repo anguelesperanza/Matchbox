@@ -79,20 +79,26 @@ the_committed_mesh_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 
 	// matchbox/shaders/mesh.pc.refl is generated from mesh.mbs and committed next to the HLSL. When the shader or the
 	// compiler changes, run:
-	//     mbsc matchbox/shaders/mesh.mbs -target:pc --emit-reflection -o:matchbox/shaders/mesh.pc.refl
-	text := reflect(t, no_carriage_returns(#load("../../matchbox/shaders/mesh.mbs", string)))
-	committed := no_carriage_returns(#load("../../matchbox/shaders/mesh.pc.refl", string))
-	testing.expect(t, text == committed, "matchbox/shaders/mesh.pc.refl is out of date; generate it again (see the comment in this test)")
+	//     mbsc matchbox/shaders/<name>.mbs -target:pc --emit-reflection -o:matchbox/shaders/<name>.pc.refl
+	// for mesh and mesh_lit
+	shaders := [?][3]string {
+		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.pc.refl", string)},
+		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.pc.refl", string)},
+	}
+	for shader in shaders {
+		text := reflect(t, no_carriage_returns(shader[1]))
+		testing.expectf(t, text == no_carriage_returns(shader[2]), "matchbox/shaders/%s.pc.refl is out of date; generate it again (see the comment in this test)", shader[0])
+	}
 }
 
 @(test)
 the_engine_blocks_have_the_sizes_of_the_engines_structs :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	// Frame_Constants and Render_Constants in render_windows.odin are 80 and 112 bytes, and the engine checks its own
-	// offsets against this file when it starts
+	// Frame_Constants and Render_Constants in render_windows.odin are 144 and 112 bytes, and the engine checks its own
+	// offsets against this file when it starts. `view` starts a new row after `time`, at 80
 	text := reflect(t, no_carriage_returns(#load("testdata/mesh.mbs", string)))
-	testing.expect(t, strings.contains(text, "block frame 0 80\n"), text)
+	testing.expect(t, strings.contains(text, "block frame 0 144\n"), text)
 	testing.expect(t, strings.contains(text, "block render 1 112\n"), text)
 	testing.expect(t, strings.contains(text, "value frame time f32 64 4 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "value render alpha_cutoff f32 96 4 0 0\n"), text)

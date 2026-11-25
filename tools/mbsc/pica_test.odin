@@ -111,6 +111,39 @@ every_builtin_the_3ds_has_gives_the_numbers_the_shader_means :: proc(t: ^testing
 	}
 }
 
+/*
+	The engine's shaders for the 3DS are generated and committed, like the PC's HLSL and the Vita's Cg: the runtime
+	reads the .tev plan with #load and 3ds_build.bat assembles the .v.pica. Nothing checked them until mesh_lit (G2
+	L4-3), so a compiler change could leave the 3DS drawing with an old program. When a shader or the compiler
+	changes, run:
+	    mbsc matchbox/shaders/<name>.mbs -target:3ds --emit-pica -o:matchbox/shaders/<name>.3ds
+*/
+@(test)
+the_committed_3ds_shaders_are_what_mbsc_writes_now :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	shaders := [?][4]string {
+		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.3ds.v.pica", string), #load("../../matchbox/shaders/mesh.3ds.tev", string)},
+		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.3ds.v.pica", string), #load("../../matchbox/shaders/mesh_lit.3ds.tev", string)},
+	}
+	for shader in shaders {
+		ir, parsed, message := build_ir_for(no_carriage_returns_for_pica(shader[1]), .PICA200)
+		defer destroy_parsed(parsed)
+		if message != "" {
+			testing.expectf(t, false, "%s.mbs: %s", shader[0], message)
+			continue
+		}
+		program, problems := generate_pica(ir, context.temp_allocator)
+		testing.expect_value(t, len(problems), 0)
+		plan, tev_problems := generate_tev(ir, context.temp_allocator)
+		testing.expect_value(t, len(tev_problems), 0)
+		table := format_tev(plan, context.temp_allocator)
+		testing.expectf(t, program.vertex == no_carriage_returns_for_pica(shader[2]), "matchbox/shaders/%s.3ds.v.pica is out of date; generate it again (see the comment above this test)", shader[0])
+		testing.expectf(t, table == no_carriage_returns_for_pica(shader[3]), "matchbox/shaders/%s.3ds.tev is out of date; generate it again (see the comment above this test)", shader[0])
+		expect_assembles(t, program.vertex, fmt.tprintf("%s.3ds.v.pica", shader[0]))
+	}
+}
+
 @(test)
 the_spec_shader_runs_the_same_on_the_3ds :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)

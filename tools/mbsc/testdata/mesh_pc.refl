@@ -5,11 +5,12 @@ attribute position [3]f32
 attribute texcoord [2]f32
 attribute color [4]f32
 
-block frame 0 80
+block frame 0 144
 block render 1 112
 
 value frame view_projection matrix[4,4]f32 0 64 0 0
 value frame time f32 64 4 0 0
+value frame view matrix[4,4]f32 80 64 0 0
 value render model matrix[4,4]f32 0 64 0 0
 value render tint [4]f32 64 16 0 0
 value render uv_rectangle [4]f32 80 16 0 0

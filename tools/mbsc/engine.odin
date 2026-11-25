@@ -10,8 +10,11 @@ Engine_Field :: struct {
 	type: string, // written without spaces, as type_key makes it
 }
 
+// `view` is the camera's view matrix alone, which a lit shader needs to put normals and positions in eye space,
+// the space the light built-ins and the 3DS's lighting unit work in (G2 L4-3). It comes after `time` so the fields
+// before it keep their offsets; HLSL starts a matrix on a whole row, so it sits at 80, not 68.
 @(rodata)
-FRAME_FIELDS := [?]Engine_Field{{"view_projection", "matrix[4,4]f32"}, {"time", "f32"}}
+FRAME_FIELDS := [?]Engine_Field{{"view_projection", "matrix[4,4]f32"}, {"time", "f32"}, {"view", "matrix[4,4]f32"}}
 
 // `shininess` and `specular_strength` are the part's material, which the light built-ins read (G2 L3). They sit in
 // the row `alpha_cutoff` already starts, so the block stays 112 bytes.

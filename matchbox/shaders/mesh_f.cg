@@ -15,6 +15,7 @@ struct Varying {
 // frame
 uniform float4x4 frame_view_projection;
 uniform float frame_time;
+uniform float4x4 frame_view;
 
 // render
 uniform float4x4 render_model;

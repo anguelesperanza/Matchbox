@@ -121,10 +121,11 @@ shader :: proc(body: string, extras := "") -> string {
 engine_blocks_are_written_in_the_engines_full_layout :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
-	// the shader declares only three fields of `render`, and none of `frame.time`; the buffers still hold them all
+	// the shader declares only three fields of `render`, and neither `frame.time` nor `frame.view`; the buffers
+	// still hold them all
 	text, _ := generate(t, shader("\toutput.position = frame.view_projection * render.model * [4]f32{input.position.x, 0.0, 0.0, 1.0}"))
 	expect_compiles(t, text)
-	expect_has(t, text, "cbuffer frame_block : register(b0) {\n    float4x4 frame_view_projection;\n    float frame_time;\n};")
+	expect_has(t, text, "cbuffer frame_block : register(b0) {\n    float4x4 frame_view_projection;\n    float frame_time;\n    float4x4 frame_view;\n};")
 	expect_has(t, text, "cbuffer render_block : register(b1) {\n    float4x4 render_model;\n    float4 render_tint;\n    float4 render_uv_rectangle;\n    float render_alpha_cutoff;\n    float render_shininess;\n    float render_specular_strength;\n};")
 }
 
@@ -381,10 +382,15 @@ the_committed_mesh_hlsl_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
 	// matchbox/shaders/mesh.pc.hlsl is generated from mesh.mbs and committed, so the engine needs no tool at build
-	// time. When the shader or the compiler changes, run:
-	//     mbsc matchbox/shaders/mesh.mbs -target:pc --emit-hlsl -o:matchbox/shaders/mesh.pc.hlsl
-	text, problems := generate(t, no_carriage_returns(#load("../../matchbox/shaders/mesh.mbs", string)))
-	testing.expect_value(t, len(problems), 0)
-	committed := no_carriage_returns(#load("../../matchbox/shaders/mesh.pc.hlsl", string))
-	testing.expect(t, text == committed, "matchbox/shaders/mesh.pc.hlsl is out of date; generate it again (see the comment in this test)")
+	// time. mesh_lit.pc.hlsl the same, from mesh_lit.mbs. When a shader or the compiler changes, run:
+	//     mbsc matchbox/shaders/<name>.mbs -target:pc --emit-hlsl -o:matchbox/shaders/<name>.pc.hlsl
+	shaders := [?][3]string {
+		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.pc.hlsl", string)},
+		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.pc.hlsl", string)},
+	}
+	for shader in shaders {
+		text, problems := generate(t, no_carriage_returns(shader[1]))
+		testing.expect_value(t, len(problems), 0)
+		testing.expectf(t, text == no_carriage_returns(shader[2]), "matchbox/shaders/%s.pc.hlsl is out of date; generate it again (see the comment in this test)", shader[0])
+	}
 }

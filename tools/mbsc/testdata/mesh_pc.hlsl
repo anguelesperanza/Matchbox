@@ -15,6 +15,7 @@ struct Varying {
 cbuffer frame_block : register(b0) {
     float4x4 frame_view_projection;
     float frame_time;
+    float4x4 frame_view;
 };
 
 cbuffer render_block : register(b1) {

@@ -199,6 +199,7 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 			switch value.name {
 			case "view_projection": expected = int(offset_of(Frame_Constants, view_projection))
 			case "time": expected = int(offset_of(Frame_Constants, time))
+			case "view": expected = int(offset_of(Frame_Constants, view))
 			}
 		case .RENDER:
 			switch value.name {

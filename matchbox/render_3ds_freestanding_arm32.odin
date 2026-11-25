@@ -291,16 +291,6 @@ when !VITA {
 	}
 
 	/*
-		citro3d's C3D_FVec is laid out w, z, y, x (c3d/types.h: "Matches PICA layout"), but
-		o3dx's binding names the same four floats x, y, z, w, so writing `.x` through it sets
-		citro3d's w. Built here in citro3d's order rather than through the binding's names
-	*/
-	@(private = "file")
-	create_citro3d_vector :: proc(v:[4]f32) -> c3d.C3D_FVec {
-		return transmute(c3d.C3D_FVec)[4]f32{v.w, v.z, v.y, v.x}
-	}
-
-	/*
 		Gives the lighting unit the scene's lights for the camera being drawn. The block's
 		directions point towards the light in this camera's eye space (calculate_lights_block),
 		which is what C3D_LightPosition takes for a directional light (w = 0). They are made unit
@@ -319,7 +309,7 @@ when !VITA {
 			c3d.C3D_LightEnable(&light, on)
 			if !on do continue
 			direction /= math.sqrt(length_squared)
-			position := create_citro3d_vector({direction.x, direction.y, direction.z, 0})
+			position := c3d.C3D_FVec{x = direction.x, y = direction.y, z = direction.z, w = 0}
 			c3d.C3D_LightPosition(&light, &position)
 			c3d.C3D_LightDiffuse(&light, block.diffuse[slot].r, block.diffuse[slot].g, block.diffuse[slot].b)
 			c3d.C3D_LightSpecular0(&light, block.specular[slot].r, block.specular[slot].g, block.specular[slot].b)

@@ -131,14 +131,17 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 
 // CG_LIGHT_FUNCTIONS is the Vita's form of the light functions (the HLSL's are write_light_functions), made for what
 // the Vita's fragment unit is bound by: a lit pixel measured 26 fps with one sun and 11 with two more lights on the real
-// console, against 60 per vertex. Three things differ from the HLSL's, none of them in what a pixel comes out as:
+// console, against 60 per vertex. Four things differ from the HLSL's, none of them in what a pixel comes out as:
 //  - one pass, not two. light_diffuse and light_specular both run `mbs_light_all`, which keeps its results in statics
 //    and works once; the second call finds them done (psp2cgc sees the flag is set and drops the test, so the program
 //    is as long as one pass). The cost is that both calls must pass the same arguments, which mbsc checks;
 //  - the lights arrive sorted by kind (suns, then points, then spots; matchbox/light.odin does it for the Vita), with
 //    `lights_split` holding where each run ends and the total, so a sun is a direction and nothing else and a point
 //    has no cone;
-//  - the loops run the engine's counts, so a scene with one sun runs one turn.
+//  - the loops run the engine's counts, so a scene with one sun runs one turn;
+//  - the highlight is skipped for a part whose specular strength is 0 (a pixel gets the same black, for a whole third of
+//    the program: measured on the Vita, a floor with strength 0 ran 31 fps against 24 with the bulbs on), and N.H is
+//    worked from the half vector without normalising it first, which is the same number in fewer instructions.
 // `@RENDER@` is the render block's name.
 CG_LIGHT_FUNCTIONS :: `
 static float3 mbs_light_diffuse_sum;
@@ -149,8 +152,11 @@ static float mbs_light_done = 0.0;
 void mbs_light_add(int i, float3 l, float fade, float3 n, float3 v) {
     float facing = dot(l, n);
     mbs_light_diffuse_sum += lights_diffuse[i].rgb * (max(facing, 0.0) * fade);
-    float3 h = mbs_light_unit(l + v);
-    mbs_light_specular_sum += lights_specular[i].rgb * ((facing > 0.0 ? 1.0 : 0.0) * fade * pow(max(dot(n, h), 1e-8), @RENDER@_shininess));
+    if (@RENDER@_specular_strength > 0.0) {
+        float3 hu = l + v;
+        float nh = dot(n, hu) * rsqrt(max(dot(hu, hu), 1e-12));
+        mbs_light_specular_sum += lights_specular[i].rgb * ((facing > 0.0 ? 1.0 : 0.0) * fade * pow(max(nh, 1e-8), @RENDER@_shininess));
+    }
 }
 
 // The distance fade of a bulb at distance d: 1 / (1 + 0.09 d + 0.032 d d).

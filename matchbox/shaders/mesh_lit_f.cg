@@ -57,8 +57,11 @@ static float mbs_light_done = 0.0;
 void mbs_light_add(int i, float3 l, float fade, float3 n, float3 v) {
     float facing = dot(l, n);
     mbs_light_diffuse_sum += lights_diffuse[i].rgb * (max(facing, 0.0) * fade);
-    float3 h = mbs_light_unit(l + v);
-    mbs_light_specular_sum += lights_specular[i].rgb * ((facing > 0.0 ? 1.0 : 0.0) * fade * pow(max(dot(n, h), 1e-8), render_shininess));
+    if (render_specular_strength > 0.0) {
+        float3 hu = l + v;
+        float nh = dot(n, hu) * rsqrt(max(dot(hu, hu), 1e-12));
+        mbs_light_specular_sum += lights_specular[i].rgb * ((facing > 0.0 ? 1.0 : 0.0) * fade * pow(max(nh, 1e-8), render_shininess));
+    }
 }
 
 // The distance fade of a bulb at distance d: 1 / (1 + 0.09 d + 0.032 d d).

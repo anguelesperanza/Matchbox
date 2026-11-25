@@ -134,6 +134,8 @@ when VITA {
 	create_render_pipeline :: proc() {
 		load_render_pipeline(&mbi.pipeline, #load("shaders/mesh_v.gxp"), #load("shaders/mesh_f.gxp"), nil)
 		load_render_pipeline(&mbi.lit_pipeline, #load("shaders/mesh_lit_v.gxp"), #load("shaders/mesh_lit_f.gxp"), .PER_PIXEL)
+		// The same vertex program: the copy differs only in having no `discard`, which the fragment stage alone holds
+		load_render_pipeline(&mbi.lit_opaque_pipeline, #load("shaders/mesh_lit_v.gxp"), #load("shaders/mesh_lit_opaque_f.gxp"), .PER_PIXEL, has_alpha_test = false)
 		load_render_pipeline(&mbi.vertex_lit_pipeline, #load("shaders/mesh_vertex_lit_v.gxp"), #load("shaders/mesh_vertex_lit_f.gxp"), .PER_VERTEX)
 
 		// 8 x 8 because a linear texture's rows are padded to 8 pixels anyway
@@ -145,7 +147,7 @@ when VITA {
 
 	/*Registers one shader's two programs, makes its vertex and fragment programs and finds its uniforms*/
 	@(private = "file")
-	load_render_pipeline :: proc(pipeline:^Render_Pipeline, vertex_gxp:[]u8, fragment_gxp:[]u8, lighting:Maybe(Lighting_Mode)) {
+	load_render_pipeline :: proc(pipeline:^Render_Pipeline, vertex_gxp:[]u8, fragment_gxp:[]u8, lighting:Maybe(Lighting_Mode), has_alpha_test := true) {
 		pipeline.lighting = lighting
 		ok:bool
 		pipeline.vertex_shader, ok = gfx.register_program(vertex_gxp)
@@ -201,7 +203,8 @@ when VITA {
 		pipeline.model_uniform = find(vertex, "render_model")
 		pipeline.tint_uniform = find(vertex, "render_tint")
 		pipeline.uv_rectangle_uniform = find(vertex, "render_uv_rectangle")
-		pipeline.alpha_cutoff_uniform = find(pipeline.fragment_shader, "render_alpha_cutoff")
+		// The shader without the test never reads the cutoff, so psp2cgc leaves it out: nil, and render_item skips it
+		if has_alpha_test do pipeline.alpha_cutoff_uniform = find(pipeline.fragment_shader, "render_alpha_cutoff")
 		pipeline.texture_unit = gfx.texture_unit(pipeline.fragment_shader, "tex")
 		if mode, lit := lighting.?; lit {
 			pipeline.view_uniform = find(vertex, "frame_view")
@@ -243,6 +246,7 @@ when VITA {
 	destroy_render_pipeline :: proc() {
 		gfx.destroy_texture(&mbi.pipeline.white_texture)
 		unload_render_pipeline(&mbi.vertex_lit_pipeline)
+		unload_render_pipeline(&mbi.lit_opaque_pipeline)
 		unload_render_pipeline(&mbi.lit_pipeline)
 		unload_render_pipeline(&mbi.pipeline)
 		delete(mbi.opaque_items)
@@ -261,7 +265,10 @@ when VITA {
 		pipeline := &mbi.pipeline
 		if lit {
 			switch get_lighting_mode(item.material) {
-			case .PER_PIXEL:  pipeline = &mbi.lit_pipeline
+			// A discard in a fragment program makes the GPU shade pixels it could have rejected as hidden, which the
+			// big flat part of a scene pays for (measured on a Vita: 24 fps with it, 28 without); a part with no
+			// cut-out takes the program without one
+			case .PER_PIXEL:  pipeline = &mbi.lit_pipeline if item.alpha_cutoff > 0 else &mbi.lit_opaque_pipeline
 			case .PER_VERTEX: pipeline = &mbi.vertex_lit_pipeline
 			}
 		}
@@ -279,7 +286,7 @@ when VITA {
 		cutoff := item.alpha_cutoff
 		gfx.set_uniform(vertex_uniforms, pipeline.tint_uniform, tint[:])
 		gfx.set_uniform(vertex_uniforms, pipeline.uv_rectangle_uniform, uv[:])
-		gfx.set_uniform(fragment_uniforms, pipeline.alpha_cutoff_uniform, ([^]f32)(&cutoff)[:1])
+		if pipeline.alpha_cutoff_uniform != nil do gfx.set_uniform(fragment_uniforms, pipeline.alpha_cutoff_uniform, ([^]f32)(&cutoff)[:1])
 		if lit do set_light_uniforms(pipeline, vertex_uniforms, fragment_uniforms, item.material)
 
 		// No texture is white, as on PC: the shader always samples, and white times the tint is the tint

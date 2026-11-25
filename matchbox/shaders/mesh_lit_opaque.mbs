@@ -1,0 +1,76 @@
+// mesh_lit.mbs without the alpha test, for the Vita (see "Why a copy" below).
+//
+// The lit model shader (G2 L4-3, docs/3ds_fragment_lighting_plan.md): mesh.mbs with a normal, lit per pixel by
+// the scene's lights. The engine draws a Lit_Vertex mesh with it while lighting is on; sprites, shapes, text and
+// unlit models keep mesh.mbs.
+//
+// The lighting is worked out in eye space, the space the 3DS's lighting unit works in and the lights block's
+// directions arrive in, so all three targets read the same block. The vertex stage hands the fragment stage the
+// normal as a quaternion and the way back to the eye, which is what the unit interpolates; PC and the Vita
+// interpolate the same two and rebuild the normal from the quaternion as the unit does.
+
+// Why a copy: any `discard` in a fragment program makes the Vita's GPU shade a pixel before it knows whether the pixel is
+// hidden, so a floor under other models is paid for at full cost. A part with no cut-out (alpha_cutoff 0) draws with
+// this one; it is mesh_lit.mbs line for line except for the missing test and the comment, and render.odin picks it. Keep
+// the two in step. render.alpha_cutoff is still declared so the uniform block is the same; psp2cgc drops it from the
+// program, so the engine looks it up only where it is read.
+
+@(texture = 0) tex:Texture2D
+
+// The attributes are in Lit_Vertex's order, so the normal is the fourth: the 3DS loads it as attribute 3 and the
+// first three line up with mesh.mbs's
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+	normal: [3]f32 `attr:"normal"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv: [2]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+	quat: [4]f32 `out:"normalquat"`,
+	view: [3]f32 `out:"view"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32,
+	view:matrix[4,4]f32,
+}
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+
+	world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.position = frame.view_projection * world
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+
+	// The eye sits at the origin of eye space, so the way back to it is the position negated
+	eye := frame.view * world
+	output.view = [3]f32{-eye.x, -eye.y, -eye.z}
+
+	// w = 0 turns the normal without moving it. The model matrix is used as it is rather than its inverse transpose:
+	// that is exact for a Transform scaled the same on every axis, which normalize then undoes. A model stretched
+	// along one axis gets normals leaning slightly the wrong way; the inverse transpose costs a matrix the engine
+	// doesn't upload yet, and no model here is stretched
+	turned := frame.view * (render.model * [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0})
+	output.quat = normal_quaternion(normalize(turned.xyz))
+	return output
+}
+
+// The texture and the vertex colour first, then the light: diffuse scales the surface's colour, and the highlight
+// is added on top with alpha 0 so it leaves the surface's alpha, and with it the cut-out, alone (L4-0)
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	surface := sample(tex, v.uv) * v.color
+	color := light_diffuse(v.quat, v.view) * surface + light_specular(v.quat, v.view)
+	return color
+}

@@ -196,6 +196,8 @@ the_committed_mesh_cg_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh_v.cg", string), #load("../../matchbox/shaders/mesh_f.cg", string)},
 		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit_v.cg", string), #load("../../matchbox/shaders/mesh_lit_f.cg", string)},
 		{"mesh_vertex_lit", #load("../../matchbox/shaders/mesh_vertex_lit.mbs", string), #load("../../matchbox/shaders/mesh_vertex_lit_v.cg", string), #load("../../matchbox/shaders/mesh_vertex_lit_f.cg", string)},
+		// the same vertex program as mesh_lit's: the copy differs only in its fragment stage, so it has no _v.cg of its own
+		{"mesh_lit_opaque", #load("../../matchbox/shaders/mesh_lit_opaque.mbs", string), #load("../../matchbox/shaders/mesh_lit_v.cg", string), #load("../../matchbox/shaders/mesh_lit_opaque_f.cg", string)},
 	}
 	for shader in shaders {
 		programs, ok := generate_cg_text(t, no_carriage_returns(shader.source), fmt.tprintf("%s.mbs", shader.name))

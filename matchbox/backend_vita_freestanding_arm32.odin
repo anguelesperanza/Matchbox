@@ -35,6 +35,7 @@ when VITA {
 		// per vertex, as each part's material says
 		pipeline:Render_Pipeline,
 		lit_pipeline:Render_Pipeline,
+		lit_opaque_pipeline:Render_Pipeline, // lit_pipeline without the alpha test, for parts with no cut-out (shaders/mesh_lit_opaque.mbs)
 		vertex_lit_pipeline:Render_Pipeline,
 		// GXM has no uniforms that outlive a draw: each draw gets a fresh default uniform buffer, so
 		// the camera's matrix and lights are kept here and written into every one

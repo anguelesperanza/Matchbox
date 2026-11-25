@@ -49,6 +49,9 @@ main :: proc() {
 	sphere := mb.create_sphere_model(0.5)
 	cylinder := mb.create_cylinder_model(0.4, 1)
 	floor := mb.create_plane_model(12)
+	// A floor has no highlight to show, and strength 0 lets the Vita skip the specular work for every pixel of it, the most
+	// expensive thing on screen (24 fps with the bulbs on at 0.5, 60 at 0)
+	floor.parts[0].material = mb.Material{shininess = 16, specular_strength = 0}
 	font := mb.create_font(mb.DEFAULT_FONT_BYTES, 32)
 
 	// The cut-out: a plane stood upright, an 8 x 8 checkerboard whose dark squares are see-through.

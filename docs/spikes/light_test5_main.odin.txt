@@ -1,0 +1,246 @@
+package lighttest5
+
+/*
+	LIGHT TEST 5 (G2 L9-0, W5 of docs/g2_remaining_work.md): what does the 3DS's lighting unit do to a flat part seen from
+	behind, and which switch gives what? One plane (24 x 16 units, a little tilted so no normal is exactly +Z or -Z, which
+	is the quaternion's degenerate case), culling off, seen from the front and from the back by one sun given in eye space.
+	"Near" is the sun on the viewer's side of the plane (eye-space z > 0 for the sun), "far" the other side. After each step
+	the app reads its own framebuffer back at two points, once showing the unit's primary result (diffuse) and once its
+	secondary (specular), and prints what the unit drew against what the formula says, so the result is numbers.
+	The target (PC today, tools/mbsc/lighting.odin): diffuse max(L.N, 0) and specular only where L.N > 0 and N.H > 0, N the
+	vertex normal as it is. The "flip" steps turn the normal to face the eye in the vertex shader (light3.mbs) and light
+	that. Each step changes one thing from the one before it. START quits.
+	  S0  front, near, as the engine draws now (control)        S6  front, far, two-sided diffuse
+	  S1  back,  far,  as now                                   S7  back, near, normal flipped by the vertex shader
+	  S2  back,  near, as now                                   S8  back, far,  flipped
+	  S3  back,  far,  D0 signed (negative N.H gives 0)         S9  front, near, flipped
+	  S4  front, near, D0 signed                                S10 front, far, flipped
+	  S5  back,  near, two-sided diffuse
+*/
+
+import "core:fmt"
+import "core:math"
+import "core:math/linalg"
+import "core:mem"
+import mb "../../matchbox"
+import "../../matchbox/o3dx/c3d"
+import "../../matchbox/o3dx/ctru"
+
+SHININESS :: 2.0 // low, so that a highlight which should be gone is big enough to measure (cos 45 deg ^ 2 = 0.5)
+
+Step :: struct {
+	name:string,
+	back:bool, // seen from behind
+	near:bool, // the sun is on the viewer's side
+	signed:bool, // the D0 table takes a signed N.H
+	two_sided:bool, // the light's two-sided diffuse
+	flip:bool, // the vertex shader turns the normal to face the eye
+}
+
+steps := [?]Step {
+	{"S0 front near", false, true, false, false, false},
+	{"S1 back far", true, false, false, false, false},
+	{"S2 back near", true, true, false, false, false},
+	{"S3 back far signed D0", true, false, true, false, false},
+	{"S4 front near signed D0", false, true, true, false, false},
+	{"S5 back near two-sided", true, true, false, true, false},
+	{"S6 front far two-sided", false, false, false, true, false},
+	{"S7 back near flipped", true, true, false, false, true},
+	{"S8 back far flipped", true, false, false, false, true},
+	{"S9 front near flipped", false, true, false, false, true},
+	{"S10 front far flipped", false, false, false, false, true},
+}
+
+PROBES :: [2]int{-100, 100} // pixels right of the screen's centre, on its middle row
+
+normalize :: proc(v:[3]f64) -> [3]f64 {
+	return v / math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+}
+
+dot :: proc(a, b:[3]f64) -> f64 {
+	return a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+sun_of :: proc(near:bool) -> [3]f64 {
+	return normalize({0.5, 0.3, 1}) if near else normalize({0.5, 0.3, -0.5})
+}
+
+// The model matrix: the plane tilted 15 degrees about y and 10 about x
+model_matrix :: proc() -> matrix[4, 4]f32 {
+	return linalg.matrix4_rotate_f32(math.to_radians(f32(15)), {0, 1, 0}) * linalg.matrix4_rotate_f32(math.to_radians(f32(-10)), {1, 0, 0})
+}
+
+view_matrix :: proc(back:bool) -> matrix[4, 4]f32 {
+	eye := [3]f32{0, 0, -10} if back else [3]f32{0, 0, 10}
+	return linalg.matrix4_look_at_f32(eye, {0, 0, 0}, {0, 1, 0})
+}
+
+// What the unit should draw at a probe, 0 to 1: the point on the plane under the pixel, then the lighting maths in eye space
+expected_value :: proc(step:Step, probe:int, specular:bool) -> f64 {
+	model_view := view_matrix(step.back) * model_matrix()
+	normal4 := model_view * [4]f32{0, 0, 1, 0}
+	origin4 := model_view * [4]f32{0, 0, 0, 1}
+	normal := [3]f64{f64(normal4.x), f64(normal4.y), f64(normal4.z)}
+	origin := [3]f64{f64(origin4.x), f64(origin4.y), f64(origin4.z)}
+	// The eye ray through the pixel's middle: 200 pixels across 1 unit at depth 1 (a vertical field of view of 2 atan 0.6)
+	ray := [3]f64{(f64(probe) + 0.5) / 200, -0.5 / 200, -1}
+	point := ray * (dot(origin, normal) / dot(ray, normal))
+	toward_eye := normalize(-point)
+	if step.flip && dot(normal, toward_eye) < 0 do normal = -normal
+	sun := sun_of(step.near)
+	facing := dot(sun, normal)
+	if !specular do return abs(facing) if step.two_sided else max(facing, 0)
+	if facing <= 0 do return 0 // clamp highlights
+	half_dot := dot(normal, normalize(sun + toward_eye))
+	if step.signed && half_dot < 0 do return 0
+	return math.pow(abs(half_dot), SHININESS)
+}
+
+set_matrix :: proc(location:i32, m:matrix[4, 4]f32) {
+	for row in 0 ..< 4 do c3d.C3D_FVUnifSet(.VERTEX_SHADER, location + i32(row), m[row, 0], m[row, 1], m[row, 2], m[row, 3])
+}
+
+Vertex :: struct {
+	position:[3]f32,
+	normal:[3]f32,
+	uv:[2]f32,
+}
+
+main :: proc() {
+	mb.set_bottom_screen(.CONSOLE) // before init: init applies it
+	mb.init("light test 5", 400, 240)
+	mb.print("LIGHT TEST 5: back faces (G2 W5)")
+	mb.print("d = diffuse, s = specular; got/exp")
+
+	bytes := mb.read_file_words("romfs:/shaders/light3.shbin")
+	if len(bytes) == 0 do mb.print("light3.shbin missing")
+	binary := ctru.DVLB_ParseFile(raw_data(bytes), u32(len(bytes) * size_of(u32)))
+	program:ctru.shaderProgram_s
+	ctru.shaderProgramInit(&program)
+	ctru.shaderProgramSetVsh(&program, binary.DVLE)
+	projection_location := i32(ctru.shaderInstanceGetUniformLocation(program.vertexShader, "projection"))
+	model_view_location := i32(ctru.shaderInstanceGetUniformLocation(program.vertexShader, "model_view"))
+	flip_location := i32(ctru.shaderInstanceGetUniformLocation(program.vertexShader, "flip_enable"))
+
+	vertices := [4]Vertex {
+		{{-12, -8, 0}, {0, 0, 1}, {0, 0}},
+		{{12, -8, 0}, {0, 0, 1}, {1, 0}},
+		{{12, 8, 0}, {0, 0, 1}, {1, 1}},
+		{{-12, 8, 0}, {0, 0, 1}, {0, 1}},
+	}
+	indices := [6]u16{0, 1, 2, 0, 2, 3}
+	vertex_memory := ctru.linearAlloc(size_of(vertices))
+	index_memory := ctru.linearAlloc(size_of(indices))
+	mem.copy(vertex_memory, &vertices, size_of(vertices))
+	mem.copy(index_memory, &indices, size_of(indices))
+	ctru.GSPGPU_FlushDataCache(vertex_memory, size_of(vertices))
+	ctru.GSPGPU_FlushDataCache(index_memory, size_of(indices))
+
+	// D0 tables: Phong over |N.H| as the engine builds it, and a signed one (entries 0..127 are N.H 0 to 1, 128..255 are
+	// N.H -1 to 0, which gives zero), 256 values then 256 steps to the next entry
+	unsigned_table, signed_table:c3d.C3D_LightLut
+	c3d.LightLut_Phong(&unsigned_table, SHININESS)
+	table:[512]f32
+	signed_value :: proc(x:f64) -> f32 {
+		return f32(math.pow(x, SHININESS)) if x > 0 else 0
+	}
+	for i in 0 ..< 256 {
+		x := f64(i) / 128 if i < 128 else f64(i - 256) / 128
+		next_x := f64(i + 1) / 128 if i < 128 else (f64(i + 1 - 256) / 128 if i < 255 else 0)
+		table[i] = signed_value(x)
+		table[256 + i] = signed_value(next_x) - signed_value(x)
+	}
+	c3d.LightLut_FromArray(&signed_table, &table[0])
+
+	environment:c3d.C3D_LightEnv
+	material := c3d.C3D_Material{diffuse = {1, 1, 1}, specular0 = {1, 1, 1}}
+	light:c3d.C3D_Light
+
+	projection := mb.TILT_TO_PANEL * mb.GL_TO_PICA_DEPTH * linalg.matrix4_perspective_f32(2 * math.atan(f32(0.6)), 400.0 / 240.0, 0.1, 50)
+	model := model_matrix()
+
+	frame := 0
+	passed, total := 0, 0
+	finished := false
+	line := ""
+	for mb.is_running() {
+		mb.poll_events()
+		if mb.is_gamepad_pressed(.START) do mb.stop_running()
+
+		test := min(frame / 4, 2 * len(steps) - 1) // each step shows its diffuse, then its specular
+		step := steps[test / 2]
+		specular := test % 2 == 1
+
+		mb.render_start()
+		mb.clear_background({0, 0, 0, 1})
+		c3d.C3D_LightEnvBind(nil)
+		c3d.C3D_BindProgram(&program)
+		view := view_matrix(step.back)
+		set_matrix(projection_location, projection)
+		set_matrix(model_view_location, view * model)
+		flip:f32 = 1 if step.flip else 0
+		c3d.C3D_FVUnifSet(.VERTEX_SHADER, flip_location, flip, flip, flip, flip)
+
+		attributes := c3d.C3D_GetAttrInfo()
+		c3d.AttrInfo_Init(attributes)
+		c3d.AttrInfo_AddLoader(attributes, 0, .FLOAT, 3)
+		c3d.AttrInfo_AddLoader(attributes, 1, .FLOAT, 3)
+		c3d.AttrInfo_AddLoader(attributes, 2, .FLOAT, 2)
+		buffers := c3d.C3D_GetBufInfo()
+		c3d.BufInfo_Init(buffers)
+		c3d.BufInfo_Add(buffers, vertex_memory, size_of(Vertex), 3, 0x210)
+
+		c3d.C3D_DepthTest(true, .GREATER, .ALL)
+		c3d.C3D_AlphaBlend(.ADD, .ADD, .ONE, .ZERO, .ONE, .ZERO)
+		c3d.C3D_CullFace(.NONE)
+
+		c3d.C3D_LightEnvInit(&environment)
+		c3d.C3D_LightEnvBind(&environment)
+		c3d.C3D_LightEnvMaterial(&environment, &material)
+		c3d.C3D_LightEnvClampHighlights(&environment, true)
+		c3d.C3D_LightEnvLut(&environment, .D0, .NH, step.signed, &signed_table if step.signed else &unsigned_table)
+		c3d.C3D_LightInit(&light, &environment)
+		c3d.C3D_LightTwoSideDiffuse(&light, step.two_sided)
+		sun := sun_of(step.near)
+		position := c3d.C3D_FVec{x = f32(sun.x), y = f32(sun.y), z = f32(sun.z), w = 0}
+		c3d.C3D_LightPosition(&light, &position)
+		c3d.C3D_LightColor(&light, 1, 1, 1)
+
+		stage := c3d.C3D_GetTexEnv(0)
+		c3d.C3D_TexEnvInit(stage)
+		source:c3d.GPU_TEVSRC = .FRAGMENT_SECONDARY if specular else .FRAGMENT_PRIMARY
+		c3d.C3D_TexEnvSrc(stage, c3d.C3D_Both, source, .PRIMARY_COLOR, .PRIMARY_COLOR)
+		c3d.C3D_TexEnvFunc(stage, c3d.C3D_Both, .REPLACE)
+
+		c3d.C3D_DrawElements(.TRIANGLES, 6, 1, index_memory)
+		c3d.C3D_LightEnvBind(nil)
+		mb.render_end()
+
+		// The test has been on screen three frames: read it back
+		if !finished && frame % 4 == 3 {
+			width, height:u16
+			pixels := ([^]u8)(ctru.gfxGetFramebuffer(.TOP, .LEFT, &width, &height))
+			if !specular do line = fmt.aprintf("S%d d", test / 2) // kept across frames, so not the temporary allocator
+			else do line = fmt.aprintf("%s s", line)
+			for probe in PROBES {
+				px := 200 + probe
+				py := 120
+				offset := (px * int(width) + (int(width) - 1 - py)) * 3
+				got := int(pixels[offset + 1]) // green; the light and the material are white, so all three agree
+				expected := int(math.round(expected_value(step, probe, specular) * 255))
+				line = fmt.aprintf("%s %d/%d", line, got, expected)
+				total += 1
+				if abs(got - expected) <= 3 do passed += 1
+			}
+			if specular do mb.print(line)
+			if test == 2 * len(steps) - 1 {
+				mb.print(fmt.tprintf("within 3 of the formula: %d of %d", passed, total))
+				finished = true
+			}
+		}
+		frame += 1
+	}
+
+	c3d.C3D_LightEnvBind(nil)
+	mb.cleanup()
+}

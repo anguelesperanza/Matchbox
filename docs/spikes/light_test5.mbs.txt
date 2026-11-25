@@ -1,0 +1,40 @@
+// LIGHT TEST 5's vertex shader (G2 L9-0, W5): tools/testdata/lighting/light2.mbs with one addition. When flip_enable.x
+// is 1 the normal is turned to face the eye: its sign is that of dot(normal, way back to the eye) at the vertex, which for
+// a flat part is the face's own, so a part seen from behind gets the normal a back face should have.
+
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	normal: [3]f32 `attr:"normal"`,
+	uv: [2]f32 `attr:"texcoord"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	quat: [4]f32 `out:"normalquat"`,
+	view: [3]f32 `out:"view"`,
+	color: [4]f32 `out:"color"`,
+	uv: [2]f32 `out:"texcoord0"`,
+}
+
+@(uniform) projection: matrix[4, 4]f32
+@(uniform) model_view: matrix[4, 4]f32
+@(uniform) flip_enable: [4]f32
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	eye := model_view * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.position = projection * eye
+	toward_eye := [3]f32{-eye.x, -eye.y, -eye.z}
+	output.view = toward_eye
+	turned := model_view * [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0}
+	facing := step(0.0, dot(turned.xyz, toward_eye)) * 2.0 - 1.0
+	scale := lerp(1.0, facing, flip_enable.x)
+	output.quat = normal_quaternion(normalize(turned.xyz * scale))
+	output.color = [4]f32{1.0, 1.0, 1.0, 1.0}
+	output.uv = input.uv
+	return output
+}
+
+fragment_main :: proc(v: Varying) -> [4]f32 {
+	return v.color
+}

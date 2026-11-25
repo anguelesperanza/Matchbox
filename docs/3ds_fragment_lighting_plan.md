@@ -549,3 +549,30 @@ pass is 45 instructions straight-line against 79 for the two-loop form, and the 
 gave no saving in the count (47 against 45) and was not used. Not changed: the floor is shaded at full cost (overdraw).
 Per-vertex remains the Vita's smooth path; whether it becomes the Vita's default is the user's call. Test build
 `build/hardware/model_check_bulbs4.vpk` (MBOX00064).
+
+**L9. Back faces on two-sided parts, 3DS (W5 of `docs/g2_remaining_work.md`, decision D5).** Written 2026-11-25 before any
+runtime code. **What PC and the Vita do today, measured:** neither flips the normal for a back face. `light_diffuse` and
+`light_specular` take the interpolated normal as it is (nothing in mbsc reads a facing), so a part seen from behind is lit as
+if the normal were still the front's: diffuse `max(L.N, 0)`, highlight only where `L.N > 0` and `N.H > 0`. The brief's "PC
+and the Vita flip" does not match the code. PC's generated HLSL on the D3D software device (plane normal toward or away from the
+eye, one sun, shininess 20, strength 1, no ambient; scratch test, not kept): front view, light on the normal's side diffuse
+0.864, specular 0.494; back view, light on the normal's side (L.N > 0, i.e. through the plane) diffuse 0.651, specular 0.000;
+back view, light on the viewer's side (L.N < 0) diffuse 0.000, specular 0.000; all equal to the f64 formula. So a lit board
+seen from behind is lit by lights *behind it* and dark under lights on the viewer's side. The Vita's Cg is the same maths in
+the source (`facing`, `max(dot(n, h), 1e-8)`); it was not run in Vita3K for this.
+The 3DS today differs from PC only in the highlight: the unit indexes D0 by |N.H|, so a back face gets a highlight where PC gives 0.
+Two targets are possible, and which one is wanted is the user's call: (a) **match PC as it is**: a signed D0 table (negative N.H
+gives 0); (b) **a true back face on all three**: flip the normal when the part is seen from behind (light on the viewer's side
+lights it, light through the plane does not), which changes PC and the Vita's shader as well (`mesh_lit.mbs`).
+- L9-0. **3DS hardware spike**, `light_test5` (source `docs/spikes/light_test5_main.odin.txt` and `light_test5.mbs.txt`; build
+  `build/hardware/light_test5.3dsx`, title LightTest5): a plane, culling off, tilted so no normal is exactly +Z/-Z (the quaternion's
+  degenerate case), seen from the front and the back by a sun on the viewer's side ("near") or the other ("far"); two probes, diffuse
+  and specular read back from its own framebuffer, got/expected per step. Steps: S0 front near (control); S1 back far; S2 back near;
+  S3 back far with a signed D0; S4 front near signed; S5 back near with two-sided diffuse; S6 front far two-sided; S7 to S10 the
+  vertex shader turns the normal to face the eye (sign of N.V, a uniform switches it) on back near, back far, front near, front far.
+  **Azahar, 2026-11-25: within 3 of the formula, 38 of 44.** S0, S3, S4 and S7 to S10 all pass, so a signed D0 table works (the
+  highlight through the plane is gone) and **flipping the normal in the vertex shader gives a back face the front face's lighting,
+  front faces unchanged**. The six misses: S1 back far, unsigned D0: the formula (|N.H|) says 35 and 46, Azahar draws 0 (Azahar
+  does not highlight there; hardware may); S5 and S6, two-sided diffuse: the highlight appears where the clamp should remove it
+  (222 and 213 on S5, 61 and 123 on S6, expected 0), so **two-sided diffuse lights a front face from behind and lets the
+  highlight through; it is not a flipped normal and is not the way**. **Stops here until the user's hardware result.**

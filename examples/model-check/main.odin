@@ -87,6 +87,9 @@ main :: proc() {
 	}
 
 	time:f32 = 0
+	fps:f32 = 0
+	fps_time:f32 = 0
+	fps_frames := 0
 	for mb.is_running() {
 		mb.poll_events()
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
@@ -121,17 +124,36 @@ main :: proc() {
 		mb.render_model(cylinder, mb.create_transform({3, 0, 0}, mb.calculate_rotation_axis_angle({0, 0, 1}, math.sin(time) * 0.5)), {1, 0.9, 0.3, 1})
 		mb.camera_end()
 
-		mb.screen_start()
+		// Frame rate, smoothed over half a second so the digits can be read
+		fps_time += mb.get_delta_time()
+		fps_frames += 1
+		if fps_time >= 0.5 {
+			fps = f32(fps_frames) / fps_time
+			fps_time = 0
+			fps_frames = 0
+		}
+
 		size := mb.calculate_model_size(crate)
-		label := fmt.tprintf("test_crate.glb: %v parts, size %.2f x %.2f x %.2f", len(crate.parts), size.x, size.y, size.z)
-		mb.render_text(font, label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -0.6}))
-		// FACE_DOWN is a position, not a letter: B on the 3DS, Cross on the Vita, A on a PC pad
-		switch_label := "lighting on (L or bottom button: off)" if lighting_on else "lighting off (L or bottom button: on)"
-		mb.render_text(font, switch_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -1.4}))
-		bulb_label := "point and spot lights on (P or right button: off)" if bulbs_on else "point and spot lights off (P or right button: on)"
-		mb.render_text(font, bulb_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -2.2}))
-		mode_label := "lit per vertex (M or left button: per pixel)" if per_vertex else "lit per pixel (M or left button: per vertex)"
-		mb.render_text(font, mode_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -3.0}))
+		// Short on purpose, measured with calculate_text_size against calculate_visible_rectangle: the longest is about 9
+		// of the 19.6 units the 3DS's top screen gives (the narrowest target). The letters
+		// are the PC keys; after the slash is the face button's place on the handhelds
+		lines := [?]string {
+			fmt.tprintf("crate %.2f x %.2f x %.2f", size.x, size.y, size.z),
+			"lighting on [L / down]" if lighting_on else "lighting off [L / down]",
+			"bulbs on [P / right]" if bulbs_on else "bulbs off [P / right]",
+			"per vertex [M / left]" if per_vertex else "per pixel [M / left]",
+			fmt.tprintf("fps %.0f (%.1f ms)", fps, 1000 / max(fps, 0.001)),
+		}
+
+		mb.screen_start()
+		visible_min, visible_max := mb.calculate_visible_rectangle()
+		margin :f32 = 0.2
+		// The cursor y of a line is its baseline, so the first sits one ascent below the top edge
+		baseline := visible_max.y - margin - font.ascent / font.pixels_per_unit
+		for line in lines {
+			mb.render_text(font, line, {visible_min.x + margin, baseline, 0})
+			baseline -= mb.calculate_line_height(font)
+		}
 		mb.screen_end()
 
 		mb.render_end()

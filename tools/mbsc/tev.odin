@@ -72,7 +72,8 @@ Tev_Alpha_Test :: struct {
 	What the 3DS's fragment lighting unit is set to, when a shader lights (light_diffuse, light_specular). The settings
 	the shader can't say yet are written with their values, so the runtime reads one place: the specular table is D0
 	indexed by N.H (Blinn-Phong, its curve from the material's shininess at run time), highlights are clamped, back
-	faces get no diffuse, and there is no Fresnel term
+	faces get no diffuse, and the Fresnel selector puts an all-zero FR table in the secondary alpha, so the highlight's
+	alpha is 0 as on PC and the Vita (lighting.odin says why; measured on the New 3DS LL in G2 L4-0)
 */
 Tev_Lighting :: struct {
 	diffuse:          bool, // light_diffuse is read: FRAGMENT_PRIMARY
@@ -81,7 +82,7 @@ Tev_Lighting :: struct {
 	table_input:      string, // what indexes it, "NH"
 	clamp_highlights: bool,
 	two_sided:        bool,
-	fresnel:          string, // "none"
+	fresnel:          string, // "secondary_alpha_zero"
 }
 
 Tev_Plan :: struct {
@@ -196,7 +197,7 @@ generate_tev :: proc(ir: ^IR_Module, allocator := context.allocator) -> (plan: T
 		plan.lighting.table = "D0"
 		plan.lighting.table_input = "NH"
 		plan.lighting.clamp_highlights = true
-		plan.lighting.fresnel = "none"
+		plan.lighting.fresnel = "secondary_alpha_zero"
 	}
 	for &stage in plan.stages {
 		stage.constant.uniform = strings.clone(stage.constant.uniform, allocator)

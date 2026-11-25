@@ -597,7 +597,7 @@ write_light_block :: proc(h: ^Cg, builder: ^strings.Builder) {
 			fmt.sbprintfln(builder, "uniform %s %s;", engine_type(field.type), block_field_name(render_block, field.name))
 		}
 	}
-	write_light_functions(builder, render_block, count)
+	write_light_functions(builder, render_block, fmt.tprintf("%d", count))
 }
 
 @(private = "file")

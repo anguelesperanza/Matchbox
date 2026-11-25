@@ -73,7 +73,7 @@ reads_the_lighting_section :: proc(t:^testing.T) {
 	text := "mbs-tev 2\ntarget 3ds\n\ntexture 0 a texcoord 0\n\n" +
 		"stage 0 MULTIPLY_ADD FRAGMENT_PRIMARY TEXTURE0 FRAGMENT_SECONDARY\n\n" +
 		"lighting diffuse specular\nlighting_table D0 NH\nlighting_clamp_highlights true\n" +
-		"lighting_two_sided false\nlighting_fresnel none\n"
+		"lighting_two_sided false\nlighting_fresnel secondary_alpha_zero\n"
 	plan, ok, message := parse_tev_plan(text)
 	testing.expect(t, ok, message)
 	testing.expect_value(t, plan.stages[0].operands[0], Tev_Operand{source = .FRAGMENT_PRIMARY})
@@ -85,7 +85,7 @@ reads_the_lighting_section :: proc(t:^testing.T) {
 		table_input = "NH",
 		clamp_highlights = true,
 		two_sided = false,
-		fresnel = "none",
+		fresnel = "secondary_alpha_zero",
 	}
 	testing.expect_value(t, plan.lighting, want)
 }

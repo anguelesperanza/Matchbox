@@ -89,7 +89,7 @@ Tev_Lighting :: struct {
 	table_input:string, // what indexes it, "NH" (N.H)
 	clamp_highlights:bool,
 	two_sided:bool, // diffuse on back faces too
-	fresnel:string, // "none"
+	fresnel:string, // "secondary_alpha_zero": an all-zero FR table as the secondary's alpha, so a highlight leaves alpha alone
 }
 
 Tev_Plan :: struct {
@@ -187,8 +187,8 @@ parse_tev_plan :: proc(text:string) -> (plan:Tev_Plan, ok:bool, message:string) 
 			else do plan.lighting.two_sided = words[1] == "true"
 
 		case "lighting_fresnel":
-			if len(words) != 2 || words[1] != "none" do return plan, false, tev_error(line_number, "only `lighting_fresnel none` is known")
-			plan.lighting.fresnel = "none"
+			if len(words) != 2 || words[1] != "secondary_alpha_zero" do return plan, false, tev_error(line_number, "only `lighting_fresnel secondary_alpha_zero` is known")
+			plan.lighting.fresnel = "secondary_alpha_zero"
 
 		case:
 			return plan, false, tev_error(line_number, "unknown line")

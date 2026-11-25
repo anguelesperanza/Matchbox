@@ -65,6 +65,11 @@ Azahar; the plan is `docs/3ds_fragment_lighting_plan.md`):
 - **Specular comes from the D0 table** with `LightLut_Phong` indexed by N.H.
 - **`C3D_LightEnvBind(nil)` turns lighting off** for the draws after it. The engine's own draws (sprites, shapes, text)
   ran correctly after it on hardware, so a lit draw unbinding afterwards is enough to keep them unlit.
+- **Both results have alpha 1**, so `primary * TEXTURE0 + secondary` in one stage loses the texture's alpha (a cut-out
+  shows no holes). An all-zero FR table (`C3D_LightEnvLut(&env, .FR, .NV, false, &zeros)`) with
+  `C3D_LightEnvFresnel(&env, .SEC_ALPHA_FRESNEL)` makes the secondary's alpha 0 and the cut-out survives; a table of
+  ones brings the problem back, so it is the table's value that lands there. Measured on the New 3DS LL in
+  `light_test3` (G2 L4-0, 2026-11-25). The `.tev` line is `lighting_fresnel secondary_alpha_zero`.
 - Not measured yet: how many lights at once (two were used), and what uploading a table costs.
 
 ## What the output looks like
@@ -135,7 +140,7 @@ lighting [diffuse] [specular]
 lighting_table D0 NH
 lighting_clamp_highlights true
 lighting_two_sided false
-lighting_fresnel none
+lighting_fresnel secondary_alpha_zero
 ```
 
 A source is `TEXTURE0..3`, `PRIMARY_COLOR`, `PREVIOUS` (the previous stage's result), `CONSTANT`, or (version 2)
@@ -144,7 +149,7 @@ A source is `TEXTURE0..3`, `PRIMARY_COLOR`, `PREVIOUS` (the previous stage's res
 
 The `lighting` lines (version 2, G2 L2) are there only when the shader calls a light built-in, and say how the unit is
 set: which results are read, the specular table and what indexes it, highlight clamping, two-sided diffuse, Fresnel.
-Only the values above are written or read so far, the ones measured on hardware in L0. Version 1 is version 2 without
+Only the values above are written or read so far, the ones measured on hardware in L0 and L4-0. Version 1 is version 2 without
 these lines, and the runtime still reads it. Example, the shipped `mesh.mbs`: `stage 0 MODULATE TEXTURE0 PRIMARY_COLOR` and
 `alphatest GEQUAL uniform render_alpha_cutoff`.
 

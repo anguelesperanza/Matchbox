@@ -523,6 +523,8 @@ write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 	for name in LIGHT_UNIFORM_NAMES[1:] {
 		fmt.sbprintfln(builder, "    float4 %s[%d];", name, count)
 	}
+	// where the loops stop: PC has 64 slots, and a scene rarely fills them (lighting.odin)
+	fmt.sbprintln(builder, "    int lights_count;")
 	fmt.sbprintln(builder, "};")
 
 	render_block := ""
@@ -540,7 +542,7 @@ write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 		}
 		fmt.sbprintln(builder, "};")
 	}
-	write_light_functions(builder, render_block, count)
+	write_light_functions(builder, render_block, "lights_count")
 }
 
 @(private = "file")

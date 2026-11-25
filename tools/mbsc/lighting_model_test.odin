@@ -31,7 +31,8 @@ Light_Scene :: struct {
 	specular_strength: f32,
 }
 
-// Light_Result is the two built-ins' answers for one pixel, alpha left out: both are 1 on every target.
+// Light_Result is the two built-ins' answers for one pixel, alpha left out: 1 for the diffuse and 0 for the specular
+// on every target.
 Light_Result :: struct {
 	diffuse:  [3]f64,
 	specular: [3]f64,

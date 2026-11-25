@@ -18,6 +18,10 @@ measured here yet are marked *to confirm* and are checked in L0, on hardware, be
      floor every target supports, but Matchbox also makes PC-only and Vita-only games, so PC and the Vita may take
      more once measured. The limit lives in one place per target (an array size, which CLAUDE.md allows as a
      constant), the shader language reads it from there, and a game can ask for it (`get_max_lights`).
+     *Raised for PC on 2026-11-25 (L4-1):* `MAX_LIGHTS` stays 8, the count every target takes; `MAX_PC_LIGHTS` is
+     64 and exists only in a Windows build, so a game naming it doesn't compile for the handhelds (checked: "not
+     declared by 'mb'" on both). PC's block ends with `lights_count` and its loops stop there, so a scene with one
+     sun doesn't pay for 64 slots; the Vita's loops still run all 8.
   3. **Specular in G2**, with diffuse and ambient.
   4. The built-ins (`light_diffuse` / `light_specular`, first planned as one `light_surface`) and the `.LIGHTS` uniform block **as recommended**: the block is
      engine-defined and a game's own shader may declare it, so custom shaders are lit by the same `set_lights`. The user
@@ -157,6 +161,48 @@ stated tolerance on random normals, views and lights.
 **L4. The 3DS runtime.** `render_3ds` fills `C3D_LightEnv` from `set_lighting` and `C3D_Light`s from `set_lights`
 (directions moved into eye space per camera), builds each table once, and binds the environment for lit draws and
 unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit per pixel on all three targets.
+- **Decided 2026-11-25, before starting:** L4 as written needs more than the 3DS runtime. Nothing uploads normals
+  (`Vertex` is position, uv, colour), there is one unlit shader and one pipeline per target, and `set_lights` is L6.
+  So, with the user:
+  - **Models get a vertex of their own with a normal** (`Lit_Vertex`, 48 bytes). Sprites, shapes and text keep the
+    36-byte `Vertex`, so 2D pays nothing. Two input layouts per target.
+  - **L6's API comes forward into L4:** `Light`, `create_directional_light`, `set_lights`, `set_lighting`,
+    `get_max_lights`. L6 keeps the per-vertex choice, the examples and the cheatsheet.
+  - **`Light` has `diffuse` and `specular` colours** (not main's single `color`); `create_directional_light(direction,
+    color = WHITE)` sets both from one, so the common call reads as main's.
+  - **A part's material** (specular strength, shininess) comes from the glTF material's roughness and metallic
+    factors, with a soft default (0.5, 16) for a part with none, and is stored in `.mbm`.
+- **Found while planning:** the `.tev` plan combines whole colours, and both of the unit's results have alpha 1, so
+  `diffuse * texture + specular` would push alpha to 1 and break cut-outs and blending. So `light_specular`'s alpha
+  becomes **0** on every target: a highlight adds colour and leaves alpha alone. On PC and the Vita that is the
+  generated function. On the 3DS the Fresnel selector can put the FR table's value in the secondary alpha, and an
+  all-zero FR table makes it 0. Confirmed on hardware in L4-0.
+- Steps:
+  - L4-0. A 3DS spike, `light_test3`: L0's scene with the texture's alpha cut out after `primary * tex + secondary`,
+    with and without the zero FR table in the secondary alpha. Done when: the cut-out survives the highlight on the
+    New 3DS LL.
+    **DONE 2026-11-25, on the New 3DS LL:** without the table no holes, with the zero table holes, with a table of
+    ones no holes again (the control). Recorded in `docs/shader_pica.md`; `light_specular` returns alpha 0 on PC and
+    the Vita, and the `.tev` plan says `lighting_fresnel secondary_alpha_zero`.
+  - L4-1. The API above, shared, holding its state in `mbi`; directions are turned into eye space at `camera_end`
+    from the camera's view. `Lighting_Settings` holds the ambient colour.
+    **DONE 2026-11-25 (tests only; no target uploads the block yet, that is L4-4 and L4-5).** `matchbox/light.odin`:
+    `Light{direction, diffuse, specular}` (direction is the way the light travels, as on main),
+    `create_directional_light(direction, color = WHITE)`, `set_lights` (more than `get_max_lights()` is an
+    `ensure`, not a silent trim; 8 on the handhelds, `MAX_PC_LIGHTS` = 64 on PC), `set_lighting(settings = {enabled = true, ambient = 0.2})`, `get_max_lights`, state in `mbi.lighting`, off
+    until a game calls `set_lighting`. `calculate_lights_block(lighting, view)` is the one place directions are
+    reversed and turned into eye space; each target's `camera_end` will call it. `light_test.odin` checks it against
+    directions worked by hand from two cameras, and the block's layout against the HLSL's.
+    `lighting_pixels_windows_test.odin` puts a bright light in the first slot past `lights_count`: with the count
+    the HLSL is 3e-7 from the formula; with the loop made to run all 64 it was 0.79 off, so the test sees the count.
+  - L4-2. `Lit_Vertex`, `create_lit_mesh` per target, `Model_Part.material`, `.mbm` version 2 (the normals it already
+    stores are uploaded; the material is added), the glTF loader building lit meshes.
+  - L4-3. `mesh_lit.mbs`, per pixel, generated for all three targets; `frame` gains `view`, which the lit vertex
+    stage needs for eye space.
+  - L4-4. PC: a second pipeline, the lights buffer at b3, lit items drawn with it.
+  - L4-5. 3DS and Vita runtimes (each file shown to the user first): a second pipeline; on the 3DS `C3D_LightEnv`,
+    the lights, one D0 table per distinct shininess, bound for lit draws and unbound after.
+  - L4-6. `examples/model-check` lit on all three targets.
 
 **L5. Per-vertex lighting** in `mesh.mbs` on all three targets, from the same uniforms. Done when: the same scene lit
 both ways on each target.

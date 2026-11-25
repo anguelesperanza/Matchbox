@@ -153,7 +153,7 @@ the_lighting_results_are_sources_and_the_plan_says_how_the_unit_is_set :: proc(t
 	// lit texture plus highlight fuses into one stage
 	text, problems := lit_plan_of("return light_diffuse(v.quat, v.view) * sample(a, v.uv) + light_specular(v.quat, v.view)")
 	testing.expectf(t, len(problems) == 0, "problems: %v\n%s", problems, text)
-	want := "mbs-tev 2\ntarget 3ds\n\ntexture 0 a texcoord 0\n\nstage 0 MULTIPLY_ADD FRAGMENT_PRIMARY TEXTURE0 FRAGMENT_SECONDARY\n\nlighting diffuse specular\nlighting_table D0 NH\nlighting_clamp_highlights true\nlighting_two_sided false\nlighting_fresnel none\n"
+	want := "mbs-tev 2\ntarget 3ds\n\ntexture 0 a texcoord 0\n\nstage 0 MULTIPLY_ADD FRAGMENT_PRIMARY TEXTURE0 FRAGMENT_SECONDARY\n\nlighting diffuse specular\nlighting_table D0 NH\nlighting_clamp_highlights true\nlighting_two_sided false\nlighting_fresnel secondary_alpha_zero\n"
 	testing.expectf(t, text == want, "got:\n%s", text)
 
 	// diffuse alone says so, and a shader that doesn't light has no lighting lines at all

@@ -36,7 +36,7 @@ fragment_main :: proc(v: Varying) -> [4]f32 {
 `
 
 @(private = "file")
-render_light :: proc(scene: Light_Scene, quat: [4]f32, view: [3]f32, result: string) -> (pixel: [4]f32, message: string) {
+render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32, result: string) -> (pixel: [4]f32, message: string) {
 	source, _ := strings.replace(LIT_SHADER, "RESULT", result, 1, context.temp_allocator)
 	parsed := parse_shader("lit.mbs", source)
 	defer destroy_parsed(parsed)
@@ -53,16 +53,26 @@ render_light :: proc(scene: Light_Scene, quat: [4]f32, view: [3]f32, result: str
 	draw := make([]f32, 28, context.temp_allocator)
 	draw[25] = scene.shininess
 	draw[26] = scene.specular_strength
-	// the lights block: the ambient colour, then 8 directions, 8 diffuse colours, 8 specular colours, a [4]f32 each
-	lights := make([]f32, 4 + 3 * 8 * 4, context.temp_allocator)
+	// the lights block: the ambient colour, then the slots' directions, diffuse colours and specular colours, a [4]f32
+	// each, then the count as an int in the next row
+	slots := get_max_lights(.PC)
+	lights := make([]f32, 4 + 3 * slots * 4 + 4, context.temp_allocator)
 	ambient := scene.ambient
 	copy(lights[0:3], ambient[:])
 	for slot in 0 ..< 8 {
 		direction, diffuse, specular := scene.direction[slot], scene.diffuse[slot], scene.specular[slot]
 		copy(lights[4 + slot * 4:], direction[:])
-		copy(lights[4 + 32 + slot * 4:], diffuse[:])
-		copy(lights[4 + 64 + slot * 4:], specular[:])
+		copy(lights[4 + slots * 4 + slot * 4:], diffuse[:])
+		copy(lights[4 + 2 * slots * 4 + slot * 4:], specular[:])
 	}
+	// A bright light in the first slot past the count, shining from where the eye is (so on the side the normal
+	// faces): it would show in both results if the loops read past `lights_count`
+	past := count
+	view_direction := view
+	copy(lights[4 + past * 4:], view_direction[:])
+	copy(lights[4 + slots * 4 + past * 4:], []f32{1, 1, 1})
+	copy(lights[4 + 2 * slots * 4 + past * 4:], []f32{1, 1, 1})
+	lights[4 + 3 * slots * 4] = transmute(f32)i32(count)
 	game := make([]f32, 8, context.temp_allocator)
 	quat_in, view_in := quat, view
 	copy(game[0:4], quat_in[:])
@@ -98,15 +108,16 @@ the_generated_hlsl_lights_as_the_formula_says :: proc(t: ^testing.T) {
 	random := Light_Random{state = 11}
 	worst: f64
 	for case_index in 0 ..< 24 {
-		scene, quat, view := create_light_case(&random, 1 + case_index % 8)
+		count := 1 + case_index % 8
+		scene, quat, view := create_light_case(&random, count)
 		want := calculate_light_reference(scene, quat, view)
-		diffuse, diffuse_message := render_light(scene, quat, view, "light_diffuse(v.quat, v.view)")
-		specular, specular_message := render_light(scene, quat, view, "light_specular(v.quat, v.view)")
+		diffuse, diffuse_message := render_light(scene, count, quat, view, "light_diffuse(v.quat, v.view)")
+		specular, specular_message := render_light(scene, count, quat, view, "light_specular(v.quat, v.view)")
 		if diffuse_message != "" || specular_message != "" {
 			testing.expectf(t, false, "%s%s", diffuse_message, specular_message)
 			return
 		}
-		testing.expectf(t, diffuse.w == 1 && specular.w == 1, "alpha is not 1: %v %v", diffuse, specular)
+		testing.expectf(t, diffuse.w == 1 && specular.w == 0, "the diffuse's alpha is not 1 or the specular's not 0: %v %v", diffuse, specular)
 		for lane in 0 ..< 3 {
 			worst = max(worst, abs(f64(diffuse[lane]) - want.diffuse[lane]), abs(f64(specular[lane]) - want.specular[lane]))
 		}

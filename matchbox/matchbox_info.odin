@@ -40,6 +40,8 @@ Matchbox_Info :: struct {
 	triangle_mesh:Mesh,
 	circle_mesh:Mesh,
 
+	lighting:Lighting_State, // set_lights and set_lighting; off and empty until a game calls them (light.odin)
+
 	font_settings:Font_Settings,
 	screen_settings:Screen_Settings,
 	clock:Clock, // frame timing, sampled by poll_events (clock.odin)

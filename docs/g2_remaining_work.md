@@ -90,7 +90,8 @@ plan's "revisited after L3" has no question left. Close it in the plan.
 **D7. o3dx's `C3D_FVec` binding:** fix it so the fields are in citro3d's order (`w, z, y, x`, `c3d/types.h`). The fix
 goes into the O3DX repo first (`C:\Users\King-\Documents\odin-projects\O3DX\`, `lib/c3d/types.odin`), then is
 brought into Matchbox's copy (`matchbox/o3dx/`), and `create_citro3d_vector` in `render_3ds_freestanding_arm32.odin`
-is dropped. **Ask the user which O3DX branch it goes on:** the repo is checked out on `bindings-complete`, not `main`.
+is dropped. In O3DX the fix goes on **a branch of its own, with its own PR** (the user's answer); ask the user which
+branch the PR targets if it isn't clear (the repo is checked out on `bindings-complete`).
 
 **D8. Light limits:** stay as they are: 64 on PC, 8 on the 3DS and the Vita. Target-specific limits may come later,
 after more is stable and tested. Don't measure or change them now.
@@ -168,11 +169,12 @@ after more is stable and tested. Don't measure or change them now.
 
 ### W7. o3dx `C3D_FVec` (D7)
 
-- **Depends on:** the user's answer on the O3DX branch.
+- **Depends on:** nothing; can start now.
 - **Owns:** the O3DX repo's `lib/c3d/types.odin`, `matchbox/o3dx/c3d/types.odin`, `render_3ds_freestanding_arm32.odin`
   (drop `create_citro3d_vector`).
-- **Do:** fix the field order in O3DX (and any O3DX code or example that relied on the old order), commit there on the
-  branch the user names, copy the binding into Matchbox, use `C3D_FVec{x = ..., ...}` directly for light positions.
+- **Do:** in O3DX, on a new branch, fix the field order (and any O3DX code or example that relied on the old order),
+  commit, push and open its own PR; then copy the binding into Matchbox and use `C3D_FVec{x = ..., ...}` directly for
+  light positions.
 - **Done when:** model-check's lighting measures the same in Azahar before and after, and on hardware.
 
 ### W8. Small loose ends
@@ -190,7 +192,7 @@ after more is stable and tested. Don't measure or change them now.
 | W3 L6 | now | light.odin, light_test.odin, plan | W4 |
 | W4 point/spot | after W3 | light.odin, mbsc lighting, shaders, render files | W3, W6, W7 |
 | W6 allocator | now | tools/mbsc/pica*.odin, *.3ds.v.pica | W4 |
-| W7 C3D_FVec | after the user's answer | O3DX types.odin, matchbox/o3dx, 3DS render file | W4 |
+| W7 C3D_FVec | now | O3DX types.odin (own branch and PR), matchbox/o3dx, 3DS render file | W4 |
 | W8 leak | now | tools/mbsc/pica.odin | W6 (fold into W6) |
 | W5 back faces | last | 3DS render, mbsc .tev lighting | all |
 

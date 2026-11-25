@@ -383,6 +383,16 @@ both ways on each target.
       The crate and cylinder turn, so two runs of the *same* build differ by as much as old against new does;
       the old/new comparison there is the machine-model test's.
   - L5-4. model-check lit both ways on every target; hardware builds.
+- **W7. o3dx's `C3D_FVec` fixed (decision D7).**
+  **DONE 2026-11-25 in Azahar; hardware check pending.** o3dx declared `C3D_FVec` as `{x, y, z, w}` over citro3d's
+  `{w, z, y, x}`, so `.x` wrote citro3d's w. Fixed in O3DX on its own branch (`fix-c3d-fvec-field-order`, PR
+  anguelesperanza/O3DX#6 into `main`): the struct is `{w, z, y, x}` and `math.odin`'s helpers use the names. Matchbox
+  has the same `c3d/types.odin` and `c3d/math.odin`, and `create_citro3d_vector` is gone: light positions are
+  `c3d.C3D_FVec{x = ..., y = ..., z = ..., w = 0}`.
+  - Measured in Azahar, model-check before and after: the cube's front and right, its top, the floor and the board's
+    white squares have identical pixel counts at their reference values (4101, 848, 81210 against 81203, 1611); the
+    rest of the frame differs only where parts rotate. Hardware build: `build/hardware/w7_fvec_fix.3dsx` (title
+    `W7FVecFix`, model-check, which prints no test name of its own).
 - **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
   laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 

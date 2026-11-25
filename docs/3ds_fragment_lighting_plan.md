@@ -400,6 +400,28 @@ the new procedures.
 
 **L7. Hardware passes.** The 3DS check and the Vita check grow a lighting step each; the user runs them.
 
+  - **DONE 2026-11-25 in Azahar and Vita3K (hardware not yet asked, builds below).** `examples/render-check` gains seven
+    probes, 28 in all, on four 24-pixel lit patches along its bottom edge (flat planes facing the camera, no highlight,
+    one sun from (1, 2, 1), 0.2 ambient), each worked by hand: per pixel and per vertex a (0.4, 0.6, 1) face, (62, 93, 155)
+    by hand and measured (62, 93, 155) in Azahar on both; a cut-out (a 2 x 2 texture, only its top left opaque, cut at 0.5)
+    whose opaque square is (155, 155, 155) and whose three holes show the background (0, 0, 255); the same face with
+    lighting off (102, 153, 255) as measured. The probes' tolerance is 2. `examples/vita-check` gains three steps,
+    LIGHT_PER_PIXEL, LIGHT_PER_VERTEX and LIGHT_OFF, each drawing model-check's scene and saying on screen what it should
+    look like. Measured in Vita3K (medians of the cube, floor and sphere in a screenshot): per vertex cube front and right
+    (61, 93, 154), top (101, 153, 254), floor (100, 102, 114); lighting off the cube is (101, 153, 254) on every side, the
+    floor unchanged (it saturates to its tint). The sphere's highlight is visibly softer per vertex, as in L5-4.
+  - Broken once on purpose: with the lit probes' expected values wrong, the 3DS check printed each measured value and
+    reported seven failures, so the probes do see. **Found on the way:** the check's old failure line,
+    `fmt.tprintf("... %v", got, ...)` with a `[3]u8`, panics on the 3DS (a bare PANIC in Azahar); the line now passes the
+    values as plain ints. Not looked into further: `%v` of an array in freestanding arm32 `fmt`.
+  - The vita-check build needs `assets/images` (meme_cat.png, shia.png), which git ignores: without them it panics in
+    `load_texture` ("No such image"), as it did in a fresh worktree until they were copied in.
+  - Hardware builds, own names, titles and first printed lines: `build/hardware/render_check_lit.3dsx` (title
+    RenderCheckLit, first line "check: started (render check lit, G2 L7)"; it prints "28 probes ... failures 0" on its
+    bottom screen) and `build/hardware/vita_check_lit.vpk` (Vita Check Lit, MBOX00048, first log line "vita check lit (G2 L7):
+    started"; steps 8 to 10 of 14, ~42 s in, L / R move between steps). To check on hardware: the 3DS says failures 0;
+    the Vita's three steps look as each describes.
+
 ## What the same unit opens (after the G2 core)
 
 *Decided 2026-11-23:* normal and bump maps, environment mapping, procedural textures and fog **will be done**, after

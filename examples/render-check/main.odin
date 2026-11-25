@@ -8,7 +8,7 @@ package render_check
 // 3DS only (it reads the framebuffer through ctru): 3ds_build.bat examples\render-check, run
 // it in Azahar, and the results print on the bottom screen. Citra's 2024 nightly is no use
 // for this: it hangs on C3D_DrawElements and ignores the uniforms, where Azahar does
-// neither. The scene keeps drawing so it can be looked at as well as measured.
+// neither. Lit patches along the bottom check the lighting (G2 L7). The scene keeps drawing so it can be looked at as well as measured.
 
 import "core:fmt"
 import "core:math"
@@ -55,6 +55,20 @@ main :: proc() {
 		{"frame 3 of the .meta grid", 180, 210, {0, 255, 255}},
 		{"flip_x, top left shows top right", 234, 200, {0, 255, 0}},
 		{"flip_x, bottom right shows bottom left", 246, 220, {255, 255, 0}},
+
+		// Lighting (G2 L7). One sun from (1, 2, 1) shines on a patch facing the camera, so L.N =
+		// 1 / sqrt(6) = 0.408, with 0.2 ambient: a face tinted (0.4, 0.6, 1) comes out
+		// 0.4, 0.6, 1 x 0.608 x 255 = (62, 93, 155), worked by hand (the plan has (61, 93, 155)
+		// from the same sum rounded down). Per pixel and per vertex give the same on a flat face.
+		// The patches are 24 pixels square along the bottom, left to right: per pixel, per
+		// vertex, a cut-out, and lighting off
+		{"lit per pixel", 270, 208, {61, 93, 155}},
+		{"lit per vertex", 298, 208, {61, 93, 155}},
+		{"lit cut-out, opaque square", 320, 202, {155, 155, 155}},
+		{"lit cut-out, hole top right shows the background", 332, 202, {0, 0, 255}},
+		{"lit cut-out, hole bottom left", 320, 214, {0, 0, 255}},
+		{"lit cut-out, hole bottom right", 332, 214, {0, 0, 255}},
+		{"lighting off: texture times tint only", 354, 208, {102, 153, 255}},
 	}
 
 	// The same 12 x 20 picture the .t3x holds, made in memory, so both texture paths are
@@ -127,7 +141,27 @@ main :: proc() {
 		{"bottom screen: red rectangle on the left half", 80, 200, {255, 0, 0}},
 		{"bottom screen: cleared background on the right", 240, 200, {0, 0, 255}},
 	}
-	mb.print("check: started") // so the print log has a line to show by frame 30
+
+	// The lit patches: flat planes stood to face the camera, no highlight so the numbers are the diffuse
+	// alone. The cut-out's texture is 2 x 2 with only its top left pixel opaque, point filtered
+	patch_size:f32 = 1.2
+	patch_turn := mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2) // a plane faces up; this stands it facing +Z
+	patch_pixel := mb.create_plane_model(patch_size)
+	patch_vertex := mb.create_plane_model(patch_size)
+	patch_cutout := mb.create_plane_model(patch_size)
+	patch_pixel.parts[0].material = {shininess = 1, specular_strength = 0, lighting = .PER_PIXEL}
+	patch_vertex.parts[0].material = {shininess = 1, specular_strength = 0, lighting = .PER_VERTEX}
+	patch_cutout.parts[0].material = {shininess = 1, specular_strength = 0, lighting = .PER_PIXEL}
+	cutout_pixels:[4][4]u8 = {{255, 255, 255, 255}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}}
+	cutout_texture := mb.create_texture_from_pixels(&cutout_pixels, 2, 2, .POINT)
+	defer mb.destroy_texture(cutout_texture)
+	patch_cutout.parts[0].texture = cutout_texture
+	patch_cutout.parts[0].alpha_cutoff = 0.5
+	patch_cutout.parts[0].cull = .NONE
+	patch_y:f32 = -4.4 // screen y 208
+	mb.set_lights({mb.create_directional_light({-1, -2, -1})})
+
+	mb.print("check: started (render check lit, G2 L7)") // so the print log has a line to show by frame 30
 
 	frames := 0
 	for mb.is_running() {
@@ -152,6 +186,18 @@ main :: proc() {
 		mb.render_text(font, text, text_position)
 		mb.camera_end()
 
+		// Lighting is read when a camera ends, so the lit patches share one pass and the unlit one has its own
+		mb.set_lighting({enabled = true, ambient = {0.2, 0.2, 0.2, 1}})
+		mb.camera_start(camera)
+		mb.render_model(patch_pixel, mb.create_transform({3.5, patch_y, 0}, patch_turn), {0.4, 0.6, 1, 1})
+		mb.render_model(patch_vertex, mb.create_transform({4.9, patch_y, 0}, patch_turn), {0.4, 0.6, 1, 1})
+		mb.render_model(patch_cutout, mb.create_transform({6.3, patch_y, 0}, patch_turn), {1, 1, 1, 1})
+		mb.camera_end()
+		mb.set_lighting({enabled = false})
+		mb.camera_start(camera)
+		mb.render_model(patch_pixel, mb.create_transform({7.7, patch_y, 0}, patch_turn), {0.4, 0.6, 1, 1})
+		mb.camera_end()
+
 		// Red over the left half of the bottom screen's view, whatever its size in units
 		mb.bottom_screen_start()
 		bottom_min, bottom_max := mb.calculate_bottom_screen_visible_rectangle()
@@ -173,10 +219,11 @@ main :: proc() {
 				got := [3]u8{pixels[offset + 2], pixels[offset + 1], pixels[offset + 0]} // stored B, G, R
 				close := abs(int(got.r) - int(probe.expected.r)) <= 2 && abs(int(got.g) - int(probe.expected.g)) <= 2 && abs(int(got.b) - int(probe.expected.b)) <= 2
 				// Only failures get a line: the console holds about 30, and the passes would push
-				// the failures off the top
+				// the failures off the top. Values go in as plain ints: tprintf's %v of a [3]u8 panicked
+				// on the 3DS (G2 L7)
 				if !close {
 					failures += 1
-					mb.print(fmt.tprintf("check: FAIL %s at (%d, %d): got %v, expected %v", probe.name, probe.x, probe.y, got, probe.expected))
+					mb.print("check: FAIL", probe.name, "got", int(got.r), int(got.g), int(got.b), "expected", int(probe.expected.r), int(probe.expected.g), int(probe.expected.b))
 				}
 			}
 			for fact in facts {
@@ -220,7 +267,7 @@ main :: proc() {
 				close := abs(int(got.r) - int(probe.expected.r)) <= 2 && abs(int(got.g) - int(probe.expected.g)) <= 2 && abs(int(got.b) - int(probe.expected.b)) <= 2
 				if !close {
 					failures += 1
-					mb.print(fmt.tprintf("check: FAIL %s at (%d, %d): got %v, expected %v", probe.name, probe.x, probe.y, got, probe.expected))
+					mb.print("check: FAIL", probe.name, "got", int(got.r), int(got.g), int(got.b), "expected", int(probe.expected.r), int(probe.expected.g), int(probe.expected.b))
 				}
 			}
 			print_lit := 0

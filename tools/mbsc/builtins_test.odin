@@ -1,7 +1,6 @@
 package mbsc
 
 import "core:fmt"
-import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -183,9 +182,6 @@ every_builtin_is_written_as_hlsl_that_compiles :: proc(t: ^testing.T) {
 				fragment_only = builtin.fragment_only
 			}
 		}
-		if slice.contains(NOT_YET_ON_PC_AND_VITA[:], case_.name) {
-			continue // the 3DS has it first; its HLSL comes with the lighting plan's L3
-		}
 		for vertex in ([2]bool{false, true}) {
 			if vertex && fragment_only {
 				continue
@@ -208,9 +204,6 @@ every_builtin_is_written_as_cg_that_compiles :: proc(t: ^testing.T) {
 			if builtin.name == case_.name {
 				fragment_only = builtin.fragment_only
 			}
-		}
-		if slice.contains(NOT_YET_ON_PC_AND_VITA[:], case_.name) {
-			continue // the 3DS has it first; its Cg comes with the lighting plan's L3
 		}
 		for vertex in ([2]bool{false, true}) {
 			if vertex && fragment_only {

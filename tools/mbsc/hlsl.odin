@@ -59,6 +59,7 @@ Hlsl :: struct {
 	current:     string, // the procedure being written
 	calls:       map[string][dynamic]string, // the procedures each procedure calls
 	samples:     map[string]bool, // the procedures that call `sample`
+	lights:      bool, // a light built-in is called: the lights block and its functions are written
 }
 
 // Where a `sample` goes in the text of a procedure, until it's known which stage the procedure runs in: the
@@ -512,8 +513,41 @@ write_polynomial_helper :: proc(builder: ^strings.Builder, type: string, name: s
 	fmt.sbprintln(builder, "}")
 }
 
+// write_light_block declares what the light built-ins read and writes their functions (lighting.odin). The lights
+// block is b3, after the game's own at b2, so a shader that doesn't light keeps the registers it had.
+@(private = "file")
+write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
+	count := get_max_lights(.PC)
+	fmt.sbprintln(builder, "\ncbuffer mbs_lights_block : register(b3) {")
+	fmt.sbprintfln(builder, "    float4 %s;", LIGHT_UNIFORM_NAMES[0])
+	for name in LIGHT_UNIFORM_NAMES[1:] {
+		fmt.sbprintfln(builder, "    float4 %s[%d];", name, count)
+	}
+	fmt.sbprintln(builder, "};")
+
+	render_block := ""
+	for uniform in h.ir.uniforms {
+		if uniform.kind == .RENDER {
+			render_block = safe_name(uniform.name)
+		}
+	}
+	if render_block == "" {
+		// the specular reads the part's material from the render block, which this shader didn't declare
+		render_block = "render"
+		fmt.sbprintfln(builder, "\ncbuffer render_block : register(b%d) {{", RENDER_REGISTER)
+		for field in RENDER_FIELDS {
+			fmt.sbprintfln(builder, "    %s %s;", engine_type(field.type), block_field_name(render_block, field.name))
+		}
+		fmt.sbprintln(builder, "};")
+	}
+	write_light_functions(builder, render_block, count)
+}
+
 @(private = "file")
 write_helpers :: proc(h: ^Hlsl, builder: ^strings.Builder) {
+	if h.lights {
+		write_light_block(h, builder)
+	}
 	write_math_helpers(h, builder)
 	for struct_name in h.helpers {
 		for info in h.ir.structs {
@@ -841,6 +875,9 @@ builtin_call :: proc(h: ^Hlsl, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 		return "discard"
 	case "mod":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, "mod", node.args[0].type, node.args[1].type), list(h, node.args))
+	case "light_diffuse", "light_specular":
+		h.lights = true
+		return fmt.aprintf("mbs_%s(%s)", node.name, list(h, node.args))
 	case "sin_approx", "cos_approx", "normal_quaternion":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, nil), list(h, node.args))
 	case "dot3_signed":

@@ -22,6 +22,8 @@ cbuffer render_block : register(b1) {
     float4 render_tint;
     float4 render_uv_rectangle;
     float render_alpha_cutoff;
+    float render_shininess;
+    float render_specular_strength;
 };
 
 Texture2D tex : register(t0);

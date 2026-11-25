@@ -32,7 +32,9 @@ Render_Constants :: struct {
 	tint:[4]f32,
 	uv_rectangle:[4]f32, // matched to mesh.mbs by name: renaming it means regenerating every shader, the Vita .gxp included
 	alpha_cutoff:f32,
-	_pad:[3]f32
+	shininess:f32, // the part's material, read by the light built-ins (G2 L3); zero until lighting fills it (L6)
+	specular_strength:f32,
+	_pad:[1]f32
 }
 
 // D3D constant buffers must be a multiple of 16 bytes

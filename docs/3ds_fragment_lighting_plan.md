@@ -127,9 +127,32 @@ it. Done when: golden-plan tests in `tev_test.odin`, and the runtime reads it.
     `mesh.3ds.tev` is now `mbs-tev 2` with no lighting (it doesn't light). The 3DS runtime only maps the two sources
     to citro3d's; applying the `lighting` section is L4.
 
-**L3. The built-ins on PC and Vita.** `light_diffuse` / `light_specular` written as HLSL and Cg over the `.LIGHTS` block. Done when: the
+**L3. The built-ins on PC and Vita.** `light_diffuse` / `light_specular` written as HLSL and Cg over the lights block. Done when: the
 IR interpreter, the HLSL (pixel tests on the D3D software device) and a model of the 3DS's table lookup agree within a
 stated tolerance on random normals, views and lights.
+- **DONE 2026-11-25 (tests only; nothing lit on screen yet, the runtimes fill the blocks in L4 and L6).** Decided
+  with the user first: material per model part (specular strength and shininess, a 3DS D0 table cached per
+  distinct shininess in L4), **separate diffuse and specular colours per light**, and unused slots left at zero
+  colour with no count.
+  - The lights block: `lights_ambient`, then `lights_direction`, `lights_diffuse` and `lights_specular`, each
+    `[4]f32` per slot, 8 slots (`get_max_lights` in mbsc's `lighting.odin`, one answer per target). Directions are
+    towards the light, in eye space. HLSL `cbuffer` at b3, after the game's b2; Cg uniforms found by those names.
+    A shader doesn't declare it yet: calling a light built-in brings it in. Declaring it in a shader of one's own
+    (decision 4) comes with per-vertex lighting (L5), the first code that reads it directly.
+  - The `render` block gains `shininess` and `specular_strength` (in the row `alpha_cutoff` starts, so still 112
+    bytes); `Render_Constants` on PC has them, zero until L6 fills them. When a lit shader doesn't declare
+    `render`, mbsc declares it for the specular's material.
+  - The formula is in `lighting.odin`'s comment: ambient + diffuse * max(L.N, 0); specular * (N.H)^shininess
+    only where L.N > 0 (the unit's clamp highlights), times the strength; each clamped, alpha 1.
+  - `lighting_model_test.odin` holds the formula in f64 and a model of the 3DS unit (8-bit colours and results,
+    LightLut_Phong's 12-bit entries and 11-bit steps read between entries by |N.H|). On 3,200 random visible pixels
+    with 1 to 8 lights the two agree within (lights + 1)/255 + 1/256; the worst seen was 0.0110 against 0.0118
+    allowed (one light). `lighting_pixels_windows_test.odin` runs the generated HLSL on the D3D software device: 3e-7
+    from the formula. The built-in tests compile both built-ins with the HLSL compiler and psp2cgc.
+  - The IR interpreter has no part: the built-ins are fragment only, so there is no PICA program to check against
+    it, and the f64 formula is the definition instead.
+  - Found on the way: a pixel seen from behind (only drawn with culling off) gets a highlight on the 3DS and not
+    on PC, because the unit indexes D0 by |N.H|. L4 decides whether two-sided drawing needs a signed table.
 
 **L4. The 3DS runtime.** `render_3ds` fills `C3D_LightEnv` from `set_lighting` and `C3D_Light`s from `set_lights`
 (directions moved into eye space per camera), builds each table once, and binds the environment for lit draws and

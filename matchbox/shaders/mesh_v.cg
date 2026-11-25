@@ -21,6 +21,8 @@ uniform float4x4 render_model;
 uniform float4 render_tint;
 uniform float4 render_uv_rectangle;
 uniform float render_alpha_cutoff;
+uniform float render_shininess;
+uniform float render_specular_strength;
 
 uniform sampler2D tex : TEXUNIT0;
 

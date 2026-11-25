@@ -11,5 +11,7 @@ uniform render_model matrix[4,4]f32 0
 uniform render_tint [4]f32 0
 uniform render_uv_rectangle [4]f32 0
 uniform render_alpha_cutoff f32 0
+uniform render_shininess f32 0
+uniform render_specular_strength f32 0
 
 texture tex 0

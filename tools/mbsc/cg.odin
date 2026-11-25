@@ -58,6 +58,7 @@ Cg :: struct {
 	current:     string, // the procedure being written
 	calls:       map[string][dynamic]string, // the procedures each procedure calls
 	vertex:      bool, // writing the text for the vertex program (true) or the fragment program (false)
+	lights:      bool, // a light built-in is called: the lights uniforms and their functions are written
 }
 
 // The two programs of a shader.
@@ -572,8 +573,38 @@ write_polynomial_helper :: proc(builder: ^strings.Builder, type: string, name: s
 	fmt.sbprintln(builder, "}")
 }
 
+// write_light_block declares what the light built-ins read, as uniforms the runtime finds by name, and writes their
+// functions (lighting.odin).
+@(private = "file")
+write_light_block :: proc(h: ^Cg, builder: ^strings.Builder) {
+	count := get_max_lights(.VITA)
+	fmt.sbprintln(builder, "\n// the engine's lights")
+	fmt.sbprintfln(builder, "uniform float4 %s;", LIGHT_UNIFORM_NAMES[0])
+	for name in LIGHT_UNIFORM_NAMES[1:] {
+		fmt.sbprintfln(builder, "uniform float4 %s[%d];", name, count)
+	}
+
+	render_block := ""
+	for uniform in h.ir.uniforms {
+		if uniform.kind == .RENDER {
+			render_block = safe_name(uniform.name)
+		}
+	}
+	if render_block == "" {
+		// the specular reads the part's material from the render block, which this shader didn't declare
+		render_block = "render"
+		for field in RENDER_FIELDS {
+			fmt.sbprintfln(builder, "uniform %s %s;", engine_type(field.type), block_field_name(render_block, field.name))
+		}
+	}
+	write_light_functions(builder, render_block, count)
+}
+
 @(private = "file")
 write_helpers :: proc(h: ^Cg, builder: ^strings.Builder) {
+	if h.lights {
+		write_light_block(h, builder)
+	}
 	write_math_helpers(h, builder)
 	for struct_name in h.helpers {
 		for info in h.ir.structs {
@@ -916,6 +947,9 @@ builtin_call :: proc(h: ^Cg, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 		return "discard"
 	case "mod", "round":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, node.args[1].type if len(node.args) > 1 else nil), list(h, node.args))
+	case "light_diffuse", "light_specular":
+		h.lights = true
+		return fmt.aprintf("mbs_%s(%s)", node.name, list(h, node.args))
 	case "sin_approx", "cos_approx", "normal_quaternion":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, nil), list(h, node.args))
 	case "dot3_signed":

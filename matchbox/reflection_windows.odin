@@ -206,6 +206,8 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 			case "tint": expected = int(offset_of(Render_Constants, tint))
 			case "uv_rectangle": expected = int(offset_of(Render_Constants, uv_rectangle))
 			case "alpha_cutoff": expected = int(offset_of(Render_Constants, alpha_cutoff))
+			case "shininess": expected = int(offset_of(Render_Constants, shininess))
+			case "specular_strength": expected = int(offset_of(Render_Constants, specular_strength))
 			}
 		case .GAME:
 			continue

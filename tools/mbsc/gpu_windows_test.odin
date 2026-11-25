@@ -7,7 +7,7 @@ import "vendor:directx/d3d_compiler"
 
 // A small renderer for the tests: it draws one mesh with a pair of HLSL entry points through Direct3D 11's software
 // device (WARP), so it needs no GPU, and gives back the pixels as floats. It follows the engine's pipeline:
-// the same input layout, constant buffers at b0 (frame), b1 (render) and b2 (the game's uniforms), a texture at t0
+// the same input layout, constant buffers at b0 (frame), b1 (render), b2 (the game's uniforms) and b3 (the lights), a texture at t0
 // and a sampler at s0. Blending and depth are off, so the result is exactly what the pixel shader returns.
 
 // What the renderer puts in a pixel the shader never wrote (a `discard`, or outside every triangle). It can't be a
@@ -32,6 +32,7 @@ Gpu_Job :: struct {
 	frame:        []f32, // the contents of the b0 buffer
 	draw:         []f32, // b1
 	game:         []f32, // b2
+	lights:       []f32, // b3
 	texture:      Maybe(Gpu_Texture),
 }
 
@@ -149,8 +150,8 @@ gpu_render :: proc(job: Gpu_Job) -> (pixels: []f32, message: string) {
 	defer vertex_buffer->Release()
 	defer index_buffer->Release()
 
-	constants: [3]^d3d11.IBuffer
-	contents := [3][]f32{padded_constants(job.frame), padded_constants(job.draw), padded_constants(job.game)}
+	constants: [4]^d3d11.IBuffer
+	contents := [4][]f32{padded_constants(job.frame), padded_constants(job.draw), padded_constants(job.game), padded_constants(job.lights)}
 	for values, slot in contents {
 		constants[slot] = make_buffer(device, raw_data(values), u32(len(values) * size_of(f32)), {.CONSTANT_BUFFER})
 		if constants[slot] == nil {
@@ -258,8 +259,8 @@ gpu_render :: proc(job: Gpu_Job) -> (pixels: []f32, message: string) {
 	context_->IASetIndexBuffer(index_buffer, .R16_UINT, 0)
 	context_->VSSetShader(vertex_shader, nil, 0)
 	context_->PSSetShader(pixel_shader, nil, 0)
-	context_->VSSetConstantBuffers(0, 3, &constants[0])
-	context_->PSSetConstantBuffers(0, 3, &constants[0])
+	context_->VSSetConstantBuffers(0, 4, &constants[0])
+	context_->PSSetConstantBuffers(0, 4, &constants[0])
 	if texture_view != nil {
 		context_->PSSetShaderResources(0, 1, &texture_view)
 		context_->PSSetSamplers(0, 1, &sampler)

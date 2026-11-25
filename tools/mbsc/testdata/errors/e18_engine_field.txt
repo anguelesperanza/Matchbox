@@ -4,7 +4,7 @@ error[MBS-E18]: the engine's `render` block has no field `tnt`
 16 |     tnt:          [4]f32,
    |     ^^^ not a field of the engine's block
    |
-   = note: the engine's `render` block has: model, tint, uv_rectangle, alpha_cutoff
+   = note: the engine's `render` block has: model, tint, uv_rectangle, alpha_cutoff, shininess, specular_strength
    = help: did you mean `tint`?
    = more: docs/shader_errors.md#mbs-e18
 

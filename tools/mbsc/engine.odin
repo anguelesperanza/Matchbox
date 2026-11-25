@@ -13,8 +13,17 @@ Engine_Field :: struct {
 @(rodata)
 FRAME_FIELDS := [?]Engine_Field{{"view_projection", "matrix[4,4]f32"}, {"time", "f32"}}
 
+// `shininess` and `specular_strength` are the part's material, which the light built-ins read (G2 L3). They sit in
+// the row `alpha_cutoff` already starts, so the block stays 112 bytes.
 @(rodata)
-RENDER_FIELDS := [?]Engine_Field{{"model", "matrix[4,4]f32"}, {"tint", "[4]f32"}, {"uv_rectangle", "[4]f32"}, {"alpha_cutoff", "f32"}}
+RENDER_FIELDS := [?]Engine_Field {
+	{"model", "matrix[4,4]f32"},
+	{"tint", "[4]f32"},
+	{"uv_rectangle", "[4]f32"},
+	{"alpha_cutoff", "f32"},
+	{"shininess", "f32"},
+	{"specular_strength", "f32"},
+}
 
 // The vertex attributes the engine's mesh format has, or is getting: `normal` arrives with G2 lighting
 // (docs/3ds_fragment_lighting_plan.md); a shader may read it before the engine's Vertex carries it.

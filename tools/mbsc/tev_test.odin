@@ -137,8 +137,8 @@ lit_shader :: proc(body: string) -> string {
 }
 
 @(private = "file")
-lit_plan_of :: proc(body: string, target := Target.PICA200) -> (text: string, problems: []string) {
-	ir, parsed, message := build_ir_for(lit_shader(body), target)
+lit_plan_of :: proc(body: string) -> (text: string, problems: []string) {
+	ir, parsed, message := build_ir_for(lit_shader(body), .PICA200)
 	defer destroy_parsed(parsed)
 	if message != "" {
 		return fmt.tprintf("does not check: %s", message), nil
@@ -164,14 +164,10 @@ the_lighting_results_are_sources_and_the_plan_says_how_the_unit_is_set :: proc(t
 }
 
 @(test)
-lighting_reads_its_varyings_unchanged_and_is_3ds_only_until_l3 :: proc(t: ^testing.T) {
+lighting_reads_its_varyings_unchanged :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	changed, _ := lit_plan_of("q := v.quat * 0.5\n\treturn light_diffuse(q, v.view)")
 	testing.expectf(t, strings.contains(changed, "MBS-E20"), "got:\n%s", changed)
 	swapped, _ := lit_plan_of("return light_specular(v.quat, -v.view)")
 	testing.expectf(t, strings.contains(swapped, "MBS-E20"), "got:\n%s", swapped)
-	for target in ([2]Target{.PC, .VITA}) {
-		text, _ := lit_plan_of("return light_diffuse(v.quat, v.view)", target)
-		testing.expectf(t, strings.contains(text, "isn't written for PC and the Vita yet"), "%v got:\n%s", target, text)
-	}
 }

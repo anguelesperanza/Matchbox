@@ -125,7 +125,7 @@ engine_blocks_are_written_in_the_engines_full_layout :: proc(t: ^testing.T) {
 	text, _ := generate(t, shader("\toutput.position = frame.view_projection * render.model * [4]f32{input.position.x, 0.0, 0.0, 1.0}"))
 	expect_compiles(t, text)
 	expect_has(t, text, "cbuffer frame_block : register(b0) {\n    float4x4 frame_view_projection;\n    float frame_time;\n};")
-	expect_has(t, text, "cbuffer render_block : register(b1) {\n    float4x4 render_model;\n    float4 render_tint;\n    float4 render_uv_rectangle;\n    float render_alpha_cutoff;\n};")
+	expect_has(t, text, "cbuffer render_block : register(b1) {\n    float4x4 render_model;\n    float4 render_tint;\n    float4 render_uv_rectangle;\n    float render_alpha_cutoff;\n    float render_shininess;\n    float render_specular_strength;\n};")
 }
 
 @(test)

@@ -147,6 +147,8 @@ The engine fills these. A shader declares them with exactly this shape so every 
 	tint:         [4]f32,
 	uv_rectangle: [4]f32, // sub-rectangle of the texture: left, top, right, bottom
 	alpha_cutoff: f32,
+	shininess:         f32, // the part's material, which light_specular reads (G2 L3)
+	specular_strength: f32,
 }
 ```
 
@@ -404,8 +406,8 @@ is already outside the domain (`MBS-W1`, planned). A shader should keep these ou
 | `refract(i, n, eta)` | refraction, `[3]f32` only | =16 |
 | `dot3_signed(a, b)` | `4 * dot(a.rgb - 0.5, b.rgb - 0.5)`, returns `f32` | fragment only: DOT3_RGB or DOT3_RGBA (part 3) |
 | `normal_quaternion(n)` | the rotation taking +Z to the unit normal `n`, `[3]f32` to `[4]f32` (vector part, scalar): `normalize((-n.y, n.x, 0, max(1 + n.z, 0.00001)))`. What an `out:"normalquat"` holds (2026-11-24, G2 L1) | =9, the sequence the lighting plan's L0 ran on hardware |
-| `light_diffuse(quat, view)` | the lit colour: ambient plus each light's diffuse, `[4]f32`. `quat` is the `normalquat` varying, `view` the `view` varying, both unchanged (MBS-E20). Fragment only (2026-11-24, G2 L2) | the fragment lighting unit, the TexEnv source `FRAGMENT_PRIMARY`; PC and Vita: MBS-E1 until L3 |
-| `light_specular(quat, view)` | the highlight, `[4]f32`, same arguments. Fragment only | the unit's `FRAGMENT_SECONDARY`; PC and Vita: MBS-E1 until L3 |
+| `light_diffuse(quat, view)` | the lit colour: ambient plus each light's diffuse, `[4]f32`. `quat` is the `normalquat` varying, `view` the `view` varying, both unchanged (MBS-E20). Fragment only (2026-11-24, G2 L2). Reads the engine's lights (8 slots: directions towards each light in eye space, diffuse and specular colours, and the ambient), which a call brings in without a declaration (2026-11-25, L3) | the fragment lighting unit, the TexEnv source `FRAGMENT_PRIMARY`; PC and Vita: a function following the unit (mbsc's `lighting.odin`) |
+| `light_specular(quat, view)` | the highlight, `[4]f32`, same arguments. Fragment only. Only where the light is in front of the surface; `(N.H)^render.shininess * render.specular_strength` | the unit's `FRAGMENT_SECONDARY`; PC and Vita: the same function |
 
 ### Matrices
 

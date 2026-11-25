@@ -14,6 +14,8 @@ value render model matrix[4,4]f32 0 64 0 0
 value render tint [4]f32 64 16 0 0
 value render uv_rectangle [4]f32 80 16 0 0
 value render alpha_cutoff f32 96 4 0 0
+value render shininess f32 100 4 0 0
+value render specular_strength f32 104 4 0 0
 
 texture tex 0
 sampler 0

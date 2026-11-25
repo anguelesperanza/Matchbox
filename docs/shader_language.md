@@ -404,6 +404,8 @@ is already outside the domain (`MBS-W1`, planned). A shader should keep these ou
 | `refract(i, n, eta)` | refraction, `[3]f32` only | =16 |
 | `dot3_signed(a, b)` | `4 * dot(a.rgb - 0.5, b.rgb - 0.5)`, returns `f32` | fragment only: DOT3_RGB or DOT3_RGBA (part 3) |
 | `normal_quaternion(n)` | the rotation taking +Z to the unit normal `n`, `[3]f32` to `[4]f32` (vector part, scalar): `normalize((-n.y, n.x, 0, max(1 + n.z, 0.00001)))`. What an `out:"normalquat"` holds (2026-11-24, G2 L1) | =9, the sequence the lighting plan's L0 ran on hardware |
+| `light_diffuse(quat, view)` | the lit colour: ambient plus each light's diffuse, `[4]f32`. `quat` is the `normalquat` varying, `view` the `view` varying, both unchanged (MBS-E20). Fragment only (2026-11-24, G2 L2) | the fragment lighting unit, the TexEnv source `FRAGMENT_PRIMARY`; PC and Vita: MBS-E1 until L3 |
+| `light_specular(quat, view)` | the highlight, `[4]f32`, same arguments. Fragment only | the unit's `FRAGMENT_SECONDARY`; PC and Vita: MBS-E1 until L3 |
 
 ### Matrices
 
@@ -711,7 +713,7 @@ The 8-bit difference stays a documented limit in both options.
 | `MBS-E3` | the shader needs more than 6 stages |
 | `MBS-E12` | a `discard()` that isn't an alpha test |
 | `MBS-E19` | more than 3 textures |
-| `MBS-E20` | a texture coordinate that isn't a plain `texcoord` varying |
+| `MBS-E20` | a texture coordinate that isn't a plain `texcoord` varying, or a light built-in's argument that isn't the plain `normalquat` / `view` varying |
 | `MBS-E21` | two different constants needed in one stage |
 
 The entries, including the revised `MBS-E2` and `MBS-E3`, are drafted in the scratchpad `shader_errors.md` and go

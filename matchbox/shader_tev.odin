@@ -29,6 +29,8 @@ Tev_Source :: enum {
 	TEXTURE3,
 	PREVIOUS, // the previous stage's result
 	CONSTANT, // the stage's constant colour
+	FRAGMENT_PRIMARY, // the fragment lighting unit's ambient and diffuse (light_diffuse in the shader)
+	FRAGMENT_SECONDARY, // the fragment lighting unit's specular (light_specular)
 }
 
 Tev_Function :: enum {
@@ -76,11 +78,26 @@ Tev_Alpha_Test :: struct {
 	uniform:string, // the f32 uniform the reference comes from, e.g. render_alpha_cutoff
 }
 
+/*
+	How the fragment lighting unit is set for this shader (G2 L2, docs/3ds_fragment_lighting_plan.md). All false and
+	empty for a shader that doesn't light, whose draws leave the unit off
+*/
+Tev_Lighting :: struct {
+	diffuse:bool, // FRAGMENT_PRIMARY is read
+	specular:bool, // FRAGMENT_SECONDARY is read
+	table:string, // the specular table, "D0"
+	table_input:string, // what indexes it, "NH" (N.H)
+	clamp_highlights:bool,
+	two_sided:bool, // diffuse on back faces too
+	fresnel:string, // "none"
+}
+
 Tev_Plan :: struct {
 	stages:[TEV_STAGE_COUNT]Tev_Stage,
 	stage_count:int,
 	alpha_test:Tev_Alpha_Test,
 	texture_count:int, // how many `texture` lines there were; each is unit n reading texcoord n
+	lighting:Tev_Lighting,
 }
 
 /*
@@ -102,7 +119,8 @@ parse_tev_plan :: proc(text:string) -> (plan:Tev_Plan, ok:bool, message:string) 
 
 		switch words[0] {
 		case "mbs-tev":
-			if len(words) != 2 || words[1] != "1" do return plan, false, tev_error(line_number, "only version 1 of the .tev format is known")
+			// 2 since G2 L2 (the lighting lines and sources); 1 is the same without them, so it reads as it is
+			if len(words) != 2 || (words[1] != "1" && words[1] != "2") do return plan, false, tev_error(line_number, "only versions 1 and 2 of the .tev format are known")
 			saw_header = true
 
 		case "target":
@@ -146,12 +164,38 @@ parse_tev_plan :: proc(text:string) -> (plan:Tev_Plan, ok:bool, message:string) 
 				return plan, false, tev_error(line_number, "expected: alphatest <function> <reference | uniform name>")
 			}
 
+		case "lighting":
+			// lighting [diffuse] [specular]
+			if len(words) < 2 do return plan, false, tev_error(line_number, "expected: lighting [diffuse] [specular]")
+			for word in words[1:] {
+				switch word {
+				case "diffuse": plan.lighting.diffuse = true
+				case "specular": plan.lighting.specular = true
+				case: return plan, false, tev_error(line_number, "a lighting result is `diffuse` or `specular`")
+				}
+			}
+
+		case "lighting_table":
+			// lighting_table <table> <input>: only what mbsc writes, D0 indexed by N.H, is applied yet
+			if len(words) != 3 || words[1] != "D0" || words[2] != "NH" do return plan, false, tev_error(line_number, "only `lighting_table D0 NH` is known")
+			plan.lighting.table = "D0" // a literal, not a slice of the file text the caller may free
+			plan.lighting.table_input = "NH"
+
+		case "lighting_clamp_highlights", "lighting_two_sided":
+			if len(words) != 2 || (words[1] != "true" && words[1] != "false") do return plan, false, tev_error(line_number, "expected true or false")
+			if words[0] == "lighting_clamp_highlights" do plan.lighting.clamp_highlights = words[1] == "true"
+			else do plan.lighting.two_sided = words[1] == "true"
+
+		case "lighting_fresnel":
+			if len(words) != 2 || words[1] != "none" do return plan, false, tev_error(line_number, "only `lighting_fresnel none` is known")
+			plan.lighting.fresnel = "none"
+
 		case:
 			return plan, false, tev_error(line_number, "unknown line")
 		}
 	}
 
-	if !saw_header do return plan, false, "the .tev file has no `mbs-tev 1` line"
+	if !saw_header do return plan, false, "the .tev file has no `mbs-tev` line"
 	if plan.stage_count == 0 do return plan, false, "the .tev file has no stages"
 	return plan, true, ""
 }
@@ -209,6 +253,8 @@ parse_tev_operand :: proc(word:string) -> (operand:Tev_Operand, ok:bool) {
 	case "TEXTURE3":      operand.source = .TEXTURE3
 	case "PREVIOUS":      operand.source = .PREVIOUS
 	case "CONSTANT":      operand.source = .CONSTANT
+	case "FRAGMENT_PRIMARY":   operand.source = .FRAGMENT_PRIMARY
+	case "FRAGMENT_SECONDARY": operand.source = .FRAGMENT_SECONDARY
 	case: return operand, false
 	}
 	return operand, true

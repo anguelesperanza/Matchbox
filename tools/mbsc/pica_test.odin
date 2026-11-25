@@ -76,7 +76,7 @@ expect_assembles :: proc(t: ^testing.T, source: string, what: string) {
 NOT_ON_THE_3DS := [?]string {
 	"sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "ldexp", "is_nan", "is_inf",
 	"transpose", "determinant", "sample", "sample_lod", "sample_bias", "sample_grad", "ddx", "ddy", "fwidth", "discard",
-	"dot3_signed",
+	"dot3_signed", "light_diffuse", "light_specular", // fragment only: the vertex stage must refuse them
 }
 
 @(private = "file")

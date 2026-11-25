@@ -61,6 +61,28 @@ check_target :: proc(module: ^Module) {
 		check_3ds_vertex(module, vertex)
 		check_3ds_fragment(module, fragment)
 	}
+	if module.target != .PICA200 do check_not_yet_written(module)
+}
+
+// A built-in the 3DS has and this target doesn't yet (NOT_YET_ON_PC_AND_VITA)
+@(private = "file")
+check_not_yet_written :: proc(module: ^Module) {
+	reported := make(map[rawptr]bool, context.temp_allocator)
+	for edge in module.edges {
+		if edge.builtin == false || reported[edge.node] || slice.contains(NOT_YET_ON_PC_AND_VITA[:], edge.callee) == false {
+			continue
+		}
+		reported[edge.node] = true
+		error(
+			module,
+			"MBS-E1",
+			fmt.aprintf("`%s` isn't written for PC and the Vita yet", edge.callee),
+			edge.node,
+			"3DS only, for now",
+			"the lighting results are written for the 3DS's fragment lighting unit first; their HLSL and Cg come with step L3 of docs/3ds_fragment_lighting_plan.md",
+			"build for the 3DS, or keep the lighting in a `when TARGET == .PICA200` branch until L3",
+		)
+	}
 }
 
 // check_declarations is for what a declaration can't do on any target. Call it once the declarations are read.
@@ -369,7 +391,12 @@ check_uniform_registers :: proc(module: ^Module, vertex: map[string]bool) {
 
 // The built-ins a TexEnv stage has a mode for. The shapes they may take are the fragment plan's business (S6).
 @(rodata, private = "file")
-THREE_DS_FRAGMENT_BUILTINS := [?]string{"sample", "lerp", "saturate", "dot3_signed", "discard"}
+THREE_DS_FRAGMENT_BUILTINS := [?]string{"sample", "lerp", "saturate", "dot3_signed", "discard", "light_diffuse", "light_specular"}
+
+// Built-ins the 3DS has before PC and the Vita: the lighting results are the 3DS's fragment lighting unit, and their
+// HLSL and Cg come with the lighting plan's L3. Until then a PC or Vita build says so rather than drawing unlit
+@(rodata)
+NOT_YET_ON_PC_AND_VITA := [?]string{"light_diffuse", "light_specular"}
 
 @(private = "file")
 check_3ds_fragment :: proc(module: ^Module, fragment: map[string]bool) {
@@ -400,9 +427,36 @@ check_3ds_fragment :: proc(module: ^Module, fragment: map[string]bool) {
 		if edge.callee == "sample" {
 			check_texture_coordinate(module, edge, &sampled, &reported)
 		}
+		if edge.callee == "light_diffuse" || edge.callee == "light_specular" {
+			check_lighting_arguments(module, edge)
+		}
 	}
 
 	check_discards(module, fragment)
+}
+
+// The 3DS's lighting unit reads the `normalquat` and `view` the vertex stage wrote, as they arrive: the call names
+// them so the shader says what it lights, and anything else would be a value the hardware never sees
+@(private = "file")
+check_lighting_arguments :: proc(module: ^Module, edge: Call_Edge) {
+	call, is_call := edge.node.derived.(^ast.Call_Expr)
+	if is_call == false || len(call.args) != 2 || edge.caller != module.fragment_main.name {
+		return
+	}
+	wanted := [2]string{"normalquat", "view"}
+	for argument, index in call.args {
+		if plain_varying(module, argument, wanted[index]) == false {
+			error(
+				module,
+				"MBS-E20",
+				fmt.aprintf("this argument of `%s` is not the plain `%s` varying", edge.callee, wanted[index]),
+				argument,
+				fmt.aprintf("not `v.<field tagged %s>`", wanted[index]),
+				"the 3DS's lighting unit reads the normal quaternion and the view vector the vertex stage wrote to `normalquat` and `view`, unchanged",
+				"write them in `vertex_main` (`normal_quaternion(normal)` and the eye-space position negated) and pass the fields as they are",
+			)
+		}
+	}
 }
 
 // A sample reads a texture of its own, and its coordinate comes straight from a `texcoord` output of the vertex stage.
@@ -445,6 +499,29 @@ check_texture_coordinate :: proc(module: ^Module, edge: Call_Edge, sampled: ^map
 			"do the arithmetic on the coordinate in `vertex_main` and pass the result as a `texcoord`",
 		)
 	}
+}
+
+// plain_varying is true for `v.field`, where `v` is the fragment stage's input and `field` is tagged `out:"<tag>"`.
+@(private = "file")
+plain_varying :: proc(module: ^Module, expr: ^ast.Expr, tag: string) -> bool {
+	selector, is_selector := expr.derived.(^ast.Selector_Expr)
+	if is_selector == false || selector.field == nil {
+		return false
+	}
+	base, is_ident := selector.expr.derived.(^ast.Ident)
+	if is_ident == false {
+		return false
+	}
+	symbol, found := module.symbols[base]
+	if found == false || symbol.kind != .PARAM || module.varying == nil {
+		return false
+	}
+	for field in module.varying.fields {
+		if field.name == selector.field.name {
+			return field.out == tag
+		}
+	}
+	return false
 }
 
 // plain_texcoord is true for `v.uv`, where `v` is the fragment stage's input and `uv` is tagged `out:"texcoord0"` to `"texcoord2"`.

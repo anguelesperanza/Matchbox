@@ -24,6 +24,7 @@ Builtin_Rule :: enum {
 	REFRACT, // ([3]f32, [3]f32, f32) -> [3]f32
 	DOT3_SIGNED, // (V, V) -> f32 for [3]f32 or [4]f32
 	NORMAL_QUATERNION, // ([3]f32) -> [4]f32
+	LIGHTING, // (quat: [4]f32, view: [3]f32) -> [4]f32
 	TRANSPOSE, // (matrix[R, C]f32) -> matrix[C, R]f32
 	DETERMINANT, // (matrix[N, N]f32) -> f32
 	SAMPLE, // (Texture2D, [2]f32) -> [4]f32
@@ -105,6 +106,13 @@ BUILTINS := [?]Builtin {
 	// vertex stage's `out:"normalquat"`. `n` is expected normalised. The formula was proved on a New 3DS LL in the
 	// lighting plan's L0 (docs/shader_pica.md, "Fragment lighting (L0)"); every target writes the same one
 	{"normal_quaternion", .NORMAL_QUATERNION, "normal_quaternion(n: [3]f32) -> [4]f32", false},
+	// The scene's lights falling on the surface whose normal `quat` holds (an `out:"normalquat"`) seen from `view`
+	// (an `out:"view"`): the colour the lights give it, ambient and diffuse, and the highlight they leave, specular.
+	// On the 3DS these are the fragment lighting unit's two results, FRAGMENT_PRIMARY and FRAGMENT_SECONDARY, and
+	// the arguments must be those two varyings unchanged; PC and the Vita come in the lighting plan's L3
+	// (docs/3ds_fragment_lighting_plan.md). Two built-ins because the language returns one value
+	{"light_diffuse", .LIGHTING, "light_diffuse(quat: [4]f32, view: [3]f32) -> [4]f32", true},
+	{"light_specular", .LIGHTING, "light_specular(quat: [4]f32, view: [3]f32) -> [4]f32", true},
 
 	// matrices
 	{"transpose", .TRANSPOSE, "transpose(m: matrix[R, C]f32) -> matrix[C, R]f32", false},
@@ -222,6 +230,10 @@ builtin_result :: proc(rule: Builtin_Rule, args: []^Type) -> (result: ^Type, ok:
 		}
 	case .NORMAL_QUATERNION:
 		if count == 1 && is_float_vector(args[0]) && args[0].count == 3 {
+			return make_vector(&TYPE_F32, 4), true
+		}
+	case .LIGHTING:
+		if count == 2 && is_float_vector(args[0]) && args[0].count == 4 && is_float_vector(args[1]) && args[1].count == 3 {
 			return make_vector(&TYPE_F32, 4), true
 		}
 	case .REFLECT:

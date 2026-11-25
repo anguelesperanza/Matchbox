@@ -205,6 +205,8 @@ when !VITA {
 			.TEXTURE3 = .TEXTURE3,
 			.PREVIOUS = .PREVIOUS,
 			.CONSTANT = .CONSTANT,
+			.FRAGMENT_PRIMARY = .FRAGMENT_PRIMARY, // the lighting unit's diffuse + ambient (light_diffuse)
+			.FRAGMENT_SECONDARY = .FRAGMENT_SECONDARY, // its specular (light_specular)
 		}
 		functions := [Tev_Function]c3d.GPU_COMBINEFUNC {
 			.REPLACE = .REPLACE,

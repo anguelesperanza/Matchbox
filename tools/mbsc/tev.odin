@@ -28,6 +28,8 @@ Tev_Source :: enum {
 	TEXTURE2,
 	CONSTANT,
 	PREVIOUS,
+	FRAGMENT_PRIMARY, // the lighting unit's ambient and diffuse: light_diffuse
+	FRAGMENT_SECONDARY, // the lighting unit's specular: light_specular
 }
 
 Tev_Function :: enum {
@@ -66,10 +68,27 @@ Tev_Alpha_Test :: struct {
 	value:    f32,
 }
 
+/*
+	What the 3DS's fragment lighting unit is set to, when a shader lights (light_diffuse, light_specular). The settings
+	the shader can't say yet are written with their values, so the runtime reads one place: the specular table is D0
+	indexed by N.H (Blinn-Phong, its curve from the material's shininess at run time), highlights are clamped, back
+	faces get no diffuse, and there is no Fresnel term
+*/
+Tev_Lighting :: struct {
+	diffuse:          bool, // light_diffuse is read: FRAGMENT_PRIMARY
+	specular:         bool, // light_specular is read: FRAGMENT_SECONDARY
+	table:            string, // the specular table, "D0"
+	table_input:      string, // what indexes it, "NH"
+	clamp_highlights: bool,
+	two_sided:        bool,
+	fresnel:          string, // "none"
+}
+
 Tev_Plan :: struct {
 	stages:   []Tev_Stage,
 	textures: []Tev_Texture,
 	alpha:    Tev_Alpha_Test,
+	lighting: Tev_Lighting,
 }
 
 @(private = "file")
@@ -83,6 +102,8 @@ Node_Kind :: enum {
 	SUB,
 	LERP,
 	ONE_MINUS,
+	LIGHT_DIFFUSE,
+	LIGHT_SPECULAR,
 }
 
 @(private = "file")
@@ -104,6 +125,7 @@ Tev :: struct {
 	stages:   [dynamic]Tev_Stage,
 	textures: [dynamic]Tev_Texture,
 	varying:  ^IR_Var,
+	lighting: Tev_Lighting,
 }
 
 @(private = "file")
@@ -169,6 +191,13 @@ generate_tev :: proc(ir: ^IR_Module, allocator := context.allocator) -> (plan: T
 	}
 	plan.alpha = alpha
 	plan.alpha.uniform = strings.clone(alpha.uniform, allocator)
+	plan.lighting = t.lighting
+	if t.lighting.diffuse || t.lighting.specular {
+		plan.lighting.table = "D0"
+		plan.lighting.table_input = "NH"
+		plan.lighting.clamp_highlights = true
+		plan.lighting.fresnel = "none"
+	}
 	for &stage in plan.stages {
 		stage.constant.uniform = strings.clone(stage.constant.uniform, allocator)
 	}
@@ -373,6 +402,8 @@ to_node :: proc(t: ^Tev, e: ^IR_Expr) -> ^Node {
 			return make_node(.LERP, to_node(t, node.args[0]), to_node(t, node.args[1]), to_node(t, node.args[2]))
 		case "saturate":
 			return to_node(t, node.args[0])
+		case "light_diffuse", "light_specular":
+			return lighting_node(t, node)
 		}
 		tev_problem(t, fmt.aprintf("MBS-E2 `%s` can't run in a 3DS fragment shader", node.name))
 		return constant_node({})
@@ -446,6 +477,39 @@ sample_node :: proc(t: ^Tev, call: IR_Builtin_Call) -> ^Node {
 	return result
 }
 
+// lighting_node is one of the lighting unit's two results. Its arguments must be the varying's `normalquat` and `view`
+// fields as they arrive: the hardware reads those, whatever the call says (capability.odin checks the same, MBS-E20)
+@(private = "file")
+lighting_node :: proc(t: ^Tev, call: IR_Builtin_Call) -> ^Node {
+	wanted := [2]string{"normalquat", "view"}
+	for argument, index in call.args {
+		if varying_tag(t, argument) != wanted[index] {
+			tev_problem(t, fmt.aprintf("MBS-E20 `%s` reads the `normalquat` and `view` varyings unchanged on the 3DS", call.name))
+			return constant_node({})
+		}
+	}
+	if call.name == "light_diffuse" {
+		t.lighting.diffuse = true
+		return make_node(.LIGHT_DIFFUSE)
+	}
+	t.lighting.specular = true
+	return make_node(.LIGHT_SPECULAR)
+}
+
+// varying_tag is the `out:` tag of `v.field` when `e` is exactly that, or "".
+@(private = "file")
+varying_tag :: proc(t: ^Tev, e: ^IR_Expr) -> string {
+	field, is_field := e.variant.(IR_Field)
+	if is_field == false {
+		return ""
+	}
+	reference, is_reference := field.base.variant.(IR_Var_Ref)
+	if is_reference == false || reference.var != t.varying {
+		return ""
+	}
+	return tev_fields(t, field.base.type)[field.index].out
+}
+
 // inline_node reads a helper written as `name := value` lines and a `return`, with its parameters standing for the
 // arguments.
 @(private = "file")
@@ -480,7 +544,7 @@ Operand :: struct {
 @(private = "file")
 is_computed :: proc(n: ^Node) -> bool {
 	#partial switch n.kind {
-	case .TEXTURE, .COORD, .PRIMARY, .CONSTANT:
+	case .TEXTURE, .COORD, .PRIMARY, .CONSTANT, .LIGHT_DIFFUSE, .LIGHT_SPECULAR:
 		return false
 	case .ONE_MINUS:
 		return is_computed(n.args[0])
@@ -515,6 +579,10 @@ leaf_operand :: proc(t: ^Tev, n: ^Node) -> Operand {
 		return Operand{source = Tev_Source(int(Tev_Source.TEXTURE0) + n.slot)}
 	case .PRIMARY:
 		return Operand{source = .PRIMARY_COLOR}
+	case .LIGHT_DIFFUSE:
+		return Operand{source = .FRAGMENT_PRIMARY}
+	case .LIGHT_SPECULAR:
+		return Operand{source = .FRAGMENT_SECONDARY}
 	case .CONSTANT:
 		return Operand{source = .CONSTANT, constant = Tev_Constant{used = true, uniform = n.name, value = n.value}}
 	case .ONE_MINUS:
@@ -569,7 +637,7 @@ emit_node :: proc(t: ^Tev, n: ^Node) -> Operand {
 	case .LERP:
 		// INTERPOLATE is src0 * src2 + src1 * (1 - src2), and lerp(a, b, t) is a * (1 - t) + b * t
 		function, parts, count = .INTERPOLATE, {n.args[1], n.args[0], n.args[2]}, 3
-	case .TEXTURE, .COORD, .PRIMARY, .CONSTANT, .ONE_MINUS:
+	case .TEXTURE, .COORD, .PRIMARY, .CONSTANT, .ONE_MINUS, .LIGHT_DIFFUSE, .LIGHT_SPECULAR:
 	}
 
 	computed := 0
@@ -610,7 +678,8 @@ fusable :: proc(parts: [3]^Node) -> bool {
 
 // ---- the table ----------------------------------------------------------------------------------------------------
 
-TEV_VERSION :: 1
+// 2 since G2 L2: the `lighting` lines and the FRAGMENT_PRIMARY / FRAGMENT_SECONDARY sources
+TEV_VERSION :: 2
 
 // format_tev writes the table the 3DS renderer reads.
 format_tev :: proc(plan: Tev_Plan, allocator := context.allocator) -> string {
@@ -643,6 +712,17 @@ format_tev :: proc(plan: Tev_Plan, allocator := context.allocator) -> string {
 			}
 		}
 		fmt.sbprintln(&builder)
+	}
+	if plan.lighting.diffuse || plan.lighting.specular {
+		fmt.sbprintln(&builder)
+		fmt.sbprintf(&builder, "lighting")
+		if plan.lighting.diffuse do fmt.sbprintf(&builder, " diffuse")
+		if plan.lighting.specular do fmt.sbprintf(&builder, " specular")
+		fmt.sbprintln(&builder)
+		fmt.sbprintfln(&builder, "lighting_table %s %s", plan.lighting.table, plan.lighting.table_input)
+		fmt.sbprintfln(&builder, "lighting_clamp_highlights %v", plan.lighting.clamp_highlights)
+		fmt.sbprintfln(&builder, "lighting_two_sided %v", plan.lighting.two_sided)
+		fmt.sbprintfln(&builder, "lighting_fresnel %s", plan.lighting.fresnel)
 	}
 	if plan.alpha.used {
 		fmt.sbprintln(&builder)

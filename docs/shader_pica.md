@@ -122,7 +122,7 @@ register (`C3D_FVUnifMtx4x4` does that for a `C3D_Mtx`); a `[4]f32` with `C3D_FV
 (at most 6) plus an optional alpha test, and the runtime applies them with `C3D_TexEnv*` and `C3D_AlphaTest`.
 
 ```
-mbs-tev 1
+mbs-tev 2
 target 3ds
 
 texture <unit> <name> texcoord <n>
@@ -130,10 +130,22 @@ texture <unit> <name> texcoord <n>
 stage <i> <FUNC> <source0> [source1] [source2] [constant uniform <name> | constant r g b a]
 
 alphatest <FUNC> <ref | uniform name>
+
+lighting [diffuse] [specular]
+lighting_table D0 NH
+lighting_clamp_highlights true
+lighting_two_sided false
+lighting_fresnel none
 ```
 
-A source is `TEXTURE0..3`, `PRIMARY_COLOR`, `PREVIOUS` (the previous stage's result) or `CONSTANT`; a trailing `!` means
-"one minus" (the ONE_MINUS operand). Example, the shipped `mesh.mbs`: `stage 0 MODULATE TEXTURE0 PRIMARY_COLOR` and
+A source is `TEXTURE0..3`, `PRIMARY_COLOR`, `PREVIOUS` (the previous stage's result), `CONSTANT`, or (version 2)
+`FRAGMENT_PRIMARY` / `FRAGMENT_SECONDARY`, the fragment lighting unit's diffuse-plus-ambient and specular, which is what
+`light_diffuse` and `light_specular` become. A trailing `!` means "one minus" (the ONE_MINUS operand).
+
+The `lighting` lines (version 2, G2 L2) are there only when the shader calls a light built-in, and say how the unit is
+set: which results are read, the specular table and what indexes it, highlight clamping, two-sided diffuse, Fresnel.
+Only the values above are written or read so far, the ones measured on hardware in L0. Version 1 is version 2 without
+these lines, and the runtime still reads it. Example, the shipped `mesh.mbs`: `stage 0 MODULATE TEXTURE0 PRIMARY_COLOR` and
 `alphatest GEQUAL uniform render_alpha_cutoff`.
 
 Mapping: `*` MODULATE, `+` ADD, `-` SUBTRACT, `lerp(a, b, t)` INTERPOLATE (source0 = b, source1 = a, source2 = t),

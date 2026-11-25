@@ -1,6 +1,7 @@
 package mbsc
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -78,6 +79,8 @@ CASES := [?]Builtin_Case {
 	{"refract", "r = refract(v3, w3, a).y"},
 	{"dot3_signed", "r = dot3_signed(v3, w3) + dot3_signed(v4, w4)"},
 	{"normal_quaternion", "r = normal_quaternion(v3).x + normal_quaternion(v3).y + normal_quaternion(w3).w"},
+	{"light_diffuse", "r = light_diffuse(v4, v3).x"},
+	{"light_specular", "r = light_specular(v4, v3).y"},
 	{"transpose", "r = (transpose(m4) * v4).y + (v4 * transpose(m4)).x"},
 	{"determinant", "r = determinant(m4) + determinant(m3)"},
 	{"sample", "r = sample(tex, v2).x"},
@@ -180,6 +183,9 @@ every_builtin_is_written_as_hlsl_that_compiles :: proc(t: ^testing.T) {
 				fragment_only = builtin.fragment_only
 			}
 		}
+		if slice.contains(NOT_YET_ON_PC_AND_VITA[:], case_.name) {
+			continue // the 3DS has it first; its HLSL comes with the lighting plan's L3
+		}
 		for vertex in ([2]bool{false, true}) {
 			if vertex && fragment_only {
 				continue
@@ -202,6 +208,9 @@ every_builtin_is_written_as_cg_that_compiles :: proc(t: ^testing.T) {
 			if builtin.name == case_.name {
 				fragment_only = builtin.fragment_only
 			}
+		}
+		if slice.contains(NOT_YET_ON_PC_AND_VITA[:], case_.name) {
+			continue // the 3DS has it first; its Cg comes with the lighting plan's L3
 		}
 		for vertex in ([2]bool{false, true}) {
 			if vertex && fragment_only {

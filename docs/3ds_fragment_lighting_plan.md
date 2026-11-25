@@ -19,7 +19,7 @@ measured here yet are marked *to confirm* and are checked in L0, on hardware, be
      more once measured. The limit lives in one place per target (an array size, which CLAUDE.md allows as a
      constant), the shader language reads it from there, and a game can ask for it (`get_max_lights`).
   3. **Specular in G2**, with diffuse and ambient.
-  4. The built-in (provisionally `light_surface`) and the `.LIGHTS` uniform block **as recommended**: the block is
+  4. The built-ins (`light_diffuse` / `light_specular`, first planned as one `light_surface`) and the `.LIGHTS` uniform block **as recommended**: the block is
      engine-defined and a game's own shader may declare it, so custom shaders are lit by the same `set_lights`. The user
      hasn't done lighting before; the shape is revisited once L3 shows how it fits.
   5. **Directional first, then point and spot lights** under main's names (`create_point_light`, `create_spot_light`).
@@ -71,8 +71,11 @@ ClampHighlights`, `C3D_LightInit/Enable/Position/Color/TwoSideDiffuse/SpotLut/Di
 Per-pixel lighting is a **built-in of the shader language**, not engine code, so `mesh.mbs` stays the one place the
 look is defined (Phase S's rule: one shader, three targets, a compile error rather than a silent difference).
 
-- A built-in, provisionally `light_surface(normal, view) -> (diffuse:[4]f32, specular:[4]f32)`, reads the engine's
-  light uniforms (a new `.LIGHTS` uniform block mbsc knows the layout of).
+- Two built-ins, `light_diffuse(quat, view)` and `light_specular(quat, view)`, each `-> [4]f32`, read the engine's
+  light uniforms (a new `.LIGHTS` uniform block mbsc knows the layout of). The plan first named one,
+  `light_surface`, returning both; the language has no multiple returns, so it became two (L2). Their arguments are
+  the `normalquat` and `view` varyings, unchanged (MBS-E20 otherwise): on the 3DS the unit reads those outputs
+  directly, so a value computed from them in the fragment stage could not reach it.
   - **PC and Vita:** mbsc writes it as code: for each enabled light, Lambert diffuse plus Blinn-Phong specular, plus
     ambient. The specular power and the 8-bit clamping are chosen to follow what the 3DS's tables give.
   - **3DS:** mbsc writes no code for it. The vertex program gets the `normalquat` and `view` outputs; the `.tev` plan
@@ -111,11 +114,20 @@ interpreter, and L0's hand-written shader can be replaced by a generated one wit
   against the IR interpreter on random inputs. `light_test2` is `light_test1` with its shader written in the
   language (`light2.mbs`) and generated: the same eight steps pass in Azahar.
 
-**L2. mbsc, the `.tev` plan.** Sources `FRAGMENT_PRIMARY_COLOR` / `FRAGMENT_SECONDARY_COLOR`, and a `lighting` section
+**L2. mbsc, the `.tev` plan. DONE (2026-11-24, tests only; nothing new drawn yet).** Sources `FRAGMENT_PRIMARY_COLOR` / `FRAGMENT_SECONDARY_COLOR`, and a `lighting` section
 (`mbs-tev` version 2): tables and their inputs, Fresnel, highlight clamping, two-sided diffuse. `shader_tev.odin` reads
 it. Done when: golden-plan tests in `tev_test.odin`, and the runtime reads it.
+  - What landed: `light_diffuse` and `light_specular` (fragment only), the sources `FRAGMENT_PRIMARY` /
+    `FRAGMENT_SECONDARY` (citro3d's names, not the `_COLOR` spelling above), and the lines below, written whenever a
+    shader calls either built-in. Only the values L0 measured are written or accepted: table D0 indexed by N.H,
+    highlights clamped, one-sided, no Fresnel. The other tables, inputs and Fresnel arrive with the steps that use them
+    (L4 and the bump, environment and fog work), so the reader refuses anything else rather than ignoring it.
+  - On PC and the Vita the built-ins are MBS-E1 ("isn't written for PC and the Vita yet") until L3.
+  - `tev_test.odin` has the golden lit plan; `shader_tev_test.odin` reads it back and refuses each bad lighting line.
+    `mesh.3ds.tev` is now `mbs-tev 2` with no lighting (it doesn't light). The 3DS runtime only maps the two sources
+    to citro3d's; applying the `lighting` section is L4.
 
-**L3. The built-in on PC and Vita.** `light_surface` written as HLSL and Cg over the `.LIGHTS` block. Done when: the
+**L3. The built-ins on PC and Vita.** `light_diffuse` / `light_specular` written as HLSL and Cg over the `.LIGHTS` block. Done when: the
 IR interpreter, the HLSL (pixel tests on the D3D software device) and a model of the 3DS's table lookup agree within a
 stated tolerance on random normals, views and lights.
 

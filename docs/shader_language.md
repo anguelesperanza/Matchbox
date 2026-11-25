@@ -115,7 +115,11 @@ Varying :: struct {
   has nowhere to go:** the fragment stage can read only colour and texcoords (`MBS-E6`). Tag fields as
   `texcoord0`, `texcoord1`, `texcoord2` or `color` to keep a shader portable.
 - Tag names a target can carry: `position`, `color`, `texcoord0`, `texcoord1`, `texcoord2`. The 3DS adds
-  `normalquat` and `view` for its lighting unit; those are in part 3, section 21.
+  `normalquat` and `view` for its lighting unit; those are in part 3, section 21. Every target accepts them (on PC
+  and the Vita they are ordinary varyings), and they must be `[4]f32` and `[3]f32` (`MBS-E15`): `normalquat` is
+  what `normal_quaternion` makes, `view` the eye-space position negated.
+- The vertex input's `attr:` names are `position`, `texcoord`, `color` and `normal` (`normal` since 2026-11-24, for
+  lighting; the engine's own vertex gains it in G2).
 - `texcoord0` is two components on the 3DS (a third, for cube textures, is `texcoord0w`). The other targets can
   carry up to four.
 
@@ -399,6 +403,7 @@ is already outside the domain (`MBS-W1`, planned). A shader should keep these ou
 | `reflect(i, n)` | reflect `i` about the unit normal `n` | =3 |
 | `refract(i, n, eta)` | refraction, `[3]f32` only | =16 |
 | `dot3_signed(a, b)` | `4 * dot(a.rgb - 0.5, b.rgb - 0.5)`, returns `f32` | fragment only: DOT3_RGB or DOT3_RGBA (part 3) |
+| `normal_quaternion(n)` | the rotation taking +Z to the unit normal `n`, `[3]f32` to `[4]f32` (vector part, scalar): `normalize((-n.y, n.x, 0, max(1 + n.z, 0.00001)))`. What an `out:"normalquat"` holds (2026-11-24, G2 L1) | =9, the sequence the lighting plan's L0 ran on hardware |
 
 ### Matrices
 

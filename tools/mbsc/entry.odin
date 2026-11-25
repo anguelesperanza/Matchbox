@@ -315,6 +315,23 @@ check_varying :: proc(module: ^Module, info: ^Struct_Info) {
 		}
 		seen[field.out] = field.name
 
+		// The 3DS's fragment lighting unit reads these two whole and at these sizes; on PC and the Vita they are
+		// ordinary varyings, held to the same shapes so a shader means the same everywhere
+		wanted := ""
+		if field.out == "normalquat" do wanted = "[4]f32"
+		if field.out == "view" do wanted = "[3]f32"
+		if wanted != "" && type_key(field.type_text) != wanted {
+			error(
+				module,
+				"MBS-E15",
+				fmt.aprintf("the `%s` output must be `%s`", field.out, wanted),
+				field.type,
+				fmt.aprintf("found `%s`", type_key(field.type_text)),
+				"`normalquat` is the rotation taking +Z to the normal (normal_quaternion makes it); `view` is the eye-space position negated",
+				fmt.aprintf("write `%s: %s `out:\"%s\"``", field.name, wanted, field.out),
+			)
+		}
+
 		if field.out == "position" {
 			position_count += 1
 			if type_key(field.type_text) != "[4]f32" {

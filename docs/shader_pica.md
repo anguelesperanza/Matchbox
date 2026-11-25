@@ -36,6 +36,37 @@ known to run on hardware, changing one thing at a time.
 `--emit-reflection` with `-target:3ds` writes the file the runtime reads. The fragment stage is not a program on this
 hardware; it is the TexEnv plan (S6).
 
+## Fragment lighting (L0)
+
+What `light_test1` established on 2026-11-24 (hand-written shader and citro3d calls; it ran on the New 3DS LL and in
+Azahar; the plan is `docs/3ds_fragment_lighting_plan.md`):
+- The unit reads two vertex outputs, each written whole like every other: **`normalquat`**, the rotation taking +Z to
+  the eye-space normal n, and **`view`**, the eye-space position negated.
+- **The quaternion:** `q = normalize((-n.y, n.x, 0, 1 + n.z))`, as (vector part, scalar) in x, y, z, w. It has no axis
+  when n points straight away (n.z = -1), so `1 + n.z` is kept at least 0.00001: q becomes the identity there, a face
+  seen exactly edge-on from behind, which back-face culling drops anyway. In PICA assembly (operands kept to picasso's
+  rules: a constant first in `add` and `max`):
+
+  ```
+  mov r5.x, -r3.y
+  mov r5.y, r3.x
+  mov r5.z, zeros
+  add r5.w, ones, r3.z
+  max r5.w, tiny, r5.w
+  dp4 r6.x, r5, r5
+  rsq r6.x, r6.x
+  mul r5, r5, r6.xxxx
+  mov outnq, r5
+  ```
+- **Light directions are in eye space:** `C3D_LightPosition` takes the direction towards the light, w = 0 for
+  directional, already multiplied by the camera's view matrix.
+- **The two results are TexEnv sources** (`FRAGMENT_PRIMARY` = ambient + diffuse, `FRAGMENT_SECONDARY` = specular),
+  and combine with a texture as usual: `primary * TEXTURE0`, then `+ secondary` in a second stage.
+- **Specular comes from the D0 table** with `LightLut_Phong` indexed by N.H.
+- **`C3D_LightEnvBind(nil)` turns lighting off** for the draws after it. The engine's own draws (sprites, shapes, text)
+  ran correctly after it on hardware, so a lit draw unbinding afterwards is enough to keep them unlit.
+- Not measured yet: how many lights at once (two were used), and what uploading a table costs.
+
 ## What the output looks like
 
 - Every procedure is inlined into `main`. A `for` with constant bounds is written out (at most 64 turns). A `return`

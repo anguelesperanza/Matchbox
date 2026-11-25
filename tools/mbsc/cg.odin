@@ -548,6 +548,11 @@ write_math_helpers :: proc(h: ^Cg, builder: ^strings.Builder) {
 			write_polynomial_helper(builder, helper.type, "sin_approx", SIN_COEFFICIENTS[:], "r * p")
 		case "cos_approx":
 			write_polynomial_helper(builder, helper.type, "cos_approx", COS_COEFFICIENTS[:], "p")
+		case "normal_quaternion":
+			// The rotation taking +Z to n, as the 3DS's L0 formula and the HLSL helper write it (docs/shader_pica.md)
+			fmt.sbprintln(builder, "\nfloat4 mbs_normal_quaternion(float3 n) {")
+			fmt.sbprintln(builder, "    return normalize(float4(-n.y, n.x, 0.0, max(1.0 + n.z, 0.00001)));")
+			fmt.sbprintln(builder, "}")
 		}
 	}
 }
@@ -911,7 +916,7 @@ builtin_call :: proc(h: ^Cg, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 		return "discard"
 	case "mod", "round":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, node.args[1].type if len(node.args) > 1 else nil), list(h, node.args))
-	case "sin_approx", "cos_approx":
+	case "sin_approx", "cos_approx", "normal_quaternion":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, nil), list(h, node.args))
 	case "dot3_signed":
 		// `4 * dot(a.rgb - 0.5, b.rgb - 0.5)`; a fourth component, if there is one, is left out

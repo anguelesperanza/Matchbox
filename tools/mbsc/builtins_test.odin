@@ -77,6 +77,7 @@ CASES := [?]Builtin_Case {
 	{"reflect", "r = reflect(v2, w2).x + reflect(v3, w3).y + reflect(v4, w4).z"},
 	{"refract", "r = refract(v3, w3, a).y"},
 	{"dot3_signed", "r = dot3_signed(v3, w3) + dot3_signed(v4, w4)"},
+	{"normal_quaternion", "r = normal_quaternion(v3).x + normal_quaternion(v3).y + normal_quaternion(w3).w"},
 	{"transpose", "r = (transpose(m4) * v4).y + (v4 * transpose(m4)).x"},
 	{"determinant", "r = determinant(m4) + determinant(m3)"},
 	{"sample", "r = sample(tex, v2).x"},

@@ -657,6 +657,22 @@ pica_builtin :: proc(h: ^Pica, e: ^IR_Expr, node: IR_Builtin_Call) -> Pica_Value
 		inverse := pica_scalar_op(h, "rsq", squared, 1)
 		result = pica_mul(h, a, inverse, size)
 		pica_release(h, args[0])
+	case "normal_quaternion":
+		// q = normalize((-n.y, n.x, 0, max(1 + n.z, 0.00001))), the sequence the lighting plan's L0 ran on a New 3DS LL
+		// (docs/shader_pica.md, "Fragment lighting (L0)"). A constant goes first in `add` and `max`, as picasso wants
+		n := pica_keep(pica_to_temp(h, args[0], 3))
+		q := pica_temp_operand(h, 4)
+		pica_emit(h, "mov", q.base, []int{0}, pica_negated(pica_broadcast(n, 1)))
+		pica_emit(h, "mov", q.base, []int{1}, pica_broadcast(n, 0))
+		pica_emit(h, "mov", q.base, []int{2}, pica_scalar_constant(h, 0))
+		pica_emit(h, "add", q.base, []int{3}, pica_scalar_constant(h, 1), pica_broadcast(n, 2))
+		pica_emit(h, "max", q.base, []int{3}, pica_scalar_constant(h, 0.00001), pica_broadcast(q, 3))
+		pica_release(h, n)
+		whole := pica_keep(q)
+		squared := pica_dot(h, whole, whole, 4)
+		inverse := pica_scalar_op(h, "rsq", squared, 1)
+		result = pica_mul(h, whole, inverse, 4)
+		pica_release(h, q)
 	case "cross":
 		a, b := pica_keep(args[0]), pica_keep(args[1])
 		first := pica_mul(h, pica_permuted(a, 2, 0, 1), pica_permuted(b, 1, 2, 0), 3)

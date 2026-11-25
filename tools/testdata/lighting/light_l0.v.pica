@@ -1,0 +1,74 @@
+; L0 spike: the outputs the 3DS's fragment lighting unit reads, written by hand.
+; Every output register is written whole (a partial write hangs the real GPU, gpu_test4).
+;
+; Inputs: v0 position, v1 normal, v2 uv
+; normalquat: the rotation taking +Z to the eye-space normal n, as (axis * sin, cos) of the
+;   half angle: q = normalize((-n.y, n.x, 0, 1 + n.z)). n pointing straight away (n.z = -1)
+;   has no axis; 1 + n.z is kept at least `tiny`, so q becomes the identity there, a face
+;   seen exactly edge-on from behind, which back-face culling drops anyway.
+; view: the eye-space position negated (from the surface towards the eye)
+
+.fvec projection[4]
+.fvec modelView[4]
+
+.constf myconst(0.0, 1.0, 0.5, 0.00001)
+.alias  zeros myconst.xxxx
+.alias  ones  myconst.yyyy
+.alias  tiny  myconst.wwww
+
+.out outpos position
+.out outnq  normalquat
+.out outview view
+.out outclr color
+.out outtc0 texcoord0
+
+.alias inpos v0
+.alias innrm v1
+.alias intex v2
+
+.proc main
+	; r0 = position with w = 1
+	mov r0.xyz, inpos
+	mov r0.w,   ones
+
+	; r1 = modelView * position (eye space)
+	dp4 r1.x, modelView[0], r0
+	dp4 r1.y, modelView[1], r0
+	dp4 r1.z, modelView[2], r0
+	dp4 r1.w, modelView[3], r0
+
+	; view = -eye position, whole register
+	mov outview, -r1
+
+	; position = projection * eye position
+	dp4 outpos.x, projection[0], r1
+	dp4 outpos.y, projection[1], r1
+	dp4 outpos.z, projection[2], r1
+	dp4 outpos.w, projection[3], r1
+
+	; r2 = normalize(modelView * (normal, 0)): uniform scale only in this spike
+	mov r2.xyz, innrm
+	mov r2.w,   zeros
+	dp4 r3.x, modelView[0], r2
+	dp4 r3.y, modelView[1], r2
+	dp4 r3.z, modelView[2], r2
+	mov r3.w, zeros
+	dp3 r4.x, r3, r3
+	rsq r4.x, r4.x
+	mul r3, r3, r4.xxxx
+
+	; r5 = (-n.y, n.x, 0, max(1 + n.z, tiny)), then normalised
+	mov r5.x, -r3.y
+	mov r5.y, r3.x
+	mov r5.z, zeros
+	add r5.w, ones, r3.z
+	max r5.w, tiny, r5.w
+	dp4 r6.x, r5, r5
+	rsq r6.x, r6.x
+	mul r5, r5, r6.xxxx
+	mov outnq, r5
+
+	mov outclr, ones
+	mov outtc0, intex
+	end
+.end

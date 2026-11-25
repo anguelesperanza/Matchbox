@@ -455,6 +455,12 @@ interp_builtin :: proc(i: ^Interp, f: ^Frame, e: ^IR_Expr, node: IR_Builtin_Call
 	case "normalize":
 		length := math.sqrt(dot_of(args[0], args[0]))
 		return per_lane2(args[0], one(length), proc(x, y: f32) -> f32 {return x / y})
+	case "normal_quaternion":
+		n := args[0]
+		q := numbers(4)
+		q[0], q[1], q[2], q[3] = -n[1], n[0], 0, max(1 + n[2], 0.00001)
+		length := math.sqrt(dot_of(q, q))
+		return per_lane2(q, one(length), proc(x, y: f32) -> f32 {return x / y})
 	case "cross":
 		a, b := args[0], args[1]
 		result := numbers(3)

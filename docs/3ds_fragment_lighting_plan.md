@@ -95,10 +95,21 @@ with no light, one light diffuse only, specular through D0, a second light, a te
   from +Z), the light count, the eye-space convention, what Azahar gets right, and what a table upload costs.
 - Done when: a lit, textured cube looks right on the New 3DS LL and in Azahar, and the findings are written into
   `docs/shader_pica.md`.
+- **DONE 2026-11-24.** `light_test1` ran all eight steps on the New 3DS LL (the user) and in Azahar, which lit the
+  faces as expected. Findings are in `docs/shader_pica.md`, "Fragment lighting (L0)". Settled: the normalquat formula
+  and its degenerate case, eye-space light directions, that the unit's two results work as TexEnv sources with a
+  texture, and that unbinding the environment lets the engine's own draws through. Not settled, left to later steps:
+  the light count (two lights were used, not eight) and the cost of uploading a table (measured in L4).
 
 **L1. mbsc, PICA outputs.** Output tags `normalquat` and `view`, and a built-in that makes the quaternion from a
 normal (the formula from L0). Both written whole. Done when: assembled with picasso, checked against the IR
 interpreter, and L0's hand-written shader can be replaced by a generated one with the same result on hardware.
+- **DONE 2026-11-24:** `light_test2` passed on the New 3DS LL (the user). The tags were already allowed; mbsc now type-checks them
+  (`normalquat` `[4]f32`, `view` `[3]f32`, MBS-E15), accepts the vertex attribute `normal`, and has the built-in
+  `normal_quaternion(n)` on all three targets (a helper function in HLSL and Cg, L0's instruction sequence on the
+  PICA). The built-in tests compile it with the real HLSL compiler, psp2cgc and picasso, and check the PICA program
+  against the IR interpreter on random inputs. `light_test2` is `light_test1` with its shader written in the
+  language (`light2.mbs`) and generated: the same eight steps pass in Azahar.
 
 **L2. mbsc, the `.tev` plan.** Sources `FRAGMENT_PRIMARY_COLOR` / `FRAGMENT_SECONDARY_COLOR`, and a `lighting` section
 (`mbs-tev` version 2): tables and their inputs, Fresnel, highlight clamping, two-sided diffuse. `shader_tev.odin` reads

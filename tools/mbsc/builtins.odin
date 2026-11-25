@@ -23,6 +23,7 @@ Builtin_Rule :: enum {
 	REFLECT, // (V, V) -> V
 	REFRACT, // ([3]f32, [3]f32, f32) -> [3]f32
 	DOT3_SIGNED, // (V, V) -> f32 for [3]f32 or [4]f32
+	NORMAL_QUATERNION, // ([3]f32) -> [4]f32
 	TRANSPOSE, // (matrix[R, C]f32) -> matrix[C, R]f32
 	DETERMINANT, // (matrix[N, N]f32) -> f32
 	SAMPLE, // (Texture2D, [2]f32) -> [4]f32
@@ -100,6 +101,10 @@ BUILTINS := [?]Builtin {
 	{"reflect", .REFLECT, "reflect(i: V, n: V) -> V, for float vectors of the same length", false},
 	{"refract", .REFRACT, "refract(i: [3]f32, n: [3]f32, eta: f32) -> [3]f32", false},
 	{"dot3_signed", .DOT3_SIGNED, "dot3_signed(a: V, b: V) -> f32, for [3]f32 or [4]f32", true},
+	// The rotation taking +Z to `n`, as (vector part, scalar): what the 3DS's fragment lighting unit reads from a
+	// vertex stage's `out:"normalquat"`. `n` is expected normalised. The formula was proved on a New 3DS LL in the
+	// lighting plan's L0 (docs/shader_pica.md, "Fragment lighting (L0)"); every target writes the same one
+	{"normal_quaternion", .NORMAL_QUATERNION, "normal_quaternion(n: [3]f32) -> [4]f32", false},
 
 	// matrices
 	{"transpose", .TRANSPOSE, "transpose(m: matrix[R, C]f32) -> matrix[C, R]f32", false},
@@ -214,6 +219,10 @@ builtin_result :: proc(rule: Builtin_Rule, args: []^Type) -> (result: ^Type, ok:
 	case .CROSS:
 		if count == 2 && is_float_vector(args[0]) && args[0].count == 3 && types_equal(args[0], args[1]) {
 			return args[0], true
+		}
+	case .NORMAL_QUATERNION:
+		if count == 1 && is_float_vector(args[0]) && args[0].count == 3 {
+			return make_vector(&TYPE_F32, 4), true
 		}
 	case .REFLECT:
 		if count == 2 && is_float_vector(args[0]) && types_equal(args[0], args[1]) {

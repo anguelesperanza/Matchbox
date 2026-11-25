@@ -16,9 +16,10 @@ FRAME_FIELDS := [?]Engine_Field{{"view_projection", "matrix[4,4]f32"}, {"time", 
 @(rodata)
 RENDER_FIELDS := [?]Engine_Field{{"model", "matrix[4,4]f32"}, {"tint", "[4]f32"}, {"uv_rectangle", "[4]f32"}, {"alpha_cutoff", "f32"}}
 
-// The vertex attributes the engine's mesh format has today. More come with the 3D work.
+// The vertex attributes the engine's mesh format has, or is getting: `normal` arrives with G2 lighting
+// (docs/3ds_fragment_lighting_plan.md); a shader may read it before the engine's Vertex carries it.
 @(rodata)
-VERTEX_ATTRIBUTES := [?]string{"position", "texcoord", "color"}
+VERTEX_ATTRIBUTES := [?]string{"position", "texcoord", "color", "normal"}
 
 // The names a vertex stage can write for the fragment stage (part 1, section 4, "Varyings").
 @(rodata)

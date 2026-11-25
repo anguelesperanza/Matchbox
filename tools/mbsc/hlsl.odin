@@ -480,8 +480,21 @@ write_math_helpers :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 			write_polynomial_helper(builder, helper.type, "sin_approx", SIN_COEFFICIENTS[:], "r * p")
 		case "cos_approx":
 			write_polynomial_helper(builder, helper.type, "cos_approx", COS_COEFFICIENTS[:], "p")
+		case "normal_quaternion":
+			write_normal_quaternion_helper(builder)
 		}
 	}
+}
+
+/*
+	The rotation taking +Z to n, (vector part, scalar). n straight away from +Z has no axis, so `1 + n.z` is kept at
+	least 0.00001 and the result becomes the identity there, as the 3DS's L0 formula does (docs/shader_pica.md)
+*/
+@(private = "file")
+write_normal_quaternion_helper :: proc(builder: ^strings.Builder) {
+	fmt.sbprintln(builder, "\nfloat4 mbs_normal_quaternion(float3 n) {")
+	fmt.sbprintln(builder, "    return normalize(float4(-n.y, n.x, 0.0, max(1.0 + n.z, 0.00001)));")
+	fmt.sbprintln(builder, "}")
 }
 
 // write_polynomial_helper writes the argument reduction and the Horner evaluation of section 15.
@@ -828,7 +841,7 @@ builtin_call :: proc(h: ^Hlsl, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 		return "discard"
 	case "mod":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, "mod", node.args[0].type, node.args[1].type), list(h, node.args))
-	case "sin_approx", "cos_approx":
+	case "sin_approx", "cos_approx", "normal_quaternion":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, nil), list(h, node.args))
 	case "dot3_signed":
 		// `4 * dot(a.rgb - 0.5, b.rgb - 0.5)`; a fourth component, if there is one, is left out

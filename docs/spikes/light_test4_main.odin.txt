@@ -1,0 +1,259 @@
+package lighttest4
+
+/*
+	LIGHT TEST 4 (G2 L8-0, W4 of docs/g2_remaining_work.md): do the 3DS's positional light, distance table (DA) and
+	spot table (SP) give the point and spot lights of the main branch? A flat floor seen from straight above, 20
+	pixels a world unit, lit by one light 3 units over its centre. After each step the app reads its own framebuffer
+	back and prints what the unit drew against what the formula gives, so the result is numbers, not looks.
+	  distance fade  1 / (1 + 0.09 d + 0.032 d^2)       spot  smoothstep(cos 30deg, cos 20deg, cos angle)
+	Each step changes one thing from the one before. START quits.
+*/
+
+import "core:fmt"
+import "core:math"
+import "core:math/linalg"
+import "core:mem"
+import mb "matchbox"
+import "matchbox/o3dx/c3d"
+import "matchbox/o3dx/ctru"
+
+HEIGHT :: 3.0 // the light's height over the floor
+
+Step :: struct {
+	name:string,
+	radii:[]f32, // floor points probed, at this distance from the point under the light
+}
+
+Kind :: enum {
+	DIRECTIONAL,
+	POSITIONAL,
+	DA_FULL,
+	DA_SHORT,
+	SPOT,
+	SPOT_FLIPPED,
+	SPOT_AND_DA,
+}
+
+steps := [Kind]Step {
+	.DIRECTIONAL = {"S0 directional 0.5 (control)", {0, 2, 4, 6}},
+	.POSITIONAL = {"S1 positional w=1, no tables", {0, 2, 4, 6}},
+	.DA_FULL = {"S2 + DA table 0..100", {0, 2, 4, 6}},
+	.DA_SHORT = {"S3 DA table 0..6, past its end", {0, 4, 6, 9}},
+	.SPOT = {"S4 spot, axis (0,-1,0)", {0, 1, 1.4, 1.7, 2.2}},
+	.SPOT_FLIPPED = {"S5 spot, axis up (expect dark)", {0, 1, 1.4, 1.7, 2.2}},
+	.SPOT_AND_DA = {"S6 spot + DA 0..100", {0, 1, 1.4, 1.7, 2.2}},
+}
+
+attenuation :: proc(d:f64) -> f64 {
+	return 1 / (1 + 0.09 * d + 0.032 * d * d)
+}
+
+smoothstep :: proc(low, high, x:f64) -> f64 {
+	t := clamp((x - low) / (high - low), 0, 1)
+	return t * t * (3 - 2 * t)
+}
+
+spot_factor :: proc(cos_angle:f64) -> f64 {
+	return smoothstep(math.cos(math.to_radians(f64(30))), math.cos(math.to_radians(f64(20))), cos_angle)
+}
+
+// The formula's value at a floor point r from the centre, 0 to 1
+expected_value :: proc(kind:Kind, r:f64) -> f64 {
+	d := math.sqrt(HEIGHT * HEIGHT + r * r)
+	cos_angle := HEIGHT / d // the floor's normal and the spot's axis both lie along y
+	switch kind {
+	case .DIRECTIONAL:
+		return 0.5
+	case .POSITIONAL:
+		return cos_angle
+	case .DA_FULL:
+		return cos_angle * attenuation(d)
+	case .DA_SHORT:
+		return cos_angle * attenuation(min(d, 6))
+	case .SPOT_FLIPPED:
+		return 0 // the axis points up, away from the floor: dark if the axis is the way the spot points
+	case .SPOT:
+		return cos_angle * spot_factor(cos_angle)
+	case .SPOT_AND_DA:
+		return cos_angle * attenuation(d) * spot_factor(cos_angle)
+	}
+	return 0
+}
+
+set_matrix :: proc(location:i32, m:matrix[4, 4]f32) {
+	for row in 0 ..< 4 do c3d.C3D_FVUnifSet(.VERTEX_SHADER, location + i32(row), m[row, 0], m[row, 1], m[row, 2], m[row, 3])
+}
+
+Vertex :: struct {
+	position:[3]f32,
+	normal:[3]f32,
+	uv:[2]f32,
+}
+
+main :: proc() {
+	mb.set_bottom_screen(.CONSOLE) // before init: init applies it
+	mb.init("light test 4", 400, 240)
+	mb.print("LIGHT TEST 4: point and spot")
+	mb.print("got / exp (formula), 0-255")
+
+	bytes := mb.read_file_words("romfs:/shaders/light2.shbin")
+	if len(bytes) == 0 do mb.print("light2.shbin missing")
+	binary := ctru.DVLB_ParseFile(raw_data(bytes), u32(len(bytes) * size_of(u32)))
+	program:ctru.shaderProgram_s
+	ctru.shaderProgramInit(&program)
+	ctru.shaderProgramSetVsh(&program, binary.DVLE)
+	projection_location := i32(ctru.shaderInstanceGetUniformLocation(program.vertexShader, "projection"))
+	model_view_location := i32(ctru.shaderInstanceGetUniformLocation(program.vertexShader, "model_view"))
+
+	// The floor: 20 x 12 units, normal up, so it fills the screen from straight above at 20 pixels a unit
+	vertices := [4]Vertex {
+		{{-10, 0, -6}, {0, 1, 0}, {0, 0}},
+		{{10, 0, -6}, {0, 1, 0}, {1, 0}},
+		{{10, 0, 6}, {0, 1, 0}, {1, 1}},
+		{{-10, 0, 6}, {0, 1, 0}, {0, 1}},
+	}
+	indices := [6]u16{0, 2, 1, 0, 3, 2}
+	vertex_memory := ctru.linearAlloc(size_of(vertices))
+	index_memory := ctru.linearAlloc(size_of(indices))
+	mem.copy(vertex_memory, &vertices, size_of(vertices))
+	mem.copy(index_memory, &indices, size_of(indices))
+	ctru.GSPGPU_FlushDataCache(vertex_memory, size_of(vertices))
+	ctru.GSPGPU_FlushDataCache(index_memory, size_of(indices))
+
+	// Tables, built once
+	phong:c3d.C3D_LightLut
+	c3d.LightLut_Phong(&phong, 20)
+	distance_full, distance_short:c3d.C3D_LightLutDA
+	c3d.LightLutDA_Quadratic(&distance_full, 0, 100, 0.09, 0.032)
+	c3d.LightLutDA_Quadratic(&distance_short, 0, 6, 0.09, 0.032)
+	// The spot table is signed: entries 0..127 are cos 0..1, entries 128..255 are cos -1..0 (zero: behind the
+	// light). 256 values, then 256 steps to the next entry
+	spot_lut:c3d.C3D_LightLut
+	table:[512]f32
+	spot_value :: proc(x:f64) -> f32 {
+		return f32(spot_factor(x)) if x > 0 else 0
+	}
+	for i in 0 ..< 256 {
+		x := f64(i) / 128 if i < 128 else f64(i - 256) / 128
+		next_x := f64(i + 1) / 128 if i < 128 else (f64(i + 1 - 256) / 128 if i < 255 else 0)
+		table[i] = spot_value(x)
+		table[256 + i] = spot_value(next_x) - spot_value(x)
+	}
+	c3d.LightLut_FromArray(&spot_lut, &table[0])
+
+	environment:c3d.C3D_LightEnv
+	material := c3d.C3D_Material{diffuse = {1, 1, 1}}
+	light:c3d.C3D_Light
+
+	view := linalg.matrix4_look_at_f32({0, 10, 0}, {0, 0, 0}, {0, 0, -1}) // x right on screen, -z up
+	projection := mb.TILT_TO_PANEL * mb.GL_TO_PICA_DEPTH * linalg.matrix4_perspective_f32(2 * math.atan(f32(0.6)), 400.0 / 240.0, 0.1, 50)
+
+	frame := 0
+	passed, total := 0, 0
+	finished := false
+	for mb.is_running() {
+		mb.poll_events()
+		if mb.is_gamepad_pressed(.START) do mb.stop_running()
+
+		kind := Kind(min(frame / 4, int(Kind.SPOT_AND_DA)))
+		mb.diagnostic_test = frame + 1
+
+		mb.render_start()
+		mb.clear_background({0, 0, 0, 1})
+		c3d.C3D_LightEnvBind(nil)
+		c3d.C3D_BindProgram(&program)
+		set_matrix(projection_location, projection)
+		set_matrix(model_view_location, view)
+
+		attributes := c3d.C3D_GetAttrInfo()
+		c3d.AttrInfo_Init(attributes)
+		c3d.AttrInfo_AddLoader(attributes, 0, .FLOAT, 3)
+		c3d.AttrInfo_AddLoader(attributes, 1, .FLOAT, 3)
+		c3d.AttrInfo_AddLoader(attributes, 2, .FLOAT, 2)
+		buffers := c3d.C3D_GetBufInfo()
+		c3d.BufInfo_Init(buffers)
+		c3d.BufInfo_Add(buffers, vertex_memory, size_of(Vertex), 3, 0x210)
+
+		c3d.C3D_DepthTest(true, .GREATER, .ALL)
+		c3d.C3D_AlphaBlend(.ADD, .ADD, .ONE, .ZERO, .ONE, .ZERO)
+		c3d.C3D_CullFace(.NONE)
+
+		c3d.C3D_LightEnvInit(&environment)
+		c3d.C3D_LightEnvBind(&environment)
+		c3d.C3D_LightEnvMaterial(&environment, &material)
+		c3d.C3D_LightEnvLut(&environment, .D0, .NH, false, &phong)
+		c3d.C3D_LightInit(&light, &environment)
+
+		brightness:f32 = 1
+		switch kind {
+		case .DIRECTIONAL:
+			brightness = 0.5
+			toward := view * [4]f32{0, 1, 0, 0}
+			position := c3d.C3D_FVec{x = toward.x, y = toward.y, z = toward.z, w = 0}
+			c3d.C3D_LightPosition(&light, &position)
+		case .POSITIONAL, .DA_FULL, .DA_SHORT, .SPOT, .SPOT_FLIPPED, .SPOT_AND_DA:
+			spot := view * [4]f32{0, HEIGHT, 0, 1}
+			position := c3d.C3D_FVec{x = spot.x, y = spot.y, z = spot.z, w = 1}
+			c3d.C3D_LightPosition(&light, &position)
+		}
+		c3d.C3D_LightColor(&light, brightness, brightness, brightness)
+		#partial switch kind {
+		case .DA_FULL, .SPOT_AND_DA:
+			c3d.C3D_LightDistAttnEnable(&light, true)
+			c3d.C3D_LightDistAttn(&light, &distance_full)
+		case .DA_SHORT:
+			c3d.C3D_LightDistAttnEnable(&light, true)
+			c3d.C3D_LightDistAttn(&light, &distance_short)
+		}
+		#partial switch kind {
+		case .SPOT, .SPOT_FLIPPED, .SPOT_AND_DA:
+			down:f32 = -1 if kind != .SPOT_FLIPPED else 1
+			axis := view * [4]f32{0, down, 0, 0}
+			c3d.C3D_LightEnvLut(&environment, .SP, .SP, true, &spot_lut)
+			c3d.C3D_LightSpotEnable(&light, true)
+			c3d.C3D_LightSpotDir(&light, axis.x, axis.y, axis.z)
+			c3d.C3D_LightSpotLut(&light, &spot_lut)
+		}
+
+		stage := c3d.C3D_GetTexEnv(0)
+		c3d.C3D_TexEnvInit(stage)
+		c3d.C3D_TexEnvSrc(stage, c3d.C3D_Both, .FRAGMENT_PRIMARY, .PRIMARY_COLOR, .PRIMARY_COLOR)
+		c3d.C3D_TexEnvFunc(stage, c3d.C3D_Both, .REPLACE)
+
+		c3d.C3D_DrawElements(.TRIANGLES, 6, 1, index_memory)
+		c3d.C3D_LightEnvBind(nil)
+		mb.render_end()
+
+		// The step has been on screen three frames: read it back
+		if !finished && frame % 4 == 3 {
+			width, height:u16
+			pixels := ([^]u8)(ctru.gfxGetFramebuffer(.TOP, .LEFT, &width, &height))
+			step := steps[kind]
+			got_text := "got"
+			expected_text := "exp"
+			for r in step.radii {
+				px := 200 + int(math.round(f64(r) * 20))
+				py := 120
+				offset := (px * int(width) + (int(width) - 1 - py)) * 3
+				got := int(pixels[offset + 1]) // green; the floor is white, so all three agree
+				centre := (f64(px) + 0.5 - 200) / 20 // the pixel's middle, not its corner
+				expected := int(math.round(expected_value(kind, centre) * 255))
+				got_text = fmt.tprintf("%s %3d", got_text, got)
+				expected_text = fmt.tprintf("%s %3d", expected_text, expected)
+				total += 1
+				if abs(got - expected) <= 3 do passed += 1
+			}
+			mb.print(step.name)
+			mb.print(got_text)
+			mb.print(expected_text)
+			if kind == .SPOT_AND_DA {
+				mb.print(fmt.tprintf("within 3 of the formula: %d of %d", passed, total))
+				finished = true
+			}
+		}
+		frame += 1
+	}
+
+	c3d.C3D_LightEnvBind(nil)
+	mb.cleanup()
+}

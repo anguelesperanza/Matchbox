@@ -409,6 +409,32 @@ L5-2; what was left:
 
 **L7. Hardware passes.** The 3DS check and the Vita check grow a lighting step each; the user runs them.
 
+**L8. Point and spot lights (W4 of `docs/g2_remaining_work.md`).** Written 2026-11-25 before any code, after merging W6 (the
+liveness register allocator) and W7 (the `C3D_FVec` fix) into this branch. Follows `main`'s behaviour
+(`git show main:matchbox/shaders/lighting_core.hlsli`, `sample_light`): a point or spot light fades with distance as
+`1 / (1 + 0.09 d + 0.032 d^2)`, d in world units, fixed, no per-light range; a spot adds `smoothstep(cos(outer),
+cos(inner), cos_angle)` on top; the highlight fades with distance too. The user approved this API (2026-11-25):
+`Light_Kind{DIRECTIONAL, POINT, SPOT}` (directional the zero value), `Light` gains `kind`, `position`, `inner_angle`
+and `outer_angle` (degrees, from the axis to the cone edge), `create_point_light(position, color = WHITE)` and
+`create_spot_light(position, direction, color = WHITE, inner_angle = 20, outer_angle = 30)`; `MAX_LIGHTS` counts all
+kinds together.
+- L8-0. **3DS hardware spike**, `light_test4`, one feature a step, as L0 was; the app reads its own framebuffer back
+  and prints measured against expected values, so the user's result is numbers. Steps: a directional control (the
+  readback itself), a positional light (w = 1, no tables), the DA table with main's curve, the DA table's end (what
+  happens past `to`), a spot light (the SP table), and both together. Settles: whether the unit's tables reproduce
+  main's curve (if not, the nearest curve comes to the user before the formula changes), the SP table's input and
+  signed layout, and the distance beyond the table. **Stops here until the user's result.**
+  **Spike built 2026-11-25, Azahar only (hardware not run yet):** `build/hardware/light_test4.3dsx` (title LightTest4; source kept in `docs/spikes/light_test4_main.odin.txt`). In Azahar all 31 probes are within 3 of the formula: a positional light (w = 1) with no table gives L.N exactly; `LightLutDA_Quadratic(0, 100, 0.09, 0.032)` on DA reproduces main's curve to the level (164, 121, 68, 37 against 164, 121, 67, 37), so **the 3DS tables do reproduce main's curve and no nearest curve is needed**; a DA table ending at 6 holds its last value past the end (the clamp, not a wrap or a zero); a spot table of 256 entries (signed: entries 0 to 127 are cos 0 to 1, 128 to 255 zero) with `C3D_LightEnvLut(.SP, .SP, negative = true)`, `C3D_LightSpotDir` given the way the spot points (the reverse is dark) and `C3D_LightSpotLut` gives main's smoothstep (255, 241, 119, 0, 0 against 255, 241, 117, 0, 0), and spot with DA multiplies. Resolution to remember: the SP input has 128 steps over cos 0 to 1, so a cone narrower than about 7 degrees degrades to a step. The app reads its own framebuffer back and prints got and expected per step.
+- L8-1. mbsc and the block: `LIGHT_UNIFORM_NAMES`, `LIGHTS_FIELDS`, `write_light_functions`, the f64 model in
+  `lighting_model_test.odin` and the engine's `Lights_Block` layout check change together (a per-slot position and
+  spot rows); the stale-file guards name every generated file to regenerate. `Light`, `Light_Kind` and the two
+  constructors in `light.odin`; `calculate_lights_block` turns positions into eye space with w = 1.
+- L8-2. Per pixel on PC and the Vita (the generated functions) and the 3DS (positional lights, DA and SP tables).
+- L8-3. Per vertex everywhere (`mesh_vertex_lit.mbs`'s loop; the 3DS vertex program has 16 temporaries and 512
+  instructions, 267 now).
+- L8-4. Measured as L4 and L5 were: against an f64 model, and in Azahar and Vita3K; model-check gains a point light;
+  hardware builds, and the user's check.
+
 ## What the same unit opens (after the G2 core)
 
 *Decided 2026-11-23:* normal and bump maps, environment mapping, procedural textures and fog **will be done**, after

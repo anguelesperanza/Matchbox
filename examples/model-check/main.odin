@@ -21,7 +21,9 @@ package model_check
 	The sun shines down from the right and from the camera's side, so tops are brightest, and
 	the fronts and right-hand sides are lit alike. L, or the bottom face button (B on the 3DS,
 	Cross on the Vita), switches lighting off and on: off, every model draws as it did before
-	lighting existed, texture times tint.
+	lighting existed, texture times tint. P, or the right face button (A on the 3DS, Circle on the Vita),
+	switches two more lights off and on (G2 L8): a warm point light low between the cube and the crate, and a
+	spot light from above on the cylinder. The sun stays.
 
 	The checkerboard is the lit cut-out. A highlight has alpha 0 on every target, so the holes
 	stay holes under the light (G2 L4-0); were it 1, the board would be a solid square lit grey.
@@ -61,9 +63,15 @@ main :: proc() {
 	// The plane faces up; a quarter turn about X stands it up facing the camera (+Z)
 	board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
 
-	mb.set_lighting()
-	mb.set_lights({mb.create_directional_light({-1, -2, -1})})
 	lighting_on := true
+	bulbs_on := true
+	bulbs := [2]mb.Light {
+		mb.create_point_light({-2, 0.8, 1.5}, {1, 0.7, 0.4, 1}),
+		mb.create_spot_light({3, 3.5, 1.5}, {0, -1, -0.3}, {1, 1, 1, 1}, 15, 30),
+	}
+	sun := mb.create_directional_light({-1, -2, -1})
+	mb.set_lighting()
+	mb.set_lights({sun, bulbs[0], bulbs[1]})
 
 	camera := mb.Camera {
 		position = {0, 2.5, 6},
@@ -83,6 +91,11 @@ main :: proc() {
 		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			lighting_on = !lighting_on
 			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}})
+		}
+		if mb.is_key_pressed(.P) || mb.is_gamepad_pressed(.FACE_RIGHT) {
+			bulbs_on = !bulbs_on
+			if bulbs_on do mb.set_lights({sun, bulbs[0], bulbs[1]})
+			else do mb.set_lights({sun})
 		}
 		time += mb.get_delta_time()
 
@@ -109,6 +122,8 @@ main :: proc() {
 		// FACE_DOWN is a position, not a letter: B on the 3DS, Cross on the Vita, A on a PC pad
 		switch_label := "lighting on (L or bottom button: off)" if lighting_on else "lighting off (L or bottom button: on)"
 		mb.render_text(font, switch_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -1.4}))
+		bulb_label := "point and spot lights on (P or right button: off)" if bulbs_on else "point and spot lights off (P or right button: on)"
+		mb.render_text(font, bulb_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -2.2}))
 		mb.screen_end()
 
 		mb.render_end()

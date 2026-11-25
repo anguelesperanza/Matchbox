@@ -63,6 +63,8 @@ when VITA {
 		lights_direction_uniform:^sce.GxmProgramParameter,
 		lights_diffuse_uniform:^sce.GxmProgramParameter,
 		lights_specular_uniform:^sce.GxmProgramParameter,
+		lights_position_uniform:^sce.GxmProgramParameter,
+		lights_cone_uniform:^sce.GxmProgramParameter,
 		shininess_uniform:^sce.GxmProgramParameter,
 		specular_strength_uniform:^sce.GxmProgramParameter,
 
@@ -209,6 +211,8 @@ when VITA {
 			pipeline.lights_direction_uniform = find(reads, "lights_direction")
 			pipeline.lights_diffuse_uniform = find(reads, "lights_diffuse")
 			pipeline.lights_specular_uniform = find(reads, "lights_specular")
+			pipeline.lights_position_uniform = find(reads, "lights_position")
+			pipeline.lights_cone_uniform = find(reads, "lights_cone")
 			pipeline.shininess_uniform = find(reads, "render_shininess")
 			pipeline.specular_strength_uniform = find(reads, "render_specular_strength")
 		}
@@ -299,6 +303,8 @@ when VITA {
 		gfx.set_uniform(buffer, pipeline.lights_direction_uniform, ([^]f32)(&lights.direction)[:4 * LIGHT_SLOT_COUNT])
 		gfx.set_uniform(buffer, pipeline.lights_diffuse_uniform, ([^]f32)(&lights.diffuse)[:4 * LIGHT_SLOT_COUNT])
 		gfx.set_uniform(buffer, pipeline.lights_specular_uniform, ([^]f32)(&lights.specular)[:4 * LIGHT_SLOT_COUNT])
+		gfx.set_uniform(buffer, pipeline.lights_position_uniform, ([^]f32)(&lights.position)[:4 * LIGHT_SLOT_COUNT])
+		gfx.set_uniform(buffer, pipeline.lights_cone_uniform, ([^]f32)(&lights.cone)[:4 * LIGHT_SLOT_COUNT])
 		shininess := material.shininess
 		strength := material.specular_strength
 		gfx.set_uniform(buffer, pipeline.shininess_uniform, ([^]f32)(&shininess)[:1])

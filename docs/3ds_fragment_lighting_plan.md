@@ -435,6 +435,24 @@ kinds together.
 - L8-4. Measured as L4 and L5 were: against an f64 model, and in Azahar and Vita3K; model-check gains a point light;
   hardware builds, and the user's check.
 
+**L8 progress, 2026-11-25 (everything in L8-1 to L8-4 is in and measured except the user's hardware check).**
+- Block: a `Lights_Block` row each for position (eye space, w = 0 sun, 1 point, 2 spot) and cone ({cos outer, cos inner,
+  k = 1 / (cos inner - cos outer), -cos outer * k}); the directions the engine sends are unit length, so no shader normalizes
+  them. 5152 bytes on PC. The mbsc tests (137) and the engine's (98) pass; the f64 model gained kinds, distance fade and cone.
+- Per pixel, PC and Vita: `mbs_light_sample` in `write_light_functions`, **written without a branch on the kind**. With the
+  distance and the cone inside `if`s, Vita3K drew the point light on a scatter of pixels only (the real Vita is untested
+  either way); lerps by `step` give the same maths and a clean picture there and on PC.
+- Per pixel, 3DS: positional lights on the unit, `LightLutDA_Quadratic(0, 100, 0.09, 0.032)` and a spot table per cone
+  (built once, kept in `Lighting_Unit`). Azahar against PC's linear output: the floor's glow peak (199, 171, 157) against
+  (202, 171, 156), a grid of floor points within a median of 2.2 levels (largest 15). The spot was looked at, not measured.
+- Per vertex: the loop fits the 3DS vertex program at 501 of 512 instructions (it was 602 at first): unit directions and
+  the cone's scale and offset come from the engine, the distance comes from one `inverse_sqrt`, the fade is in Horner form.
+  Looked at in Azahar and Vita3K: it draws, the point light tints the crate and the board, the spot lights the cylinder; a big
+  floor quad shows no glow because it has four vertices.
+- To check on the hardware: whether the unit's DA and SP tables also scale the specular highlight (the PC and Vita shaders do
+  fade it); the SP table's 128 steps limit a cone narrower than about 7 degrees. The user's build is
+  `build/hardware/model_check_bulbs.3dsx` and `.vpk`; P or the right face button switches the two lights.
+
 ## What the same unit opens (after the G2 core)
 
 *Decided 2026-11-23:* normal and bump maps, environment mapping, procedural textures and fog **will be done**, after

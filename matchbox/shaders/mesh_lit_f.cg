@@ -50,20 +50,15 @@ float3 mbs_light_unit(float3 d) {
 
 float mbs_light_sample(int i, float3 position, out float3 l) {
     float kind = lights_position[i].w;
-    float fade = 1.0;
+    float is_point = step(0.5, kind);
+    float is_spot = step(1.5, kind);
     float3 axis = mbs_light_unit(lights_direction[i].xyz);
-    l = axis;
-    if (kind > 0.5) {
-        float3 to = lights_position[i].xyz - position;
-        float d = sqrt(dot(to, to));
-        l = mbs_light_unit(to);
-        fade = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);
-        if (kind > 1.5) {
-            float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);
-            fade *= t * t * (3.0 - 2.0 * t);
-        }
-    }
-    return fade;
+    float3 to = lights_position[i].xyz - position;
+    float d = sqrt(dot(to, to));
+    l = lerp(axis, mbs_light_unit(to), is_point);
+    float fade = lerp(1.0, 1.0 / (1.0 + 0.09 * d + 0.032 * d * d), is_point);
+    float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);
+    return fade * lerp(1.0, t * t * (3.0 - 2.0 * t), is_spot);
 }
 
 float4 mbs_light_diffuse(float4 q, float3 view) {

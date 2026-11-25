@@ -75,23 +75,21 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 
 	// One light seen from a pixel: the way to it in `l`, and how much of it arrives (the distance fade and a spot's
 	// cone), 1 for a sun. `position` is the pixel in eye space, which is the view vector negated
+	// Written without a branch on the kind: Vita3K's recompiled shader drew a point light on only a scatter of
+	// pixels when the distance and the cone sat inside `if`s, and a lerp by 0 or 1 costs the same on a GPU that runs
+	// both sides anyway. A sun gets a harmless `to` (its position row is zero) that the lerp throws away
 	fmt.sbprintln(builder, "\nfloat mbs_light_sample(int i, float3 position, out float3 l) {")
 	fmt.sbprintln(builder, "    float kind = lights_position[i].w;")
-	fmt.sbprintln(builder, "    float fade = 1.0;")
+	fmt.sbprintln(builder, "    float is_point = step(0.5, kind);")
+	fmt.sbprintln(builder, "    float is_spot = step(1.5, kind);")
 	fmt.sbprintln(builder, "    float3 axis = mbs_light_unit(lights_direction[i].xyz);")
-	fmt.sbprintln(builder, "    l = axis;")
-	fmt.sbprintln(builder, "    if (kind > 0.5) {")
-	fmt.sbprintln(builder, "        float3 to = lights_position[i].xyz - position;")
-	fmt.sbprintln(builder, "        float d = sqrt(dot(to, to));")
-	fmt.sbprintln(builder, "        l = mbs_light_unit(to);")
-	fmt.sbprintln(builder, "        fade = 1.0 / (1.0 + 0.09 * d + 0.032 * d * d);")
-	fmt.sbprintln(builder, "        if (kind > 1.5) {")
+	fmt.sbprintln(builder, "    float3 to = lights_position[i].xyz - position;")
+	fmt.sbprintln(builder, "    float d = sqrt(dot(to, to));")
+	fmt.sbprintln(builder, "    l = lerp(axis, mbs_light_unit(to), is_point);")
+	fmt.sbprintln(builder, "    float fade = lerp(1.0, 1.0 / (1.0 + 0.09 * d + 0.032 * d * d), is_point);")
 	// smoothstep(cos outer, cos inner, cos angle), written out: HLSL's is undefined for equal edges
-	fmt.sbprintln(builder, "            float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);")
-	fmt.sbprintln(builder, "            fade *= t * t * (3.0 - 2.0 * t);")
-	fmt.sbprintln(builder, "        }")
-	fmt.sbprintln(builder, "    }")
-	fmt.sbprintln(builder, "    return fade;")
+	fmt.sbprintln(builder, "    float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);")
+	fmt.sbprintln(builder, "    return fade * lerp(1.0, t * t * (3.0 - 2.0 * t), is_spot);")
 	fmt.sbprintln(builder, "}")
 
 	fmt.sbprintln(builder, "\nfloat4 mbs_light_diffuse(float4 q, float3 view) {")

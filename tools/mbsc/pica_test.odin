@@ -297,3 +297,21 @@ division_and_long_expressions_work :: proc(t: ^testing.T) {
 	expect_small(t, "division", declarations, "r = a / b + v3.x / 4.0 + (v3 / w3).y + (v3 / b).z")
 	expect_small(t, "many temporaries", declarations, "r = ((a + b) * (b + c) + (a - c) * (b - a)) * ((a + c) / (b + 4.0)) + length(v3 - w3) * dot(v3, w3)")
 }
+
+@(test)
+a_variable_lets_go_of_its_register_after_its_last_use :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	declarations := "@(uniform) a: f32\n@(uniform) b: f32\n@(uniform) c: f32\n"
+	// 24 variables, each read only by the next one: in one block they need 24 registers if they are kept to the block's end
+	body := strings.builder_make(context.temp_allocator)
+	strings.write_string(&body, "t0 := a + b\n")
+	for index in 1 ..< 24 {
+		fmt.sbprintf(&body, "\tt%d := t%d * c + %d.0\n", index, index - 1, index)
+	}
+	strings.write_string(&body, "\tr = t23 * 0.001\n\tif a < b {\n\t\tr = r + t0\n\t}")
+	source := small_pica(declarations, strings.to_string(body))
+	ir, parsed, _ := build_ir_for(source, .PICA200)
+	defer destroy_parsed(parsed)
+	_, problems := generate_pica(ir, context.temp_allocator)
+	testing.expectf(t, len(problems) == 0, "a chain of short-lived variables should fit: %v", problems)
+}

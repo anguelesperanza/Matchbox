@@ -34,6 +34,9 @@ pica_end_statement :: proc(h: ^Pica, mark: int) {
 	kept := mark
 	for index in mark ..< len(h.stack) {
 		entry := h.stack[index]
+		if entry.index < 0 {
+			continue
+		}
 		if entry.pinned && entry.depth <= h.depth && h.state[entry.index] == 2 {
 			h.stack[kept] = entry
 			kept += 1
@@ -46,9 +49,26 @@ pica_end_statement :: proc(h: ^Pica, mark: int) {
 
 pica_end_scope :: proc(h: ^Pica, mark: int) {
 	for index in mark ..< len(h.stack) {
-		h.state[h.stack[index].index] = 0
+		if h.stack[index].index >= 0 {
+			h.state[h.stack[index].index] = 0
+		}
 	}
 	resize(&h.stack, mark)
+}
+
+// pica_release_variable frees a variable's registers after its last use, and forgets their stack entries so a later owner of the register isn't freed by them.
+pica_release_variable :: proc(h: ^Pica, var: ^IR_Var) {
+	for operand in h.env[var] {
+		if operand.kind != .TEMP || h.state[operand.temp] != 2 {
+			continue
+		}
+		h.state[operand.temp] = 0
+		for &entry in h.stack {
+			if entry.index == operand.temp && entry.pinned {
+				entry.index = -1
+			}
+		}
+	}
 }
 
 pica_pin :: proc(h: ^Pica, index: int) {

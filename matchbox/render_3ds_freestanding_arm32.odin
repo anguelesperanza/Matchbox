@@ -65,6 +65,8 @@ when !VITA {
 		lights_direction_uniform:i32, // the first of LIGHT_SLOT_COUNT registers, as are the next two
 		lights_diffuse_uniform:i32,
 		lights_specular_uniform:i32,
+		lights_position_uniform:i32,
+		lights_cone_uniform:i32,
 		shininess_uniform:i32,
 		specular_strength_uniform:i32,
 		tint_uniform:i32,
@@ -94,6 +96,13 @@ when !VITA {
 			.mbm stored, so equal ones are equal bit for bit
 		*/
 		tables:map[f32]^c3d.C3D_LightLut,
+		/*
+			Every point and spot light fades by main's curve, 1 / (1 + 0.09 d + 0.032 d^2), through the one DA table,
+			built once: 256 entries over 0 to 100 units, a value held past the end (measured on the New 3DS LL, light_test4)
+		*/
+		distance_table:c3d.C3D_LightLutDA,
+		// One SP table per distinct cone, as the D0 tables are per shininess, keyed by its cosines
+		spot_tables:map[[2]f32]^c3d.C3D_LightLut,
 		material:Material, // what the environment has now, so a draw sets it only when it changes
 		has_material:bool,
 	}
@@ -226,6 +235,8 @@ when !VITA {
 		pipeline.lights_direction_uniform = find(pipeline, shader_path, "lights_direction") if per_vertex else -1
 		pipeline.lights_diffuse_uniform = find(pipeline, shader_path, "lights_diffuse") if per_vertex else -1
 		pipeline.lights_specular_uniform = find(pipeline, shader_path, "lights_specular") if per_vertex else -1
+		pipeline.lights_position_uniform = find(pipeline, shader_path, "lights_position") if per_vertex else -1
+		pipeline.lights_cone_uniform = find(pipeline, shader_path, "lights_cone") if per_vertex else -1
 		pipeline.shininess_uniform = find(pipeline, shader_path, "render_shininess") if per_vertex else -1
 		pipeline.specular_strength_uniform = find(pipeline, shader_path, "render_specular_strength") if per_vertex else -1
 		pipeline.tint_uniform = find(pipeline, shader_path, "render_tint")
@@ -259,6 +270,8 @@ when !VITA {
 		c3d.C3D_LightEnvBind(nil)
 		for _, table in mbi.lighting_unit.tables do free(table)
 		delete(mbi.lighting_unit.tables)
+		for _, table in mbi.lighting_unit.spot_tables do free(table)
+		delete(mbi.lighting_unit.spot_tables)
 		c3d.C3D_TexDelete(&mbi.pipeline.white_texture)
 		unload_render_pipeline(&mbi.vertex_lit_pipeline)
 		unload_render_pipeline(&mbi.lit_pipeline)
@@ -277,6 +290,7 @@ when !VITA {
 		unit := &mbi.lighting_unit
 		ensure(lighting.table == "D0" && lighting.table_input == "NH", "The lit shader's specular table is not the D0 table on N.H the engine builds")
 		c3d.C3D_LightEnvInit(&unit.environment)
+		c3d.LightLutDA_Quadratic(&unit.distance_table, 0, 100, 0.09, 0.032)
 		c3d.C3D_LightEnvClampHighlights(&unit.environment, lighting.clamp_highlights)
 		if lighting.fresnel == "secondary_alpha_zero" {
 			c3d.C3D_LightEnvLut(&unit.environment, .FR, .NV, false, &unit.zero_table)
@@ -291,21 +305,11 @@ when !VITA {
 	}
 
 	/*
-		citro3d's C3D_FVec is laid out w, z, y, x (c3d/types.h: "Matches PICA layout"), but
-		o3dx's binding names the same four floats x, y, z, w, so writing `.x` through it sets
-		citro3d's w. Built here in citro3d's order rather than through the binding's names
-	*/
-	@(private = "file")
-	create_citro3d_vector :: proc(v:[4]f32) -> c3d.C3D_FVec {
-		return transmute(c3d.C3D_FVec)[4]f32{v.w, v.z, v.y, v.x}
-	}
-
-	/*
-		Gives the lighting unit the scene's lights for the camera being drawn. The block's
-		directions point towards the light in this camera's eye space (calculate_lights_block),
-		which is what C3D_LightPosition takes for a directional light (w = 0). They are made unit
-		length here, as PC's and the Vita's shaders do, so {0, -2, 0} is no brighter than
-		{0, -1, 0}; a zero direction is an empty slot and stays switched off
+		Gives the lighting unit the scene's lights for the camera being drawn, from the block
+		(calculate_lights_block): a sun is a direction towards it (w = 0), a point or spot light a
+		place in eye space (w = 1) with the DA table's fade, and a spot adds its axis and the SP table of
+		its cone. C3D_LightSpotDir takes the way the spot points, the block's axis is back along it.
+		An empty slot, or a sun with no direction, stays switched off.
 	*/
 	@(private = "file")
 	set_lighting_unit_lights :: proc() {
@@ -314,16 +318,64 @@ when !VITA {
 		c3d.C3D_LightEnvAmbient(&unit.environment, block.ambient.r, block.ambient.g, block.ambient.b)
 		for &light, slot in unit.lights {
 			direction := block.direction[slot].xyz
-			length_squared := direction.x * direction.x + direction.y * direction.y + direction.z * direction.z
-			on := slot < int(block.count) && length_squared > 0
+			kind := Light_Kind(int(block.position[slot].w))
+			has_direction := direction.x != 0 || direction.y != 0 || direction.z != 0
+			on := slot < int(block.count) && (kind != .DIRECTIONAL || has_direction)
 			c3d.C3D_LightEnable(&light, on)
 			if !on do continue
-			direction /= math.sqrt(length_squared)
-			position := create_citro3d_vector({direction.x, direction.y, direction.z, 0})
-			c3d.C3D_LightPosition(&light, &position)
+			switch kind {
+			case .DIRECTIONAL:
+				position := c3d.C3D_FVec{x = direction.x, y = direction.y, z = direction.z, w = 0}
+				c3d.C3D_LightPosition(&light, &position)
+			case .POINT, .SPOT:
+				place := block.position[slot]
+				position := c3d.C3D_FVec{x = place.x, y = place.y, z = place.z, w = 1}
+				c3d.C3D_LightPosition(&light, &position)
+			}
+			distance := kind != .DIRECTIONAL
+			c3d.C3D_LightDistAttnEnable(&light, distance)
+			if distance do c3d.C3D_LightDistAttn(&light, &unit.distance_table)
+			spot := kind == .SPOT
+			c3d.C3D_LightSpotEnable(&light, spot)
+			if spot {
+				c3d.C3D_LightSpotDir(&light, -direction.x, -direction.y, -direction.z)
+				table := get_spot_table(block.cone[slot].x, block.cone[slot].y)
+				c3d.C3D_LightEnvLut(&unit.environment, .SP, .SP, true, table) // the input is the cosine from the axis, signed: behind the light reads zero
+				c3d.C3D_LightSpotLut(&light, table)
+			}
 			c3d.C3D_LightDiffuse(&light, block.diffuse[slot].r, block.diffuse[slot].g, block.diffuse[slot].b)
 			c3d.C3D_LightSpecular0(&light, block.specular[slot].r, block.specular[slot].g, block.specular[slot].b)
 		}
+	}
+
+	/*
+		The SP table for a cone, made the first time and kept. Signed, 256 entries: entry i below 128 is the cosine
+		i / 128 and holds the smoothstep from the outer cone's cosine to the inner's; entries 128 and up (a cosine
+		below 0, behind the light) are 0. 128 steps over 0 to 1 is coarse near 1: a cone narrower than about 7
+		degrees turns into a step. LightLut_FromArray takes the 256 values and then the step to the next one
+		(measured on the New 3DS LL, light_test4)
+	*/
+	@(private = "file")
+	get_spot_table :: proc(outer, inner:f32) -> ^c3d.C3D_LightLut {
+		unit := &mbi.lighting_unit
+		key := [2]f32{outer, inner}
+		if table, found := unit.spot_tables[key]; found do return table
+		table := new(c3d.C3D_LightLut)
+		value :: proc(cosine, outer, inner:f32) -> f32 {
+			if cosine <= 0 do return 0
+			t := clamp((cosine - outer) / max(inner - outer, 1e-6), 0, 1)
+			return t * t * (3 - 2 * t)
+		}
+		data:[512]f32
+		for i in 0 ..< 256 {
+			here:f32 = f32(i) / 128 if i < 128 else 0
+			next:f32 = f32(i + 1) / 128 if i < 128 else 0
+			data[i] = value(here, outer, inner)
+			data[256 + i] = value(next, outer, inner) - value(here, outer, inner)
+		}
+		c3d.LightLut_FromArray(table, &data[0])
+		unit.spot_tables[key] = table
+		return table
 	}
 
 	/*
@@ -425,6 +477,8 @@ when !VITA {
 			set_vector_uniform(pipeline.lights_direction_uniform + i32(slot), lights.direction[slot])
 			set_vector_uniform(pipeline.lights_diffuse_uniform + i32(slot), lights.diffuse[slot])
 			set_vector_uniform(pipeline.lights_specular_uniform + i32(slot), lights.specular[slot])
+			set_vector_uniform(pipeline.lights_position_uniform + i32(slot), lights.position[slot])
+			set_vector_uniform(pipeline.lights_cone_uniform + i32(slot), lights.cone[slot])
 		}
 	}
 

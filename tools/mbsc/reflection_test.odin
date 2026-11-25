@@ -144,8 +144,8 @@ a_struct_written_inline_is_listed_instead_of_guessed :: proc(t: ^testing.T) {
 /*
 	A shader that calls a light built-in gets the lights block in its reflection, so the engine can check its
 	Lights_Block when it starts. The numbers are HLSL's packing of what hlsl.odin declares, worked by hand: the
-	ambient row at 0, three arrays of 64 rows of 16 bytes from 16, 1040 and 2064, the count at 3088, and the block
-	rounded up to 3104. lit_shader declares no `render`; the HLSL declares it for the specular's material, so the
+	ambient row at 0, five arrays of 64 rows of 16 bytes from 16, 1040, 2064, 3088 and 4112, the count at 5136, and the block
+	rounded up to 5152. lit_shader declares no `render`; the HLSL declares it for the specular's material, so the
 	reflection has to list it or the runtime would never bind it.
 */
 @(test)
@@ -153,17 +153,19 @@ a_lit_shader_lists_the_lights_block :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
 	text := reflect(t, lit_shader("return light_diffuse(v.quat, v.view) * sample(a, v.uv) + light_specular(v.quat, v.view)"))
-	testing.expect(t, strings.contains(text, "block lights 3 3104\n"), text)
+	testing.expect(t, strings.contains(text, "block lights 3 5152\n"), text)
 	testing.expect(t, strings.contains(text, "value lights ambient [4]f32 0 16 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "value lights direction [4]f32 16 1024 64 16\n"), text)
 	testing.expect(t, strings.contains(text, "value lights diffuse [4]f32 1040 1024 64 16\n"), text)
 	testing.expect(t, strings.contains(text, "value lights specular [4]f32 2064 1024 64 16\n"), text)
-	testing.expect(t, strings.contains(text, "value lights count i32 3088 4 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value lights position [4]f32 3088 1024 64 16\n"), text)
+	testing.expect(t, strings.contains(text, "value lights cone [4]f32 4112 1024 64 16\n"), text)
+	testing.expect(t, strings.contains(text, "value lights count i32 5136 4 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "block render 1 112\n"), text)
 
 	// reached through a procedure of the shader's own, the call still counts
 	helper := strings.concatenate({lit_shader("return shade(v)"), "\nshade :: proc(v: Varying) -> [4]f32 {\n\treturn light_diffuse(v.quat, v.view)\n}\n"}, context.temp_allocator)
-	testing.expect(t, strings.contains(reflect(t, helper), "block lights 3 3104\n"))
+	testing.expect(t, strings.contains(reflect(t, helper), "block lights 3 5152\n"))
 
 	// and a shader that doesn't light has no lights block
 	unlit := reflect(t, lit_shader("return sample(a, v.uv)"))

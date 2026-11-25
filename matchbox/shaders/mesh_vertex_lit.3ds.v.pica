@@ -5,6 +5,8 @@
 .fvec frame_view[4]
 .fvec lights_ambient
 .fvec lights_direction[8]
+.fvec lights_position[8]
+.fvec lights_cone[8]
 .fvec lights_diffuse[8]
 .fvec render_shininess
 .fvec lights_specular[8]
@@ -14,8 +16,13 @@
 .constf mbs_k1(1.000000000e+00, 1.000000000e+00, 1.000000000e+00, 1.000000000e+00)
 .constf mbs_k2(5.000000000e-01, 5.000000000e-01, 5.000000000e-01, 5.000000000e-01)
 .constf mbs_k3(9.999999960e-13, 9.999999960e-13, 9.999999960e-13, 9.999999960e-13)
-.constf mbs_k4(9.999999939e-09, 9.999999939e-09, 9.999999939e-09, 9.999999939e-09)
-.constf mbs_k5(0.000000000e+00, 0.000000000e+00, 0.000000000e+00, 1.000000000e+00)
+.constf mbs_k4(9.000000358e-02, 9.000000358e-02, 9.000000358e-02, 9.000000358e-02)
+.constf mbs_k5(3.200000152e-02, 3.200000152e-02, 3.200000152e-02, 3.200000152e-02)
+.constf mbs_k6(1.500000000e+00, 1.500000000e+00, 1.500000000e+00, 1.500000000e+00)
+.constf mbs_k7(3.000000000e+00, 3.000000000e+00, 3.000000000e+00, 3.000000000e+00)
+.constf mbs_k8(2.000000000e+00, 2.000000000e+00, 2.000000000e+00, 2.000000000e+00)
+.constf mbs_k9(9.999999939e-09, 9.999999939e-09, 9.999999939e-09, 9.999999939e-09)
+.constf mbs_k10(0.000000000e+00, 0.000000000e+00, 0.000000000e+00, 1.000000000e+00)
 .out mbs_out_position position
 .out mbs_out_texcoord0 texcoord0
 .out mbs_out_color color
@@ -28,267 +35,513 @@
 	mul r3.xy, r4.xyzw, v1.xyzw
 	add r4.xy, render_uv_rectangle.xyyy, r3.xyzw
 	mov r1.xy, r4.xyzw
-	mov r3.xyz, mbs_k0.xxxx
-	mov r4.xyz, mbs_k0.xxxx
-	mov r5.xyz, v0.xyzw
-	mov r5.w, mbs_k1.xyzx
-	dp4 r6.x, render_model[0].xyzw, r5.xyzw
-	dp4 r6.y, render_model[1].xyzw, r5.xyzw
-	dp4 r6.z, render_model[2].xyzw, r5.xyzw
-	dp4 r6.w, render_model[3].xyzw, r5.xyzw
-	dp4 r5.x, frame_view_projection[0].xyzw, r6.xyzw
-	dp4 r5.y, frame_view_projection[1].xyzw, r6.xyzw
-	dp4 r5.z, frame_view_projection[2].xyzw, r6.xyzw
-	dp4 r5.w, frame_view_projection[3].xyzw, r6.xyzw
-	mov r0.xyzw, r5.xyzw
-	dp4 r5.x, frame_view[0].xyzw, r6.xyzw
-	dp4 r5.y, frame_view[1].xyzw, r6.xyzw
-	dp4 r5.z, frame_view[2].xyzw, r6.xyzw
-	dp4 r5.w, frame_view[3].xyzw, r6.xyzw
-	mov r7.xyz, -r5.xyzw
-	dp3 r8.x, r7.xyzw, r7.xyzw
-	rsq r9.x, r8.xxxx
-	mul r8.xyz, r7.xyzw, r9.xxxx
-	mov r3.xyz, r8.xyzw
-	mov r7.xyz, v3.xyzw
-	mov r7.w, mbs_k0.xyzx
-	dp4 r8.x, render_model[0].xyzw, r7.xyzw
-	dp4 r8.y, render_model[1].xyzw, r7.xyzw
-	dp4 r8.z, render_model[2].xyzw, r7.xyzw
-	dp4 r8.w, render_model[3].xyzw, r7.xyzw
-	dp4 r7.x, frame_view[0].xyzw, r8.xyzw
-	dp4 r7.y, frame_view[1].xyzw, r8.xyzw
-	dp4 r7.z, frame_view[2].xyzw, r8.xyzw
-	dp4 r7.w, frame_view[3].xyzw, r8.xyzw
-	dp3 r8.x, r7.xyzz, r7.xyzz
-	rsq r9.x, r8.xxxx
-	mul r8.xyz, r7.xyzz, r9.xxxx
-	mov r4.xyz, r8.xyzw
-	mov r5.xyz, lights_ambient.xyzz
-	mov r6.xyz, mbs_k0.xyzw
-	mov r7.xyz, lights_direction[0].xyzz
-	dp3 r8.x, lights_direction[0].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[0].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[0].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[0].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[1].xyzz
-	dp3 r8.x, lights_direction[1].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[1].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[1].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[1].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[2].xyzz
-	dp3 r8.x, lights_direction[2].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[2].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[2].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[2].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[3].xyzz
-	dp3 r8.x, lights_direction[3].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[3].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[3].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[3].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[4].xyzz
-	dp3 r8.x, lights_direction[4].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[4].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[4].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[4].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[5].xyzz
-	dp3 r8.x, lights_direction[5].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[5].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[5].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[5].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[6].xyzz
-	dp3 r8.x, lights_direction[6].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[6].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[6].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[6].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mov r7.xyz, lights_direction[7].xyzz
-	dp3 r8.x, lights_direction[7].xyzz, r7.xyzw
-	max r7.x, mbs_k3.xxxx, r8.xxxx
-	rsq r8.x, r7.xxxx
-	mul r7.xyz, lights_direction[7].xyzz, r8.xxxx
-	dp3 r8.x, r7.xyzw, r4.xyzw
-	max r9.x, mbs_k0.xxxx, r8.xxxx
-	mul r10.xyz, lights_diffuse[7].xyzz, r9.xxxx
-	add r9.xyz, r5.xyzw, r10.xyzw
-	mov r5.xyz, r9.xyzw
-	add r9.xyz, r7.xyzw, r3.xyzw
-	dp3 r10.x, r9.xyzw, r9.xyzw
-	rsq r11.x, r10.xxxx
-	mul r10.xyz, r9.xyzw, r11.xxxx
-	dp3 r9.x, r4.xyzw, r10.xyzw
-	max r10.x, mbs_k4.xxxx, r9.xxxx
-	lg2 r9.x, r10.xxxx
-	mul r10.x, render_shininess.xxxx, r9.xxxx
-	ex2 r9.x, r10.xxxx
-	sge r10.x, mbs_k0.xxxx, r8.xxxx
-	add r11.x, mbs_k1.xxxx, -r10.xxxx
-	mul r10.x, r11.xxxx, r9.xxxx
-	mul r11.xyz, lights_specular[7].xyzz, r10.xxxx
-	add r10.xyz, r6.xyzw, r11.xyzw
-	mov r6.xyz, r10.xyzw
-	mul r7.xyzw, render_tint.xyzw, v2.xyzw
-	max r8.xyz, mbs_k0.xxxx, r5.xyzw
-	min r9.xyz, mbs_k1.xxxx, r8.xyzw
-	mul r8.xyz, r9.xyzw, r7.xyzz
-	mul r9.xyz, render_specular_strength.xxxx, r6.xyzw
-	max r10.xyz, mbs_k0.xxxx, r9.xyzw
-	min r9.xyz, mbs_k1.xxxx, r10.xyzw
-	add r10.xyz, r8.xyzw, r9.xyzw
-	max r8.x, mbs_k0.xxxx, r10.xxxx
-	min r9.x, mbs_k1.xxxx, r8.xxxx
-	max r8.x, mbs_k0.xxxx, r10.yyyy
-	min r11.x, mbs_k1.xxxx, r8.xxxx
-	max r8.x, mbs_k0.xxxx, r10.zzzz
-	min r12.x, mbs_k1.xxxx, r8.xxxx
-	mov r8.x, r9.xyzw
-	mov r8.y, r11.xxzw
-	mov r8.z, r12.xyxw
-	mov r8.w, r7.xyzw
-	mov r2.xyzw, r8.xyzw
+	mov r3.xyz, v0.xyzw
+	mov r3.w, mbs_k1.xyzx
+	dp4 r4.x, render_model[0].xyzw, r3.xyzw
+	dp4 r4.y, render_model[1].xyzw, r3.xyzw
+	dp4 r4.z, render_model[2].xyzw, r3.xyzw
+	dp4 r4.w, render_model[3].xyzw, r3.xyzw
+	dp4 r3.x, frame_view_projection[0].xyzw, r4.xyzw
+	dp4 r3.y, frame_view_projection[1].xyzw, r4.xyzw
+	dp4 r3.z, frame_view_projection[2].xyzw, r4.xyzw
+	dp4 r3.w, frame_view_projection[3].xyzw, r4.xyzw
+	mov r0.xyzw, r3.xyzw
+	dp4 r3.x, frame_view[0].xyzw, r4.xyzw
+	dp4 r3.y, frame_view[1].xyzw, r4.xyzw
+	dp4 r3.z, frame_view[2].xyzw, r4.xyzw
+	dp4 r3.w, frame_view[3].xyzw, r4.xyzw
+	mov r4.xyz, -r3.xyzw
+	dp3 r5.x, r4.xyzw, r4.xyzw
+	rsq r6.x, r5.xxxx
+	mul r5.xyz, r4.xyzw, r6.xxxx
+	mov r4.xyz, v3.xyzw
+	mov r4.w, mbs_k0.xyzx
+	dp4 r6.x, render_model[0].xyzw, r4.xyzw
+	dp4 r6.y, render_model[1].xyzw, r4.xyzw
+	dp4 r6.z, render_model[2].xyzw, r4.xyzw
+	dp4 r6.w, render_model[3].xyzw, r4.xyzw
+	dp4 r4.x, frame_view[0].xyzw, r6.xyzw
+	dp4 r4.y, frame_view[1].xyzw, r6.xyzw
+	dp4 r4.z, frame_view[2].xyzw, r6.xyzw
+	dp4 r4.w, frame_view[3].xyzw, r6.xyzw
+	dp3 r6.x, r4.xyzz, r4.xyzz
+	rsq r7.x, r6.xxxx
+	mul r6.xyz, r4.xyzz, r7.xxxx
+	mov r4.xyz, lights_ambient.xyzz
+	mov r7.xyz, mbs_k0.xyzw
+	mov r8.xyz, lights_direction[0].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[0].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[0].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[0].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[0].zzzz, r11.xxxx
+			add r11.x, lights_cone[0].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[0].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[0].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[1].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[1].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[1].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[1].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[1].zzzz, r11.xxxx
+			add r11.x, lights_cone[1].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[1].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[1].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[2].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[2].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[2].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[2].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[2].zzzz, r11.xxxx
+			add r11.x, lights_cone[2].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[2].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[2].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[3].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[3].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[3].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[3].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[3].zzzz, r11.xxxx
+			add r11.x, lights_cone[3].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[3].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[3].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[4].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[4].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[4].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[4].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[4].zzzz, r11.xxxx
+			add r11.x, lights_cone[4].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[4].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[4].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[5].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[5].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[5].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[5].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[5].zzzz, r11.xxxx
+			add r11.x, lights_cone[5].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[5].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[5].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[6].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[6].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[6].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[6].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[6].zzzz, r11.xxxx
+			add r11.x, lights_cone[6].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[6].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[6].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mov r8.xyz, lights_direction[7].xyzz
+	mov r9.xyz, r8.xyzw
+	mov r10.x, mbs_k1.xxxx
+	mov r11.x, mbs_k2.xxxx
+	cmp lights_position[7].wwww, gt, gt, r11.xxxx
+	ifc cmp.x
+		add r11.xyz, lights_position[7].xyzz, -r3.xyzz
+		dp3 r12.x, r11.xyzw, r11.xyzw
+		max r13.x, mbs_k3.xxxx, r12.xxxx
+		rsq r12.x, r13.xxxx
+		mul r14.x, r13.xxxx, r12.xxxx
+		mul r13.xyz, r11.xyzw, r12.xxxx
+		mov r9.xyz, r13.xyzw
+		mul r11.x, mbs_k5.xxxx, r14.xxxx
+		add r12.x, mbs_k4.xxxx, r11.xxxx
+		mul r11.x, r14.xxxx, r12.xxxx
+		add r12.x, mbs_k1.xxxx, r11.xxxx
+		rcp r11.x, r12.xxxx
+		mul r12.x, mbs_k1.xxxx, r11.xxxx
+		mov r10.x, r12.xyzw
+		mov r11.x, mbs_k6.xxxx
+		cmp lights_position[7].wwww, gt, gt, r11.xxxx
+		ifc cmp.x
+			dp3 r11.x, r9.xyzw, r8.xyzw
+			mul r12.x, lights_cone[7].zzzz, r11.xxxx
+			add r11.x, lights_cone[7].wwww, r12.xxxx
+			max r12.x, mbs_k0.xxxx, r11.xxxx
+			min r11.x, mbs_k1.xxxx, r12.xxxx
+			mul r12.x, r10.xxxx, r11.xxxx
+			mul r13.x, r12.xxxx, r11.xxxx
+			mul r12.x, mbs_k8.xxxx, r11.xxxx
+			add r14.x, mbs_k7.xxxx, -r12.xxxx
+			mul r12.x, r13.xxxx, r14.xxxx
+			mov r10.x, r12.xyzw
+		.end
+	.end
+	dp3 r8.x, r9.xyzw, r6.xyzw
+	max r11.x, mbs_k0.xxxx, r8.xxxx
+	mul r12.x, r11.xxxx, r10.xxxx
+	mul r11.xyz, lights_diffuse[7].xyzz, r12.xxxx
+	add r12.xyz, r4.xyzw, r11.xyzw
+	mov r4.xyz, r12.xyzw
+	add r11.xyz, r9.xyzw, r5.xyzw
+	dp3 r12.x, r11.xyzw, r11.xyzw
+	rsq r13.x, r12.xxxx
+	mul r12.xyz, r11.xyzw, r13.xxxx
+	dp3 r11.x, r6.xyzw, r12.xyzw
+	max r12.x, mbs_k9.xxxx, r11.xxxx
+	lg2 r11.x, r12.xxxx
+	mul r12.x, render_shininess.xxxx, r11.xxxx
+	ex2 r11.x, r12.xxxx
+	sge r9.x, r8.xxxx, mbs_k0.xxxx
+	mul r12.x, r9.xxxx, r11.xxxx
+	mul r9.x, r12.xxxx, r10.xxxx
+	mul r12.xyz, lights_specular[7].xyzz, r9.xxxx
+	add r9.xyz, r7.xyzw, r12.xyzw
+	mov r7.xyz, r9.xyzw
+	mul r3.xyzw, render_tint.xyzw, v2.xyzw
+	max r5.xyz, mbs_k0.xxxx, r4.xyzw
+	min r6.xyz, mbs_k1.xxxx, r5.xyzw
+	mul r5.xyz, r6.xyzw, r3.xyzz
+	mul r6.xyz, render_specular_strength.xxxx, r7.xyzw
+	max r8.xyz, mbs_k0.xxxx, r6.xyzw
+	min r6.xyz, mbs_k1.xxxx, r8.xyzw
+	add r8.xyz, r5.xyzw, r6.xyzw
+	max r4.xyz, mbs_k0.xxxx, r8.xyzw
+	min r5.xyz, mbs_k1.xxxx, r4.xyzw
+	mov r4.xyz, r5.xyzw
+	mov r4.w, r3.xyzw
+	mov r2.xyzw, r4.xyzw
 	mov mbs_out_position.xyzw, r0.xyzw
-	mov r8.xyzw, mbs_k5.xyzw
-	mov r8.xy, r1.xyzw
-	mov mbs_out_texcoord0.xyzw, r8.xyzw
+	mov r3.xyzw, mbs_k10.xyzw
+	mov r3.xy, r1.xyzw
+	mov mbs_out_texcoord0.xyzw, r3.xyzw
 	mov mbs_out_color.xyzw, r2.xyzw
 	end
 .end

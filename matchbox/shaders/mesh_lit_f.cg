@@ -35,6 +35,9 @@ uniform float4 lights_ambient;
 uniform float4 lights_direction[8];
 uniform float4 lights_diffuse[8];
 uniform float4 lights_specular[8];
+uniform float4 lights_position[8];
+uniform float4 lights_cone[8];
+uniform float3 lights_split;
 
 // The light built-ins, following the 3DS's fragment lighting unit (mbsc's lighting.odin says how).
 float3 mbs_light_normal(float4 q) {
@@ -46,27 +49,65 @@ float3 mbs_light_unit(float3 d) {
     return d * rsqrt(max(dot(d, d), 1e-12));
 }
 
-float4 mbs_light_diffuse(float4 q, float3 view) {
-    float3 n = mbs_light_normal(q);
-    float3 sum = lights_ambient.rgb;
-    for (int i = 0; i < 8; i++) {
-        float3 l = mbs_light_unit(lights_direction[i].xyz);
-        sum += lights_diffuse[i].rgb * max(dot(l, n), 0.0);
+static float3 mbs_light_diffuse_sum;
+static float3 mbs_light_specular_sum;
+static float mbs_light_done = 0.0;
+
+// One light's share, given the way to it and how much of it arrives.
+void mbs_light_add(int i, float3 l, float fade, float3 n, float3 v) {
+    float facing = dot(l, n);
+    mbs_light_diffuse_sum += lights_diffuse[i].rgb * (max(facing, 0.0) * fade);
+    float3 h = mbs_light_unit(l + v);
+    mbs_light_specular_sum += lights_specular[i].rgb * ((facing > 0.0 ? 1.0 : 0.0) * fade * pow(max(dot(n, h), 1e-8), render_shininess));
+}
+
+// The distance fade of a bulb at distance d: 1 / (1 + 0.09 d + 0.032 d d).
+float mbs_light_fade(float d) {
+    return 1.0 / (1.0 + d * (0.09 + 0.032 * d));
+}
+
+void mbs_light_all(float4 q, float3 view) {
+    if (mbs_light_done == 0.0) {
+        float3 n = mbs_light_normal(q);
+        float3 v = mbs_light_unit(view);
+        float3 position = -view;
+        mbs_light_diffuse_sum = lights_ambient.rgb;
+        mbs_light_specular_sum = float3(0.0, 0.0, 0.0);
+        int suns = (int)(lights_split.x);
+        int points = (int)(lights_split.y);
+        int total = (int)(lights_split.z);
+        for (int i = 0; i < suns; i++) {
+            mbs_light_add(i, lights_direction[i].xyz, 1.0, n, v);
+        }
+        for (int i = suns; i < points; i++) {
+            float3 to = lights_position[i].xyz - position;
+            float squared = max(dot(to, to), 1e-12);
+            float inverse = rsqrt(squared);
+            mbs_light_add(i, to * inverse, mbs_light_fade(squared * inverse), n, v);
+        }
+        for (int i = points; i < total; i++) {
+            float3 to = lights_position[i].xyz - position;
+            float squared = max(dot(to, to), 1e-12);
+            float inverse = rsqrt(squared);
+            float3 l = to * inverse;
+            // smoothstep(cos outer, cos inner, cos angle), written out: Cg's is undefined for equal edges
+            float t = saturate(dot(l, lights_direction[i].xyz) * lights_cone[i].z + lights_cone[i].w);
+            mbs_light_add(i, l, mbs_light_fade(squared * inverse) * (t * t * (3.0 - 2.0 * t)), n, v);
+        }
+        mbs_light_diffuse_sum = saturate(mbs_light_diffuse_sum);
+        mbs_light_specular_sum = saturate(mbs_light_specular_sum * render_specular_strength);
+        mbs_light_done = 1.0;
     }
-    return float4(saturate(sum), 1.0);
+}
+
+float4 mbs_light_diffuse(float4 q, float3 view) {
+    mbs_light_all(q, view);
+    return float4(mbs_light_diffuse_sum, 1.0);
 }
 
 float4 mbs_light_specular(float4 q, float3 view) {
-    float3 n = mbs_light_normal(q);
-    float3 v = mbs_light_unit(view);
-    float3 sum = float3(0.0, 0.0, 0.0);
-    for (int i = 0; i < 8; i++) {
-        float3 l = mbs_light_unit(lights_direction[i].xyz);
-        float3 h = mbs_light_unit(l + v);
-        float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;
-        sum += lights_specular[i].rgb * (facing * pow(max(dot(n, h), 1e-8), render_shininess));
-    }
-    return float4(saturate(sum * render_specular_strength), 0.0);
+    mbs_light_all(q, view);
+    return float4(mbs_light_specular_sum, 0.0);
 }
 
 float4 mbs_normal_quaternion(float3 n) {

@@ -21,7 +21,10 @@ package model_check
 	The sun shines down from the right and from the camera's side, so tops are brightest, and
 	the fronts and right-hand sides are lit alike. L, or the bottom face button (B on the 3DS,
 	Cross on the Vita), switches lighting off and on: off, every model draws as it did before
-	lighting existed, texture times tint.
+	lighting existed, texture times tint. P, or the right face button (A on the 3DS, Circle on the Vita),
+	switches two more lights off and on (G2 L8): a warm point light low between the cube and the crate, and a
+	spot light from above on the cylinder. The sun stays. M, or the left face button (Y on the 3DS, Square on the
+Vita), switches between lighting per pixel and per vertex.
 
 	The checkerboard is the lit cut-out. A highlight has alpha 0 on every target, so the holes
 	stay holes under the light (G2 L4-0); were it 1, the board would be a solid square lit grey.
@@ -61,9 +64,16 @@ main :: proc() {
 	// The plane faces up; a quarter turn about X stands it up facing the camera (+Z)
 	board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
 
-	mb.set_lighting()
-	mb.set_lights({mb.create_directional_light({-1, -2, -1})})
 	lighting_on := true
+	per_vertex := false
+	bulbs_on := true
+	bulbs := [2]mb.Light {
+		mb.create_point_light({-2, 0.8, 1.5}, {1, 0.7, 0.4, 1}),
+		mb.create_spot_light({3, 3.5, 1.5}, {0, -1, -0.3}, {1, 1, 1, 1}, 15, 30),
+	}
+	sun := mb.create_directional_light({-1, -2, -1})
+	mb.set_lighting()
+	mb.set_lights({sun, bulbs[0], bulbs[1]})
 
 	camera := mb.Camera {
 		position = {0, 2.5, 6},
@@ -77,12 +87,24 @@ main :: proc() {
 	}
 
 	time:f32 = 0
+	fps:f32 = 0
+	fps_time:f32 = 0
+	fps_frames := 0
 	for mb.is_running() {
 		mb.poll_events()
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
 		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			lighting_on = !lighting_on
-			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}})
+			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}, mode = .PER_VERTEX if per_vertex else .PER_PIXEL})
+		}
+		if mb.is_key_pressed(.M) || mb.is_gamepad_pressed(.FACE_LEFT) {
+			per_vertex = !per_vertex
+			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}, mode = .PER_VERTEX if per_vertex else .PER_PIXEL})
+		}
+		if mb.is_key_pressed(.P) || mb.is_gamepad_pressed(.FACE_RIGHT) {
+			bulbs_on = !bulbs_on
+			if bulbs_on do mb.set_lights({sun, bulbs[0], bulbs[1]})
+			else do mb.set_lights({sun})
 		}
 		time += mb.get_delta_time()
 
@@ -102,13 +124,36 @@ main :: proc() {
 		mb.render_model(cylinder, mb.create_transform({3, 0, 0}, mb.calculate_rotation_axis_angle({0, 0, 1}, math.sin(time) * 0.5)), {1, 0.9, 0.3, 1})
 		mb.camera_end()
 
-		mb.screen_start()
+		// Frame rate, smoothed over half a second so the digits can be read
+		fps_time += mb.get_delta_time()
+		fps_frames += 1
+		if fps_time >= 0.5 {
+			fps = f32(fps_frames) / fps_time
+			fps_time = 0
+			fps_frames = 0
+		}
+
 		size := mb.calculate_model_size(crate)
-		label := fmt.tprintf("test_crate.glb: %v parts, size %.2f x %.2f x %.2f", len(crate.parts), size.x, size.y, size.z)
-		mb.render_text(font, label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -0.6}))
-		// FACE_DOWN is a position, not a letter: B on the 3DS, Cross on the Vita, A on a PC pad
-		switch_label := "lighting on (L or bottom button: off)" if lighting_on else "lighting off (L or bottom button: on)"
-		mb.render_text(font, switch_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -1.4}))
+		// Short on purpose, measured with calculate_text_size against calculate_visible_rectangle: the longest is about 9
+		// of the 19.6 units the 3DS's top screen gives (the narrowest target). The letters
+		// are the PC keys; after the slash is the face button's place on the handhelds
+		lines := [?]string {
+			fmt.tprintf("crate %.2f x %.2f x %.2f", size.x, size.y, size.z),
+			"lighting on [L / down]" if lighting_on else "lighting off [L / down]",
+			"bulbs on [P / right]" if bulbs_on else "bulbs off [P / right]",
+			"per vertex [M / left]" if per_vertex else "per pixel [M / left]",
+			fmt.tprintf("fps %.0f (%.1f ms)", fps, 1000 / max(fps, 0.001)),
+		}
+
+		mb.screen_start()
+		visible_min, visible_max := mb.calculate_visible_rectangle()
+		margin :f32 = 0.2
+		// The cursor y of a line is its baseline, so the first sits one ascent below the top edge
+		baseline := visible_max.y - margin - font.ascent / font.pixels_per_unit
+		for line in lines {
+			mb.render_text(font, line, {visible_min.x + margin, baseline, 0})
+			baseline -= mb.calculate_line_height(font)
+		}
 		mb.screen_end()
 
 		mb.render_end()

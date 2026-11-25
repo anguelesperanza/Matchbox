@@ -33,32 +33,46 @@ uniform float4 lights_ambient;
 uniform float4 lights_direction[8];
 uniform float4 lights_diffuse[8];
 uniform float4 lights_specular[8];
+uniform float4 lights_position[8];
+uniform float4 lights_cone[8];
+uniform float3 lights_split;
 
 Varying vertex_main(Vertex_In input) {
     Varying output = (Varying)0;
     output.uv = lerp(render_uv_rectangle.xy, render_uv_rectangle.zw, input.uv);
-    float3 towards_eye = (float3)0;
-    float3 normal = (float3)0;
-    {
-        float4 world = mul(float4(input.position.x, input.position.y, input.position.z, 1.0), render_model);
-        output.position = mul(world, frame_view_projection);
-        float4 eye = mul(world, frame_view);
-        towards_eye = normalize(float3((-eye.x), (-eye.y), (-eye.z)));
-        float4 turned = mul(mul(float4(input.normal.x, input.normal.y, input.normal.z, 0.0), render_model), frame_view);
-        normal = normalize(turned.xyz);
-    }
+    float4 world = mul(float4(input.position.x, input.position.y, input.position.z, 1.0), render_model);
+    output.position = mul(world, frame_view_projection);
+    float4 eye = mul(world, frame_view);
+    float3 towards_eye = normalize(float3((-eye.x), (-eye.y), (-eye.z)));
+    float4 turned = mul(mul(float4(input.normal.x, input.normal.y, input.normal.z, 0.0), render_model), frame_view);
+    float3 normal = normalize(turned.xyz);
     float3 diffuse = lights_ambient.xyz;
     float3 specular = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < 8; i++) {
-        float3 to_light = lights_direction[i].xyz * rsqrt(max(dot(lights_direction[i].xyz, lights_direction[i].xyz), 1e-12));
+        float3 axis = lights_direction[i].xyz;
+        float3 to_light = axis;
+        float fade = 1.0;
+        if (lights_position[i].w > 0.5) {
+            float3 to = lights_position[i].xyz - eye.xyz;
+            float squared = max(dot(to, to), 1e-12);
+            float inverse = rsqrt(squared);
+            float mbs_distance = squared * inverse;
+            to_light = to * inverse;
+            fade = 1.0 / (1.0 + (mbs_distance * (0.09 + (0.032 * mbs_distance))));
+            if (lights_position[i].w > 1.5) {
+                float t = saturate(((dot(to_light, axis) * lights_cone[i].z) + lights_cone[i].w));
+                fade = ((fade * t) * t) * (3.0 - (2.0 * t));
+            }
+        }
         float facing = dot(to_light, normal);
-        diffuse = diffuse + (lights_diffuse[i].xyz * max(facing, 0.0));
+        diffuse = diffuse + (lights_diffuse[i].xyz * (max(facing, 0.0) * fade));
         float shine = pow(max(dot(normal, normalize((to_light + towards_eye))), 1e-08), render_shininess);
-        specular = specular + (lights_specular[i].xyz * ((1.0 - step(facing, 0.0)) * shine));
+        specular = specular + (lights_specular[i].xyz * ((step(0.0, facing) * shine) * fade));
     }
     float4 surface = input.color * render_tint;
     float3 mbs_lit = (saturate(diffuse) * surface.xyz) + saturate((specular * render_specular_strength));
-    output.color = float4(saturate(mbs_lit.x), saturate(mbs_lit.y), saturate(mbs_lit.z), surface.w);
+    float3 clamped = saturate(mbs_lit);
+    output.color = float4(clamped.x, clamped.y, clamped.z, surface.w);
     return output;
 }
 

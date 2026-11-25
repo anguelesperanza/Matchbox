@@ -219,6 +219,8 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 			case "direction": expected = int(offset_of(Lights_Block, direction))
 			case "diffuse": expected = int(offset_of(Lights_Block, diffuse))
 			case "specular": expected = int(offset_of(Lights_Block, specular))
+			case "position": expected = int(offset_of(Lights_Block, position))
+			case "cone": expected = int(offset_of(Lights_Block, cone))
 			case "count": expected = int(offset_of(Lights_Block, count))
 			}
 		case .GAME:

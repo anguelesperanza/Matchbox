@@ -365,15 +365,93 @@ both ways on each target.
       frame switches between all three programs: cube front and right (61, 93, 154) in both emulators, as per
       pixel; the board's white squares 156 and 157; the per-pixel sphere's peak red 228 in Azahar and 230 in
       Vita3K, its L4-6 values, so the switching leaves each program's registers right.
+  - W6 and W8 (a workstream of `docs/g2_remaining_work.md`, not an L-step). mbsc's PICA register allocator frees by last use.
+    **DONE 2026-11-25 (tests and Azahar; not on hardware).** `pica_block` works out, for each variable a block
+    declares, the statement that touches it last (a statement that holds a loop or an `if` counts whole), and lets go
+    of its registers after that statement, instead of at the block's end; a statement that returns is left to the
+    caller as before. `mesh_vertex_lit.mbs` is back to the obvious form (the eye-space block and its comment are
+    gone): 267 instructions, 13 temporaries of 16, against 271 with the hand structure. W8: `pica_safe_name` takes
+    an allocator, and the test that called it passes `context.temp_allocator`, so its leak no longer prints (the
+    other leaks the run lists, from `report.odin`, `diagnostic.odin` and the string builder, were there before).
+    - New test `a_variable_lets_go_of_its_register_after_its_last_use` (24 chained variables); with the release
+      switched off it fails with "needs more than 16 temporary registers". All 137 tests pass, the 400-scene
+      per-vertex model still 1.03e-6 from f64. Regenerated: `mesh`, `mesh_lit`, `mesh_vertex_lit` `.3ds.v.pica`
+      (register names only, in the first two), and `mesh_vertex_lit`'s HLSL and Cg (the same program without the
+      block; its `.gxp` is unchanged, as the Cg is the same code).
+    - Azahar, model-check forced per vertex (scratch edit, not committed), old and new `.pica` built separately:
+      the static parts match to the pixel (blue cube (62, 93, 155), floor (105, 105, 118), sphere (89, 203, 108)).
+      The crate and cylinder turn, so two runs of the *same* build differ by as much as old against new does;
+      the old/new comparison there is the machine-model test's.
   - L5-4. model-check lit both ways on every target; hardware builds.
+- **W7. o3dx's `C3D_FVec` fixed (decision D7).**
+  **DONE 2026-11-25 in Azahar; hardware check pending.** o3dx declared `C3D_FVec` as `{x, y, z, w}` over citro3d's
+  `{w, z, y, x}`, so `.x` wrote citro3d's w. Fixed in O3DX on its own branch (`fix-c3d-fvec-field-order`, PR
+  anguelesperanza/O3DX#6 into `main`): the struct is `{w, z, y, x}` and `math.odin`'s helpers use the names. Matchbox
+  has the same `c3d/types.odin` and `c3d/math.odin`, and `create_citro3d_vector` is gone: light positions are
+  `c3d.C3D_FVec{x = ..., y = ..., z = ..., w = 0}`.
+  - Measured in Azahar, model-check before and after: the cube's front and right, its top, the floor and the board's
+    white squares have identical pixel counts at their reference values (4101, 848, 81210 against 81203, 1611); the
+    rest of the frame differs only where parts rotate. Hardware build: `build/hardware/w7_fvec_fix.3dsx` (title
+    `W7FVecFix`, model-check, which prints no test name of its own).
 - **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
   laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 
-**L6. The API.** `Light`, `create_directional_light`, `set_lights`, `set_lighting` (main's names), and the way a game
-picks per-vertex or per-pixel (open question 1). Done when: examples/model-check shows both, and the cheatsheet lists
-the new procedures.
+**L6. The API's remainder.** *DONE 2026-11-25 (W3).* The API itself came forward into L4 and the per-part choice into
+L5-2; what was left:
+- `Lights_Block` and `calculate_lights_block` are package-private (D3): only the runtimes and tests use them, a game
+  never fills a lights block.
+- `set_lights` given more than `get_max_lights()` prints "set_lights: 9 lights given, this target takes 8" and panics
+  with the same text (D2). The panic carries it because a 3DS crash screen replaces the print log, so the print alone
+  would never be seen there.
+- Measured with a deliberate 9-light scratch example (deleted): Azahar's crash screen shows the line; Vita3K's
+  `ux0:data/matchbox.log` holds it, then the panic line. Not run on hardware.
+- The cheatsheet is dropped from L6 (D1): it is regenerated once the API has stabilised.
 
 **L7. Hardware passes.** The 3DS check and the Vita check grow a lighting step each; the user runs them.
+
+**L8. Point and spot lights (W4 of `docs/g2_remaining_work.md`).** Written 2026-11-25 before any code, after merging W6 (the
+liveness register allocator) and W7 (the `C3D_FVec` fix) into this branch. Follows `main`'s behaviour
+(`git show main:matchbox/shaders/lighting_core.hlsli`, `sample_light`): a point or spot light fades with distance as
+`1 / (1 + 0.09 d + 0.032 d^2)`, d in world units, fixed, no per-light range; a spot adds `smoothstep(cos(outer),
+cos(inner), cos_angle)` on top; the highlight fades with distance too. The user approved this API (2026-11-25):
+`Light_Kind{DIRECTIONAL, POINT, SPOT}` (directional the zero value), `Light` gains `kind`, `position`, `inner_angle`
+and `outer_angle` (degrees, from the axis to the cone edge), `create_point_light(position, color = WHITE)` and
+`create_spot_light(position, direction, color = WHITE, inner_angle = 20, outer_angle = 30)`; `MAX_LIGHTS` counts all
+kinds together.
+- L8-0. **3DS hardware spike**, `light_test4`, one feature a step, as L0 was; the app reads its own framebuffer back
+  and prints measured against expected values, so the user's result is numbers. Steps: a directional control (the
+  readback itself), a positional light (w = 1, no tables), the DA table with main's curve, the DA table's end (what
+  happens past `to`), a spot light (the SP table), and both together. Settles: whether the unit's tables reproduce
+  main's curve (if not, the nearest curve comes to the user before the formula changes), the SP table's input and
+  signed layout, and the distance beyond the table. **Stops here until the user's result.**
+  **DONE 2026-11-25: passed on the New 3DS LL (the user ran it), after passing 31 of 31 in Azahar.** Built as `build/hardware/light_test4.3dsx` (title LightTest4; source kept in `docs/spikes/light_test4_main.odin.txt`). In Azahar all 31 probes are within 3 of the formula: a positional light (w = 1) with no table gives L.N exactly; `LightLutDA_Quadratic(0, 100, 0.09, 0.032)` on DA reproduces main's curve to the level (164, 121, 68, 37 against 164, 121, 67, 37), so **the 3DS tables do reproduce main's curve and no nearest curve is needed**; a DA table ending at 6 holds its last value past the end (the clamp, not a wrap or a zero); a spot table of 256 entries (signed: entries 0 to 127 are cos 0 to 1, 128 to 255 zero) with `C3D_LightEnvLut(.SP, .SP, negative = true)`, `C3D_LightSpotDir` given the way the spot points (the reverse is dark) and `C3D_LightSpotLut` gives main's smoothstep (255, 241, 119, 0, 0 against 255, 241, 117, 0, 0), and spot with DA multiplies. Resolution to remember: the SP input has 128 steps over cos 0 to 1, so a cone narrower than about 7 degrees degrades to a step. The app reads its own framebuffer back and prints got and expected per step.
+- L8-1. mbsc and the block: `LIGHT_UNIFORM_NAMES`, `LIGHTS_FIELDS`, `write_light_functions`, the f64 model in
+  `lighting_model_test.odin` and the engine's `Lights_Block` layout check change together (a per-slot position and
+  spot rows); the stale-file guards name every generated file to regenerate. `Light`, `Light_Kind` and the two
+  constructors in `light.odin`; `calculate_lights_block` turns positions into eye space with w = 1.
+- L8-2. Per pixel on PC and the Vita (the generated functions) and the 3DS (positional lights, DA and SP tables).
+- L8-3. Per vertex everywhere (`mesh_vertex_lit.mbs`'s loop; the 3DS vertex program has 16 temporaries and 512
+  instructions, 267 now).
+- L8-4. Measured as L4 and L5 were: against an f64 model, and in Azahar and Vita3K; model-check gains a point light;
+  hardware builds, and the user's check.
+
+**L8 progress, 2026-11-25 (everything in L8-1 to L8-4 is in and measured except the user's hardware check).**
+- Block: a `Lights_Block` row each for position (eye space, w = 0 sun, 1 point, 2 spot) and cone ({cos outer, cos inner,
+  k = 1 / (cos inner - cos outer), -cos outer * k}); the directions the engine sends are unit length, so no shader normalizes
+  them. 5152 bytes on PC. The mbsc tests (137) and the engine's (98) pass; the f64 model gained kinds, distance fade and cone.
+- Per pixel, PC and Vita: `mbs_light_sample` in `write_light_functions`, **written without a branch on the kind**. With the
+  distance and the cone inside `if`s, Vita3K drew the point light on a scatter of pixels only (the real Vita is untested
+  either way); lerps by `step` give the same maths and a clean picture there and on PC.
+- Per pixel, 3DS: positional lights on the unit, `LightLutDA_Quadratic(0, 100, 0.09, 0.032)` and a spot table per cone
+  (built once, kept in `Lighting_Unit`). Azahar against PC's linear output: the floor's glow peak (199, 171, 157) against
+  (202, 171, 156), a grid of floor points within a median of 2.2 levels (largest 15). The spot was looked at, not measured.
+- Per vertex: the loop fits the 3DS vertex program at 501 of 512 instructions (it was 602 at first): unit directions and
+  the cone's scale and offset come from the engine, the distance comes from one `inverse_sqrt`, the fade is in Horner form.
+  Looked at in Azahar and Vita3K: it draws, the point light tints the crate and the board, the spot lights the cylinder; a big
+  floor quad shows no glow because it has four vertices.
+- To check on the hardware: whether the unit's DA and SP tables also scale the specular highlight (the PC and Vita shaders do
+  fade it); the SP table's 128 steps limit a cone narrower than about 7 degrees. The user's build is
+  `build/hardware/model_check_bulbs.3dsx` and `.vpk`; P or the right face button switches the two lights.
 
 ## What the same unit opens (after the G2 core)
 
@@ -395,7 +473,30 @@ so the G2 design doesn't close them off:
 ## Open questions
 
 The five asked on 2026-11-23 are answered under "What was decided". Still open, for the steps that reach them:
-- **More lights than the target takes:** when a scene sets more than the limit, which are kept (the nearest, the
-  brightest, the first given) or whether it is an error. Decided at L6.
+- *Answered at L6 (D2):* more lights than the target takes is an error, with a one-line reason printed first.
 - **The real limits on PC and the Vita:** measured, not guessed, before either is raised above 8.
-- **The built-in's final name and shape:** revisited after L3.
+- *Closed (D6):* the built-ins are `light_diffuse` and `light_specular`, in use and tested since L2; nothing left to
+  revisit.
+
+**L8-5, Vita speed (2026-11-25).** The user found per-pixel lighting slow on the real Vita (worse with the bulbs, and slow
+before W4 too); per vertex was smooth. Cause by the numbers, not measured on hardware: the loops ran all 8 slots in two
+passes (diffuse, specular), each turn a normalize, a pow and, since W4, the kind terms. Changes, per-pixel Cg and HLSL only:
+the loops stop at the live light count (a float uniform `lights_count` on the Vita, set by the engine; PC already had it),
+the sent directions are not normalized again, and the distance comes from one `rsqrt`. Static size of `mesh_lit_f.gxp`:
+202 instructions at L4, 162 after W4, 152 now; the loop body is what repeats, so a scene of 3 lights runs 3 turns, not 8.
+PC and 3DS: mbsc's f64 and GPU tests still pass (the test scenes now send unit directions, as the engine does); the 3DS
+files did not change. Open: whether this is enough on the real Vita; per vertex stays the cheaper path, and making it the
+Vita's default is an API decision for the user. Test build: `build/hardware/model_check_bulbs2.vpk` (MBOX00062), M or
+Square switches per pixel and per vertex, P (Circle) the two bulbs, L (Cross) all lighting.
+
+**L8-6, Vita speed again (2026-11-25).** Real Vita on bulbs3: per vertex 60 fps with the bulbs on or off; per pixel 26 with the
+sun alone, 11 with the bulbs. Cutting the two loops to the live count was not enough. Now (Cg only; the HLSL, the 3DS and what
+a game calls are unchanged): (1) one pass for light_diffuse and light_specular (statics and a done-flag; psp2cgc folds the flag),
+so the normal, the view and each light are worked once; mbsc refuses a shader whose two calls pass different arguments;
+(2) the engine sorts the Vita's block into suns, bulbs and spots (`sort_lights_block_by_kind`, tested) and sends the three
+run ends as `lights_split`, so a sun is a direction and a dot, and a bulb has no cone. Evidence is instruction counts only, from
+scratch Cg compiled with psp2cgc (a dynamic loop's cost is its body, so sizes are for the code, not the frame): the sun-only
+pass is 45 instructions straight-line against 79 for the two-loop form, and the all-kinds form 105 against 152. Half precision
+gave no saving in the count (47 against 45) and was not used. Not changed: the floor is shaded at full cost (overdraw).
+Per-vertex remains the Vita's smooth path; whether it becomes the Vita's default is the user's call. Test build
+`build/hardware/model_check_bulbs4.vpk` (MBOX00064).

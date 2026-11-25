@@ -7,7 +7,7 @@ import "core:testing"
 
 /*
 	mesh_vertex_lit.mbs (G2 L5-1) against the lighting model worked out here in f64, on scenes made from random
-	numbers: a model turned, scaled and moved, a camera looking at it, 1 to 8 lights of any length (the slots after
+	numbers: a model turned, scaled and moved, a camera looking at it, 1 to 8 lights, suns, point lights and spots (the slots after
 	them empty, as the engine leaves them), and random colours and materials. Two runs of the vertex stage are
 	checked:
 	- the IR interpreter, which is what the shader means on every target;
@@ -121,6 +121,7 @@ Scene :: struct {
 	shininess, strength: f64,
 	ambient: [4]f64,
 	direction, diffuse, specular: [8][4]f64,
+	place, cone: [8][4]f64, // place.w is the kind: 0 a sun, 1 a point light, 2 a spot
 	position, normal: Vector3,
 }
 
@@ -137,8 +138,16 @@ random_scene :: proc(r: ^Random) -> (scene: Scene) {
 	scene.strength = next_random(r, 0, 1)
 	count := 1 + int(next_random(r, 0, 7.99))
 	for slot in 0 ..< count {
-		// any length: the shader makes it unit length, as the 3DS runtime does on the CPU
-		scene.direction[slot].xyz = random_unit(r) * next_random(r, 0.3, 3)
+		// unit length, as the engine hands them over (the shader has no instructions to spare to normalize)
+		scene.direction[slot].xyz = random_unit(r)
+		// a sun, a point light or a spot, the places a few units from the model
+		kind := int(next_random(r, 0, 2.999))
+		scene.place[slot].xyz = random_unit(r) * next_random(r, 0.5, 8)
+		scene.place[slot].w = f64(kind)
+		outer := next_random(r, 0.35, 1.25)
+		inner := outer * next_random(r, 0, 0.95)
+		scale := 1 / max(math.cos(inner) - math.cos(outer), 1e-6)
+		scene.cone[slot] = {math.cos(outer), math.cos(inner), scale, -math.cos(outer) * scale}
 		for lane in 0 ..< 3 {
 			scene.diffuse[slot][lane] = next_random(r, 0, 0.6)
 			scene.specular[slot][lane] = next_random(r, 0, 1)
@@ -163,12 +172,24 @@ calculate_reference_color :: proc(scene: Scene) -> (color: [4]f64) {
 	for slot in 0 ..< 8 {
 		direction := scene.direction[slot].xyz
 		if dot3(direction, direction) == 0 do continue // an empty slot adds nothing
-		to_light := unit(direction)
+		to_light := direction
+		fade := 1.0
+		if scene.place[slot].w > 0.5 {
+			to := scene.place[slot].xyz - eye.xyz
+			distance := math.sqrt(dot3(to, to))
+			to_light = unit(to)
+			fade = 1 / (1 + 0.09 * distance + 0.032 * distance * distance)
+			if scene.place[slot].w > 1.5 {
+				// a spot: the smoothstep from the outer cone's cosine to the inner's
+				t := clamp((dot3(to_light, direction) - scene.cone[slot][0]) / (scene.cone[slot][1] - scene.cone[slot][0]), 0, 1)
+				fade *= t * t * (3 - 2 * t)
+			}
+		}
 		facing := dot3(to_light, normal)
-		diffuse += scene.diffuse[slot].xyz * max(facing, 0)
+		diffuse += scene.diffuse[slot].xyz * (max(facing, 0) * fade)
 		if facing > 0 {
 			halfway := unit(to_light + towards_eye)
-			specular += scene.specular[slot].xyz * math.pow(max(dot3(normal, halfway), 1e-8), scene.shininess)
+			specular += scene.specular[slot].xyz * (fade * math.pow(max(dot3(normal, halfway), 1e-8), scene.shininess))
 		}
 	}
 	surface := scene.color * scene.tint
@@ -208,6 +229,8 @@ scene_uniforms :: proc(scene: Scene) -> (frame, render, lights: []f32) {
 	for slot in 0 ..< 8 do vector_numbers(&lights_list, scene.direction[slot])
 	for slot in 0 ..< 8 do vector_numbers(&lights_list, scene.diffuse[slot])
 	for slot in 0 ..< 8 do vector_numbers(&lights_list, scene.specular[slot])
+	for slot in 0 ..< 8 do vector_numbers(&lights_list, scene.place[slot])
+	for slot in 0 ..< 8 do vector_numbers(&lights_list, scene.cone[slot])
 	return frame_list[:], render_list[:], lights_list[:]
 }
 

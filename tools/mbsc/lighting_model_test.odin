@@ -24,7 +24,10 @@ import "core:testing"
 // Light_Scene is what the lights block and the part's material hold, before any target stores it.
 Light_Scene :: struct {
 	ambient:           [3]f32,
-	direction:         [8][3]f32, // towards the light, eye space; zero in an unused slot
+	kind:              [8]int, // 0 a sun, 1 a point light, 2 a spot light (the block's position.w)
+	direction:         [8][3]f32, // a sun: towards the light; a spot: back along its axis; eye space; zero in an unused slot
+	position:          [8][3]f32, // a point or spot light's place, eye space
+	cone:              [8][4]f32, // a spot's cos(outer angle), cos(inner angle) 1 / their difference and minus the outer cosine times it
 	diffuse:           [8][3]f32,
 	specular:          [8][3]f32,
 	shininess:         f32,
@@ -70,17 +73,36 @@ saturate3 :: proc(v: [3]f64) -> [3]f64 {
 	return {clamp(v.x, 0, 1), clamp(v.y, 0, 1), clamp(v.z, 0, 1)}
 }
 
+// calculate_light_sample is the way from the pixel to a light and how much of the light arrives (its distance fade and
+// a spot's cone), in f64. `position` is the pixel in eye space, which is the view vector negated.
+calculate_light_sample :: proc(scene: Light_Scene, slot: int, position: [3]f64) -> (l: [3]f64, fade: f64) {
+	axis := calculate_unit(widen(scene.direction[slot]))
+	if scene.kind[slot] == 0 {
+		return axis, 1
+	}
+	to := widen(scene.position[slot]) - position
+	d := math.sqrt(dot3(to, to))
+	l = calculate_unit(to)
+	fade = 1 / (1 + 0.09 * d + 0.032 * d * d)
+	if scene.kind[slot] == 2 {
+
+		t := clamp(dot3(l, axis) * f64(scene.cone[slot][2]) + f64(scene.cone[slot][3]), 0, 1)
+		fade *= t * t * (3 - 2 * t)
+	}
+	return
+}
+
 calculate_light_reference :: proc(scene: Light_Scene, quat: [4]f32, view: [3]f32) -> Light_Result {
 	n := calculate_light_normal(quat)
 	v := calculate_unit(widen(view))
 	diffuse := widen(scene.ambient)
 	specular: [3]f64
 	for slot in 0 ..< 8 {
-		l := calculate_unit(widen(scene.direction[slot]))
+		l, fade := calculate_light_sample(scene, slot, -widen(view))
 		h := calculate_unit(l + v)
-		diffuse += widen(scene.diffuse[slot]) * max(dot3(l, n), 0)
+		diffuse += widen(scene.diffuse[slot]) * (max(dot3(l, n), 0) * fade)
 		if dot3(l, n) > 0 {
-			specular += widen(scene.specular[slot]) * math.pow(max(dot3(n, h), 1e-8), f64(scene.shininess))
+			specular += widen(scene.specular[slot]) * (fade * math.pow(max(dot3(n, h), 1e-8), f64(scene.shininess)))
 		}
 	}
 	return {saturate3(diffuse), saturate3(specular * f64(scene.specular_strength))}
@@ -115,6 +137,37 @@ calculate_phong_table :: proc(x: f64, shininess: f64) -> f64 {
 	return entry + stored_step * fraction
 }
 
+// The DA table the runtime builds, LightLutDA_Quadratic(0, 100, 0.09, 0.032): 256 entries over 0 to 100 units, 12 bits
+// each, read between entries; beyond 100 it holds its last entry (measured on the unit with a shorter table).
+@(private = "file")
+calculate_da_table :: proc(d: f64) -> f64 {
+	position := clamp(d / 100, 0, 1) * 255
+	index := min(int(math.floor(position)), 254)
+	fraction := position - f64(index)
+	here := 1 / (1 + 0.09 * (100 * f64(index) / 255) + 0.032 * math.pow(100 * f64(index) / 255, 2))
+	next := 1 / (1 + 0.09 * (100 * f64(index + 1) / 255) + 0.032 * math.pow(100 * f64(index + 1) / 255, 2))
+	return (min(math.floor(here * 4096), 4095) + (next - here) * 4096 * fraction) / 4096
+}
+
+// The SP table: signed, entry i is cos i/128 for i below 128 and the smoothstep of it, read between entries; a cos
+// below 0 reads the zero half. Measured on the unit with the same layout.
+@(private = "file")
+calculate_sp_table :: proc(cosine: f64, outer, inner: f64) -> f64 {
+	if cosine <= 0 {
+		return 0
+	}
+	value :: proc(x, outer, inner: f64) -> f64 {
+		t := clamp((x - outer) / max(inner - outer, 1e-6), 0, 1)
+		return t * t * (3 - 2 * t)
+	}
+	position := min(cosine, 1) * 128
+	index := min(int(math.floor(position)), 127)
+	fraction := position - f64(index)
+	here := value(f64(index) / 128, outer, inner)
+	next := value(f64(index + 1) / 128, outer, inner)
+	return here + (next - here) * fraction
+}
+
 calculate_light_3ds :: proc(scene: Light_Scene, quat: [4]f32, view: [3]f32) -> Light_Result {
 	n := calculate_light_normal(quat)
 	v := calculate_unit(widen(view))
@@ -125,10 +178,19 @@ calculate_light_3ds :: proc(scene: Light_Scene, quat: [4]f32, view: [3]f32) -> L
 	strength := f64(scene.specular_strength)
 	for slot in 0 ..< 8 {
 		l := calculate_unit(widen(scene.direction[slot]))
+		fade := 1.0
+		if scene.kind[slot] != 0 {
+			to := widen(scene.position[slot]) + widen(view) // the pixel is at -view
+			l = calculate_unit(to)
+			fade = calculate_da_table(math.sqrt(dot3(to, to)))
+			if scene.kind[slot] == 2 {
+				fade *= calculate_sp_table(dot3(l, calculate_unit(widen(scene.direction[slot]))), f64(scene.cone[slot][0]), f64(scene.cone[slot][1]))
+			}
+		}
 		h := calculate_unit(l + v)
-		diffuse += calculate_stored_color(widen(scene.diffuse[slot])) * max(dot3(l, n), 0)
+		diffuse += calculate_stored_color(widen(scene.diffuse[slot])) * (max(dot3(l, n), 0) * fade)
 		if dot3(l, n) > 0 { 	// clamp highlights
-			specular += calculate_stored_color(widen(scene.specular[slot]) * strength) * calculate_phong_table(abs(dot3(n, h)), f64(scene.shininess))
+			specular += calculate_stored_color(widen(scene.specular[slot]) * strength) * (calculate_phong_table(abs(dot3(n, h)), f64(scene.shininess)) * fade)
 		}
 	}
 	return {calculate_stored_color(saturate3(diffuse)), calculate_stored_color(saturate3(specular))}
@@ -160,14 +222,23 @@ calculate_random_direction :: proc(random: ^Light_Random) -> [3]f32 {
 /*
 	create_light_case makes a scene with `lights` slots in use and the rest empty, and a pixel to light: a normal
 	facing the eye side (+Z in eye space) and a view vector towards the eye, as a visible pixel has. Directions are
-	left unnormalized and scaled, and the quaternion scaled, since the built-ins normalize both
+	unit length, as the engine sends them, and the quaternion scaled, since the built-ins normalize it
 */
-create_light_case :: proc(random: ^Light_Random, lights: int) -> (scene: Light_Scene, quat: [4]f32, view: [3]f32) {
+create_light_case :: proc(random: ^Light_Random, lights: int, kinds := false) -> (scene: Light_Scene, quat: [4]f32, view: [3]f32) {
 	scene.ambient = {calculate_light_random(random) * 0.3, calculate_light_random(random) * 0.3, calculate_light_random(random) * 0.3}
 	for slot in 0 ..< lights {
-		scene.direction[slot] = calculate_random_direction(random) * (0.5 + calculate_light_random(random) * 2)
+		scene.direction[slot] = calculate_random_direction(random) // unit length, as the engine sends it: the Cg and HLSL no longer normalize it
 		scene.diffuse[slot] = {calculate_light_random(random), calculate_light_random(random), calculate_light_random(random)} * 0.6
 		scene.specular[slot] = {calculate_light_random(random), calculate_light_random(random), calculate_light_random(random)}
+		if kinds {
+			// a sun, a point light or a spot light; the places are within a few units of the pixel, where the fade is steep
+			scene.kind[slot] = int(calculate_light_random(random) * 2.999)
+			scene.position[slot] = calculate_random_direction(random) * (0.5 + calculate_light_random(random) * 8)
+			outer := 0.35 + calculate_light_random(random) * 0.9 // radians, 20 to 70 degrees
+			inner := outer * calculate_light_random(random) * 0.95
+			scale := 1 / max(f32(math.cos(inner) - math.cos(outer)), 1e-6)
+			scene.cone[slot] = {f32(math.cos(outer)), f32(math.cos(inner)), scale, -f32(math.cos(outer)) * scale}
+		}
 	}
 	scene.shininess = 1 + calculate_light_random(random) * 63
 	scene.specular_strength = calculate_light_random(random)
@@ -215,10 +286,14 @@ the_quaternion_turns_plus_z_back_into_the_normal :: proc(t: ^testing.T) {
 the_3ds_unit_follows_the_formula_within_its_8_bit_steps :: proc(t: ^testing.T) {
 	random := Light_Random{state = 2026_11_25}
 	for lights in 1 ..= 8 {
-		tolerance := f64(lights + 1) / 255 + 1.0 / 256
+		tolerance := f64(2 * lights + 1) / 255 + 1.0 / 256 // a table-read fade adds a step a light on top of the colours' own
 		worst: f64
-		for _ in 0 ..< 400 {
-			scene, quat, view := create_light_case(&random, lights)
+		for case_index in 0 ..< 400 {
+			// the second half of the cases mix suns, point lights and spots; a fade read from a table adds its own
+			// rounding
+			mixed := case_index >= 200
+			scene, quat, view := create_light_case(&random, lights, mixed)
+			
 			want := calculate_light_reference(scene, quat, view)
 			got := calculate_light_3ds(scene, quat, view)
 			for lane in 0 ..< 3 {

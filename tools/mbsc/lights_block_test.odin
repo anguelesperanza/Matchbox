@@ -38,7 +38,7 @@ light_slot_count_is_the_targets :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, "mbs_light_diffuse") == false)
 
 	reflection, _ := generate_reflection(ir, context.temp_allocator)
-	testing.expectf(t, strings.contains(reflection, "block lights 3 3104\n"), "got:\n%s", reflection)
+	testing.expectf(t, strings.contains(reflection, "block lights 3 5152\n"), "got:\n%s", reflection)
 
 	pica_ir, pica_parsed, pica_message := build_ir_for(without_carriage_returns(VERTEX_LIGHTS), .PICA200)
 	defer destroy_parsed(pica_parsed)
@@ -107,7 +107,7 @@ a_wrong_lights_block_is_refused :: proc(t: ^testing.T) {
 	cases := [?]Case {
 		{"named otherwise", "@(uniform = .LIGHTS) sun: struct { ambient: [4]f32 }", "MBS-E13", "must be named `lights`"},
 		{"a fixed length", "@(uniform = .LIGHTS) lights: struct { direction: [8][4]f32 }", "MBS-E13", "has the wrong type"},
-		{"a field it hasn't", "@(uniform = .LIGHTS) lights: struct { position: [LIGHT_SLOT_COUNT][4]f32 }", "MBS-E18", "has no field `position`"},
+		{"a field it hasn't", "@(uniform = .LIGHTS) lights: struct { shadow: [LIGHT_SLOT_COUNT][4]f32 }", "MBS-E18", "has no field `shadow`"},
 		{"the count declared again", "LIGHT_SLOT_COUNT :: 4", "", ""},
 	}
 	for test_case in cases {

@@ -89,8 +89,8 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	// The lights block is declared by mbsc, not the shader, whenever a light built-in is called (lighting.odin). The
 	// specular reads the material from `render`, which the HLSL then declares even when the shader didn't, so the
 	// runtime has to bind it as well
-	lights := calls_light_builtin(ir)
-	has_render ||= lights
+	lights := calls_light_builtin(ir) || declares_lights(ir)
+	has_render ||= calls_light_builtin(ir)
 
 	fmt.sbprintln(&builder)
 	frame := engine_layout(ir, .FRAME)
@@ -164,7 +164,8 @@ generate_reflection_vita :: proc(ir: ^IR_Module, allocator := context.allocator)
 
 	fmt.sbprintln(&builder)
 	for uniform in ir.uniforms {
-		if uniform.kind == .GAME {
+		// the lights block is listed below, the same whether declared or brought in by a built-in
+		if uniform.kind == .GAME || uniform.kind == .LIGHTS {
 			continue
 		}
 		for entry in engine_layout(ir, uniform.kind).entries {
@@ -181,8 +182,8 @@ generate_reflection_vita :: proc(ir: ^IR_Module, allocator := context.allocator)
 	}
 	// A shader that lights reads the lights uniforms mbsc declares for it (cg.odin), and `render`'s material, which the
 	// Cg declares as `render_*` when the shader left the block out. The runtime finds them all by these names
-	if calls_light_builtin(ir) {
-		declared_render := false
+	if calls_light_builtin(ir) || declares_lights(ir) {
+		declared_render := calls_light_builtin(ir) == false // only the built-ins bring `render` in
 		for uniform in ir.uniforms {
 			declared_render ||= uniform.kind == .RENDER
 		}

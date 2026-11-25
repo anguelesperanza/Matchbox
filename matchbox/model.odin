@@ -69,13 +69,20 @@ calculate_transform_pivoted :: proc(transform:Transform, pivot:[3]f32) -> Transf
 }
 
 /*
-	How a part takes a light's highlight. Per part rather than per light, so two models under
-	one sun can shine differently, as a varnished crate and a cloth sack do. Diffuse needs no
-	setting: it is the part's colour and texture.
+	How a part takes the light. Per part rather than per light, so two models under one sun can
+	shine differently, as a varnished crate and a cloth sack do. Diffuse needs no setting: it is
+	the part's colour and texture.
+
+	`lighting` chooses per pixel or per vertex for this part; nil follows the scene's
+	(Lighting_Settings.mode). On the material, as engines that offer both put it (Godot's shading
+	mode is a material's), rather than on the light or the model: it is about the surface, how
+	smooth its shading must look against what it costs. Not stored in an .mbm: a file's materials
+	describe the surface, and how a game spends its vertex and pixel time is the game's call
 */
 Material :: struct {
 	shininess:f32, // the highlight's power: higher is smaller and sharper
 	specular_strength:f32, // 0 for no highlight, 1 for the light's whole specular colour
+	lighting:Maybe(Lighting_Mode),
 }
 
 /*Fixed values the engine uses for models, held in mbi.model_settings*/

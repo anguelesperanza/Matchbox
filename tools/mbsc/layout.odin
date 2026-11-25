@@ -131,9 +131,12 @@ game_layout :: proc(ir: ^IR_Module) -> Layout {
 	return layout
 }
 
-// engine_field_type reads the type spelling of the engine tables (`f32`, `[4]f32`, `matrix[4,4]f32`).
-engine_field_type :: proc(key: string) -> ^Type {
+// engine_field_type reads the type spelling of the engine tables (`f32`, `[4]f32`, `matrix[4,4]f32`, and the lights
+// block's `[LIGHT_SLOT_COUNT][4]f32`, whose length is the target's).
+engine_field_type :: proc(key: string, target: Target) -> ^Type {
 	switch {
+	case key == "[LIGHT_SLOT_COUNT][4]f32":
+		return make_sized_array(make_vector(&TYPE_F32, 4), get_max_lights(target))
 	case key == "f32":
 		return &TYPE_F32
 	case key == "[2]f32":
@@ -153,13 +156,10 @@ engine_field_type :: proc(key: string) -> ^Type {
 engine_layout :: proc(ir: ^IR_Module, kind: Uniform_Kind) -> Layout {
 	layout: Layout
 	layout.entries = make([dynamic]Layout_Entry, 0, 16, context.temp_allocator)
-	fields: []Engine_Field = FRAME_FIELDS[:]
-	if kind == .RENDER {
-		fields = RENDER_FIELDS[:]
-	}
+	fields := get_engine_fields(kind)
 	cursor := 0
 	for field in fields {
-		type := engine_field_type(field.type)
+		type := engine_field_type(field.type, ir.target)
 		at := place(ir, type, cursor)
 		add_entries(ir, &layout, field.name, type, at)
 		cursor = at + packed_size(ir, type)

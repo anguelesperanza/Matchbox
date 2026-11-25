@@ -59,6 +59,7 @@ Cg :: struct {
 	calls:       map[string][dynamic]string, // the procedures each procedure calls
 	vertex:      bool, // writing the text for the vertex program (true) or the fragment program (false)
 	lights:      bool, // a light built-in is called: the lights uniforms and their functions are written
+	lights_declared: bool, // the shader declares the lights block itself: its uniforms are written in both programs
 }
 
 // The two programs of a shader.
@@ -188,7 +189,7 @@ reserve_global_names :: proc(h: ^Cg) {
 		if uniform.kind == .GAME {
 			h.globals[safe_name(uniform.name)] = true
 		} else {
-			for field in engine_fields(uniform.kind) {
+			for field in get_engine_fields(uniform.kind) {
 				h.globals[block_field_name(uniform.name, field.name)] = true
 			}
 		}
@@ -201,17 +202,6 @@ reserve_global_names :: proc(h: ^Cg) {
 @(private = "file")
 block_field_name :: proc(block, field: string) -> string {
 	return strings.concatenate({safe_name(block), "_", field})
-}
-
-@(private = "file")
-engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
-	#partial switch kind {
-	case .FRAME:
-		return FRAME_FIELDS[:]
-	case .RENDER:
-		return RENDER_FIELDS[:]
-	}
-	return nil
 }
 
 // local_name picks the name of a variable. It keeps the shader's own name unless another variable of the
@@ -375,8 +365,13 @@ write_uniforms :: proc(h: ^Cg, builder: ^strings.Builder) {
 		if uniform.kind == .GAME {
 			continue
 		}
+		// the lights block is written by write_helpers, once, with what the built-ins read
+		if uniform.kind == .LIGHTS {
+			h.lights_declared = true
+			continue
+		}
 		fmt.sbprintfln(builder, "\n// %s", uniform.name)
-		for field in engine_fields(uniform.kind) {
+		for field in get_engine_fields(uniform.kind) {
 			fmt.sbprintfln(builder, "uniform %s %s;", engine_type(field.type), block_field_name(uniform.name, field.name))
 		}
 	}
@@ -573,17 +568,23 @@ write_polynomial_helper :: proc(builder: ^strings.Builder, type: string, name: s
 	fmt.sbprintln(builder, "}")
 }
 
-// write_light_block declares what the light built-ins read, as uniforms the runtime finds by name, and writes their
-// functions (lighting.odin).
+// write_light_uniforms declares the lights block, as uniforms the runtime finds by name: what the light built-ins
+// read, and what a shader that declares `@(uniform = .LIGHTS) lights` reads itself.
 @(private = "file")
-write_light_block :: proc(h: ^Cg, builder: ^strings.Builder) {
+write_light_uniforms :: proc(builder: ^strings.Builder) {
 	count := get_max_lights(.VITA)
 	fmt.sbprintln(builder, "\n// the engine's lights")
 	fmt.sbprintfln(builder, "uniform float4 %s;", LIGHT_UNIFORM_NAMES[0])
 	for name in LIGHT_UNIFORM_NAMES[1:] {
 		fmt.sbprintfln(builder, "uniform float4 %s[%d];", name, count)
 	}
+}
 
+// write_light_functions_for writes the functions the light built-ins call (lighting.odin), and the material
+// uniforms they read when the shader didn't declare `render` itself.
+@(private = "file")
+write_light_functions_for :: proc(h: ^Cg, builder: ^strings.Builder) {
+	count := get_max_lights(.VITA)
 	render_block := ""
 	for uniform in h.ir.uniforms {
 		if uniform.kind == .RENDER {
@@ -602,10 +603,14 @@ write_light_block :: proc(h: ^Cg, builder: ^strings.Builder) {
 
 @(private = "file")
 write_helpers :: proc(h: ^Cg, builder: ^strings.Builder, vertex: bool) {
-	// The light built-ins are fragment only (MBS-E26 refuses them in a vertex stage), so the vertex program never
-	// needs their uniforms or functions. `h.lights` is set for the shader as a whole, hence the stage check
+	// The light built-ins are fragment only (MBS-E26 refuses them in a vertex stage), so their functions go in the
+	// fragment program alone; `h.lights` is set for the shader as a whole, hence the stage check. A declared lights
+	// block may be read in either stage, so its uniforms go in both, and psp2cgc drops them from one that doesn't
+	if h.lights_declared || (h.lights && !vertex) {
+		write_light_uniforms(builder)
+	}
 	if h.lights && !vertex {
-		write_light_block(h, builder)
+		write_light_functions_for(h, builder)
 	}
 	write_math_helpers(h, builder)
 	for struct_name in h.helpers {

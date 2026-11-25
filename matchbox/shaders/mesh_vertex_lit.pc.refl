@@ -1,0 +1,29 @@
+mbs-reflection 1
+target pc
+
+attribute position [3]f32
+attribute texcoord [2]f32
+attribute color [4]f32
+attribute normal [3]f32
+
+block frame 0 144
+block render 1 112
+block lights 3 3104
+
+value frame view_projection matrix[4,4]f32 0 64 0 0
+value frame time f32 64 4 0 0
+value frame view matrix[4,4]f32 80 64 0 0
+value render model matrix[4,4]f32 0 64 0 0
+value render tint [4]f32 64 16 0 0
+value render uv_rectangle [4]f32 80 16 0 0
+value render alpha_cutoff f32 96 4 0 0
+value render shininess f32 100 4 0 0
+value render specular_strength f32 104 4 0 0
+value lights ambient [4]f32 0 16 0 0
+value lights direction [4]f32 16 1024 64 16
+value lights diffuse [4]f32 1040 1024 64 16
+value lights specular [4]f32 2064 1024 64 16
+value lights count i32 3088 4 0 0
+
+texture tex 0
+sampler 0

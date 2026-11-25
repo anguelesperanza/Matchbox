@@ -73,10 +73,12 @@ Backend_State :: struct {
 	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
 	samplers:[Filter_Mode]^d3d11.ISamplerState,
 
-	// The two shaders, each with what it reads (render_windows.odin). `pipeline` (shaders/mesh.mbs) draws
-	// everything unlit; `lit_pipeline` (shaders/mesh_lit.mbs) draws lit meshes while lighting is on
+	// The three shaders, each with what it reads (render_windows.odin). `pipeline` (shaders/mesh.mbs) draws
+	// everything unlit; while lighting is on, `lit_pipeline` (shaders/mesh_lit.mbs) draws lit meshes per pixel and
+	// `vertex_lit_pipeline` (shaders/mesh_vertex_lit.mbs) per vertex, as each part's material says
 	pipeline:Render_Pipeline,
 	lit_pipeline:Render_Pipeline,
+	vertex_lit_pipeline:Render_Pipeline,
 
 	// The constant buffers, shared by both pipelines: each binds the ones its reflection lists
 	frame_constants:^d3d11.IBuffer,

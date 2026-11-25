@@ -58,3 +58,12 @@ the_lights_block_matches_the_hlsl_layout :: proc(t:^testing.T) {
 	testing.expect_value(t, offset_of(Lights_Block, count), 16 + 3 * MAX_PC_LIGHTS * 16)
 	testing.expect_value(t, size_of(Lights_Block) % 16, 0)
 }
+
+// A material without a choice follows the scene, which starts per pixel; a material's own choice wins
+@(test)
+a_materials_lighting_mode_wins_over_the_scenes :: proc(t:^testing.T) {
+	testing.expect_value(t, mbi.lighting.settings.mode, Lighting_Mode.PER_PIXEL)
+	testing.expect_value(t, get_lighting_mode(Material{shininess = 16}), Lighting_Mode.PER_PIXEL)
+	testing.expect_value(t, get_lighting_mode(Material{shininess = 16, lighting = .PER_VERTEX}), Lighting_Mode.PER_VERTEX)
+	testing.expect_value(t, mbi.model_settings.default_material.lighting, nil)
+}

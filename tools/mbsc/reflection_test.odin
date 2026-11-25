@@ -84,6 +84,7 @@ the_committed_mesh_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	shaders := [?][3]string {
 		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.pc.refl", string)},
 		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.pc.refl", string)},
+		{"mesh_vertex_lit", #load("../../matchbox/shaders/mesh_vertex_lit.mbs", string), #load("../../matchbox/shaders/mesh_vertex_lit.pc.refl", string)},
 	}
 	for shader in shaders {
 		text := reflect(t, no_carriage_returns(shader[1]))

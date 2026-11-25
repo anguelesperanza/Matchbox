@@ -49,12 +49,16 @@ when !VITA {
 		// it lifted from
 		touch_position:[2]f32,
 
-		// The two shaders, their uniforms and TexEnv plans (render_3ds_freestanding_arm32.odin): `pipeline` draws
-		// everything unlit, `lit_pipeline` draws lit meshes while lighting is on, with the lighting unit
+		// The three shaders, their uniforms and TexEnv plans (render_3ds_freestanding_arm32.odin): `pipeline` draws
+		// everything unlit; while lighting is on, `lit_pipeline` draws lit meshes per pixel with the lighting unit,
+		// and `vertex_lit_pipeline` per vertex, as each part's material says
 		pipeline:Render_Pipeline,
 		lit_pipeline:Render_Pipeline,
+		vertex_lit_pipeline:Render_Pipeline,
 		bound_pipeline:^Render_Pipeline, // the one citro3d has now, so a draw only switches when it changes
-		camera_view_projection:matrix[4, 4]f32, // set again after each switch: the programs' registers are shared
+		// The camera being drawn, set again after each switch: the programs' registers are shared
+		camera_view_projection:matrix[4, 4]f32,
+		camera_lights:Lights_Block, // this camera's lights, which the per-vertex program reads from its registers
 		lighting_unit:Lighting_Unit, // the fragment lighting unit's state, for lit_pipeline
 
 		print_log:Print_Log, // what `print` wrote, drawn on the bottom screen (bottom_screen_3ds_freestanding_arm32.odin)

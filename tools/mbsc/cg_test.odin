@@ -195,6 +195,7 @@ the_committed_mesh_cg_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	shaders := [?]Committed_Cg {
 		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh_v.cg", string), #load("../../matchbox/shaders/mesh_f.cg", string)},
 		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit_v.cg", string), #load("../../matchbox/shaders/mesh_lit_f.cg", string)},
+		{"mesh_vertex_lit", #load("../../matchbox/shaders/mesh_vertex_lit.mbs", string), #load("../../matchbox/shaders/mesh_vertex_lit_v.cg", string), #load("../../matchbox/shaders/mesh_vertex_lit_f.cg", string)},
 	}
 	for shader in shaders {
 		programs, ok := generate_cg_text(t, no_carriage_returns(shader.source), fmt.tprintf("%s.mbs", shader.name))
@@ -246,6 +247,7 @@ the_committed_vita_reflection_is_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	shaders := [?][3]string {
 		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.vita.refl", string)},
 		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.vita.refl", string)},
+		{"mesh_vertex_lit", #load("../../matchbox/shaders/mesh_vertex_lit.mbs", string), #load("../../matchbox/shaders/mesh_vertex_lit.vita.refl", string)},
 	}
 	for shader in shaders {
 		ir, parsed, message := build_ir_for(no_carriage_returns(shader[1]), .VITA)

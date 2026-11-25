@@ -157,6 +157,26 @@ A shader may declare any subset of the fields, in any order. A field name the en
 The engine's current `Frame_Constants` and `Render_Constants` (in `render_windows.odin`) are the reference; `time`
 is new and comes with S3.
 
+The scene's lights are a third block (G2 L5), filled by `set_lights` and `set_lighting` once per camera:
+
+```odin
+@(uniform = .LIGHTS) lights: struct {
+	ambient:   [4]f32,                   // the light every surface gets
+	direction: [LIGHT_SLOT_COUNT][4]f32, // towards each light, in eye space (multiply by frame.view to get there)
+	diffuse:   [LIGHT_SLOT_COUNT][4]f32,
+	specular:  [LIGHT_SLOT_COUNT][4]f32,
+}
+```
+
+- **`LIGHT_SLOT_COUNT`** is a constant every shader has: the target's number of light slots, 8 on the 3DS and the
+  Vita and 64 on PC. Size the arrays with it and loop to it (`for i in 0 ..< LIGHT_SLOT_COUNT`), and one shader is
+  right on every target. An empty slot is all zeros, so it adds nothing to a sum.
+- The block **must be named `lights`** (`MBS-E13` otherwise): the light built-ins and the runtimes find its fields
+  as `lights_ambient`, `lights_direction`, ...
+- It is the block `light_diffuse` and `light_specular` read, so a shader may declare it and call them too.
+- It can be read in either stage. Per-vertex lighting reads it in the vertex stage, where the 3DS unrolls the loop
+  (an index there must be a constant or a loop counter, `MBS-E10`).
+
 ### Game-owned uniforms
 
 A uniform the game sets by name:

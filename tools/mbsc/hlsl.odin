@@ -61,6 +61,7 @@ Hlsl :: struct {
 	calls:       map[string][dynamic]string, // the procedures each procedure calls
 	samples:     map[string]bool, // the procedures that call `sample`
 	lights:      bool, // a light built-in is called: the lights block and its functions are written
+	lights_declared: bool, // the shader declares the lights block itself: the block alone is written
 }
 
 // Where a `sample` goes in the text of a procedure, until it's known which stage the procedure runs in: the
@@ -183,7 +184,7 @@ reserve_global_names :: proc(h: ^Hlsl) {
 		if uniform.kind == .GAME {
 			h.globals[safe_name(uniform.name)] = true
 		} else {
-			for field in engine_fields(uniform.kind) {
+			for field in get_engine_fields(uniform.kind) {
 				h.globals[block_field_name(uniform.name, field.name)] = true
 			}
 		}
@@ -197,17 +198,6 @@ reserve_global_names :: proc(h: ^Hlsl) {
 @(private = "file")
 block_field_name :: proc(block, field: string) -> string {
 	return strings.concatenate({safe_name(block), "_", field})
-}
-
-@(private = "file")
-engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
-	#partial switch kind {
-	case .FRAME:
-		return FRAME_FIELDS[:]
-	case .RENDER:
-		return RENDER_FIELDS[:]
-	}
-	return nil
 }
 
 // local_name picks the name of a variable. It keeps the shader's own name unless another variable of the
@@ -382,9 +372,15 @@ write_constant_buffers :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 		if uniform.kind == .GAME {
 			continue
 		}
+		// The lights block is the one the light built-ins read, written once by write_light_block whether the shader
+		// declares it, calls a built-in, or both
+		if uniform.kind == .LIGHTS {
+			h.lights_declared = true
+			continue
+		}
 		register := FRAME_REGISTER if uniform.kind == .FRAME else RENDER_REGISTER
 		fmt.sbprintf(builder, "\ncbuffer %s_block : register(b%d) {{\n", safe_name(uniform.name), register)
-		for field in engine_fields(uniform.kind) {
+		for field in get_engine_fields(uniform.kind) {
 			fmt.sbprintfln(builder, "    %s %s;", engine_type(field.type), block_field_name(uniform.name, field.name))
 		}
 		fmt.sbprintln(builder, "};")
@@ -517,7 +513,7 @@ write_polynomial_helper :: proc(builder: ^strings.Builder, type: string, name: s
 // write_light_block declares what the light built-ins read and writes their functions (lighting.odin). The lights
 // block is b3, after the game's own at b2, so a shader that doesn't light keeps the registers it had.
 @(private = "file")
-write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
+write_light_block :: proc(builder: ^strings.Builder) {
 	count := get_max_lights(.PC)
 	fmt.sbprintfln(builder, "\ncbuffer mbs_lights_block : register(b%d) {{", LIGHTS_REGISTER)
 	fmt.sbprintfln(builder, "    float4 %s;", LIGHT_UNIFORM_NAMES[0])
@@ -527,7 +523,12 @@ write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 	// where the loops stop: PC has 64 slots, and a scene rarely fills them (lighting.odin)
 	fmt.sbprintln(builder, "    int lights_count;")
 	fmt.sbprintln(builder, "};")
+}
 
+// write_light_functions_for writes the functions the light built-ins call (lighting.odin), and the `render` block
+// they read the material from when the shader didn't declare it.
+@(private = "file")
+write_light_functions_for :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 	render_block := ""
 	for uniform in h.ir.uniforms {
 		if uniform.kind == .RENDER {
@@ -548,8 +549,13 @@ write_light_block :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 
 @(private = "file")
 write_helpers :: proc(h: ^Hlsl, builder: ^strings.Builder) {
+	// One lights block, whether the shader declares it, calls a built-in, or both; the built-ins' functions only
+	// when one is called
+	if h.lights || h.lights_declared {
+		write_light_block(builder)
+	}
 	if h.lights {
-		write_light_block(h, builder)
+		write_light_functions_for(h, builder)
 	}
 	write_math_helpers(h, builder)
 	for struct_name in h.helpers {

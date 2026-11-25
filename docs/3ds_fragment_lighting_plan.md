@@ -305,6 +305,69 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
 
 **L5. Per-vertex lighting** in `mesh.mbs` on all three targets, from the same uniforms. Done when: the same scene lit
 both ways on each target.
+- **Decided 2026-11-25, before starting, with the user:**
+  - **The highlight is folded into the vertex colour:** colour = tint x vertex colour x (ambient + diffuse) +
+    specular, then x texture, the same on all three targets. The 3DS passes one interpolated colour to the TexEnv
+    stages (`PRIMARY_COLOR`), so a per-vertex highlight can't be added after the texture there as the per-pixel one
+    is; folding it on every target keeps them alike. Exact on an untextured part; on a textured one the highlight
+    takes the texture's colour, which per-pixel doesn't.
+  - **A `.LIGHTS` block a shader declares** (decision 4), and per-vertex lighting written as ordinary code in a
+    third engine shader, `mesh_vertex_lit.mbs`, not in `mesh.mbs`: `mesh.mbs` draws sprites and text, whose
+    `Vertex` has no normal.
+  - **The choice is global and per part, both now** (L6's per-part choice brought forward): a mode in
+    `Lighting_Settings`, and a per-part override. Its exact shape is shown to the user before it is written.
+- Steps:
+  - L5-0. mbsc: `@(uniform = .LIGHTS) lights: struct { ambient: [4]f32, direction, diffuse, specular:
+    [LIGHT_SLOT_COUNT][4]f32 }`, any subset, on every backend; `LIGHT_SLOT_COUNT` a predeclared constant, the
+    target's `get_max_lights` (not `MAX_LIGHTS`, which in the engine is 8 on every target, PC included). The block is the same one the light built-ins read, so a shader can declare it and call them.
+    **DONE 2026-11-25 (tests only).** `LIGHT_SLOT_COUNT` is added to every module as an ordinary constant, so array
+    lengths, loop bounds and expressions read it like one the shader wrote; declaring it again is refused. The block
+    must be named `lights`. HLSL writes one `cbuffer mbs_lights_block` at b3 whether the block is declared, a
+    built-in is called, or both, and the built-ins' functions only with a built-in; Cg declares the uniforms in
+    both programs when the block is declared (psp2cgc drops them where unread), the functions in the fragment one
+    only; the PICA backend needed nothing new (a struct uniform is split per field, and the unrolled loop indexes
+    by constant). Both reflection files list the block when declared. `lights_block_test.odin`: one test shader
+    (`testdata/vertex_lights.mbs`) on all three targets, 64 slots on PC and 8 on the handhelds, the PICA program
+    against the IR interpreter on random lights, psp2cgc, d3dcompiler, picasso, and the refused shapes.
+  - L5-1. `mesh_vertex_lit.mbs`, generated for all three; checked against the formula: the IR interpreter and the
+    PICA machine model run its vertex stage on vertices whose answer is worked out in f64.
+    **DONE 2026-11-25 (tests only; no runtime draws it yet).** `matchbox/shaders/mesh_vertex_lit.mbs` and its
+    outputs for every target (the Vita's `.gxp` compiled with psp2cgc), each guarded by the stale-file tests. The
+    3DS program is 271 instructions of 512, and its `.tev` plan a single `texture x vertex colour` stage.
+    - **The 3DS's 16 temporary registers shaped the shader:** written the obvious way it needed more. mbsc's PICA
+      backend lets a variable's register go when its block ends, not after its last use, and the unrolled loop is
+      one block; so the eye-space values are worked out in a block of their own, and the loop keeps only what more
+      than one line reads. Said in the shader. A liveness-based allocator in mbsc would lift this.
+    - `vertex_lighting_test.odin`: 400 random scenes (a model turned, scaled and moved, a look-at camera, 1 to 8
+      lights of any length with the rest empty, random colours and materials), the colour from the IR interpreter
+      and from the PICA program on the machine model against the model worked out in f64 from its description:
+      1.03e-6 worst for both. Dropping the "only where L.N > 0" gate from the reference makes it 0.19 off, so the
+      test sees it. The machine model's `rsq`, `lg2` and `ex2` are exact; the real unit's are not, which is the
+      hardware pass's to see.
+  - L5-2. The API (shown first), and PC drawing per-vertex.
+    **DONE 2026-11-25, PC (measured on screen).** Decided with the user after asking what engines do (Godot puts
+    a shading mode on the material, with a project setting that can force per-vertex): **on the material, with the
+    scene's setting as the default.** `Lighting_Mode{PER_PIXEL, PER_VERTEX}` (per pixel the zero value),
+    `Lighting_Settings.mode`, `Material.lighting:Maybe(Lighting_Mode)` (nil follows the scene; not stored in .mbm),
+    `get_lighting_mode(material)`. PC has a third pipeline, `mbi.vertex_lit_pipeline`, chosen per draw.
+    - Measured against per-pixel with the same scene: the cube's faces, the floor's tint and the board's squares
+      are equal to the pixel (a flat face under a directional light has the same diffuse at every corner); the
+      highlights differ as they should: the floor 2 levels brighter from its corners' highlights blended across it,
+      the sphere's peak (237, 255, 250) against (243, 255, 255), 2 pixels off.
+  - L5-3. The 3DS and the Vita drawing per-vertex (each file shown first).
+    **DONE 2026-11-25 in the emulators (drafts shown and applied on the user's OK; not on hardware yet).** Each
+    handheld has a third pipeline, `vertex_lit_pipeline`, and a pipeline's `lighting:Maybe(Lighting_Mode)` says
+    which it is (nil unlit). 3DS: the camera's lights block is kept in `mbi.camera_lights` and set into the
+    per-vertex program's registers after every switch, with the camera's matrices; shininess and strength per
+    draw; `3ds_build.bat` assembles `mesh_vertex_lit.shbin`. Vita: the lights and material go into the vertex
+    program's uniform buffer per vertex, the fragment one's per pixel.
+    - Measured with a probe drawing everything per vertex but the sphere, whose material asks for per pixel, so a
+      frame switches between all three programs: cube front and right (61, 93, 154) in both emulators, as per
+      pixel; the board's white squares 156 and 157; the per-pixel sphere's peak red 228 in Azahar and 230 in
+      Vita3K, its L4-6 values, so the switching leaves each program's registers right.
+  - L5-4. model-check lit both ways on every target; hardware builds.
+- **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
+  laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 
 **L6. The API.** `Light`, `create_directional_light`, `set_lights`, `set_lighting` (main's names), and the way a game
 picks per-vertex or per-pixel (open question 1). Done when: examples/model-check shows both, and the cheatsheet lists

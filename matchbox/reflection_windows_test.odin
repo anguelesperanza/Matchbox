@@ -202,3 +202,19 @@ a_wrong_value_is_refused_with_a_reason :: proc(t:^testing.T) {
 	// a refused value changes nothing
 	testing.expect(t, slice.equal(block, before))
 }
+
+// The per-vertex shader reads the lights block in its vertex stage (G2 L5): the same block, the same register and
+// layout, and the normal from Lit_Vertex
+@(test)
+the_vertex_lit_reflection_matches_the_engines_structs :: proc(t:^testing.T) {
+	reflection, ok, message := parse_reflection(#load("shaders/mesh_vertex_lit.pc.refl", string))
+	defer destroy_reflection(&reflection)
+	testing.expectf(t, ok, "%s", message)
+
+	testing.expect_value(t, check_engine_blocks(&reflection), "")
+	testing.expect_value(t, reflection.blocks[.LIGHTS], Reflected_Block{present = true, register = 3, size = size_of(Lights_Block)})
+	for attribute in reflection.attributes {
+		_, problem := find_vertex_attribute(attribute, true)
+		testing.expect_value(t, problem, "")
+	}
+}

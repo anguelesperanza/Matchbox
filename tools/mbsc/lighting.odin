@@ -188,3 +188,11 @@ write_light_reflection :: proc(builder: ^strings.Builder, values: bool) {
 	}
 	fmt.sbprintfln(builder, "value lights count i32 %d 4 0 0", count_offset)
 }
+
+// declares_lights says whether the shader declares the lights block itself (`@(uniform = .LIGHTS) lights`, G2 L5).
+declares_lights :: proc(ir: ^IR_Module) -> bool {
+	for uniform in ir.uniforms {
+		if uniform.kind == .LIGHTS do return true
+	}
+	return false
+}

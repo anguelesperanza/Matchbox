@@ -1155,8 +1155,8 @@ report_unknown_field :: proc(c: ^Checker, node: ^ast.Selector_Expr, base: ^Type)
 	engine: []Engine_Field
 	for uniform in c.module.uniforms {
 		if uniform.block == base.info && uniform.kind != .GAME {
-			block_name = "frame" if uniform.kind == .FRAME else "render"
-			engine = FRAME_FIELDS[:] if uniform.kind == .FRAME else RENDER_FIELDS[:]
+			block_name = get_engine_block_name(uniform.kind)
+			engine = get_engine_fields(uniform.kind)
 		}
 	}
 

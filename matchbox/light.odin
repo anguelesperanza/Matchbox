@@ -55,6 +55,17 @@ Light :: struct {
 	specular:[4]f32,
 }
 
+/*
+	Where the light is worked out. Per pixel follows a highlight across a face; per vertex works
+	it out at the corners and blends between them, which costs less and looks softer, and folds
+	the highlight into the colour before the texture (mesh_vertex_lit.mbs says why). Per pixel is
+	the zero value, so a scene that never chooses gets it
+*/
+Lighting_Mode :: enum {
+	PER_PIXEL,
+	PER_VERTEX,
+}
+
 // Settings that belong to the whole scene rather than to one light.
 Lighting_Settings :: struct {
 	/*
@@ -65,6 +76,7 @@ Lighting_Settings :: struct {
 	*/
 	enabled:bool,
 	ambient:[4]f32, // the light every surface gets, whichever way it faces
+	mode:Lighting_Mode, // for every part whose material doesn't choose (Material.lighting)
 }
 
 // What set_lights and set_lighting keep, held in mbi.lighting.
@@ -145,4 +157,12 @@ calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> 
 		block.specular[slot] = light.specular
 	}
 	return block
+}
+
+/*
+	get_lighting_mode is how a part with this material is lit: the material's own choice, or the
+	scene's when it has none. Read at draw time, so a game changing either sees it the next frame
+*/
+get_lighting_mode :: proc(material:Material) -> Lighting_Mode {
+	return material.lighting.? or_else mbi.lighting.settings.mode
 }

@@ -1,0 +1,38 @@
+// G2 L5-0: a shader that declares the engine's lights block and reads it in the vertex stage, looping over every
+// slot by the predeclared LIGHT_SLOT_COUNT (8 on the handhelds, 64 on PC). lights_block_test.odin builds it for all
+// three targets.
+
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	normal: [3]f32 `attr:"normal"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	color: [4]f32 `out:"color"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection: matrix[4, 4]f32,
+}
+
+@(uniform = .LIGHTS) lights: struct {
+	ambient: [4]f32,
+	direction: [LIGHT_SLOT_COUNT][4]f32,
+	diffuse: [LIGHT_SLOT_COUNT][4]f32,
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	output.position = frame.view_projection * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	sum := lights.ambient.xyz
+	for i in 0 ..< LIGHT_SLOT_COUNT {
+		sum = sum + lights.diffuse[i].xyz * max(dot(lights.direction[i].xyz, input.normal), 0.0)
+	}
+	output.color = [4]f32{sum.x, sum.y, sum.z, 1.0}
+	return output
+}
+
+fragment_main :: proc(v: Varying) -> [4]f32 {
+	return v.color
+}

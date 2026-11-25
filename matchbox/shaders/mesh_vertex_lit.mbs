@@ -1,0 +1,100 @@
+// The per-vertex lit model shader (G2 L5-1, docs/3ds_fragment_lighting_plan.md): mesh_lit.mbs's lighting worked out
+// once a vertex instead of once a pixel, and handed on as the vertex colour. Cheaper, and softer: a highlight
+// smaller than a triangle can fall between its corners and vanish. The engine draws a Lit_Vertex mesh with it while
+// lighting is on and the part asks for per-vertex.
+//
+// The same model as the light built-ins (tools/mbsc/lighting.odin), in eye space as they are: ambient + each light's
+// diffuse * max(L.N, 0), and each light's specular * (N.H)^shininess where L.N > 0, times the part's strength, each
+// clamped. One difference, decided with the user: the highlight is added to the colour *before* the texture, as
+// (tint x vertex colour x (ambient + diffuse) + specular) x texture. The 3DS hands the TexEnv stages one interpolated
+// colour, so a highlight can't be added after the texture there, and doing the same on every target keeps them
+// alike. Untextured, it is exactly the per-pixel result at the corners; textured, the highlight takes the texture's
+// colour.
+
+@(texture = 0) tex:Texture2D
+
+// The attributes are in Lit_Vertex's order, as mesh_lit.mbs's, so the 3DS loads the normal as attribute 3
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+	normal: [3]f32 `attr:"normal"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv: [2]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32,
+	view:matrix[4,4]f32,
+}
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+	shininess: f32,
+	specular_strength: f32,
+}
+
+@(uniform = .LIGHTS) lights: struct {
+	ambient: [4]f32,
+	direction: [LIGHT_SLOT_COUNT][4]f32,
+	diffuse: [LIGHT_SLOT_COUNT][4]f32,
+	specular: [LIGHT_SLOT_COUNT][4]f32,
+}
+
+/*
+	Written for the 3DS's 16 temporary registers: mbsc's PICA backend lets a variable's register go when its block
+	ends, not after its last use, and unrolls the loop into the same block. So the eye-space values are worked out in
+	a block of their own, which lets `world`, `eye` and `turned` go before the loop, and the loop keeps only what more
+	than one line reads. Written the obvious way, it needed more than 16
+*/
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+
+	// Eye space, as the lights' directions are. The eye is at its origin, so the way to it is the position negated.
+	// The normal is turned by the model matrix itself, as in mesh_lit.mbs: exact for an even scale, which normalize
+	// undoes
+	towards_eye: [3]f32
+	normal: [3]f32
+	{
+		world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+		output.position = frame.view_projection * world
+		eye := frame.view * world
+		towards_eye = normalize([3]f32{-eye.x, -eye.y, -eye.z})
+		turned := frame.view * (render.model * [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0})
+		normal = normalize(turned.xyz)
+	}
+
+	diffuse := lights.ambient.xyz
+	specular := [3]f32{0.0, 0.0, 0.0}
+	for i in 0 ..< LIGHT_SLOT_COUNT {
+		// An empty slot's direction is zero; kept zero rather than normalized into a NaN, so it adds nothing
+		to_light := lights.direction[i].xyz * inverse_sqrt(max(dot(lights.direction[i].xyz, lights.direction[i].xyz), 1e-12))
+		facing := dot(to_light, normal)
+		diffuse = diffuse + lights.diffuse[i].xyz * max(facing, 0.0)
+
+		// Blinn-Phong, and only on the side the light reaches: the 3DS unit's "clamp highlights", which the
+		// per-pixel path follows. 1 - step(facing, 0) is 1 where facing > 0. The base stays just above 0, as pow
+		// of 0 to a power of 0 is a NaN
+		shine := pow(max(dot(normal, normalize(to_light + towards_eye)), 1e-8), render.shininess)
+		specular = specular + lights.specular[i].xyz * ((1.0 - step(facing, 0.0)) * shine)
+	}
+
+	surface := input.color * render.tint
+	lit := saturate(diffuse) * surface.xyz + saturate(specular * render.specular_strength)
+	output.color = [4]f32{saturate(lit.x), saturate(lit.y), saturate(lit.z), surface.w}
+	return output
+}
+
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	color := sample(tex, v.uv) * v.color
+	if color.a < render.alpha_cutoff do discard()
+	return color
+}

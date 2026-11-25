@@ -28,8 +28,50 @@ RENDER_FIELDS := [?]Engine_Field {
 	{"specular_strength", "f32"},
 }
 
-// The vertex attributes the engine's mesh format has, or is getting: `normal` arrives with G2 lighting
-// (docs/3ds_fragment_lighting_plan.md); a shader may read it before the engine's Vertex carries it.
+/*
+	The lights block a shader may declare (G2 L5), the same one the light built-ins read: directions towards each
+	light in eye space, and its colours, a row per slot; an empty slot is all zeros (lighting.odin). PC's block also
+	ends with `lights_count`, which isn't here: the PICA has no integers (MBS-E9), so a loop meant for every target
+	runs to LIGHT_SLOT_COUNT, and an empty slot adds nothing. The block must be named `lights`, since the built-ins'
+	code and the runtimes use the names `lights_<field>`.
+*/
+@(rodata)
+LIGHTS_FIELDS := [?]Engine_Field {
+	{"ambient", "[4]f32"},
+	{"direction", "[LIGHT_SLOT_COUNT][4]f32"},
+	{"diffuse", "[LIGHT_SLOT_COUNT][4]f32"},
+	{"specular", "[LIGHT_SLOT_COUNT][4]f32"},
+}
+
+// get_engine_fields is an engine block's fields in the engine's order; a game's own uniforms have none.
+get_engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
+	switch kind {
+	case .FRAME:
+		return FRAME_FIELDS[:]
+	case .RENDER:
+		return RENDER_FIELDS[:]
+	case .LIGHTS:
+		return LIGHTS_FIELDS[:]
+	case .GAME:
+	}
+	return nil
+}
+
+// get_engine_block_name is what the engine calls a block, which is how messages name it: `frame`, `render`, `lights`.
+get_engine_block_name :: proc(kind: Uniform_Kind) -> string {
+	switch kind {
+	case .FRAME:
+		return "frame"
+	case .RENDER:
+		return "render"
+	case .LIGHTS:
+		return "lights"
+	case .GAME:
+	}
+	return ""
+}
+
+// The vertex attributes the engine's mesh format has: `normal` is a Lit_Vertex's (G2 L4).
 @(rodata)
 VERTEX_ATTRIBUTES := [?]string{"position", "texcoord", "color", "normal"}
 
@@ -37,9 +79,14 @@ VERTEX_ATTRIBUTES := [?]string{"position", "texcoord", "color", "normal"}
 @(rodata)
 VARYING_OUTPUTS := [?]string{"position", "color", "texcoord0", "texcoord1", "texcoord2", "normalquat", "view"}
 
-// Names that exist before the shader declares anything.
+/*
+	Names that exist before the shader declares anything. LIGHT_SLOT_COUNT is a constant whose value is the target's
+	(get_max_lights: 8 on the handhelds, 64 on PC), so one shader sizes and loops over the lights block on every
+	target. Not MAX_LIGHTS: in the engine that is 8 on every target, PC included, and one name meaning two numbers
+	would be read wrong
+*/
 @(rodata)
-PREDECLARED_NAMES := [?]string{"TARGET", "Target", "Texture2D"}
+PREDECLARED_NAMES := [?]string{"TARGET", "Target", "Texture2D", "LIGHT_SLOT_COUNT"}
 
 // type_key writes a type the way the engine tables do, with the spaces taken out, so `matrix[4, 4]f32` and
 // `matrix[4,4]f32` compare equal.

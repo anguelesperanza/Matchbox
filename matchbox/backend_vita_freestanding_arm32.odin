@@ -30,10 +30,12 @@ when VITA {
 	Backend_State :: struct {
 		input:vito.Input, // buttons, sticks and touch panels for this frame, from vito.input_update
 		touch:Touch_State, // the front panel's first finger, as the mouse (input_vita_freestanding_arm32.odin)
-		// The two shaders, their programs and uniforms (render_vita_freestanding_arm32.odin): `pipeline` draws
-		// everything unlit, `lit_pipeline` draws lit meshes while lighting is on
+		// The three shaders, their programs and uniforms (render_vita_freestanding_arm32.odin): `pipeline` draws
+		// everything unlit; while lighting is on, `lit_pipeline` draws lit meshes per pixel and `vertex_lit_pipeline`
+		// per vertex, as each part's material says
 		pipeline:Render_Pipeline,
 		lit_pipeline:Render_Pipeline,
+		vertex_lit_pipeline:Render_Pipeline,
 		// GXM has no uniforms that outlive a draw: each draw gets a fresh default uniform buffer, so
 		// the camera's matrix and lights are kept here and written into every one
 		camera_view_projection:matrix[4, 4]f32,

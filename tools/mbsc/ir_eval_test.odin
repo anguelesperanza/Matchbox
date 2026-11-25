@@ -531,7 +531,6 @@ fill_numbers :: proc(state: ^u32, kind: Input_Kind, counter: ^int, count: int) -
 }
 
 // registers_from_flat is how a value sits in uniform registers: a scalar or a vector in one, a matrix one row each.
-@(private = "file")
 registers_from_flat :: proc(ir: ^IR_Module, type: ^Type, flat: []f32, into: ^[dynamic][4]f32) {
 	#partial switch type.kind {
 	case .MATRIX:
@@ -564,7 +563,7 @@ registers_from_flat :: proc(ir: ^IR_Module, type: ^Type, flat: []f32, into: ^[dy
 }
 
 // fill_leaves gives the uniforms the program declared the numbers the evaluator uses, under the names the backend chose.
-@(private = "file")
+// vertex_lighting_test.odin uses it too, to give both one scene
 fill_leaves :: proc(m: ^Machine, ir: ^IR_Module, prefix: string, type: ^Type, flat: []f32) {
 	leaf := type
 	for leaf.kind == .ARRAY {

@@ -34,6 +34,7 @@ Uniform_Kind :: enum {
 	FRAME, // the engine's per-frame block
 	RENDER, // the engine's per-draw block (`render`)
 	GAME, // one the game sets by name
+	LIGHTS, // the engine's lights, per camera (`lights`, G2 L5)
 }
 
 Uniform_Info :: struct {
@@ -102,6 +103,7 @@ build_module :: proc(parsed: ^Parsed, target: Target) -> ^Module {
 	}
 
 	collect_statements(module, parsed.file.decls[:])
+	add_light_slot_count(module)
 	check_engine_uniforms(module)
 	check_declarations(module)
 	check_texture_slots(module)
@@ -113,6 +115,22 @@ build_module :: proc(parsed: ^Parsed, target: Target) -> ^Module {
 		check_bodies(module)
 	}
 	return module
+}
+
+/*
+	add_light_slot_count gives the shader LIGHT_SLOT_COUNT, the target's number of light slots (engine.odin), as if it
+	had written `LIGHT_SLOT_COUNT :: 8` itself. Made an ordinary constant rather than a special name so that an array
+	length, a loop bound and an expression all read it the way they read any other constant. A shader declaring the
+	name itself is refused like any other predeclared name (PREDECLARED_NAMES)
+*/
+@(private = "file")
+add_light_slot_count :: proc(module: ^Module) {
+	literal := ast.new(ast.Basic_Lit, tokenizer.Pos{}, tokenizer.Pos{})
+	literal.tok = tokenizer.Token {
+		kind = .Integer,
+		text = fmt.aprintf("%d", get_max_lights(module.target)),
+	}
+	append(&module.constants, Constant_Info{name = "LIGHT_SLOT_COUNT", value = literal, node = literal})
 }
 
 find_struct :: proc(module: ^Module, name: string) -> ^Struct_Info {
@@ -362,6 +380,8 @@ read_uniform_kind :: proc(module: ^Module, value: ^ast.Expr) -> (kind: Uniform_K
 			return .FRAME, true
 		case "RENDER":
 			return .RENDER, true
+		case "LIGHTS":
+			return .LIGHTS, true
 		}
 	}
 	error(
@@ -369,9 +389,9 @@ read_uniform_kind :: proc(module: ^Module, value: ^ast.Expr) -> (kind: Uniform_K
 		"MBS-E24",
 		"unknown uniform block",
 		value,
-		"not `.FRAME` or `.RENDER`",
-		"the engine provides two blocks: `.FRAME` (once per frame) and `.RENDER` (once per draw). A uniform of your own has no value: `@(uniform)`",
-		"write `@(uniform = .FRAME)`, `@(uniform = .RENDER)` or `@(uniform)`",
+		"not `.FRAME`, `.RENDER` or `.LIGHTS`",
+		"the engine provides three blocks: `.FRAME` (once per frame), `.RENDER` (once per draw) and `.LIGHTS` (the scene's lights). A uniform of your own has no value: `@(uniform)`",
+		"write `@(uniform = .FRAME)`, `@(uniform = .RENDER)`, `@(uniform = .LIGHTS)` or `@(uniform)`",
 	)
 	return .GAME, false
 }
@@ -516,22 +536,30 @@ parse_tag :: proc(raw: string) -> (tags: []Tag, ok: bool) {
 
 @(private = "file")
 check_engine_uniforms :: proc(module: ^Module) {
-	seen_frame, seen_render := false, false
+	seen: [Uniform_Kind]bool
 	for uniform in module.uniforms {
 		if uniform.kind == .GAME {
 			continue
 		}
-		block_name := "frame" if uniform.kind == .FRAME else "render"
-		if uniform.kind == .FRAME {
-			if seen_frame {
-				duplicate_block(module, uniform, ".FRAME")
-			}
-			seen_frame = true
-		} else {
-			if seen_render {
-				duplicate_block(module, uniform, ".RENDER")
-			}
-			seen_render = true
+		block_name := get_engine_block_name(uniform.kind)
+		kind_text := strings.to_upper(block_name)
+		if seen[uniform.kind] {
+			duplicate_block(module, uniform, fmt.aprintf(".%s", kind_text))
+		}
+		seen[uniform.kind] = true
+
+		// The light built-ins' code and every runtime read `lights_<field>`: a block called anything else would be a
+		// second set of uniforms nothing fills
+		if uniform.kind == .LIGHTS && uniform.name != "lights" {
+			error(
+				module,
+				"MBS-E13",
+				"the engine's lights block must be named `lights`",
+				uniform.node,
+				fmt.aprintf("named `%s`", uniform.name),
+				"the light built-ins and the runtimes find its fields as `lights_ambient`, `lights_direction`, ...",
+				"write `@(uniform = .LIGHTS) lights: struct { ... }`",
+			)
 		}
 
 		if uniform.block == nil {
@@ -542,12 +570,12 @@ check_engine_uniforms :: proc(module: ^Module) {
 				uniform.type,
 				"not a struct",
 				"the engine fills it field by field",
-				fmt.aprintf("write `@(uniform = .%s) %s: struct { ... }`", "FRAME" if uniform.kind == .FRAME else "RENDER", uniform.name),
+				fmt.aprintf("write `@(uniform = .%s) %s: struct { ... }`", kind_text, uniform.name),
 			)
 			continue
 		}
 
-		known: []Engine_Field = FRAME_FIELDS[:] if uniform.kind == .FRAME else RENDER_FIELDS[:]
+		known := get_engine_fields(uniform.kind)
 		for field in uniform.block.fields {
 			expected, found := find_engine_field(known, field.name)
 			if found == false {

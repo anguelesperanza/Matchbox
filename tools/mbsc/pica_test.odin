@@ -125,6 +125,7 @@ the_committed_3ds_shaders_are_what_mbsc_writes_now :: proc(t: ^testing.T) {
 	shaders := [?][4]string {
 		{"mesh", #load("../../matchbox/shaders/mesh.mbs", string), #load("../../matchbox/shaders/mesh.3ds.v.pica", string), #load("../../matchbox/shaders/mesh.3ds.tev", string)},
 		{"mesh_lit", #load("../../matchbox/shaders/mesh_lit.mbs", string), #load("../../matchbox/shaders/mesh_lit.3ds.v.pica", string), #load("../../matchbox/shaders/mesh_lit.3ds.tev", string)},
+		{"mesh_vertex_lit", #load("../../matchbox/shaders/mesh_vertex_lit.mbs", string), #load("../../matchbox/shaders/mesh_vertex_lit.3ds.v.pica", string), #load("../../matchbox/shaders/mesh_vertex_lit.3ds.tev", string)},
 	}
 	for shader in shaders {
 		ir, parsed, message := build_ir_for(no_carriage_returns_for_pica(shader[1]), .PICA200)

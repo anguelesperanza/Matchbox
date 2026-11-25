@@ -1,5 +1,7 @@
 package matchbox
 
+import "core:fmt"
+
 /*
 	light
 	=====
@@ -92,6 +94,7 @@ Lighting_State :: struct {
 	`lights_count`). Every row is four floats, which suits HLSL's constant buffer packing and the
 	PICA's vec4 registers alike.
 */
+@(private)
 Lights_Block :: struct {
 	ambient:[4]f32,
 	direction:[LIGHT_SLOT_COUNT][4]f32, // towards the light, eye space, w = 0; zero in an unused slot
@@ -120,7 +123,11 @@ create_directional_light :: proc(direction:[3]f32, color:[4]f32 = WHITE) -> Ligh
 		mb.set_lights({mb.create_directional_light({-1, -2, -1})})
 */
 set_lights :: proc(lights:[]Light) {
-	ensure(len(lights) <= LIGHT_SLOT_COUNT, "set_lights: more lights than get_max_lights()")
+	if len(lights) > LIGHT_SLOT_COUNT {
+		message := fmt.tprintf("set_lights: %d lights given, this target takes %d", len(lights), LIGHT_SLOT_COUNT)
+		print(message) // the print log keeps it; the panic carries it too, as a 3DS crash screen replaces the print log
+		panic(message)
+	}
 	mbi.lighting.lights = {}
 	copy(mbi.lighting.lights[:], lights)
 	mbi.lighting.light_count = len(lights)
@@ -145,6 +152,7 @@ get_max_lights :: proc() -> int {
 	w = 0 keeps the view's translation out, as a direction has no position to move. Takes the
 	state rather than reading mbi so it is the same maths on every target and in a test.
 */
+@(private)
 calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> Lights_Block {
 	block:Lights_Block
 	block.ambient = lighting.settings.ambient

@@ -369,9 +369,16 @@ both ways on each target.
 - **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
   laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 
-**L6. The API.** `Light`, `create_directional_light`, `set_lights`, `set_lighting` (main's names), and the way a game
-picks per-vertex or per-pixel (open question 1). Done when: examples/model-check shows both, and the cheatsheet lists
-the new procedures.
+**L6. The API's remainder.** *DONE 2026-11-25 (W3).* The API itself came forward into L4 and the per-part choice into
+L5-2; what was left:
+- `Lights_Block` and `calculate_lights_block` are package-private (D3): only the runtimes and tests use them, a game
+  never fills a lights block.
+- `set_lights` given more than `get_max_lights()` prints "set_lights: 9 lights given, this target takes 8" and panics
+  with the same text (D2). The panic carries it because a 3DS crash screen replaces the print log, so the print alone
+  would never be seen there.
+- Measured with a deliberate 9-light scratch example (deleted): Azahar's crash screen shows the line; Vita3K's
+  `ux0:data/matchbox.log` holds it, then the panic line. Not run on hardware.
+- The cheatsheet is dropped from L6 (D1): it is regenerated once the API has stabilised.
 
 **L7. Hardware passes.** The 3DS check and the Vita check grow a lighting step each; the user runs them.
 
@@ -395,7 +402,7 @@ so the G2 design doesn't close them off:
 ## Open questions
 
 The five asked on 2026-11-23 are answered under "What was decided". Still open, for the steps that reach them:
-- **More lights than the target takes:** when a scene sets more than the limit, which are kept (the nearest, the
-  brightest, the first given) or whether it is an error. Decided at L6.
+- *Answered at L6 (D2):* more lights than the target takes is an error, with a one-line reason printed first.
 - **The real limits on PC and the Vita:** measured, not guessed, before either is raised above 8.
-- **The built-in's final name and shape:** revisited after L3.
+- *Closed (D6):* the built-ins are `light_diffuse` and `light_specular`, in use and tested since L2; nothing left to
+  revisit.

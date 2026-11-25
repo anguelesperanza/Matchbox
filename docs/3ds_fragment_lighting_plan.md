@@ -517,6 +517,7 @@ so the G2 design doesn't close them off:
   enter the `.tev` plan.
 - **Stereoscopic 3D (C6), deferred:** the unit works in eye space, so each eye needs its light directions in that eye's
   space, or both eyes share the centre eye's and accept the small difference. Decided if C6 is ever taken up.
+- **Flip the normal for back faces, on all three targets (after G2, from L9):** `mesh_lit.mbs` turns the normal to face the eye when the part is seen from behind (the sign of N.V at the vertex, exact for a flat part), so a two-sided part is lit from the viewer's side and not through the plane. Hardware `light_test5` S7 to S10 support it on the 3DS (back faces lit by the flipped normal, front faces unchanged). It changes what PC and the Vita draw, not the API; the Vita's `.gxp` files and the 3DS `.pica` are regenerated.
 - **Resource use:** per-pixel quality with no per-pixel program, and the vertex unit freed of lighting maths.
 
 ## Open questions
@@ -585,3 +586,6 @@ lights it, light through the plane does not), which changes PC and the Vita's sh
   suspicion in L3's note does not show at shininess 2 with clamp on, and the signed table (S3, also 0) is not needed to match PC
   in this case.** Two-sided diffuse leaks light and highlight as in Azahar (S5, S6), so it is out. Flipping the normal in the vertex
   shader works on hardware: back faces get the flipped normal's lighting (S7 lit, S8 dark), front faces unchanged (S9, S10).
+  **L9 closed 2026-11-25 (the user's decision): no runtime change.** D5 needs nothing on the 3DS: on hardware the unsigned D0 table already
+  draws highlight 0 on a back face lit through the plane, which is what PC draws. The signed D0 table and two-sided diffuse are not
+  used. The spike sources stay in `docs/spikes/`. Flipping the normal for back faces is a post-G2 item (below).

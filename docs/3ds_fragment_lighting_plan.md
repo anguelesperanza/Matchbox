@@ -576,3 +576,12 @@ lights it, light through the plane does not), which changes PC and the Vita's sh
   does not highlight there; hardware may); S5 and S6, two-sided diffuse: the highlight appears where the clamp should remove it
   (222 and 213 on S5, 61 and 123 on S6, expected 0), so **two-sided diffuse lights a front face from behind and lets the
   highlight through; it is not a flipped normal and is not the way**. **Stops here until the user's hardware result.**
+  **New 3DS LL, 2026-11-25 (the user's photo of the bottom screen): also 38 of 44, the same six misses as Azahar.** The photo's rows are
+  shifted by one step (each `s` pair sits on the line above its step), so by the step table: S0, S2, S3, S4, S7 to S10 pass; the
+  misses are S1, S5 and S6, as in Azahar. Hardware against Azahar, step by step: every value agrees within 2 levels (S0 specular
+  244 and 236 against 245 and 237, S1 diffuse 132 against 133, S5 specular 222 and 212, S6 specular 60 and 123 against 61 and 123,
+  S7 specular 221 and 211 against 222 and 213). **The unsigned D0 step (S1, back, light through the plane) gave highlight 0 on
+  hardware, as in Azahar, not the formula's 35 and 46: this unit already gives no highlight on a back face there, so the `|N.H|`
+  suspicion in L3's note does not show at shininess 2 with clamp on, and the signed table (S3, also 0) is not needed to match PC
+  in this case.** Two-sided diffuse leaks light and highlight as in Azahar (S5, S6), so it is out. Flipping the normal in the vertex
+  shader works on hardware: back faces get the flipped normal's lighting (S7 lit, S8 dark), front faces unchanged (S9, S10).

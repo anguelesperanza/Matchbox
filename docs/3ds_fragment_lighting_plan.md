@@ -366,6 +366,31 @@ both ways on each target.
       pixel; the board's white squares 156 and 157; the per-pixel sphere's peak red 228 in Azahar and 230 in
       Vita3K, its L4-6 values, so the switching leaves each program's registers right.
   - L5-4. model-check lit both ways on every target; hardware builds.
+    **DONE 2026-11-25 on PC and in the emulators (hardware not yet asked, builds below).** model-check gains M, or
+    FACE_LEFT (Y on the 3DS, Square on the Vita), which cycles `Lighting_Settings.mode`; the sphere's material always
+    asks for the other mode (`Material.lighting`), so every frame draws both pipelines, and a HUD line names both. L4-6's
+    lighting switch and the cut-out board stay. `apply_lighting` sets the scene and the sphere together.
+    - Measured, linear (PC's sRGB converted back); the cube's front and right (61, 93, 155) and the top (102, 153, 255)
+      are worked out by hand, the sphere's peak red is the brightest pixel:
+
+      | scene mode (sphere the other) | cube front/right | cube top | sphere peak red |
+      |---|---|---|---|
+      | PC, per pixel (sphere per vertex) | 62, 93, 156 | 103, 152, 255 | 216 |
+      | PC, per vertex (sphere per pixel) | 62, 93, 156 | 103, 152, 255 | 229 (reference 229) |
+      | Azahar, per pixel | 62, 93, 155 | 102, 153, 255 | 215 |
+      | Azahar, per vertex | 62, 93, 155 | 102, 153, 255 | 228 (reference 228) |
+      | Vita3K, per pixel | 62, 93, 155 | 102, 153, 255 | 217 |
+      | Vita3K, per vertex | 62, 93, 155 | 102, 153, 255 | 229 (L4-6: 230) |
+
+      A flat face is the same both ways, as L5-2 found; the per-vertex highlight peaks lower (216 against 229) because it
+      is blended from the corners. On the floor the per-vertex scene is a few levels brighter (Azahar 108 against 102,
+      Vita3K 105 against 103). The board's holes show what is behind in both modes (seen, not measured).
+    - Keys: Azahar's Y (`x`) switched the mode in one run. Vita3K's did not take a synthetic Z press, so its per-vertex
+      scene was measured from a build starting in that mode instead (same code, a scratch copy).
+    - Hardware builds, own names and first printed line "model check lit both ways (G2 L5-4)":
+      `build/hardware/model_check_both.3dsx` (title ModelCheckBoth) and `build/hardware/model_check_both.vpk` (Model
+      Check Both, MBOX00047). To check on hardware: both modes look alike on the faces, the sphere differs, Y/Square
+      cycles, B/Cross still switches lighting off.
 - **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
   laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.
 

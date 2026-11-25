@@ -26,8 +26,12 @@ package model_check
 	The checkerboard is the lit cut-out. A highlight has alpha 0 on every target, so the holes
 	stay holes under the light (G2 L4-0); were it 1, the board would be a solid square lit grey.
 
-	A HUD line names the crate and its size from calculate_model_size, and one says whether
-	lighting is on. SELECT or Escape quits
+	M, or the left face button (Y on the 3DS, Square on the Vita), cycles the scene's lighting
+	mode between per pixel and per vertex (G2 L5-4). The sphere's material always asks for the
+	other one, so every frame draws both pipelines side by side; the HUD names both modes.
+
+	A HUD line names the crate and its size from calculate_model_size, one says whether
+	lighting is on, and one names the modes. SELECT or Escape quits
 */
 
 import "core:fmt"
@@ -61,9 +65,16 @@ main :: proc() {
 	// The plane faces up; a quarter turn about X stands it up facing the camera (+Z)
 	board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
 
-	mb.set_lighting()
 	mb.set_lights({mb.create_directional_light({-1, -2, -1})})
 	lighting_on := true
+	scene_mode := mb.Lighting_Mode.PER_PIXEL
+	// The sphere always takes the other pipeline from the scene, so every frame mixes both
+	sphere.parts[0].material.lighting = .PER_VERTEX
+	apply_lighting :: proc(sphere:mb.Model, enabled:bool, mode:mb.Lighting_Mode) {
+		mb.set_lighting({enabled = enabled, ambient = {0.2, 0.2, 0.2, 1}, mode = mode})
+		sphere.parts[0].material.lighting = .PER_VERTEX if mode == .PER_PIXEL else .PER_PIXEL
+	}
+	apply_lighting(sphere, lighting_on, scene_mode)
 
 	camera := mb.Camera {
 		position = {0, 2.5, 6},
@@ -82,7 +93,12 @@ main :: proc() {
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
 		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
 			lighting_on = !lighting_on
-			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}})
+			apply_lighting(sphere, lighting_on, scene_mode)
+		}
+		// FACE_LEFT: Y on the 3DS, Square on the Vita
+		if mb.is_key_pressed(.M) || mb.is_gamepad_pressed(.FACE_LEFT) {
+			scene_mode = .PER_VERTEX if scene_mode == .PER_PIXEL else .PER_PIXEL
+			apply_lighting(sphere, lighting_on, scene_mode)
 		}
 		time += mb.get_delta_time()
 
@@ -109,6 +125,8 @@ main :: proc() {
 		// FACE_DOWN is a position, not a letter: B on the 3DS, Cross on the Vita, A on a PC pad
 		switch_label := "lighting on (L or bottom button: off)" if lighting_on else "lighting off (L or bottom button: on)"
 		mb.render_text(font, switch_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -1.4}))
+		mode_label := fmt.tprintf("scene: %v, sphere: %v", scene_mode, mb.get_lighting_mode(sphere.parts[0].material))
+		mb.render_text(font, mode_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -2.2}))
 		mb.screen_end()
 
 		mb.render_end()

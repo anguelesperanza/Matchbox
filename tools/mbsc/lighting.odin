@@ -30,10 +30,11 @@ import "core:strings"
 	because the Vita runtime finds uniforms by name.
 
 	A light slot with nothing in it is zero colour, and a zero direction is kept zero rather than normalized into a
-	NaN, so an unused slot adds exactly nothing. On the Vita the loops run every slot: 8 turns is cheap, and there is
-	no count to keep in step. PC has 64 slots (decided 2026-11-25: a PC-only game is not held to the handhelds' 8), and
+	NaN, so an unused slot adds exactly nothing. PC has 64 slots (decided 2026-11-25: a PC-only game is not held to the handhelds' 8), and
 	64 turns for a scene with one sun would be every lit pixel paying for the most a game could set, so PC's block
-	ends with `lights_count` and its loops stop there. The engine keeps the slots past the count zero as well, so a
+	ends with `lights_count` and its loops stop there. The Vita's per-pixel loops stop at it too (a float uniform there):
+	its first lit build, which ran all 8, was slow on the real Vita, and every turn costs a normalize, a pow and the
+	kind terms on every pixel. The engine keeps the slots past the count zero as well, so a
 	count that were ever too high would still add nothing.
 */
 
@@ -82,11 +83,13 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintln(builder, "    float kind = lights_position[i].w;")
 	fmt.sbprintln(builder, "    float is_point = step(0.5, kind);")
 	fmt.sbprintln(builder, "    float is_spot = step(1.5, kind);")
-	fmt.sbprintln(builder, "    float3 axis = mbs_light_unit(lights_direction[i].xyz);")
+	fmt.sbprintln(builder, "    float3 axis = lights_direction[i].xyz;")
 	fmt.sbprintln(builder, "    float3 to = lights_position[i].xyz - position;")
-	fmt.sbprintln(builder, "    float d = sqrt(dot(to, to));")
-	fmt.sbprintln(builder, "    l = lerp(axis, mbs_light_unit(to), is_point);")
-	fmt.sbprintln(builder, "    float fade = lerp(1.0, 1.0 / (1.0 + 0.09 * d + 0.032 * d * d), is_point);")
+	fmt.sbprintln(builder, "    float squared = max(dot(to, to), 1e-12);")
+	fmt.sbprintln(builder, "    float inverse = rsqrt(squared);")
+	fmt.sbprintln(builder, "    float d = squared * inverse;")
+	fmt.sbprintln(builder, "    l = lerp(axis, to * inverse, is_point);")
+	fmt.sbprintln(builder, "    float fade = lerp(1.0, 1.0 / (1.0 + d * (0.09 + 0.032 * d)), is_point);")
 	// smoothstep(cos outer, cos inner, cos angle), written out: HLSL's is undefined for equal edges
 	fmt.sbprintln(builder, "    float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);")
 	fmt.sbprintln(builder, "    return fade * lerp(1.0, t * t * (3.0 - 2.0 * t), is_spot);")
@@ -95,7 +98,8 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintln(builder, "\nfloat4 mbs_light_diffuse(float4 q, float3 view) {")
 	fmt.sbprintln(builder, "    float3 n = mbs_light_normal(q);")
 	fmt.sbprintln(builder, "    float3 sum = lights_ambient.rgb;")
-	fmt.sbprintfln(builder, "    for (int i = 0; i < %s; i++) {{", loop_end)
+	fmt.sbprintfln(builder, "    int total = (int)(%s);", loop_end)
+	fmt.sbprintln(builder, "    for (int i = 0; i < total; i++) {")
 	fmt.sbprintln(builder, "        float3 l;")
 	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
 	fmt.sbprintln(builder, "        sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);")
@@ -108,7 +112,8 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintln(builder, "    float3 n = mbs_light_normal(q);")
 	fmt.sbprintln(builder, "    float3 v = mbs_light_unit(view);")
 	fmt.sbprintln(builder, "    float3 sum = float3(0.0, 0.0, 0.0);")
-	fmt.sbprintfln(builder, "    for (int i = 0; i < %s; i++) {{", loop_end)
+	fmt.sbprintfln(builder, "    int total = (int)(%s);", loop_end)
+	fmt.sbprintln(builder, "    for (int i = 0; i < total; i++) {")
 	fmt.sbprintln(builder, "        float3 l;")
 	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
 	fmt.sbprintln(builder, "        float3 h = mbs_light_unit(l + v);")

@@ -65,6 +65,7 @@ when VITA {
 		lights_specular_uniform:^sce.GxmProgramParameter,
 		lights_position_uniform:^sce.GxmProgramParameter,
 		lights_cone_uniform:^sce.GxmProgramParameter,
+		lights_count_uniform:^sce.GxmProgramParameter, // per pixel only: where the fragment loops stop (nil per vertex, whose loop runs all 8)
 		shininess_uniform:^sce.GxmProgramParameter,
 		specular_strength_uniform:^sce.GxmProgramParameter,
 
@@ -213,6 +214,7 @@ when VITA {
 			pipeline.lights_specular_uniform = find(reads, "lights_specular")
 			pipeline.lights_position_uniform = find(reads, "lights_position")
 			pipeline.lights_cone_uniform = find(reads, "lights_cone")
+			if mode == .PER_PIXEL do pipeline.lights_count_uniform = find(reads, "lights_count")
 			pipeline.shininess_uniform = find(reads, "render_shininess")
 			pipeline.specular_strength_uniform = find(reads, "render_specular_strength")
 		}
@@ -290,9 +292,9 @@ when VITA {
 	/*
 		Writes what a lit shader reads besides the common uniforms: the camera's view for eye
 		space, this camera's lights (filled at camera_end), and the part's material, into the
-		program that reads them: the fragment one per pixel, the vertex one per vertex. 8 slots of
-		three colours and a direction is 400 bytes a draw; the loops in the shaders run all 8, so
-		the block's count isn't sent (tools/mbsc/lighting.odin)
+		program that reads them: the fragment one per pixel, the vertex one per vertex. The per-pixel
+		loops stop at the live count, sent as a float; the per-vertex loop runs all 8 and has no
+		count (tools/mbsc/lighting.odin)
 	*/
 	@(private = "file")
 	set_light_uniforms :: proc(pipeline:^Render_Pipeline, vertex_uniforms:rawptr, fragment_uniforms:rawptr, material:Material) {
@@ -305,6 +307,10 @@ when VITA {
 		gfx.set_uniform(buffer, pipeline.lights_specular_uniform, ([^]f32)(&lights.specular)[:4 * LIGHT_SLOT_COUNT])
 		gfx.set_uniform(buffer, pipeline.lights_position_uniform, ([^]f32)(&lights.position)[:4 * LIGHT_SLOT_COUNT])
 		gfx.set_uniform(buffer, pipeline.lights_cone_uniform, ([^]f32)(&lights.cone)[:4 * LIGHT_SLOT_COUNT])
+		if pipeline.lights_count_uniform != nil {
+			count := f32(lights.count)
+			gfx.set_uniform(buffer, pipeline.lights_count_uniform, ([^]f32)(&count)[:1])
+		}
 		shininess := material.shininess
 		strength := material.specular_strength
 		gfx.set_uniform(buffer, pipeline.shininess_uniform, ([^]f32)(&shininess)[:1])

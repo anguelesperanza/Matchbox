@@ -57,11 +57,13 @@ float mbs_light_sample(int i, float3 position, out float3 l) {
     float kind = lights_position[i].w;
     float is_point = step(0.5, kind);
     float is_spot = step(1.5, kind);
-    float3 axis = mbs_light_unit(lights_direction[i].xyz);
+    float3 axis = lights_direction[i].xyz;
     float3 to = lights_position[i].xyz - position;
-    float d = sqrt(dot(to, to));
-    l = lerp(axis, mbs_light_unit(to), is_point);
-    float fade = lerp(1.0, 1.0 / (1.0 + 0.09 * d + 0.032 * d * d), is_point);
+    float squared = max(dot(to, to), 1e-12);
+    float inverse = rsqrt(squared);
+    float d = squared * inverse;
+    l = lerp(axis, to * inverse, is_point);
+    float fade = lerp(1.0, 1.0 / (1.0 + d * (0.09 + 0.032 * d)), is_point);
     float t = saturate(dot(l, axis) * lights_cone[i].z + lights_cone[i].w);
     return fade * lerp(1.0, t * t * (3.0 - 2.0 * t), is_spot);
 }
@@ -69,7 +71,8 @@ float mbs_light_sample(int i, float3 position, out float3 l) {
 float4 mbs_light_diffuse(float4 q, float3 view) {
     float3 n = mbs_light_normal(q);
     float3 sum = lights_ambient.rgb;
-    for (int i = 0; i < lights_count; i++) {
+    int total = (int)(lights_count);
+    for (int i = 0; i < total; i++) {
         float3 l;
         float fade = mbs_light_sample(i, -view, l);
         sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);
@@ -81,7 +84,8 @@ float4 mbs_light_specular(float4 q, float3 view) {
     float3 n = mbs_light_normal(q);
     float3 v = mbs_light_unit(view);
     float3 sum = float3(0.0, 0.0, 0.0);
-    for (int i = 0; i < lights_count; i++) {
+    int total = (int)(lights_count);
+    for (int i = 0; i < total; i++) {
         float3 l;
         float fade = mbs_light_sample(i, -view, l);
         float3 h = mbs_light_unit(l + v);

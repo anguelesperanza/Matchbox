@@ -117,8 +117,9 @@ Lights_Block :: struct {
 	position:[LIGHT_SLOT_COUNT][4]f32, // eye space, w = the kind: 0 directional, 1 point, 2 spot
 	cone:[LIGHT_SLOT_COUNT][4]f32, // SPOT: cos(outer angle), cos(inner angle), then k = 1 / (the difference) and -outer * k, so a shader works the cone out as cos * k + (-outer * k), two instructions on the 3DS where subtracting and scaling is three; zero otherwise
 	/*
-		Where PC's shader loops stop, so a scene with one sun doesn't pay for 64 slots. The
-		handhelds' loops run all 8 and don't read it. The padding fills the row, as HLSL rounds
+		Where the per-pixel shader loops stop on PC and the Vita, so a scene with one sun doesn't pay for 64 slots
+		(PC) or for eight on every pixel (the Vita's fragment cost is what a lit draw is bound by). The 3DS's
+		per-vertex loop runs all 8 and doesn't read it. The padding fills the row, as HLSL rounds
 		a constant buffer up to whole rows of 16 bytes.
 	*/
 	count:i32,

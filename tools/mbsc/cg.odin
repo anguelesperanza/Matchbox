@@ -578,13 +578,15 @@ write_light_uniforms :: proc(builder: ^strings.Builder) {
 	for name in LIGHT_UNIFORM_NAMES[1:] {
 		fmt.sbprintfln(builder, "uniform float4 %s[%d];", name, count)
 	}
+	// A float, not an int: the runtime sets uniforms as floats. The fragment loops stop here, so a scene with one sun
+	// doesn't pay for eight lights on every pixel, which is what a lit draw on the Vita is bound by
+	fmt.sbprintln(builder, "uniform float lights_count;")
 }
 
 // write_light_functions_for writes the functions the light built-ins call (lighting.odin), and the material
 // uniforms they read when the shader didn't declare `render` itself.
 @(private = "file")
 write_light_functions_for :: proc(h: ^Cg, builder: ^strings.Builder) {
-	count := get_max_lights(.VITA)
 	render_block := ""
 	for uniform in h.ir.uniforms {
 		if uniform.kind == .RENDER {
@@ -598,7 +600,7 @@ write_light_functions_for :: proc(h: ^Cg, builder: ^strings.Builder) {
 			fmt.sbprintfln(builder, "uniform %s %s;", engine_type(field.type), block_field_name(render_block, field.name))
 		}
 	}
-	write_light_functions(builder, render_block, fmt.tprintf("%d", count))
+	write_light_functions(builder, render_block, "lights_count")
 }
 
 @(private = "file")

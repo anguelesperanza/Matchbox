@@ -222,12 +222,12 @@ calculate_random_direction :: proc(random: ^Light_Random) -> [3]f32 {
 /*
 	create_light_case makes a scene with `lights` slots in use and the rest empty, and a pixel to light: a normal
 	facing the eye side (+Z in eye space) and a view vector towards the eye, as a visible pixel has. Directions are
-	left unnormalized and scaled, and the quaternion scaled, since the built-ins normalize both
+	unit length, as the engine sends them, and the quaternion scaled, since the built-ins normalize it
 */
 create_light_case :: proc(random: ^Light_Random, lights: int, kinds := false) -> (scene: Light_Scene, quat: [4]f32, view: [3]f32) {
 	scene.ambient = {calculate_light_random(random) * 0.3, calculate_light_random(random) * 0.3, calculate_light_random(random) * 0.3}
 	for slot in 0 ..< lights {
-		scene.direction[slot] = calculate_random_direction(random) * (0.5 + calculate_light_random(random) * 2)
+		scene.direction[slot] = calculate_random_direction(random) // unit length, as the engine sends it: the Cg and HLSL no longer normalize it
 		scene.diffuse[slot] = {calculate_light_random(random), calculate_light_random(random), calculate_light_random(random)} * 0.6
 		scene.specular[slot] = {calculate_light_random(random), calculate_light_random(random), calculate_light_random(random)}
 		if kinds {

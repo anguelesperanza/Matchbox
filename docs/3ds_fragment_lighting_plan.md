@@ -488,3 +488,15 @@ PC and 3DS: mbsc's f64 and GPU tests still pass (the test scenes now send unit d
 files did not change. Open: whether this is enough on the real Vita; per vertex stays the cheaper path, and making it the
 Vita's default is an API decision for the user. Test build: `build/hardware/model_check_bulbs2.vpk` (MBOX00062), M or
 Square switches per pixel and per vertex, P (Circle) the two bulbs, L (Cross) all lighting.
+
+**L8-6, Vita speed again (2026-11-25).** Real Vita on bulbs3: per vertex 60 fps with the bulbs on or off; per pixel 26 with the
+sun alone, 11 with the bulbs. Cutting the two loops to the live count was not enough. Now (Cg only; the HLSL, the 3DS and what
+a game calls are unchanged): (1) one pass for light_diffuse and light_specular (statics and a done-flag; psp2cgc folds the flag),
+so the normal, the view and each light are worked once; mbsc refuses a shader whose two calls pass different arguments;
+(2) the engine sorts the Vita's block into suns, bulbs and spots (`sort_lights_block_by_kind`, tested) and sends the three
+run ends as `lights_split`, so a sun is a direction and a dot, and a bulb has no cone. Evidence is instruction counts only, from
+scratch Cg compiled with psp2cgc (a dynamic loop's cost is its body, so sizes are for the code, not the frame): the sun-only
+pass is 45 instructions straight-line against 79 for the two-loop form, and the all-kinds form 105 against 152. Half precision
+gave no saving in the count (47 against 45) and was not used. Not changed: the floor is shaded at full cost (overdraw).
+Per-vertex remains the Vita's smooth path; whether it becomes the Vita's default is the user's call. Test build
+`build/hardware/model_check_bulbs4.vpk` (MBOX00064).

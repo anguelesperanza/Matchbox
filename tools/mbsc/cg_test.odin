@@ -281,3 +281,25 @@ a_lit_shader_lists_the_lights_uniforms_for_the_vita :: proc(t: ^testing.T) {
 	expect_has(t, text, "uniform render_shininess f32 0\n")
 	expect_has(t, text, "uniform render_specular_strength f32 0\n")
 }
+
+// The Vita works the lights out once for both light built-ins (CG_LIGHT_FUNCTIONS), so a shader that calls them with different arguments is refused rather than lit with the first call's
+@(test)
+the_vita_refuses_light_calls_with_different_arguments :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	same, same_ok := generate_cg_text(t, lit_shader("return light_diffuse(v.quat, v.view) * sample(a, v.uv) + light_specular(v.quat, v.view)"), "same")
+	testing.expect(t, same_ok)
+	testing.expect(t, strings.contains(same.fragment, "static float3 mbs_light_diffuse_sum;"), same.fragment)
+	testing.expect(t, strings.contains(same.fragment, "uniform float3 lights_split;"), same.fragment)
+
+	parsed := parse_shader("different.mbs", lit_shader("return light_diffuse(v.quat, v.view) * sample(a, v.uv) + light_specular(v.quat, v.view * 2.0)"))
+	defer destroy_parsed(parsed)
+	check_subset(parsed)
+	module := build_module(parsed, .VITA)
+	_, problems := generate_cg(lower_module(module), context.temp_allocator)
+	found := false
+	for problem in problems {
+		if strings.contains(problem, "different arguments") do found = true
+	}
+	testing.expect(t, found, "a shader whose light calls differ should be refused")
+}

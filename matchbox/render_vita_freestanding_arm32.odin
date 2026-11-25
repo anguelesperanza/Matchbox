@@ -65,7 +65,7 @@ when VITA {
 		lights_specular_uniform:^sce.GxmProgramParameter,
 		lights_position_uniform:^sce.GxmProgramParameter,
 		lights_cone_uniform:^sce.GxmProgramParameter,
-		lights_count_uniform:^sce.GxmProgramParameter, // per pixel only: where the fragment loops stop (nil per vertex, whose loop runs all 8)
+		lights_split_uniform:^sce.GxmProgramParameter, // per pixel only: where the suns, the bulbs and all the lights end in the sorted block (nil per vertex, whose loop runs all 8)
 		shininess_uniform:^sce.GxmProgramParameter,
 		specular_strength_uniform:^sce.GxmProgramParameter,
 
@@ -214,7 +214,7 @@ when VITA {
 			pipeline.lights_specular_uniform = find(reads, "lights_specular")
 			pipeline.lights_position_uniform = find(reads, "lights_position")
 			pipeline.lights_cone_uniform = find(reads, "lights_cone")
-			if mode == .PER_PIXEL do pipeline.lights_count_uniform = find(reads, "lights_count")
+			if mode == .PER_PIXEL do pipeline.lights_split_uniform = find(reads, "lights_split")
 			pipeline.shininess_uniform = find(reads, "render_shininess")
 			pipeline.specular_strength_uniform = find(reads, "render_specular_strength")
 		}
@@ -293,8 +293,8 @@ when VITA {
 		Writes what a lit shader reads besides the common uniforms: the camera's view for eye
 		space, this camera's lights (filled at camera_end), and the part's material, into the
 		program that reads them: the fragment one per pixel, the vertex one per vertex. The per-pixel
-		loops stop at the live count, sent as a float; the per-vertex loop runs all 8 and has no
-		count (tools/mbsc/lighting.odin)
+		loops run the sorted block's runs, sent as three floats; the per-vertex loop runs all 8 and
+		has no counts (tools/mbsc/lighting.odin)
 	*/
 	@(private = "file")
 	set_light_uniforms :: proc(pipeline:^Render_Pipeline, vertex_uniforms:rawptr, fragment_uniforms:rawptr, material:Material) {
@@ -307,9 +307,9 @@ when VITA {
 		gfx.set_uniform(buffer, pipeline.lights_specular_uniform, ([^]f32)(&lights.specular)[:4 * LIGHT_SLOT_COUNT])
 		gfx.set_uniform(buffer, pipeline.lights_position_uniform, ([^]f32)(&lights.position)[:4 * LIGHT_SLOT_COUNT])
 		gfx.set_uniform(buffer, pipeline.lights_cone_uniform, ([^]f32)(&lights.cone)[:4 * LIGHT_SLOT_COUNT])
-		if pipeline.lights_count_uniform != nil {
-			count := f32(lights.count)
-			gfx.set_uniform(buffer, pipeline.lights_count_uniform, ([^]f32)(&count)[:1])
+		if pipeline.lights_split_uniform != nil {
+			split := [3]f32{f32(lights.sun_count), f32(lights.sun_count + lights.point_count), f32(lights.count)}
+			gfx.set_uniform(buffer, pipeline.lights_split_uniform, split[:])
 		}
 		shininess := material.shininess
 		strength := material.specular_strength
@@ -406,7 +406,10 @@ when VITA {
 
 		sort_render_queue()
 		// The lights' directions are in this camera's eye space, so they are worked out once a camera
-		if mbi.lighting.settings.enabled do mbi.camera_lights = calculate_lights_block(mbi.lighting, mbi.view)
+		if mbi.lighting.settings.enabled {
+			mbi.camera_lights = calculate_lights_block(mbi.lighting, mbi.view)
+			sort_lights_block_by_kind(&mbi.camera_lights)
+		}
 		set_depth_mode(depth_opaque)
 		for item in mbi.opaque_items {
 			set_cull_mode(item.cull)

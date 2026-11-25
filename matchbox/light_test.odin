@@ -85,3 +85,27 @@ a_materials_lighting_mode_wins_over_the_scenes :: proc(t:^testing.T) {
 	testing.expect_value(t, get_lighting_mode(Material{shininess = 16, lighting = .PER_VERTEX}), Lighting_Mode.PER_VERTEX)
 	testing.expect_value(t, mbi.model_settings.default_material.lighting, nil)
 }
+
+// The Vita's per-pixel shader runs a loop per kind, so its block is put in the order suns, bulbs, spots (the game's order inside each kind)
+@(test)
+the_vita_block_sorts_lights_by_kind :: proc(t:^testing.T) {
+	lighting:Lighting_State
+	lighting.lights[0] = create_spot_light({0, 4, 0}, {0, -1, 0}, {0, 0, 1, 1})
+	lighting.lights[1] = create_point_light({1, 0, 0}, {1, 0, 0, 1})
+	lighting.lights[2] = create_directional_light({0, -1, 0}, {0, 1, 0, 1})
+	lighting.lights[3] = create_point_light({2, 0, 0}, {1, 1, 0, 1})
+	lighting.light_count = 4
+	block := calculate_lights_block(lighting, calculate_camera_view_matrix({position = {0, 0, 5}, target = {0, 0, 0}, up = {0, 1, 0}}))
+	sort_lights_block_by_kind(&block)
+	testing.expect_value(t, block.sun_count, 1)
+	testing.expect_value(t, block.point_count, 2)
+	testing.expect_value(t, block.count, 4)
+	kinds := [4]f32{block.position[0].w, block.position[1].w, block.position[2].w, block.position[3].w}
+	testing.expect_value(t, kinds, [4]f32{0, 1, 1, 2})
+	testing.expect_value(t, block.diffuse[0], [4]f32{0, 1, 0, 1}) // the sun
+	testing.expect_value(t, block.diffuse[1], [4]f32{1, 0, 0, 1}) // the bulbs, in the game's order
+	testing.expect_value(t, block.diffuse[2], [4]f32{1, 1, 0, 1})
+	testing.expect_value(t, block.diffuse[3], [4]f32{0, 0, 1, 1}) // the spot, its cone with it
+	testing.expect(t, block.cone[3][2] > 0)
+	testing.expect_value(t, block.cone[0], [4]f32{})
+}

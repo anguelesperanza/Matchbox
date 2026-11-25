@@ -117,13 +117,14 @@ Lights_Block :: struct {
 	position:[LIGHT_SLOT_COUNT][4]f32, // eye space, w = the kind: 0 directional, 1 point, 2 spot
 	cone:[LIGHT_SLOT_COUNT][4]f32, // SPOT: cos(outer angle), cos(inner angle), then k = 1 / (the difference) and -outer * k, so a shader works the cone out as cos * k + (-outer * k), two instructions on the 3DS where subtracting and scaling is three; zero otherwise
 	/*
-		Where the per-pixel shader loops stop on PC and the Vita, so a scene with one sun doesn't pay for 64 slots
-		(PC) or for eight on every pixel (the Vita's fragment cost is what a lit draw is bound by). The 3DS's
-		per-vertex loop runs all 8 and doesn't read it. The padding fills the row, as HLSL rounds
+		Where PC's shader loop stops, so a scene with one sun doesn't pay for 64 slots. The Vita's per-pixel shader
+		uses the three counts below instead; the 3DS's per-vertex loop runs all 8 and reads neither. The padding fills the row, as HLSL rounds
 		a constant buffer up to whole rows of 16 bytes.
 	*/
 	count:i32,
-	_padding:[3]i32,
+	sun_count:i32, // the Vita's only, set by sort_lights_block_by_kind: how many of the first `count` slots are suns
+	point_count:i32, // the Vita's only: how many of the next are bulbs; the rest are spots
+	_padding:i32,
 }
 
 // create_directional_light makes a sun shining along `direction`, `color` used for both its diffuse and highlights.
@@ -180,6 +181,33 @@ calculate_unit_direction :: proc(direction:[3]f32) -> [4]f32 {
 	if length_squared < 1e-24 do return {}
 	unit := direction / math.sqrt(length_squared)
 	return {unit.x, unit.y, unit.z, 0}
+}
+
+/*
+	sort_lights_block_by_kind puts the block's lights in the order suns, bulbs, spots, keeping the game's order inside
+	each kind, and says how many of each in `sun_count` and `point_count`. The Vita's per-pixel shader runs one loop per
+	kind, so a sun costs a direction and no more and a bulb has no cone to work out; with the lights in the game's order
+	every turn of one loop would pay for all three. The Vita only: PC's shader tests the kind, and the 3DS's unit takes
+	any order. The sum of the lights does not depend on their order.
+*/
+@(private)
+sort_lights_block_by_kind :: proc(block:^Lights_Block) {
+	sorted:Lights_Block = block^
+	next := 0
+	for kind in 0 ..< 3 {
+		for slot in 0 ..< int(block.count) {
+			if int(block.position[slot].w) != kind do continue
+			sorted.direction[next] = block.direction[slot]
+			sorted.diffuse[next] = block.diffuse[slot]
+			sorted.specular[next] = block.specular[slot]
+			sorted.position[next] = block.position[slot]
+			sorted.cone[next] = block.cone[slot]
+			next += 1
+		}
+		if kind == 0 do sorted.sun_count = i32(next)
+		if kind == 1 do sorted.point_count = i32(next) - sorted.sun_count
+	}
+	block^ = sorted
 }
 
 // calculate_lights_block turns the scene's lights into the block a camera's shaders read, in eye space: a direction with w = 0 so the view's translation stays out, a position with w = 1.

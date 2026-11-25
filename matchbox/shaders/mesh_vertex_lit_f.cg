@@ -35,7 +35,7 @@ uniform float4 lights_diffuse[8];
 uniform float4 lights_specular[8];
 uniform float4 lights_position[8];
 uniform float4 lights_cone[8];
-uniform float lights_count;
+uniform float3 lights_split;
 
 float4 fragment_main(Varying v) {
     float4 color = tex2D(tex, v.uv) * v.color;

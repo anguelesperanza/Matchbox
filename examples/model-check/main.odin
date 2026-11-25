@@ -54,12 +54,14 @@ main :: proc() {
 		mb.clear_background({0.15, 0.17, 0.22, 1})
 
 		mb.camera_start(camera)
-		// All three forms of the render_model group: a position, a pivot and a transform, a transform
-		mb.render_model(floor, {0, -0.5, 0}, tint = {0.4, 0.4, 0.45, 1})
-		mb.render_model(cube, {-3, 0, 0}, tint = {0.4, 0.6, 1, 1})
+		// All three forms of the render_model group: a position, a pivot and a transform, a transform.
+		// The positions are typed because they have to be: an untyped {x, y, z} also fits a Transform,
+		// and Odin stops the build as ambiguous (see render_model)
+		mb.render_model(floor, [3]f32{0, -0.5, 0}, tint = {0.4, 0.4, 0.45, 1})
+		mb.render_model(cube, [3]f32{-3, 0, 0}, tint = {0.4, 0.6, 1, 1})
 		turning := mb.create_transform({-1, 0, 0}, mb.calculate_rotation_axis_angle({0, 1, 0}, time))
 		mb.render_model(crate, mb.calculate_model_center(crate), turning)
-		mb.render_model(sphere, {1.2, 0, 0}, tint = {0.4, 1, 0.5, 1})
+		mb.render_model(sphere, [3]f32{1.2, 0, 0}, tint = {0.4, 1, 0.5, 1})
 		mb.render_model(cylinder, mb.create_transform({3, 0, 0}, mb.calculate_rotation_axis_angle({0, 0, 1}, math.sin(time) * 0.5)), {1, 0.9, 0.3, 1})
 		mb.camera_end()
 

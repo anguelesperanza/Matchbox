@@ -207,8 +207,19 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
     second vertex program of the same shader, the 3DS steps over the normal with a 12-byte padding component
     (`0xE210`, 4 components). model-check on Azahar draws the crate (from a version 2 `.mbm`) and the cylinder
     as before. **Not caused by L4-2, found while checking:** on Azahar the floor, cube and sphere don't show,
-    before this change as after (the commit before it built and run side by side). Not looked into yet; L4-6
-    needs it. Not run on Vita3K or hardware.
+    before this change as after (the commit before it built and run side by side). Not run on Vita3K or hardware.
+  - **Found 2026-11-25, the missing models:** not the 3DS. `render_model(model, {x, y, z}, ...)` resolves to
+    `render_model_transform` on every target: an untyped `{x, y, z}` also fits a `Transform` (position `x` on every
+    axis, rotation `y`, scale `0`), and Odin picks the overload with fewer defaults left unfilled
+    (`render_model_at` leaves two, scale and tint; the transform form one). The model is queued at zero size.
+    Measured on the 3DS by printing the queue, and reproduced standalone on PC; with equal defaults Odin reports
+    the call as ambiguous instead. model-check now types its positions (`[3]f32{...}`) and all five models draw
+    in Azahar. **Decided with the user:** `render_model_at` loses its `scale` (a scale goes in a Transform,
+    `create_transform(position, scale = 2)`), so it leaves as many defaults as the transform form and a bare
+    `{x, y, z}` is now a compile error ("ambiguous") rather than an invisible model. Checked against the package:
+    the bare literal fails with and without a tint, typed positions and variables compile. An instance struct
+    holding placement, as `Sprite` does, was considered and not taken: `Model` owns its meshes, so placement on
+    it would mean copies per drawn thing and a double free on destroy.
   - L4-3. `mesh_lit.mbs`, per pixel, generated for all three targets; `frame` gains `view`, which the lit vertex
     stage needs for eye space.
   - L4-4. PC: a second pipeline, the lights buffer at b3, lit items drawn with it.

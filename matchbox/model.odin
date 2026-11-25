@@ -31,7 +31,11 @@ import "core:math/linalg"
 	**The zero value is not the identity.** A zeroed Transform has a scale of zero and a
 	rotation that is not a rotation, and a model drawn with one is a model you cannot see.
 	`create_transform()` with no arguments is the identity, and render_model's position form exists so the
-	common case, a position and one scale, never has to build one at all.
+	common case, a model placed and nothing else, never has to build one at all.
+
+	The same fact is why an untyped `{x, y, z}` must never reach a Transform parameter: Odin fills
+	the fields in order, position x on every axis, rotation y, scale z, and the model is drawn at
+	zero size (see render_model)
 
 	Rotation is a quaternion because that is what a physics library hands back, so a body's
 	orientation reaches a draw call without being taken apart into angles and put back
@@ -118,10 +122,17 @@ calculate_model_size :: proc(model:Model) -> [3]f32 {
 	Draws a model, in whichever of the three ways the arguments ask for, as `render_text` does
 	for what it is given:
 		render_model(model, transform)              render_model_transform
-		render_model(model, position, scale)        render_model_at
+		render_model(model, position)               render_model_at
 		render_model(model, pivot, transform)       render_model_pivoted
-	Each also takes a `tint` last. The three can't be mistaken for each other: only
-	render_model_transform takes a Transform second, and only render_model_pivoted takes one third
+	Each also takes a `tint` last. A scale goes in a Transform: create_transform(position, scale = 2).
+
+	A position written straight into the call has to be typed, `[3]f32{-3, 0, 0}`, or held in a
+	variable. An untyped `{-3, 0, 0}` fits a Transform too, read field by field as a zero-sized one.
+	render_model_at deliberately leaves as many defaults unfilled as render_model_transform, so
+	Odin calls that ambiguous and stops the build. With a `scale` parameter it did not: Odin picked
+	the overload with fewer defaults left over, the Transform, and the model vanished silently on
+	every target (found 2026-11-25, docs/3ds_fragment_lighting_plan.md). Don't add a defaulted
+	parameter to render_model_at without checking that the bare literal still fails to compile
 */
 render_model :: proc {
 	render_model_transform,
@@ -144,9 +155,9 @@ render_model_transform :: proc(model:Model, transform:Transform, tint:[4]f32 = {
 	}
 }
 
-/*A model at a position, at one scale on every axis and unturned. What most draws want. Part of the `render_model` group*/
-render_model_at :: proc(model:Model, position:[3]f32, scale:f32 = 1, tint:[4]f32 = {1, 1, 1, 1}) {
-	render_model_transform(model, create_transform(position, scale = scale), tint)
+/*A model at a position, at its own size and unturned. What most draws want. Part of the `render_model` group*/
+render_model_at :: proc(model:Model, position:[3]f32, tint:[4]f32 = {1, 1, 1, 1}) {
+	render_model_transform(model, create_transform(position), tint)
 }
 
 /*

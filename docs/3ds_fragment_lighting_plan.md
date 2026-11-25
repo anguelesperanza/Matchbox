@@ -286,6 +286,22 @@ unbinds it for unlit ones (sprites, text, the HUD). Done when: a model check lit
       in both; floor (102, 102, 115) expected, (100, 102, 114) and (101, 103, 115). Not checked: the highlight's
       value, a lit cut-out, lighting switched off with this code, and real hardware.
   - L4-6. `examples/model-check` lit on all three targets.
+    **DONE 2026-11-25 on PC, in the emulators, and on the New 3DS LL and the Vita (the user ran the builds below
+    on both and reported them good).**
+    - model-check sets one sun from (1, 2, 1) with 0.2 ambient, and L or the bottom face button (FACE_DOWN: B on
+      the 3DS, Cross on the Vita) switches lighting off and on. It adds a lit cut-out: a plane stood upright with
+      an 8 x 8 checkerboard texture made in code, the dark squares alpha 0, cut at 0.5, two-sided.
+    - Measured (PC in sRGB turned back to linear; the handhelds are linear): the sphere's brightest pixel, the
+      highlight, has red 229 on PC, 228 in Azahar and 230 in Vita3K (green and blue saturate). The board's white
+      squares are 155 expected (0.2 + L.N 0.41), 157 on PC, 155 in Azahar and 157 in Vita3K, and its holes show
+      what is behind on all three: a highlight leaves the cut-out alone. Lighting off draws every model flat as
+      texture times tint on all three, and back on lights again (checked both ways in Azahar).
+    - A brightest-pixel reading of 172 for the board in Azahar was JPEG ringing at the square edges of a scaled
+      screenshot; the median of the white squares is 155.
+    - Hardware builds, each with its own name, title and first line ("model check lit (G2 L4-6)"):
+      `build/hardware/model_check_lit.3dsx` (title ModelCheckLit) and `build/hardware/model_check_lit.vpk` (Model
+      Check Lit, MBOX00046). Both looked good on hardware (2026-11-25): with L4-5's code that is the first lit
+      draw on the real lighting unit and the real GXM, including the program switching and the zero FR table.
 
 **L5. Per-vertex lighting** in `mesh.mbs` on all three targets, from the same uniforms. Done when: the same scene lit
 both ways on each target.

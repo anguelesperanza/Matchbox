@@ -1,10 +1,10 @@
 package model_check
 
 /*
-	G1's check: models through a perspective camera. Run from the repository root (the assets are
-	the shared ones in assets/), on PC with `odin run examples/model-check`; on the handhelds with
-	`3ds_build.bat examples\model-check` / `vita_build.bat examples\model-check` once they read
-	models.
+	G1's check, lit in G2 L4-6: models through a perspective camera, lit by one sun. Run from the
+	repository root (the assets are the shared ones in assets/), on PC with
+	`odin run examples/model-check`; on the handhelds with `3ds_build.bat examples\model-check` /
+	`vita_build.bat examples\model-check`.
 
 	test_crate.glb is loaded from assets/models, which git ignores (assets are the game's own).
 	`python tools/make_test_model.py` writes it there, beside the tracked copy the tests read in
@@ -14,9 +14,20 @@ package model_check
 	- a cube (create_cube_model), tinted blue
 	- test_crate.glb, turning: an orange/white checkered crate with a red square standing
 	  above it, half its size. The square is double-sided, so it shows from behind too
-	- a sphere (create_sphere_model), tinted green
+	- a sphere (create_sphere_model), tinted green, with a highlight
 	- a cylinder (create_cylinder_model), tinted yellow
-	A HUD line names the model and its size from calculate_model_size. SELECT or Escape quits
+	and behind them a white checkerboard standing upright with every other square cut out.
+
+	The sun shines down from the right and from the camera's side, so tops are brightest, and
+	the fronts and right-hand sides are lit alike. L, or the bottom face button (B on the 3DS,
+	Cross on the Vita), switches lighting off and on: off, every model draws as it did before
+	lighting existed, texture times tint.
+
+	The checkerboard is the lit cut-out. A highlight has alpha 0 on every target, so the holes
+	stay holes under the light (G2 L4-0); were it 1, the board would be a solid square lit grey.
+
+	A HUD line names the crate and its size from calculate_model_size, and one says whether
+	lighting is on. SELECT or Escape quits
 */
 
 import "core:fmt"
@@ -33,6 +44,27 @@ main :: proc() {
 	floor := mb.create_plane_model(12)
 	font := mb.create_font(mb.DEFAULT_FONT_BYTES, 32)
 
+	// The cut-out: a plane stood upright, an 8 x 8 checkerboard whose dark squares are see-through.
+	// Made in code because no test model has a MASK material yet. Point filtering keeps the
+	// squares' edges sharp, so a hole is a hole and not a blend between the two
+	holes:[8 * 8][4]u8
+	for &pixel, index in holes {
+		x := index % 8
+		y := index / 8
+		pixel = {255, 255, 255, 255} if (x + y) % 2 == 0 else {0, 0, 0, 0}
+	}
+	board_texture := mb.create_texture_from_pixels(&holes, 8, 8, .POINT)
+	board := mb.create_plane_model(1.5)
+	board.parts[0].texture = board_texture
+	board.parts[0].alpha_cutoff = 0.5
+	board.parts[0].cull = .NONE
+	// The plane faces up; a quarter turn about X stands it up facing the camera (+Z)
+	board_transform := mb.create_transform({0, 0.5, -1.5}, mb.calculate_rotation_axis_angle({1, 0, 0}, math.PI / 2))
+
+	mb.set_lighting()
+	mb.set_lights({mb.create_directional_light({-1, -2, -1})})
+	lighting_on := true
+
 	camera := mb.Camera {
 		position = {0, 2.5, 6},
 		target = {0, 0.5, 0},
@@ -48,6 +80,10 @@ main :: proc() {
 	for mb.is_running() {
 		mb.poll_events()
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
+		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
+			lighting_on = !lighting_on
+			mb.set_lighting({enabled = lighting_on, ambient = {0.2, 0.2, 0.2, 1}})
+		}
 		time += mb.get_delta_time()
 
 		mb.render_start()
@@ -58,6 +94,7 @@ main :: proc() {
 		// The positions are typed because they have to be: an untyped {x, y, z} also fits a Transform,
 		// and Odin stops the build as ambiguous (see render_model)
 		mb.render_model(floor, [3]f32{0, -0.5, 0}, tint = {0.4, 0.4, 0.45, 1})
+		mb.render_model(board, board_transform)
 		mb.render_model(cube, [3]f32{-3, 0, 0}, tint = {0.4, 0.6, 1, 1})
 		turning := mb.create_transform({-1, 0, 0}, mb.calculate_rotation_axis_angle({0, 1, 0}, time))
 		mb.render_model(crate, mb.calculate_model_center(crate), turning)
@@ -69,6 +106,9 @@ main :: proc() {
 		size := mb.calculate_model_size(crate)
 		label := fmt.tprintf("test_crate.glb: %v parts, size %.2f x %.2f x %.2f", len(crate.parts), size.x, size.y, size.z)
 		mb.render_text(font, label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -0.6}))
+		// FACE_DOWN is a position, not a letter: B on the 3DS, Cross on the Vita, A on a PC pad
+		switch_label := "lighting on (L or bottom button: off)" if lighting_on else "lighting off (L or bottom button: on)"
+		mb.render_text(font, switch_label, mb.calculate_anchor_position(.TOP_LEFT, {0.3, -1.4}))
 		mb.screen_end()
 
 		mb.render_end()
@@ -79,6 +119,8 @@ main :: proc() {
 	mb.destroy(sphere)
 	mb.destroy(cylinder)
 	mb.destroy(floor)
+	mb.destroy(board)
+	mb.destroy(board_texture)
 	mb.destroy_font(font)
 	mb.cleanup()
 }

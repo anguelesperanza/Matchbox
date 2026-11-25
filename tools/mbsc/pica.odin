@@ -151,9 +151,10 @@ PICA_WORDS := [?]string {
 	"jmpc", "jmpu", "emit", "setemit", "mad", "main", "out", "in", "pos", "position", "color", "view", "normalquat",
 }
 
-pica_safe_name :: proc(name: string) -> string {
+// pica_safe_name is the name a uniform gets in the assembly; a renamed one is made with `allocator`.
+pica_safe_name :: proc(name: string, allocator := context.allocator) -> string {
 	if strings.has_prefix(name, "mbs_") {
-		return strings.concatenate({"mbs_", name})
+		return strings.concatenate({"mbs_", name}, allocator)
 	}
 	// `v3` and `r0` are registers, so a shader's own `v3` can't keep its name
 	if len(name) >= 2 && len(name) <= 3 && (name[0] == 'r' || name[0] == 'v' || name[0] == 'c' || name[0] == 'o') {
@@ -164,12 +165,12 @@ pica_safe_name :: proc(name: string) -> string {
 			}
 		}
 		if digits {
-			return strings.concatenate({"mbs_", name})
+			return strings.concatenate({"mbs_", name}, allocator)
 		}
 	}
 	for word in PICA_WORDS {
 		if word == name {
-			return strings.concatenate({"mbs_", name})
+			return strings.concatenate({"mbs_", name}, allocator)
 		}
 	}
 	return name

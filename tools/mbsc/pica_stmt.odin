@@ -122,11 +122,11 @@ pica_inline :: proc(h: ^Pica, callee: ^IR_Proc, args: []Pica_Value) -> Pica_Valu
 
 // ---- statements -----------------------------------------------------------------------------------------------
 
-// pica_block writes the statements of one block, in a scope of its own, and returns the value of a `return` at its end.
-// The block's registers are let go of by whoever opened the scope.
+// pica_block writes the statements of one block, and lets go of each variable's registers after the statement that reads it last.
 pica_block :: proc(h: ^Pica, stmts: []^IR_Stmt) -> Pica_Value {
 	result: Pica_Value
-	for stmt in stmts {
+	dying := pica_last_uses(stmts)
+	for stmt, index in stmts {
 		mark := pica_mark(h)
 		value, returned := pica_stmt(h, stmt)
 		if returned {
@@ -134,8 +134,105 @@ pica_block :: proc(h: ^Pica, stmts: []^IR_Stmt) -> Pica_Value {
 			continue
 		}
 		pica_end_statement(h, mark)
+		for var in dying[index] {
+			pica_release_variable(h, var)
+		}
 	}
 	return result
+}
+
+// pica_last_uses lists, for each statement, the variables declared in this block that the statement is the last to touch.
+pica_last_uses :: proc(stmts: []^IR_Stmt) -> [][dynamic]^IR_Var {
+	dying := make([][dynamic]^IR_Var, len(stmts))
+	declared := make(map[^IR_Var]bool, context.temp_allocator)
+	for stmt in stmts {
+		if declare, is_declare := stmt.variant.(IR_Declare); is_declare {
+			declared[declare.var] = true
+		}
+	}
+	seen := make(map[^IR_Var]bool, context.temp_allocator)
+	refs := make([dynamic]^IR_Var, context.temp_allocator)
+	for index := len(stmts) - 1; index >= 0; index -= 1 {
+		clear(&refs)
+		pica_stmt_refs(stmts[index], &refs)
+		for var in refs {
+			if seen[var] == false {
+				seen[var] = true
+				if declared[var] {
+					append(&dying[index], var)
+				}
+			}
+		}
+	}
+	return dying
+}
+
+pica_stmt_refs :: proc(stmt: ^IR_Stmt, refs: ^[dynamic]^IR_Var) {
+	switch node in stmt.variant {
+	case IR_Declare:
+		append(refs, node.var)
+		pica_expr_refs(node.init, refs)
+	case IR_Assign:
+		pica_expr_refs(node.target, refs)
+		pica_expr_refs(node.value, refs)
+	case IR_If:
+		pica_expr_refs(node.condition, refs)
+		pica_block_refs(node.then, refs)
+		pica_block_refs(node.otherwise, refs)
+	case IR_For:
+		pica_expr_refs(node.from, refs)
+		pica_expr_refs(node.to, refs)
+		pica_block_refs(node.body, refs)
+	case IR_Return:
+		pica_expr_refs(node.value, refs)
+	case IR_Eval:
+		pica_expr_refs(node.call, refs)
+	case IR_Block:
+		pica_block_refs(node.body, refs)
+	}
+}
+
+pica_block_refs :: proc(stmts: []^IR_Stmt, refs: ^[dynamic]^IR_Var) {
+	for stmt in stmts {
+		pica_stmt_refs(stmt, refs)
+	}
+}
+
+pica_expr_refs :: proc(e: ^IR_Expr, refs: ^[dynamic]^IR_Var) {
+	if e == nil {
+		return
+	}
+	switch node in e.variant {
+	case IR_Float, IR_Int, IR_Bool, IR_Zero, IR_Uniform_Ref, IR_Texture_Ref:
+	case IR_Var_Ref:
+		append(refs, node.var)
+	case IR_Unary:
+		pica_expr_refs(node.operand, refs)
+	case IR_Binary:
+		pica_expr_refs(node.left, refs)
+		pica_expr_refs(node.right, refs)
+	case IR_Swizzle:
+		pica_expr_refs(node.base, refs)
+	case IR_Field:
+		pica_expr_refs(node.base, refs)
+	case IR_Index:
+		pica_expr_refs(node.base, refs)
+		pica_expr_refs(node.index, refs)
+	case IR_Convert:
+		pica_expr_refs(node.operand, refs)
+	case IR_Construct:
+		for arg in node.args {
+			pica_expr_refs(arg, refs)
+		}
+	case IR_Builtin_Call:
+		for arg in node.args {
+			pica_expr_refs(arg, refs)
+		}
+	case IR_Proc_Call:
+		for arg in node.args {
+			pica_expr_refs(arg, refs)
+		}
+	}
 }
 
 pica_scoped_block :: proc(h: ^Pica, stmts: []^IR_Stmt) -> Pica_Value {

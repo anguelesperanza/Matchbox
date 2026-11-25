@@ -42,16 +42,12 @@ cbuffer mbs_lights_block : register(b3) {
 Varying vertex_main(Vertex_In input) {
     Varying output = (Varying)0;
     output.uv = lerp(render_uv_rectangle.xy, render_uv_rectangle.zw, input.uv);
-    float3 towards_eye = (float3)0;
-    float3 normal = (float3)0;
-    {
-        float4 world = mul(render_model, float4(input.position.x, input.position.y, input.position.z, 1.0));
-        output.position = mul(frame_view_projection, world);
-        float4 eye = mul(frame_view, world);
-        towards_eye = normalize(float3((-eye.x), (-eye.y), (-eye.z)));
-        float4 turned = mul(frame_view, mul(render_model, float4(input.normal.x, input.normal.y, input.normal.z, 0.0)));
-        normal = normalize(turned.xyz);
-    }
+    float4 world = mul(render_model, float4(input.position.x, input.position.y, input.position.z, 1.0));
+    output.position = mul(frame_view_projection, world);
+    float4 eye = mul(frame_view, world);
+    float3 towards_eye = normalize(float3((-eye.x), (-eye.y), (-eye.z)));
+    float4 turned = mul(frame_view, mul(render_model, float4(input.normal.x, input.normal.y, input.normal.z, 0.0)));
+    float3 normal = normalize(turned.xyz);
     float3 diffuse = lights_ambient.xyz;
     float3 specular = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < 64; i++) {

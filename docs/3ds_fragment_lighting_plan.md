@@ -365,6 +365,23 @@ both ways on each target.
       frame switches between all three programs: cube front and right (61, 93, 154) in both emulators, as per
       pixel; the board's white squares 156 and 157; the per-pixel sphere's peak red 228 in Azahar and 230 in
       Vita3K, its L4-6 values, so the switching leaves each program's registers right.
+  - W6 and W8 (a workstream of `docs/g2_remaining_work.md`, not an L-step). mbsc's PICA register allocator frees by last use.
+    **DONE 2026-11-25 (tests and Azahar; not on hardware).** `pica_block` works out, for each variable a block
+    declares, the statement that touches it last (a statement that holds a loop or an `if` counts whole), and lets go
+    of its registers after that statement, instead of at the block's end; a statement that returns is left to the
+    caller as before. `mesh_vertex_lit.mbs` is back to the obvious form (the eye-space block and its comment are
+    gone): 267 instructions, 13 temporaries of 16, against 271 with the hand structure. W8: `pica_safe_name` takes
+    an allocator, and the test that called it passes `context.temp_allocator`, so its leak no longer prints (the
+    other leaks the run lists, from `report.odin`, `diagnostic.odin` and the string builder, were there before).
+    - New test `a_variable_lets_go_of_its_register_after_its_last_use` (24 chained variables); with the release
+      switched off it fails with "needs more than 16 temporary registers". All 137 tests pass, the 400-scene
+      per-vertex model still 1.03e-6 from f64. Regenerated: `mesh`, `mesh_lit`, `mesh_vertex_lit` `.3ds.v.pica`
+      (register names only, in the first two), and `mesh_vertex_lit`'s HLSL and Cg (the same program without the
+      block; its `.gxp` is unchanged, as the Cg is the same code).
+    - Azahar, model-check forced per vertex (scratch edit, not committed), old and new `.pica` built separately:
+      the static parts match to the pixel (blue cube (62, 93, 155), floor (105, 105, 118), sphere (89, 203, 108)).
+      The crate and cylinder turn, so two runs of the *same* build differ by as much as old against new does;
+      the old/new comparison there is the machine-model test's.
   - L5-4. model-check lit both ways on every target; hardware builds.
 - **Paused 2026-11-25 after L5-3.** What is left of G2 (L5-4, L6, L7, point and spot lights, the open questions) is
   laid out for the next session's agents in `docs/g2_remaining_work.md`, with the decisions the user makes first.

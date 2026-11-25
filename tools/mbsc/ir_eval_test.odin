@@ -585,7 +585,7 @@ fill_leaves :: proc(m: ^Machine, ir: ^IR_Module, prefix: string, type: ^Type, fl
 		}
 		return
 	}
-	name := pica_safe_name(prefix)
+	name := pica_safe_name(prefix, context.temp_allocator)
 	if type.kind == .BOOL {
 		if name in m.bools {
 			m.bools[name] = flat[0] != 0

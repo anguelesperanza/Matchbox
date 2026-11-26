@@ -217,9 +217,104 @@ is_mouse_released :: proc(mouse:Mouse) -> bool {
 	return mbi.mouse_released[mouse]
 }
 
-/*Sets window to always capture mouse input*/
-set_mouse_capture :: proc(){
-	win.SetCapture(mbi.window)
+/*
+	What set_mouse_capture has done. `active` is what the game asked for; `applied` is whether the OS has the cursor
+	confined and hidden right now, which it does not while the window is in the background: the cursor is the player's
+	to take back, and it is locked again by itself when the window returns
+*/
+Mouse_Capture :: struct {
+	active:bool,
+	applied:bool,
+}
+
+/*
+	Locks the mouse to the window for looking around: the cursor is hidden, kept inside the window and put back in the
+	middle every frame, so `get_mouse_delta` keeps measuring however far the hand moves and a camera never runs out of
+	desk or screen. While captured, get_camera_look_input turns the view without a button held. Leaving the window (alt-tab)
+	gives the cursor back and capturing again is automatic when it returns. release_mouse_capture undoes this, and a menu
+	should call it. Handhelds have no mouse, so this does nothing there
+*/
+set_mouse_capture :: proc() {
+	mbi.mouse_capture.active = true
+	apply_mouse_capture()
+}
+
+/*Gives the cursor back: visible, free to leave the window*/
+release_mouse_capture :: proc() {
+	mbi.mouse_capture.active = false
+	undo_mouse_capture()
+}
+
+/*Whether the game has asked for the mouse to be locked and not yet released*/
+is_mouse_captured :: proc() -> bool {
+	return mbi.mouse_capture.active
+}
+
+/*Confines the cursor to the window's drawing area and returns the middle of it in screen pixels, where it is kept*/
+@(private)
+confine_cursor_to_window :: proc() -> win.POINT {
+	client:win.RECT
+	win.GetClientRect(mbi.window, &client)
+
+	top_left := win.POINT{client.left, client.top}
+	bottom_right := win.POINT{client.right, client.bottom}
+	win.ClientToScreen(mbi.window, &top_left)
+	win.ClientToScreen(mbi.window, &bottom_right)
+	area := win.RECT{top_left.x, top_left.y, bottom_right.x, bottom_right.y}
+	win.ClipCursor(&area)
+
+	return win.POINT{(top_left.x + bottom_right.x) / 2, (top_left.y + bottom_right.y) / 2}
+}
+
+@(private)
+apply_mouse_capture :: proc() {
+	capture := &mbi.mouse_capture
+	if capture.active == false || capture.applied do return
+	if win.GetForegroundWindow() != mbi.window do return
+
+	centre := confine_cursor_to_window()
+	win.SetCursorPos(centre.x, centre.y)
+	win.ShowCursor(win.FALSE) // a counter, not a switch: balanced by the one in undo_mouse_capture
+	capture.applied = true
+	mbi.mouse_motion.tracking = false // the cursor was just moved by us: that is not a look
+}
+
+@(private)
+undo_mouse_capture :: proc() {
+	capture := &mbi.mouse_capture
+	if capture.applied == false do return
+
+	win.ClipCursor(nil)
+	win.ShowCursor(win.TRUE)
+	capture.applied = false
+	mbi.mouse_motion.tracking = false
+}
+
+/*
+	Called by poll_events. While captured the look is how far the cursor is from the middle of the window, which is then put
+	back, rather than the difference between two positions: a position stops changing at the edge of the screen and this
+	does not. Returns true when it has set `mbi.mouse_motion` itself
+*/
+@(private)
+update_mouse_capture :: proc() -> bool {
+	capture := &mbi.mouse_capture
+	if capture.active == false || win.GetForegroundWindow() != mbi.window {
+		undo_mouse_capture()
+		return false
+	}
+	if capture.applied == false {
+		apply_mouse_capture()
+		mbi.mouse_motion = {}
+		return true
+	}
+
+	centre := confine_cursor_to_window() // again each frame: the window may have moved or been resized
+	cursor:win.POINT
+	win.GetCursorPos(&cursor)
+	mbi.mouse_motion.delta = {f32(cursor.x - centre.x), f32(cursor.y - centre.y)}
+	mbi.mouse_motion.tracking = true
+	win.SetCursorPos(centre.x, centre.y)
+	return true
 }
 
 /*Where the mouse is pointing in world units, as seen by `camera`. Use for clicking things in the world*/

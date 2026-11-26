@@ -31,6 +31,7 @@ Backend_State :: struct {
 	mouse_pressed:[Mouse]bool,
 	mouse_released:[Mouse]bool,
 	mouse_held:[Mouse]bool,
+	mouse_capture:Mouse_Capture,
 
 	// GameInput
 	gamepad_pressed: bit_set [Button],

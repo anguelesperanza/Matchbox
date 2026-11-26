@@ -32,8 +32,9 @@ get_mouse_delta :: proc() -> [2]f32 {
 get_camera_look_input :: proc(sensitivity:f32, stick_speed:f32, delta_time:f32) -> [2]f32 {
 	look:[2]f32
 
-	// A drag only turns the view while a button is down, so moving the cursor to a menu does not
-	if is_mouse_held(.LEFT) || is_mouse_held(.RIGHT) {
+	// A drag only turns the view while a button is down, so moving the cursor to a menu does not. A captured mouse is
+	// hidden and locked to the window, so there is no menu to move it to and it turns the view as it is
+	if is_mouse_captured() || is_mouse_held(.LEFT) || is_mouse_held(.RIGHT) {
 		drag := get_mouse_delta()
 		look += {-drag.x, -drag.y} * sensitivity // dragging right turns right, which is a smaller yaw
 	}

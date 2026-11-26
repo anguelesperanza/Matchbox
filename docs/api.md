@@ -141,6 +141,8 @@ is_mouse_pressed :: proc(mouse:Mouse) -> bool
 is_mouse_held :: proc(mouse:Mouse) -> bool
 is_mouse_released :: proc(mouse:Mouse) -> bool
 set_mouse_capture :: proc()
+release_mouse_capture :: proc()
+is_mouse_captured :: proc() -> bool
 calculate_mouse_world_position :: proc(camera:Camera) -> [2]f32
 
 create_directional_light :: proc(direction:[3]f32, color:[4]f32 = WHITE) -> Light

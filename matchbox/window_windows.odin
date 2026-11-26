@@ -359,7 +359,7 @@ stop_running :: proc() {
 cleanup :: proc() {
 
 	// Win32
-	win.ReleaseCapture()
+	release_mouse_capture() // the clip and the hidden cursor outlive a program that exits holding them
 
 	// GameInput -- User may not have a controller so the values can be nil by cleanup call
 	if mbi.gamepad != nil do mbi.gamepad->Release()

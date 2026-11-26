@@ -123,5 +123,14 @@ is_key_released :: proc(key:Key) -> bool {
 	return false
 }
 
-set_mouse_capture :: proc(){
+/*There is no mouse on a handheld; so that a game written for the PC builds, this does nothing*/
+set_mouse_capture :: proc() {
+}
+
+release_mouse_capture :: proc() {
+}
+
+/*Always false on a handheld*/
+is_mouse_captured :: proc() -> bool {
+	return false
 }

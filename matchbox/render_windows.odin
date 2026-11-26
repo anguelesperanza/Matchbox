@@ -75,6 +75,7 @@ Mesh :: struct {
 	index_buffer:^d3d11.IBuffer,
 	index_count:u32,
 	lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
+	skinned:bool, // made by create_skinned_mesh: Skinned_Vertex, 56 bytes a vertex, with joints and weights (also lit)
 }
 
 
@@ -90,7 +91,15 @@ create_lit_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (mesh:Mesh) {
 	return
 }
 
-/*The two kinds of mesh differ only in how many bytes a vertex has; the buffers are made the same way*/
+/*Copies skinned vertices and indices to the GPU, for a skinned model part. The slices can be freed afterwards*/
+create_skinned_mesh :: proc(vertices:[]Skinned_Vertex, indices:[]u16) -> (mesh:Mesh) {
+	mesh = create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+	mesh.lit = true
+	mesh.skinned = true
+	return
+}
+
+/*The three kinds of mesh differ only in how many bytes a vertex has; the buffers are made the same way*/
 @(private = "file")
 create_mesh_from_bytes :: proc(vertex_bytes:[]u8, vertex_count:int, indices:[]u16) -> (mesh:Mesh) {
 	assert(vertex_count > 0 && len(indices) > 0, "A mesh needs vertices and indices")
@@ -142,7 +151,12 @@ render_item :: proc(item:Render_Item) {
 	// reads it unchanged with the longer stride. A separate switch rather than "lit when there are lights", so a
 	// scene whose lights are all removed goes dark instead of flipping back to unlit (light.odin)
 	pipeline := &mbi.pipeline
-	if item.mesh.lit && mbi.lighting.settings.enabled {
+	if item.mesh.skinned {
+		// A skinned mesh is never unlit-shaded by the plain shader (it would draw the bind pose): lighting off picks the
+		// skinned unlit one, and per-vertex lighting is drawn per pixel (see Backend_State)
+		pipeline = &mbi.skinned_lit_pipeline if mbi.lighting.settings.enabled else &mbi.skinned_pipeline
+		set_skin_constants(item)
+	} else if item.mesh.lit && mbi.lighting.settings.enabled {
 		switch get_lighting_mode(item.material) {
 		case .PER_PIXEL:  pipeline = &mbi.lit_pipeline
 		case .PER_VERTEX: pipeline = &mbi.vertex_lit_pipeline
@@ -153,6 +167,7 @@ render_item :: proc(item:Render_Item) {
 
 	vertex_buffer := item.mesh.vertex_buffer
 	stride:u32 = size_of(Lit_Vertex) if item.mesh.lit else size_of(Vertex)
+	if item.mesh.skinned do stride = size_of(Skinned_Vertex)
 	offset:u32 = 0
 
 	upload_game_constants()
@@ -166,7 +181,7 @@ render_item :: proc(item:Render_Item) {
 	mbi.device_context->PSSetShader(pipeline.pixel_shader, nil, 0)
 
 	// Each constant buffer goes to the register the shader's reflection file names
-	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = mbi.game_constants, .LIGHTS = mbi.lights_constants}
+	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = mbi.game_constants, .LIGHTS = mbi.lights_constants, .SKIN = mbi.skin_constants}
 	for block, kind in pipeline.reflection.blocks {
 		if block.present == false do continue
 		buffer := buffers[kind]
@@ -395,6 +410,14 @@ set_lights_constants :: proc() {
 	update_buffer(mbi.lights_constants, &block, size_of(Lights_Block))
 }
 
+/*Fills the skin block with the draw's joints: three row arrays, padded with the identity (skin.odin)*/
+@(private)
+set_skin_constants :: proc(item:Render_Item) {
+	if mbi.skin_constants == nil do return
+	rows := get_skin_rows(item)
+	update_buffer(mbi.skin_constants, raw_data(rows), len(rows) * size_of([4]f32))
+}
+
 /*Only the 3DS measures the GPU's time (render_3ds_freestanding_arm32.odin); the PC answers {0, 0}*/
 get_gpu_times :: proc() -> [2]f32 {
 	return {}
@@ -533,18 +556,21 @@ create_pipeline :: proc() {
 	mbi.pipeline = create_render_pipeline(#load("shaders/mesh.pc.hlsl"), #load("shaders/mesh.pc.refl", string), "shaders/mesh.pc.hlsl", lit = false)
 	mbi.lit_pipeline = create_render_pipeline(#load("shaders/mesh_lit.pc.hlsl"), #load("shaders/mesh_lit.pc.refl", string), "shaders/mesh_lit.pc.hlsl", lit = true)
 	mbi.vertex_lit_pipeline = create_render_pipeline(#load("shaders/mesh_vertex_lit.pc.hlsl"), #load("shaders/mesh_vertex_lit.pc.refl", string), "shaders/mesh_vertex_lit.pc.hlsl", lit = true)
+	mbi.skinned_pipeline = create_render_pipeline(#load("shaders/mesh_skinned.pc.hlsl"), #load("shaders/mesh_skinned.pc.refl", string), "shaders/mesh_skinned.pc.hlsl", lit = true, skinned = true)
+	mbi.skinned_lit_pipeline = create_render_pipeline(#load("shaders/mesh_skinned_lit.pc.hlsl"), #load("shaders/mesh_skinned_lit.pc.refl", string), "shaders/mesh_skinned_lit.pc.hlsl", lit = true, skinned = true)
 
 	// The engine's blocks are the size of its structs (check_engine_blocks made sure each shader agrees), made when
 	// any shader reads them. The game's block is as big as mesh.mbs says, and starts out as zeros: set_shader_value
 	// writes mesh.mbs's uniforms, so a game block in a lit shader would be one nothing fills
 	uses :: proc(kind:Block_Kind) -> bool {
-		return mbi.pipeline.reflection.blocks[kind].present || mbi.lit_pipeline.reflection.blocks[kind].present || mbi.vertex_lit_pipeline.reflection.blocks[kind].present
+		return mbi.pipeline.reflection.blocks[kind].present || mbi.lit_pipeline.reflection.blocks[kind].present || mbi.vertex_lit_pipeline.reflection.blocks[kind].present || mbi.skinned_pipeline.reflection.blocks[kind].present || mbi.skinned_lit_pipeline.reflection.blocks[kind].present
 	}
 	ensure(mbi.lit_pipeline.reflection.blocks[.GAME].present == false, "mesh_lit.mbs declares game uniforms, which set_shader_value can't reach")
 	ensure(mbi.vertex_lit_pipeline.reflection.blocks[.GAME].present == false, "mesh_vertex_lit.mbs declares game uniforms, which set_shader_value can't reach")
 	if uses(.FRAME) do mbi.frame_constants = create_constant_buffer(size_of(Frame_Constants))
 	if uses(.RENDER) do mbi.render_constants = create_constant_buffer(size_of(Render_Constants))
 	if uses(.LIGHTS) do mbi.lights_constants = create_constant_buffer(size_of(Lights_Block))
+	if uses(.SKIN) do mbi.skin_constants = create_constant_buffer(u32(mbi.skin_settings.joint_limit * 3 * 16))
 	if mbi.pipeline.reflection.blocks[.GAME].present {
 		mbi.game_shadow = make([]byte, mbi.pipeline.reflection.blocks[.GAME].size)
 		mbi.game_constants = create_constant_buffer(u32(len(mbi.game_shadow)))
@@ -559,7 +585,7 @@ create_pipeline :: proc() {
 	the normal; the unlit shader is refused one, since it also draws plain Vertex meshes that have none
 */
 @(private)
-create_render_pipeline :: proc(source:[]u8, reflection_text:string, name:cstring, lit:bool) -> (pipeline:Render_Pipeline) {
+create_render_pipeline :: proc(source:[]u8, reflection_text:string, name:cstring, lit:bool, skinned := false) -> (pipeline:Render_Pipeline) {
 	reflection_ok:bool
 	reflection_message:string
 	pipeline.reflection, reflection_ok, reflection_message = parse_reflection(reflection_text)
@@ -590,7 +616,7 @@ create_render_pipeline :: proc(source:[]u8, reflection_text:string, name:cstring
 	// The input layout is what the shader reads, each attribute found in the engine's Vertex or Lit_Vertex
 	input_element_descs := make([]d3d11.INPUT_ELEMENT_DESC, len(pipeline.reflection.attributes), context.temp_allocator)
 	for attribute, index in pipeline.reflection.attributes {
-		found, message := find_vertex_attribute(attribute, lit)
+		found, message := find_vertex_attribute(attribute, lit, skinned)
 		ensure(message == "", message)
 		input_element_descs[index] = {
 			SemanticName = strings.clone_to_cstring(attribute.name, context.temp_allocator),
@@ -659,6 +685,7 @@ camera_end :: proc() {
 	if mbi.discard_pass == true {
 		clear(&mbi.opaque_items)
 		clear(&mbi.transparent_items)
+		clear(&mbi.skin_state.rows)
 		mbi.camera_active = false
 		mbi.screen_pass = false
 		mbi.discard_pass = false
@@ -689,6 +716,7 @@ camera_end :: proc() {
 
 	clear(&mbi.opaque_items)
 	clear(&mbi.transparent_items)
+	clear(&mbi.skin_state.rows)
 	mbi.camera_active = false
 	mbi.screen_pass = false
 }
@@ -698,7 +726,9 @@ destroy_pipeline :: proc() {
 	delete(mbi.opaque_items)
 	delete(mbi.transparent_items)
 
+	if mbi.skin_constants != nil do mbi.skin_constants->Release()
 	if mbi.lights_constants != nil do mbi.lights_constants->Release()
+	delete(mbi.skin_state.rows)
 	if mbi.game_constants != nil do mbi.game_constants->Release()
 	if mbi.render_constants != nil do mbi.render_constants->Release()
 	if mbi.frame_constants != nil do mbi.frame_constants->Release()
@@ -706,6 +736,8 @@ destroy_pipeline :: proc() {
 
 	destroy_states()
 
+	destroy_render_pipeline(&mbi.skinned_lit_pipeline)
+	destroy_render_pipeline(&mbi.skinned_pipeline)
 	destroy_render_pipeline(&mbi.vertex_lit_pipeline)
 	destroy_render_pipeline(&mbi.lit_pipeline)
 	destroy_render_pipeline(&mbi.pipeline)

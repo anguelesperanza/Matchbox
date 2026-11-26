@@ -100,6 +100,11 @@ Model_Part :: struct {
 	blend:Blend_Mode, // .ALPHA for a glTF material whose alpha mode is BLEND
 	alpha_cutoff:f32, // a glTF MASK material's cutoff; 0 keeps every pixel
 	cull:Cull_Mode, // .NONE for a double-sided glTF material
+
+	// A skinned part only (mesh.skinned): the zero values mean nothing, so read these only when it is
+	skin:int, // which of the skeleton's skins deforms it
+	mesh_node:int, // the node its mesh hangs off, whose own transform glTF says a skinned mesh ignores (-1 for none)
+	joint_map:[]u32, // the skin's joints this part's vertices use, in the order their `joints` name them. At most mbi.skin_settings.joint_limit
 }
 
 /*
@@ -113,6 +118,8 @@ Model :: struct {
 	textures:[]Texture,
 	bounds_min:[3]f32,
 	bounds_max:[3]f32,
+	skeleton:Skeleton, // empty for a model with none: a crate (skeleton.odin)
+	animations:[]Model_Animation,
 }
 
 /*The middle of the model's own bounds: what a physics library wants as a centre, and the usual pivot*/
@@ -145,6 +152,7 @@ render_model :: proc {
 	render_model_transform,
 	render_model_at,
 	render_model_pivoted,
+	render_model_animated,
 }
 
 /*
@@ -159,6 +167,28 @@ render_model_transform :: proc(model:Model, transform:Transform, tint:[4]f32 = {
 		blend := part.blend
 		if color.a < 1 do blend = .ALPHA
 		queue_render(part.mesh, model_matrix, color, blend, part.cull, part.texture, {0, 0, 1, 1}, part.alpha_cutoff, part.material)
+	}
+}
+
+/*
+	A skinned model posed by `animator`, which update_animator has worked the pose out for. The palettes are
+	copied into the frame's joint arena here, because a draw is only recorded now and happens at camera_end,
+	by when the animator may have been updated again or a second character drawn from the same model. A
+	skinned part drawn with render_model(model, transform) instead shows its bind pose (a T-pose). Part of the
+	`render_model` group
+*/
+render_model_animated :: proc(model:Model, animator:Animator, transform:Transform, tint:[4]f32 = {1, 1, 1, 1}) {
+	model_matrix := calculate_transform_matrix(transform)
+	for part, index in model.parts {
+		color := part.color * tint
+		blend := part.blend
+		if color.a < 1 do blend = .ALPHA
+
+		joint_offset, joint_count := 0, 0
+		if part.mesh.skinned && index < len(animator.pose.palettes) {
+			joint_offset, joint_count = push_skin_palette(animator.pose.palettes[index])
+		}
+		queue_render(part.mesh, model_matrix, color, blend, part.cull, part.texture, {0, 0, 1, 1}, part.alpha_cutoff, part.material, joint_offset, joint_count)
 	}
 }
 
@@ -204,6 +234,9 @@ create_model_from_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (model:M
 	Texture leaves the parts that name it untextured. The model takes the textures and frees them
 	in destroy_model. Every target's load_model ends here, so a model is put together one way.
 
+	The model also takes the skeleton, the clips and each skinned part's joint map: moved, not copied, so
+	they are the model's and `data` must then be freed with destroy_model_data_leftovers, which leaves them
+
 	Texture coordinates outside 0..1 do not repeat: textures are clamped on every target, and on
 	the 3DS the image sits in a corner of a larger canvas, so a tiling texture shows its edge
 	stretched instead
@@ -213,24 +246,38 @@ create_model_from_data :: proc(data:Model_Data, textures:[]Texture) -> (model:Mo
 	model.parts = make([]Model_Part, len(data.parts))
 	for part, index in data.parts {
 		model.parts[index] = Model_Part {
-			mesh = create_lit_mesh(part.vertices, part.indices),
 			material = part.material,
 			color = part.color,
 			blend = part.blend,
 			alpha_cutoff = part.alpha_cutoff,
 			cull = part.cull,
 		}
+		if len(part.skinned_vertices) > 0 {
+			model.parts[index].mesh = create_skinned_mesh(part.skinned_vertices, part.indices)
+			model.parts[index].skin = part.skin
+			model.parts[index].mesh_node = part.mesh_node
+			model.parts[index].joint_map = part.joint_map
+		} else {
+			model.parts[index].mesh = create_lit_mesh(part.vertices, part.indices)
+		}
 		if part.image >= 0 && part.image < len(textures) do model.parts[index].texture = textures[part.image]
 	}
 	model.bounds_min = data.bounds_min
 	model.bounds_max = data.bounds_max
+	model.skeleton = data.skeleton
+	model.animations = data.animations
 	return
 }
 
 /*Frees every part's geometry, then each texture the model owns, once*/
 destroy_model :: proc(model:Model) {
-	for part in model.parts do destroy_mesh(part.mesh)
+	for part in model.parts {
+		destroy_mesh(part.mesh)
+		delete(part.joint_map)
+	}
 	for texture in model.textures do destroy_texture(texture)
+	destroy_skeleton(model.skeleton)
+	destroy_model_animations(model.animations)
 	delete(model.parts)
 	delete(model.textures)
 }

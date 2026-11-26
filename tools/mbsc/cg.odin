@@ -373,7 +373,7 @@ write_uniforms :: proc(h: ^Cg, builder: ^strings.Builder) {
 		}
 		fmt.sbprintfln(builder, "\n// %s", uniform.name)
 		for field in get_engine_fields(uniform.kind) {
-			fmt.sbprintfln(builder, "uniform %s %s;", engine_type(field.type), block_field_name(uniform.name, field.name))
+			fmt.sbprintfln(builder, "uniform %s %s%s;", engine_type(field.type), block_field_name(uniform.name, field.name), engine_array_suffix(field.type, h.ir.target))
 		}
 	}
 	for uniform in h.ir.uniforms {

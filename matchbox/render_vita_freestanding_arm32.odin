@@ -423,6 +423,7 @@ when VITA {
 		defer {
 			clear(&mbi.opaque_items)
 			clear(&mbi.transparent_items)
+			clear(&mbi.skin_state.rows)
 			mbi.camera_active = false
 			mbi.screen_pass = false
 			mbi.discard_pass = false

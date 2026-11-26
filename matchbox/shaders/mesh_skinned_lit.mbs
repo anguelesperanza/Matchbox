@@ -1,0 +1,100 @@
+// The skinned lit model shader (G6, docs/g6_skinned_animation_plan.md): mesh_lit.mbs for a Skinned_Vertex. The vertex
+// is moved by the weighted sum of up to four joints before anything else, position and normal alike, and the rest is
+// mesh_lit.mbs line for line (per pixel, in eye space). Keep the two in step.
+//
+// The palette is the engine's `skin` block: three rows of each joint's matrix (the last row of a skin matrix is
+// 0 0 0 1), as three arrays so a joint's row is `skin.row0[joint]` and the 3DS needs no arithmetic on the index. A
+// vertex names its joints as whole numbers held in floats (attribute `joints`), and the 3DS reads its bytes as
+// 0..255 floats where PC and the Vita normalise `weights` to 0..1: `when TARGET` puts them back to 0..1.
+// JOINT_SLOT_COUNT is the target's limit on joints per draw (22 on the 3DS: lighting and the matrices keep the rest of
+// its 96 float registers). The loader cuts every part to it, so a joint index never passes the end of the arrays.
+
+@(texture = 0) tex:Texture2D
+
+// The attributes are in Lit_Vertex's order, so the normal is the fourth: the 3DS loads it as attribute 3 and the
+// first three line up with mesh.mbs's
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+	normal: [3]f32 `attr:"normal"`,
+	joints: [4]f32 `attr:"joints"`,
+	weights: [4]f32 `attr:"weights"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv: [2]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+	quat: [4]f32 `out:"normalquat"`,
+	view: [3]f32 `out:"view"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32,
+	view:matrix[4,4]f32,
+}
+
+@(uniform = .SKIN) skin: struct {
+	row0: [JOINT_SLOT_COUNT][4]f32,
+	row1: [JOINT_SLOT_COUNT][4]f32,
+	row2: [JOINT_SLOT_COUNT][4]f32,
+}
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+
+	weights := input.weights
+	when TARGET == .PICA200 {
+		weights = input.weights * 0.003921568859368563
+	}
+
+	// The weighted sum of the joints' rows, then the vertex through them: a matrix built once and used twice, so the
+	// position and the normal are moved by provably the same deformation
+	row0 := [4]f32{0.0, 0.0, 0.0, 0.0}
+	row1 := [4]f32{0.0, 0.0, 0.0, 0.0}
+	row2 := [4]f32{0.0, 0.0, 0.0, 0.0}
+	for k in 0 ..< 4 {
+		weight := weights[k]
+		row0 = row0 + skin.row0[i32(input.joints[k])] * weight
+		row1 = row1 + skin.row1[i32(input.joints[k])] * weight
+		row2 = row2 + skin.row2[i32(input.joints[k])] * weight
+	}
+	at := [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	along := [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0}
+	moved := [4]f32{dot(row0, at), dot(row1, at), dot(row2, at), 1.0}
+	leaned := [4]f32{dot(row0, along), dot(row1, along), dot(row2, along), 0.0}
+
+	world := render.model * moved
+	output.position = frame.view_projection * world
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+
+	// The eye sits at the origin of eye space, so the way back to it is the position negated
+	eye := frame.view * world
+	output.view = [3]f32{-eye.x, -eye.y, -eye.z}
+
+	// w = 0 turns the normal without moving it. The model matrix is used as it is rather than its inverse transpose:
+	// that is exact for a Transform scaled the same on every axis, which normalize then undoes. A model stretched
+	// along one axis gets normals leaning slightly the wrong way; the inverse transpose costs a matrix the engine
+	// doesn't upload yet, and no model here is stretched
+	turned := frame.view * (render.model * leaned)
+	output.quat = normal_quaternion(normalize(turned.xyz))
+	return output
+}
+
+// The texture and the vertex colour first, then the light: diffuse scales the surface's colour, and the highlight
+// is added on top with alpha 0 so it leaves the surface's alpha, and with it the cut-out, alone (L4-0)
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	surface := sample(tex, v.uv) * v.color
+	color := light_diffuse(v.quat, v.view) * surface + light_specular(v.quat, v.view)
+	if color.a < render.alpha_cutoff do discard()
+	return color
+}

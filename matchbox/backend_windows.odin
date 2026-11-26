@@ -80,6 +80,12 @@ Backend_State :: struct {
 	lit_pipeline:Render_Pipeline,
 	vertex_lit_pipeline:Render_Pipeline,
 
+	// Skinned meshes (G6): mesh_skinned.mbs unlit and mesh_skinned_lit.mbs per pixel. A skinned part asking for per-vertex
+	// lighting is drawn per pixel (there is no per-vertex skinned shader), so a model looks the same on every target
+	skinned_pipeline:Render_Pipeline,
+	skinned_lit_pipeline:Render_Pipeline,
+	skin_constants:^d3d11.IBuffer, // the joint palette of the draw, filled from mbi.skin_state in render_item
+
 	// The constant buffers, shared by both pipelines: each binds the ones its reflection lists
 	frame_constants:^d3d11.IBuffer,
 	render_constants:^d3d11.IBuffer,
@@ -90,6 +96,7 @@ Backend_State :: struct {
 
 	// Fixed values the PC backend works with
 	shader_format:Shader_Format,
+	skin_settings:Skin_Settings,
 }
 
 /*
@@ -98,13 +105,20 @@ Backend_State :: struct {
 	time, and the shared file can't name a DXGI format or a PC-only Vertex_Attribute
 */
 BACKEND_DEFAULTS :: Backend_State {
+	// The most joints one draw may use. **Revisit later:** the user plans a PC-only pass that raises this for PC games
+	// at the cost of models that no longer compile to the other targets. It is a setting rather than shared code so
+	// that raising it is this number and the shaders' JOINT_SLOT_COUNT (tools/mbsc/lighting.odin get_max_joints)
+	skin_settings = {joint_limit = 256},
 	shader_format = {
 		reflection_version = 1,
 		vertex_attributes = {
-			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position)), false},
-			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv)), false},
-			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color)), false},
-			{"normal", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Lit_Vertex, normal)), true},
+			{"position", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Vertex, position)), false, false},
+			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv)), false, false},
+			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color)), false, false},
+			{"normal", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Lit_Vertex, normal)), true, false},
+			// A joint is a whole number 0..255 that the input assembler widens to a float; a weight is a byte read as 0..1
+			{"joints", "[4]f32", .R8G8B8A8_UINT, u32(offset_of(Skinned_Vertex, joints)), true, true},
+			{"weights", "[4]f32", .R8G8B8A8_UNORM, u32(offset_of(Skinned_Vertex, weights)), true, true},
 		},
 	},
 }

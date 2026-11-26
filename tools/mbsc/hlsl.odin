@@ -21,6 +21,7 @@ import "core:strings"
 FRAME_REGISTER :: 0
 RENDER_REGISTER :: 1
 GAME_REGISTER :: 2
+SKIN_REGISTER :: 4 // the joint palette (G6), after the lights' b3
 LIGHTS_REGISTER :: 3 // after the game's own, so a shader that doesn't light keeps the registers it had
 SAMPLER_REGISTER :: 0
 
@@ -266,6 +267,8 @@ declarator :: proc(h: ^Hlsl, type: ^Type, name: string) -> string {
 @(private = "file")
 engine_type :: proc(key: string) -> string {
 	switch {
+	case key == "[JOINT_SLOT_COUNT][4]f32":
+		return "float4"
 	case key == "f32":
 		return "float"
 	case key == "[2]f32":
@@ -379,9 +382,10 @@ write_constant_buffers :: proc(h: ^Hlsl, builder: ^strings.Builder) {
 			continue
 		}
 		register := FRAME_REGISTER if uniform.kind == .FRAME else RENDER_REGISTER
+		if uniform.kind == .SKIN do register = SKIN_REGISTER
 		fmt.sbprintf(builder, "\ncbuffer %s_block : register(b%d) {{\n", safe_name(uniform.name), register)
 		for field in get_engine_fields(uniform.kind) {
-			fmt.sbprintfln(builder, "    %s %s;", engine_type(field.type), block_field_name(uniform.name, field.name))
+			fmt.sbprintfln(builder, "    %s %s%s;", engine_type(field.type), block_field_name(uniform.name, field.name), engine_array_suffix(field.type, h.ir.target))
 		}
 		fmt.sbprintln(builder, "};")
 	}
@@ -909,4 +913,12 @@ builtin_call :: proc(h: ^Hlsl, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 	}
 	problem(h, fmt.aprintf("`%s` isn't written for HLSL yet", node.name))
 	return "?"
+}
+
+// engine_array_suffix is `[22]` for an engine field that is an array of the target's joint slots, and nothing for the rest.
+engine_array_suffix :: proc(key: string, target: Target) -> string {
+	if key == "[JOINT_SLOT_COUNT][4]f32" {
+		return fmt.aprintf("[%d]", get_max_joints(target))
+	}
+	return ""
 }

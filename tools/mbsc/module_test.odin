@@ -189,9 +189,9 @@ when .VITA == TARGET || TARGET == .PC {
 
 	// LIGHT_SLOT_COUNT is predeclared on every target, after the shader's own (add_light_slot_count)
 	expected := [Target][]string {
-		.PC      = {"NOT_3DS", "NOT_VITA", "VITA_OR_PC", "LIGHT_SLOT_COUNT"},
-		.VITA    = {"NOT_3DS", "VITA_OR_PC", "LIGHT_SLOT_COUNT"},
-		.PICA200 = {"ONLY_3DS", "NOT_VITA", "LIGHT_SLOT_COUNT"},
+		.PC      = {"NOT_3DS", "NOT_VITA", "VITA_OR_PC", "LIGHT_SLOT_COUNT", "JOINT_SLOT_COUNT"},
+		.VITA    = {"NOT_3DS", "VITA_OR_PC", "LIGHT_SLOT_COUNT", "JOINT_SLOT_COUNT"},
+		.PICA200 = {"ONLY_3DS", "NOT_VITA", "LIGHT_SLOT_COUNT", "JOINT_SLOT_COUNT"},
 	}
 	for target in Target {
 		parsed, module := build(source, target)

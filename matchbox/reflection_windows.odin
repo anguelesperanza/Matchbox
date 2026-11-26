@@ -23,6 +23,7 @@ Block_Kind :: enum {
 	RENDER,
 	GAME,
 	LIGHTS, // declared by mbsc when a shader calls a light built-in, filled from mbi.lighting (light.odin)
+	SKIN, // a skinned draw's joint palette: three row arrays of `mbi.skin_settings.joint_limit` rows (skin.odin)
 }
 
 Reflected_Block :: struct {
@@ -67,7 +68,7 @@ Shader_Reflection :: struct {
 */
 Shader_Format :: struct {
 	reflection_version:int, // the .refl file version this engine reads; mbsc writes the same number
-	vertex_attributes:[4]Vertex_Attribute, // what a Vertex and a Lit_Vertex have. A shader may read any of these, in any order, and leave some out
+	vertex_attributes:[6]Vertex_Attribute, // what a Vertex, a Lit_Vertex and a Skinned_Vertex have. A shader may read any of these, in any order, and leave some out
 }
 
 @(private)
@@ -85,6 +86,7 @@ parse_block_kind :: proc(word:string) -> (kind:Block_Kind, ok:bool) {
 	case "render": return .RENDER, true
 	case "game": return .GAME, true
 	case "lights": return .LIGHTS, true
+	case "skin": return .SKIN, true
 	}
 	return {}, false
 }
@@ -194,6 +196,8 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 	if message := check_block(reflection, .FRAME, "frame", size_of(Frame_Constants)); message != "" do return message
 	if message := check_block(reflection, .RENDER, "render", size_of(Render_Constants)); message != "" do return message
 	if message := check_block(reflection, .LIGHTS, "lights", size_of(Lights_Block)); message != "" do return message
+	// Three row arrays of a float4 per joint slot: the shader was built for a joint limit and the engine's must match
+	if message := check_block(reflection, .SKIN, "skin", mbi.skin_settings.joint_limit * 3 * 16); message != "" do return message
 
 	for value in reflection.values {
 		expected := -1
@@ -223,6 +227,13 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 			case "cone": expected = int(offset_of(Lights_Block, cone))
 			case "count": expected = int(offset_of(Lights_Block, count))
 			}
+		case .SKIN:
+			limit := mbi.skin_settings.joint_limit
+			switch value.name {
+			case "row0": expected = 0
+			case "row1": expected = limit * 16
+			case "row2": expected = 2 * limit * 16
+			}
 		case .GAME:
 			continue
 		}
@@ -245,6 +256,7 @@ Vertex_Attribute :: struct {
 	format:dxgi.FORMAT,
 	offset:u32,
 	lit:bool, // only a Lit_Vertex has it: a shader drawing plain Vertex meshes that read it would read the next vertex
+	skinned:bool, // only a Skinned_Vertex has it
 }
 
 /*
@@ -252,11 +264,14 @@ Vertex_Attribute :: struct {
 	is whether the shader draws Lit_Vertex meshes; one that draws plain Vertex meshes can't read a normal
 */
 @(private)
-find_vertex_attribute :: proc(attribute:Reflected_Attribute, lit:bool) -> (found:Vertex_Attribute, message:string) {
+find_vertex_attribute :: proc(attribute:Reflected_Attribute, lit:bool, skinned := false) -> (found:Vertex_Attribute, message:string) {
 	for candidate in mbi.shader_format.vertex_attributes {
 		if candidate.name == attribute.name {
 			if candidate.lit && lit == false {
 				return {}, fmt.tprintf("the shader reads `%s`, which only a lit mesh's vertices (Lit_Vertex) have", attribute.name)
+			}
+			if candidate.skinned && skinned == false {
+				return {}, fmt.tprintf("the shader reads `%s`, which only a skinned mesh's vertices (Skinned_Vertex) have", attribute.name)
 			}
 			if candidate.type != attribute.type {
 				return {}, fmt.tprintf("the shader reads `%s` as %s and the engine's vertices have it as %s", attribute.name, attribute.type, candidate.type)

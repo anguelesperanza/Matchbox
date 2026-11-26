@@ -1264,7 +1264,7 @@ check_index :: proc(c: ^Checker, node: ^ast.Index_Expr) -> ^Type {
 	}
 	if is_invalid(index) == false && index.kind != .I32 && index.kind != .U32 {
 		err(c, "MBS-E13", fmt.aprintf("an index must be a whole number, found `%s`", type_name(index)), node.index, fmt.aprintf("this is `%s`", type_name(index)), "indexes are `i32` or `u32`", fmt.aprintf("convert it: `i32(%s)`", node_text(c.module.parsed, node.index)))
-	} else if is_invalid(index) == false && index_is_fixed(c, node.index) == false {
+	} else if is_invalid(index) == false && index_is_fixed(c, node.index) == false && index_is_float_cast(c, node.index) == false {
 		record_use(c, .DYNAMIC_INDEX, node.index)
 	}
 	return base.elem
@@ -1523,6 +1523,18 @@ index_is_fixed :: proc(c: ^Checker, index: ^ast.Expr) -> bool {
 		}
 	}
 	return false
+}
+
+// index_is_float_cast says whether an index is written `i32(x)` with x a float: the one computed index the 3DS can
+// take, through its address register (pica_indexed_read, G6). Written inline, so the cast is where the index is used
+@(private = "file")
+index_is_float_cast :: proc(c: ^Checker, index: ^ast.Expr) -> bool {
+	call, is_call := index.derived.(^ast.Call_Expr)
+	if is_call == false || len(call.args) != 1 do return false
+	callee, is_ident := call.expr.derived.(^ast.Ident)
+	if is_ident == false || callee.name != "i32" do return false
+	argument := c.module.types[call.args[0]]
+	return argument != nil && argument.kind == .F32
 }
 
 // ---- messages ---------------------------------------------------------------------------------------------

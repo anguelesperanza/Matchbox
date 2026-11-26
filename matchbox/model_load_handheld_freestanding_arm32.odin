@@ -32,7 +32,7 @@ load_model :: proc(filename:string, filter:Filter_Mode = .POINT) -> (model:Model
 	defer delete(bytes)
 
 	data, ok, problem := read_model_file(bytes)
-	defer destroy_model_data(data)
+	defer destroy_model_data_leftovers(data)
 	if ok == false {
 		print("Could not read", path, "--", problem)
 		panic("Failed to load model")

@@ -16,6 +16,7 @@ destroy :: proc {
 	destroy_mesh,
 	destroy_model,
 	destroy_texture,
+	destroy_render_target,
 	destroy_sprite,
 	destroy_animation_clip,
 	destroy_parallax,

@@ -416,32 +416,52 @@ render_start :: proc() {
 		mbi.did_resize = false
 	}
 
-	viewport := d3d11.VIEWPORT {
-		TopLeftX = 0,
-		TopLeftY = 0,
-		Width    = cast(f32)mbi.window_size[0],
-		Height   = cast(f32)mbi.window_size[1],
-		MinDepth = 0,
-		MaxDepth = 1,
-	}
-
-	mbi.device_context->RSSetViewports(1, &viewport)
-	mbi.device_context->OMSetRenderTargets(1, &mbi.framebuffer_view, mbi.depth_view)
+	bind_screen()
 	mbi.device_context->ClearDepthStencilView(mbi.depth_view, {.DEPTH}, 1.0, 0)
-
-	set_render_state(.OPAQUE, .NONE, .BACK)
+	begin_internal_frame() // a game with set_internal_resolution on draws into its target from here
 }
 
 /*Renders final output -- Present all the gathered data this frame to the screen*/
 render_end :: proc() {
 	ensure(mbi.camera_active == false, "camera_end was not called before render_end")
+	ensure(mbi.render_target_state.is_active == false || mbi.render_target_state.internal_frame, "render_target_end was not called before render_end")
+	end_internal_frame()
 	mbi.swapchain->Present(1, {})
 }
 
 /*Fills the whole window with `color`*/
 clear_background :: proc(color:[4]f32) {
 	color := color
+	view := mbi.framebuffer_view
+	if mbi.render_target_state.is_active do view = mbi.render_target_state.active.color_view
+	mbi.device_context->ClearRenderTargetView(view, &color)
+}
+
+/*Fills the screen itself, whatever target is being drawn to*/
+@(private)
+clear_screen :: proc(color:[4]f32) {
+	color := color
 	mbi.device_context->ClearRenderTargetView(mbi.framebuffer_view, &color)
+}
+
+/*The 1x1 white a draw with no texture samples, so the colour is its tint alone. Made by init, and by the pixel tests*/
+@(private)
+create_white_texture :: proc() {
+	pixel := [4]u8{255, 255, 255, 255}
+
+	description := d3d11.TEXTURE2D_DESC {
+		Width = 1, Height = 1, MipLevels = 1, ArraySize = 1,
+		Format = .R8G8B8A8_UNORM,
+		Usage = .IMMUTABLE,
+		BindFlags = {.SHADER_RESOURCE},
+		SampleDesc = {Count = 1},
+	}
+	data := d3d11.SUBRESOURCE_DATA{pSysMem = &pixel, SysMemPitch = 4}
+
+	result := mbi.device->CreateTexture2D(&description, &data, &mbi.white_texture)
+	ensure(win.SUCCEEDED(result), "Create white texture failed")
+	result = mbi.device->CreateShaderResourceView(mbi.white_texture, nil, &mbi.white_texture_view)
+	ensure(win.SUCCEEDED(result), "Create white texture view failed")
 }
 
 @(private)
@@ -602,7 +622,9 @@ destroy_render_pipeline :: proc(pipeline:^Render_Pipeline) {
 camera_start :: proc(camera:Camera) {
 	ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
-	window :=[2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
+	check_camera_destination(camera)
+	draw_size := get_draw_size()
+	window :=[2]f32{f32(draw_size.x), f32(draw_size.y)}
 	aspect := calculate_window_aspect()
 
 	// With pixel_snap, draw through a copy moved onto the pixel grid. render_sprite reads
@@ -637,6 +659,7 @@ camera_end :: proc() {
 		mbi.discard_pass = false
 		return
 	}
+	note_screen_drawn()
 
 	// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
 	depth_opaque := Depth_Mode.OPAQUE

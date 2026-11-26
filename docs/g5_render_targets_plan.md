@@ -1,6 +1,6 @@
 # G5: render targets and internal resolution (plan)
 
-Written 2026-11-26. Status: **stage 1, API awaiting the user's approval**; no code in `matchbox/` yet.
+Written 2026-11-26. Status: **API approved 2026-11-26 with one change (`no_depth` replaces `depth`); implemented and checked on PC, Azahar and Vita3K; hardware builds are waiting for the user's check.**
 Source of truth for the phase: `render_plan.md`, "G5. Render targets", and the open item "Render resolution as a performance lever"
 (the Vita's per-pixel lighting runs at about 30 fps and is accepted; the next gain is drawing fewer pixels).
 Camera conventions are `docs/g3_cameras_plan.md`'s (world units, +Y up). The plan format and check pattern are `docs/g4_billboards_plan.md`'s.
@@ -61,7 +61,7 @@ Render_Target_Settings :: struct {
 	height:i32,
 	scale:f32,           // only when width and height are 0: the screen's size times this. 0.5 = a quarter of the pixels. 0 means 1
 	filter:Filter_Mode,  // how it is sampled when drawn bigger. POINT (the zero value) is pixel-perfect; LINEAR smooths
-	depth:bool,          // a depth buffer, for 3D. A 2D-only target leaves it off and saves the memory (the 3DS has 6 MB of VRAM)
+	no_depth:bool,       // a bare {width, height} has a depth buffer, for 3D. A 2D-only target opts out and saves the memory (the 3DS has 6 MB of VRAM)
 }
 
 Render_Target :: struct {
@@ -80,7 +80,7 @@ Fit_Mode :: enum {
 }
 
 // Makes a target. Nothing is drawn into it until render_target_start. destroy(&target) frees it
-create_render_target :: proc(settings := Render_Target_Settings{depth = true}) -> Render_Target
+create_render_target :: proc(settings := Render_Target_Settings{}) -> Render_Target
 destroy_render_target :: proc(target:^Render_Target)               // joins the `destroy` group
 
 // Everything drawn between these goes into the target: camera_start ... camera_end, screen_start ... screen_end, text, as usual.
@@ -104,7 +104,7 @@ calculate_target_position :: proc(target:Render_Target, window_position:[2]f32, 
 Using it:
 
 ```odin
-scene := mb.create_render_target({width = 480, height = 272, depth = true})     // half the Vita's pixels in each direction
+scene := mb.create_render_target({width = 480, height = 272})     // half the Vita's pixels in each direction
 defer mb.destroy(&scene)
 
 for mb.is_running() {
@@ -144,9 +144,8 @@ target, whether the screen has been drawn into this frame, the saved screen view
 5. **Pixel-perfect is `POINT` + `INTEGER`.** `INTEGER` picks `floor(min(sw/w, sh/h))` (at least 1) so every target pixel is a whole number of
    screen pixels. At 480x272 on the Vita's 960x544 that is exactly x2. At 400x240 on a 1920x1080 window it is x4 with bars. `FIT` with
    `LINEAR` is the smooth "lower the resolution for speed" setting.
-6. **Depth is opt-in per target** (default on, since the common case is 3D). A target without depth draws with `Depth_Mode.DISABLED`
-   semantics where the depth buffer would have been used: a world pass in a no-depth target asserts, since it would silently draw in
-   submission order. Screen passes never needed one.
+6. **Depth is opt-out per target** (`no_depth`, answered 2026-11-26). A world camera drawing into a `no_depth` target is an `ensure` failure,
+   since it would silently draw in submission order; screen passes (`Depth_Mode.DISABLED`) are fine.
 
 ### Proposed second step, kept separate: one internal resolution for the whole game
 
@@ -238,4 +237,30 @@ user's own 30 fps case is the one to compare.
 4. **`set_internal_resolution`**: in G5, or deferred? It is the lever for the Vita's frame time; the explicit targets are the engine for it either way.
 5. **Colour format**: a target is RGBA8 on every target (the 3DS's and the Vita's native; PC sRGB to match the swapchain). No HDR or 16-bit format
    (`main`'s tonemap target) in G5. Agreed?
-6. **Depth default on**: `Render_Target_Settings{depth = true}` is the constructor's default, `Render_Target_Settings{}` (zero) is no depth. OK, or invert so a bare `{}` has depth?
+6. **Depth default**: answered, `no_depth:bool`.
+
+## Answers (2026-11-26)
+
+1. Names right. 2. One frame-order rule everywhere (error if the screen was drawn to first; `clear_background` on the screen first is allowed, the Vita holds it). 3. HUD placement as proposed.
+4. `set_internal_resolution` is in G5. 5. RGBA8 everywhere, PC sRGB. 6. `no_depth`.
+
+## What was done and how it was checked (2026-11-26)
+
+- Files: `matchbox/render_target.odin` (shared), `render_target_{windows,3ds_freestanding_arm32,vita_freestanding_arm32}.odin`, `render_target_test.odin`,
+  `render_target_windows_test.odin`, `examples/render-target-check`. One public procedure beyond the proposal: `read_render_target_pixels(target, allocator)` (RGBA rows, top
+  first), because the on-target self-check and the tests need to read a target back.
+- Tests (PC, 179 in the package, all pass): fit/position/size maths by hand; the pointer unscaled through the fit and the pixel counts quoted below; on a D3D11 WARP device, a scene with four quadrants and a
+  depth-decided pair read back exactly, a x2 upscale where every 2x2 block equals its source pixel, the sRGB grey round trip (188 in, 188 out), LINEAR blends where POINT does not, and a whole
+  internal-resolution frame into a 16x8 stand-in screen.
+- **3DS (Azahar):** `render-target-check` prints `12 passed, 0 failed`: the target's rows read back top-first, depth ordering, the no-depth minimap, padded canvases (267x161 and 200x120 targets sit in 512x256 / 256x128 canvases). The
+  scene and minimap draw the right way up, and internal-resolution mode works. **First attempt was wrong:** I assumed the GPU writes a target bottom-up and built a `bottom_up` rule; Azahar showed 5 failures and an upside-down
+  minimap, so it was removed: a target's rows lie first-row-on-top like a loaded texture, with no tilt and the viewport at (0, 0).
+  **A target created in the middle of a frame killed the app** (an `svcBreak` exception dialog, cause not found), so the internal target is made in `set_internal_resolution`, between frames.
+- **Vita (Vita3K):** the scene, the minimap (red quarter top left) and the HUD draw correctly. The example's pixel read-back checks **fail in Vita3K (4 passed, 8 failed)** because the emulator keeps GPU-written
+  textures on the GPU and does not write them back to the memory the CPU reads; that says nothing about a real Vita, where the check is the one to read. Not verified on hardware: the scene-to-scene wait (decision above).
+- Pixel counts and what each size costs (emulators cannot give hardware frame times; both Azahar and Vita3K sit at their 60 fps vsync, so ms below are vsync, not cost):
+
+  | Target | Full | 2/3 | 1/2 |
+  |---|---|---|---|
+  | Vita 960x544 | 522,240 px | 641x363 = 232,683 (45%) | 480x272 = 130,560 (25%) |
+  | 3DS top 400x240 | 96,000 px | 267x161 = 42,987 (45%) | 200x120 = 24,000 (25%) |

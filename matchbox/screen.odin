@@ -34,8 +34,9 @@ get_screen_camera :: proc() -> Camera {
 /*Window width over height, 1 when the window has no height yet (it is minimised)*/
 @(private)
 calculate_window_aspect :: proc() -> f32 {
-	if mbi.window_size[1] <= 0 do return 1
-	return f32(mbi.window_size[0]) / f32(mbi.window_size[1])
+	size := get_draw_size()
+	if size.y <= 0 do return 1
+	return f32(size.x) / f32(size.y)
 }
 
 /*Everything drawn until screen_end is HUD: depth off, in the units of set_screen_height*/

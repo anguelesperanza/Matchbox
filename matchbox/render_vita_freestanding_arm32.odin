@@ -358,11 +358,30 @@ when VITA {
 	}
 
 	render_start :: proc() {
+		mbi.screen_scene_open = false
+		mbi.pending_clear = nil
+		begin_internal_frame() // a game with set_internal_resolution on draws into its target from here
+	}
+
+	/*
+		Opens the screen's scene if it is not open. GXM cannot interleave scenes, so it waits for the first thing
+		drawn to the screen (or render_end), after every render target has had its own. A clear_background that came
+		first is applied here
+	*/
+	@(private)
+	ensure_screen_scene :: proc() {
+		if mbi.screen_scene_open do return
 		gfx.begin_frame()
+		mbi.screen_scene_open = true
+		if color, ok := mbi.pending_clear.?; ok do gfx.clear(color)
+		mbi.pending_clear = nil
 	}
 
 	/*Renders final output -- ends the scene and queues it for display, which waits for vsync*/
 	render_end :: proc() {
+		ensure(mbi.render_target_state.is_active == false || mbi.render_target_state.internal_frame, "render_target_end was not called before render_end")
+		end_internal_frame()
+		ensure_screen_scene() // a frame that drew nothing to the screen still has to be presented
 		gfx.end_frame()
 		gfx.swap()
 	}
@@ -374,7 +393,9 @@ when VITA {
 	camera_start :: proc(camera:Camera) {
 		ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
-		window := [2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
+		check_camera_destination(camera)
+		draw_size := get_draw_size()
+		window := [2]f32{f32(draw_size.x), f32(draw_size.y)}
 		used := calculate_camera_snapped(camera, window)
 		mbi.pixel_scale = calculate_camera_snap_scale(camera, window.y)
 
@@ -404,6 +425,8 @@ when VITA {
 
 		// A hidden pass was queued but is never drawn
 		if mbi.discard_pass == true do return
+		note_screen_drawn()
+		if mbi.render_target_state.is_active == false do ensure_screen_scene()
 
 		// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
 		depth_opaque := Depth_Mode.OPAQUE
@@ -433,6 +456,16 @@ when VITA {
 
 	/*Fills the screen with one colour, 0..1 RGBA. Call between render_start and render_end*/
 	clear_background :: proc(color:[4]f32) {
-		gfx.clear(color)
+		if mbi.render_target_state.is_active || mbi.screen_scene_open {
+			gfx.clear(color)
+			return
+		}
+		mbi.pending_clear = color // the screen's scene is not open yet: ensure_screen_scene clears it
+	}
+
+	/*Fills the screen itself. Only called when no target is being drawn to*/
+	@(private)
+	clear_screen :: proc(color:[4]f32) {
+		clear_background(color)
 	}
 }

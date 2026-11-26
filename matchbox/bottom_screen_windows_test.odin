@@ -7,8 +7,7 @@ import "core:testing"
 
 // Tests run on several threads at once, and these all use the one global `mbi`. save_state
 // takes this lock and restore_state gives it back, so only one of them runs at a time
-@(private="file")
-mbi_lock:sync.Mutex
+mbi_lock:sync.Mutex // package-level: the internal resolution tests set the window size too (render_target_test.odin)
 
 // The state these tests touch, put back afterwards so one test cannot leak into the next
 @(private="file")

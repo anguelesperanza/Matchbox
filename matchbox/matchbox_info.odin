@@ -36,6 +36,7 @@ Matchbox_Info :: struct {
 	pixel_scale:f32,
 	screen_height:f32,
 	bottom_screen_layout:Bottom_Screen_Layout,
+	render_target_state:Render_Target_State, // the active render target and the internal resolution (render_target.odin)
 
 	// Meshes every sprite and shape is drawn with, made in `init`
 	sprite_mesh:Mesh,

@@ -42,6 +42,10 @@ when VITA {
 		camera_view_projection:matrix[4, 4]f32,
 		camera_lights:Lights_Block,
 		print_log:Print_Log, // the file print writes to (util_vita_freestanding_arm32.odin)
+		// GXM scenes cannot interleave, so the screen's scene opens at the first thing drawn to the screen, after
+		// every render target (render_vita_freestanding_arm32.odin: ensure_screen_scene)
+		screen_scene_open:bool,
+		pending_clear:Maybe([4]f32), // a clear_background asked for before the screen's scene opened
 	}
 
 	/*The backend's fixed values, which matchbox_info.odin puts in `mbi` where it is declared*/
@@ -52,6 +56,11 @@ when VITA {
 	/*The GXM texture, on the heap so every copy of a Texture names the same one (texture_vita_freestanding_arm32.odin)*/
 	Backend_Texture :: struct {
 		texture:^gfx.Texture,
+	}
+
+	/*What only a Vita render target has besides its texture: vito's target, whose colour `texture.texture` points into*/
+	Backend_Render_Target :: struct {
+		gfx_target:^gfx.Target,
 	}
 
 	/*
@@ -91,7 +100,6 @@ when VITA {
 		place of the mouse
 	*/
 	calculate_mouse_world_position :: proc(camera:Camera) -> [2]f32 {
-		size := get_window_size()
-		return calculate_screen_to_world_2d(camera, mbi.touch.position, {f32(size[0]), f32(size[1])})
+		return calculate_screen_to_world_2d(camera, calculate_pointer_draw_position(mbi.touch.position), get_pointer_draw_size())
 	}
 }

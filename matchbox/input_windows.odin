@@ -225,6 +225,6 @@ set_mouse_capture :: proc(){
 /*Where the mouse is pointing in world units, as seen by `camera`. Use for clicking things in the world*/
 calculate_mouse_world_position :: proc(camera:Camera) -> [2]f32 {
 	mouse := get_mouse_position()
-	size := get_window_size()
-	return calculate_screen_to_world_2d(camera, {f32(mouse.x), f32(mouse.y)}, {f32(size[0]), f32(size[1])})
+	// In the pixels the game draws in: the window's, or the internal resolution's (set_internal_resolution)
+	return calculate_screen_to_world_2d(camera, calculate_pointer_draw_position({f32(mouse.x), f32(mouse.y)}), get_pointer_draw_size())
 }

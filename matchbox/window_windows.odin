@@ -326,24 +326,7 @@ init :: proc(title:string, width:i32, height:i32) {
 		delete(circle_indices)		
 	}
 
-	{
-		pixel := [4]u8{255, 255, 255, 255}
-
-		description := d3d11.TEXTURE2D_DESC {
-			Width = 1, Height = 1, MipLevels = 1, ArraySize = 1,
-			Format = .R8G8B8A8_UNORM,
-			Usage = .IMMUTABLE,
-			BindFlags = {.SHADER_RESOURCE},
-			SampleDesc = {Count = 1},
-		}
-		data := d3d11.SUBRESOURCE_DATA{pSysMem = &pixel, SysMemPitch = 4}
-
-		result := mbi.device->CreateTexture2D(&description, &data, &mbi.white_texture)
-		ensure(win.SUCCEEDED(result), "Create white texture failed")
-		result = mbi.device->CreateShaderResourceView(mbi.white_texture, nil, &mbi.white_texture_view)
-		ensure(win.SUCCEEDED(result), "Create white texture view failed")
-
-	}	
+	create_white_texture()
 	
 	// The frame clock counts from here (clock.odin)
 	frequency, counter:win.LARGE_INTEGER

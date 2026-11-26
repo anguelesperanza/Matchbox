@@ -124,13 +124,23 @@ when !VITA {
 	@(private)
 	bottom_screen_target_start :: proc() {
 		mbi.drawing_bottom_screen = true
+		// The bottom screen is never scaled, so a render target being drawn (set_internal_resolution's) waits
+		mbi.render_target_state.suspended = mbi.render_target_state.active
+		mbi.render_target_state.suspended_active = mbi.render_target_state.is_active
+		mbi.render_target_state.active = {}
+		mbi.render_target_state.is_active = false
 		c3d.C3D_FrameDrawOn(mbi.bottom_screen)
 	}
 
 	@(private)
 	bottom_screen_target_end :: proc() {
 		mbi.drawing_bottom_screen = false
-		c3d.C3D_FrameDrawOn(mbi.top_screen)
+		state := &mbi.render_target_state
+		state.active = state.suspended
+		state.is_active = state.suspended_active
+		state.suspended = {}
+		state.suspended_active = false
+		c3d.C3D_FrameDrawOn(state.active.citro_target if state.is_active else mbi.top_screen)
 	}
 
 	/*

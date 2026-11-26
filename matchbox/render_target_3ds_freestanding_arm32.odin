@@ -42,11 +42,23 @@ when !VITA {
 		destroy_texture(target.texture)
 	}
 
-	/*Points the frame at the target, puts the viewport on the picture in the canvas's corner, and clears unless `clear_color` is nil*/
+	/*
+		Points the frame at the target, puts the viewport on the picture in the canvas's corner, and clears unless
+		`clear_color` is nil.
+
+		**The viewport's y is the canvas's height minus the picture's, not 0.** The GPU counts y up from the bottom
+		of the buffer but stores the buffer top row first, so a viewport at y 0 puts the picture in the LAST rows
+		of the canvas and the padding in the first ones. Sampling (calculate_canvas_uv_rectangle) and the readback
+		both expect the picture in the first rows, like a loaded image. A canvas with no padding (16 x 16, 64 x 64)
+		hides the mistake, because there both placements are the same; a 267 x 161 picture in a 512 x 256 canvas shows
+		the padding's clear colour over the top 37% of the screen. Found by sampling a 20 x 12 picture
+		(render-target-check)
+	*/
 	@(private)
 	bind_render_target :: proc(target:^Render_Target, clear_color:Maybe([4]f32)) {
+		canvas := calculate_texture_canvas_size(target.width, target.height)
 		c3d.C3D_FrameDrawOn(target.citro_target)
-		c3d.C3D_SetViewport(0, 0, u32(target.width), u32(target.height))
+		c3d.C3D_SetViewport(0, u32(canvas.y - target.height), u32(target.width), u32(target.height))
 		if color, ok := clear_color.?; ok {
 			c3d.C3D_RenderTargetClear(target.citro_target, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
 		}

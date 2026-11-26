@@ -264,3 +264,17 @@ user's own 30 fps case is the one to compare.
   |---|---|---|---|
   | Vita 960x544 | 522,240 px | 641x363 = 232,683 (45%) | 480x272 = 130,560 (25%) |
   | 3DS top 400x240 | 96,000 px | 267x161 = 42,987 (45%) | 200x120 = 24,000 (25%) |
+
+## Hardware finding, 2026-11-26: the 3DS viewport sat at the bottom of the canvas
+
+On the real 3DS the picture showed the target's clear colour over the top of the screen at full size, and over about half of it at 2/3
+size. Cause: `C3D_SetViewport(0, 0, w, h)` puts the picture in the LAST rows of the canvas (y counts up from the bottom, the buffer is
+stored top row first), while sampling (`calculate_canvas_uv_rectangle`) and `read_render_target_pixels` expect the first rows. A canvas
+with no padding hides it, so the 16 x 16 and 64 x 64 checks passed in Azahar. 400 x 240 in 512 x 256 has 6% padding, 267 x 161 has 37%.
+Fixed: the viewport's y is the canvas height minus the picture's. Azahar reproduced it with a 20 x 12 picture drawn green over a
+magenta clear and sampled into a second target (`sample POINT: 160 off ...`); after the fix `0 off`. That check is now in
+`render-target-check` (14 checks), and the example's default fit is FIT (INTEGER leaves bars by design).
+
+Not explained: with the two sample pairs alive through the benchmark, Azahar panicked (svcBreak, reason lost) when the scene target was
+remade for the third size. The pairs are now freed at frame 3, between frames, and that no longer panics (not run to the end of the
+benchmark: Azahar ran at 1% speed in the background). Freeing a target mid-frame also panics.

@@ -76,6 +76,68 @@ draw_minimap :: proc(minimap:^mb.Render_Target, angle:f32) {
 	mb.render_target_end()
 }
 
+/*
+	A picture that is not a power of two (20 x 12 sits in the 3DS's 32 x 16 canvas), drawn green over a magenta clear,
+	then drawn as a sprite into a second target of the same size, which was cleared blue. Every pixel of the copy
+	should be green: magenta in it is the source's padding being sampled, blue is the picture not being sampled at all.
+	It goes through the GPU twice, so it finds a wrong placement or uv rectangle that reading the memory back cannot
+*/
+SAMPLE_WIDTH :: 20
+SAMPLE_HEIGHT :: 12
+
+Sample_Pair :: struct {
+	source:mb.Render_Target,
+	copy:mb.Render_Target,
+	sprite:mb.Sprite,
+}
+
+create_sample_pair :: proc(filter:mb.Filter_Mode) -> (pair:Sample_Pair) {
+	pair.source = mb.create_render_target({width = SAMPLE_WIDTH, height = SAMPLE_HEIGHT, filter = filter})
+	pair.copy = mb.create_render_target({width = SAMPLE_WIDTH, height = SAMPLE_HEIGHT})
+	pair.sprite = mb.create_sprite(pair.source.texture)
+	pair.sprite.pixels_per_unit = 1
+	return
+}
+
+destroy_sample_pair :: proc(pair:^Sample_Pair) {
+	mb.destroy_sprite(pair.sprite)
+	mb.destroy(&pair.copy)
+	mb.destroy(&pair.source)
+}
+
+draw_sample :: proc(pair:^Sample_Pair) {
+	mb.render_target_start(&pair.source, [4]f32{1, 0, 1, 1})
+	mb.camera_start(mb.create_camera_2d(SAMPLE_HEIGHT))
+	mb.render_rectangle({0, 0, -5}, {SAMPLE_WIDTH, SAMPLE_HEIGHT}, {0, 1, 0, 1})
+	mb.camera_end()
+	mb.render_target_end()
+
+	mb.render_target_start(&pair.copy, [4]f32{0, 0, 1, 1})
+	mb.camera_start(mb.create_screen_camera(SAMPLE_HEIGHT))
+	mb.render_sprite(pair.sprite)
+	mb.camera_end()
+	mb.render_target_end()
+}
+
+// Counts the copy's pixels that are not green, and where they are, so the HUD says which edge went wrong
+check_sample :: proc(pair:Sample_Pair, name:string, result:^Check_Result) -> string {
+	pixels := mb.read_render_target_pixels(pair.copy)
+	defer delete(pixels)
+	bad, top, bottom, left, right := 0, 0, 0, 0, 0
+	for y in 0 ..< SAMPLE_HEIGHT {
+		for x in 0 ..< SAMPLE_WIDTH {
+			if pixel(pixels, SAMPLE_WIDTH, x, y) == {0, 255, 0, 255} do continue
+			bad += 1
+			if y < SAMPLE_HEIGHT / 2 do top += 1
+			else do bottom += 1
+			if x < SAMPLE_WIDTH / 2 do left += 1
+			else do right += 1
+		}
+	}
+	check(result, bad == 0, fmt.tprintf("sampling %s", name))
+	return fmt.aprintf("sample %s: %d off (top %d bottom %d left %d right %d)", name, bad, top, bottom, left, right)
+}
+
 pixel :: proc(pixels:[]u8, width, x, y:int) -> [4]u8 {
 	offset := (y * width + x) * 4
 	return {pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]}
@@ -127,10 +189,14 @@ main :: proc() {
 	minimap_sprite := mb.create_sprite(minimap.texture)
 	minimap_sprite.pixels_per_unit = 32 // 2 HUD units wide
 
+	sample_point := create_sample_pair(.POINT)
+	sample_linear := create_sample_pair(.LINEAR)
+	sample_lines:[2]string
+
 	scales := SCALES
 	fits := FITS
 	scale_index := 0
-	fit_index := 1
+	fit_index := 0 // FIT: no bars at full size, and the smaller sizes fill the screen. INTEGER (index 1) leaves bars by design
 	filter := mb.Filter_Mode.POINT
 	internal := false
 	scene := mb.create_render_target({scale = scales[scale_index], filter = filter})
@@ -179,7 +245,14 @@ main :: proc() {
 			bench_frame += 1
 		}
 
-		// Between frames: a new size or filter remakes the target, and the internal resolution follows the same settings
+		// Between frames (a target made or freed inside one crashes the 3DS): the sample pairs, read at frame 2, are given
+		// back so the benchmark below has their VRAM
+		if frame == 3 {
+			destroy_sample_pair(&sample_point)
+			destroy_sample_pair(&sample_linear)
+		}
+
+		// A new size or filter remakes the target, and the internal resolution follows the same settings
 		if scene_dirty {
 			scene_dirty = false
 			mb.destroy(&scene)
@@ -195,10 +268,18 @@ main :: proc() {
 		mb.render_start()
 
 		// Every target first, then the screen
-		if frame == 1 do draw_probe(&probe)
+		if frame == 1 {
+			draw_probe(&probe)
+			draw_sample(&sample_point)
+			draw_sample(&sample_linear)
+		}
 		if internal == false do draw_minimap(&minimap, f32(frame % 60) / 60 - 0.5)
 		if frame == 2 {
 			check_probe(probe, minimap, &checks)
+			sample_lines[0] = check_sample(sample_point, "POINT", &checks)
+			sample_lines[1] = check_sample(sample_linear, "LINEAR", &checks)
+			mb.print(sample_lines[0])
+			mb.print(sample_lines[1])
 			mb.print(fmt.tprintf("render-target-check: %d passed, %d failed %s", checks.passed, checks.failed, checks.first_failure))
 		}
 
@@ -224,11 +305,22 @@ main :: proc() {
 			mb.render_upscaled_target(scene, fits[fit_index])
 		}
 
+		// Where the picture lands and how big it is, so a photo of the screen shows what the code intended
+		rectangle_line := ""
+		{
+			shown := mb.Render_Target{width = mb.get_internal_resolution().x, height = mb.get_internal_resolution().y} if internal else scene
+			top_left, bottom_right := mb.calculate_upscaled_rectangle(shown, fits[fit_index])
+			rectangle_line = fmt.tprintf("%dx%d at %.0f,%.0f to %.0f,%.0f", shown.width, shown.height, top_left.x, top_left.y, bottom_right.x, bottom_right.y)
+		}
+
 		// The HUD: after the upscale it is in screen pixels (crisp); in internal mode it is inside the picture
 		lines := [?]string {
 			fmt.tprintf("checks: %d passed, %d failed", checks.passed, checks.failed),
 			checks.first_failure,
 			fmt.tprintf("%s %v %v", "internal" if internal else "target", fits[fit_index], filter),
+			sample_lines[0],
+			sample_lines[1],
+			rectangle_line,
 			bench_lines[0],
 			bench_lines[1],
 			bench_lines[2],

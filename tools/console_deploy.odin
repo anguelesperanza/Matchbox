@@ -474,7 +474,21 @@ upload_file :: proc(
 
 	log_in(&connection, settings, timeouts) or_return
 	command_expect(&connection, "TYPE I", {200}, timeouts) or_return
-	command_expect(&connection, fmt.tprintf("CWD %s", settings.folder_location), {250, 200}, timeouts) or_return
+	folder := settings.folder_location
+	_, cwd_error := command_expect(&connection, fmt.tprintf("CWD %s", folder), {250, 200}, timeouts)
+	if cwd_error != nil {
+		// The 3DS server (ftpd) roots its tree at the SD card, so `sdmc:/3ds` is "No such device" there and `/3ds` is
+		// the same folder; the Vita server takes `ux0:downloads/` as written. Retry once without a `device:` prefix
+		// instead of making the ini differ per server: the ini keeps the console's own name for the folder.
+		colon := strings.index_byte(folder, ':')
+		slash := strings.index_byte(folder, '/')
+		has_device_prefix := colon > 0 && (slash < 0 || colon < slash)
+		if !has_device_prefix do return {}, cwd_error
+		rooted := folder[colon + 1:]
+		if !strings.has_prefix(rooted, "/") do rooted = fmt.tprintf("/%s", rooted)
+		command_expect(&connection, fmt.tprintf("CWD %s", rooted), {250, 200}, timeouts) or_return
+		folder = rooted
+	}
 
 	data_socket := open_data_connection(&connection, timeouts) or_return
 	data_open := true
@@ -502,7 +516,7 @@ upload_file :: proc(
 
 	result.bytes = len(data)
 	result.milliseconds = i64(time.duration_milliseconds(time.tick_since(started)))
-	result.folder = settings.folder_location
+	result.folder = folder
 	return result, nil
 }
 

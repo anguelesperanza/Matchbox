@@ -109,6 +109,13 @@ BACKEND_DEFAULTS :: Backend_State {
 	},
 }
 
+/*What only a PC render target has besides its texture: the views the GPU draws through (render_target_windows.odin)*/
+Backend_Render_Target :: struct {
+	color_view:^d3d11.IRenderTargetView,
+	depth_texture:^d3d11.ITexture2D,
+	depth_view:^d3d11.IDepthStencilView,
+}
+
 /*What only a PC texture has: the D3D11 objects. Embedded in Texture with `using`*/
 Backend_Texture :: struct {
 	texture:^d3d11.ITexture2D,

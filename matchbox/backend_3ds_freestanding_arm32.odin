@@ -96,6 +96,11 @@ when !VITA {
 		texture:^c3d.C3D_Tex,
 	}
 
+	/*What only a 3DS render target has besides its texture: citro3d's target, drawn to through C3D_FrameDrawOn*/
+	Backend_Render_Target :: struct {
+		citro_target:rawptr,
+	}
+
 	/*
 		Sets up the Odin runtime on the 3DS and returns the context the game runs in. Called
 		from matchbox/handheld_entry, before the game's `main`: Matchbox can't run it

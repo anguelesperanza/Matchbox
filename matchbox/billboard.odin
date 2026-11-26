@@ -135,7 +135,7 @@ calculate_billboard_matrix :: proc(camera:Camera, position:[3]f32, size := [2]f3
 
 	world_size := size
 	if settings.screen_size {
-		world_size = size * calculate_billboard_units_per_pixel(view, fov_y, f32(get_window_size()[1]), position)
+		world_size = size * calculate_billboard_units_per_pixel(view, fov_y, f32(get_draw_size().y), position)
 	}
 	return calculate_billboard_model(view, fov_y, position, world_size, {0.5, 0.5}, roll, settings.mode)
 }

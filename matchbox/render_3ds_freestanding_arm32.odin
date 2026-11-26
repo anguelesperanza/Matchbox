@@ -29,6 +29,7 @@ package matchbox
 */
 
 import "core:math"
+import "core:math/linalg"
 import "core:mem"
 
 import "o3dx/c3d"
@@ -615,6 +616,15 @@ when !VITA {
 	}
 
 	/*
+		The last frame's cost as the hardware measured it, in milliseconds: {the CPU's time to build the commands, the
+		GPU's time to draw them}, from citro3d's own counters. PC and Vita answer {0, 0}. It tells a frame bound by
+		pixels (the GPU time falls when set_internal_resolution lowers them) from one bound by something else
+	*/
+	get_gpu_times :: proc() -> [2]f32 {
+		return {c3d.C3D_GetProcessingTime(), c3d.C3D_GetDrawingTime()}
+	}
+
+	/*
 		Binds the unlit pipeline afresh every frame rather than trusting what is bound: citro3d
 		keeps this state, but anything else that draws (a future citro2d overlay, a debug tool)
 		can change it, and setting it again is cheap
@@ -624,6 +634,7 @@ when !VITA {
 		c3d.C3D_FrameDrawOn(mbi.top_screen)
 		mbi.bound_pipeline = nil
 		use_render_pipeline(&mbi.pipeline)
+		begin_internal_frame() // a game with set_internal_resolution on draws into its target from here
 	}
 
 	/*
@@ -631,6 +642,8 @@ when !VITA {
 		log goes on last, over the game's bottom screen (bottom_screen_3ds_freestanding_arm32.odin)
 	*/
 	render_end :: proc() {
+		ensure(mbi.render_target_state.is_active == false || mbi.render_target_state.internal_frame, "render_target_end was not called before render_end")
+		end_internal_frame()
 		render_print_log()
 		c3d.C3D_FrameEnd(0)
 	}
@@ -642,7 +655,9 @@ when !VITA {
 	camera_start :: proc(camera:Camera) {
 		ensure(mbi.camera_active == false, "camera_start called again before camera_end")
 
-		window := [2]f32{f32(mbi.window_size[0]), f32(mbi.window_size[1])}
+		check_camera_destination(camera)
+		draw_size := get_draw_size()
+		window := [2]f32{f32(draw_size.x), f32(draw_size.y)}
 		if mbi.drawing_bottom_screen == true do window = {f32(mbi.window_size[2]), f32(mbi.window_size[3])}
 		used := calculate_camera_snapped(camera, window)
 		mbi.pixel_scale = calculate_camera_snap_scale(camera, window.y)
@@ -653,7 +668,9 @@ when !VITA {
 		mbi.camera_fov_y = used.fov_y if used.projection == .PERSPECTIVE else 0 // billboards read these two (billboard.odin)
 		mbi.camera_window_height = window.y
 
-		mbi.camera_view_projection = TILT_TO_PANEL * GL_TO_PICA_DEPTH * calculate_camera_projection_gl(used, window.x / window.y) * mbi.view
+		// A render target is a texture, not a panel on its side: no tilt
+		panel := TILT_TO_PANEL if mbi.render_target_state.is_active == false else linalg.MATRIX4F32_IDENTITY
+		mbi.camera_view_projection = panel * GL_TO_PICA_DEPTH * calculate_camera_projection_gl(used, window.x / window.y) * mbi.view
 		set_camera_uniforms(mbi.bound_pipeline)
 	}
 
@@ -670,6 +687,7 @@ when !VITA {
 
 		// A hidden pass was queued but is never drawn
 		if mbi.discard_pass == true do return
+		if mbi.drawing_bottom_screen == false do note_screen_drawn()
 
 		// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
 		depth_opaque := Depth_Mode.OPAQUE
@@ -725,9 +743,19 @@ when !VITA {
 		The bottom one is left alone while the console has the screen
 	*/
 	clear_background :: proc(color:[4]f32) {
+		if mbi.render_target_state.is_active {
+			c3d.C3D_RenderTargetClear(mbi.render_target_state.active.citro_target, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
+			return
+		}
 		c3d.C3D_RenderTargetClear(mbi.top_screen, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
 		if is_bottom_screen_visible() == true {
 			c3d.C3D_RenderTargetClear(mbi.bottom_screen, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
 		}
+	}
+
+	/*Fills the top screen, whatever target is being drawn to. The bottom one is the game's own to clear*/
+	@(private)
+	clear_screen :: proc(color:[4]f32) {
+		c3d.C3D_RenderTargetClear(mbi.top_screen, c3d.C3D_CLEAR_ALL, calculate_color_u32(color), 0)
 	}
 }

@@ -75,7 +75,7 @@ create_camera_2d:: proc(view_height:f32 = 0) -> Camera {
 
 	vh:f32 = view_height
 
-	if view_height == 0 do vh = cast(f32)get_window_size()[1]
+	if view_height == 0 do vh = cast(f32)get_draw_size().y
 	
 	return Camera {
 		position = {0, 0, 10},
@@ -196,7 +196,7 @@ camera_set_pixel_scale :: proc(camera:^Camera, pixels_per_unit:f32, scale:f32, w
 */
 calculate_integer_zoom :: proc(design_height:f32, window_height:f32 = 0) -> f32 {
 	height := window_height
-	if height <= 0 do height = f32(get_window_size()[1])
+	if height <= 0 do height = f32(get_draw_size().y)
 	if design_height <= 0 do return 1
 	return max(1, math.floor(height / design_height))
 }

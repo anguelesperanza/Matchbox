@@ -21,7 +21,7 @@ rules too; they are repeated here so this file stands alone.
    want Claude to do. Phase S work (mbsc, docs, shader files) is yours to do as asked.
 3. **`render_plan.md`:** the decisions list and S-checkboxes are the user's to tick. Propose, don't tick. Dated status
    lines at the top are fine to add.
-4. **Engine files edited for Phase S** are logged in `docs/phase_s_engine_changes.md` (the user reviews them).
+4. **Engine files edited for Phase S** were logged in a file the user reviewed and that has since been removed; git history has it.
 5. **No legacy 2D path.** The old pixel-space renderer is deleted, not kept alive. No stopgaps.
 6. **AI-usage promise in `README.md`:** Claude writes rendering and shader code, but **audio** must be designed and tested
    by hand first before Claude is given free rein. Font code was Claude's and the user plans to redo it by hand.
@@ -191,7 +191,7 @@ Open Phase S work:
 - Errors without source spans: E3 and E21 come from the backends as plain strings; structural E2 and E5 are not yet
   AST-spanned. Making them rustc-style with a span is the open polish.
 - Custom shaders in the engine: `set_shader_value(name, value)` has no `shader` argument (one built-in shader); there is no
-  way to bind a second texture per draw. `docs/phase_s_engine_changes.md` lists these.
+  way to bind a second texture per draw. The removed Phase S change log listed these.
 - `docs/shader_language.md` section 20 has no pointer to the `.tev` format yet.
 - Fix the small `pica_safe_name` leak that prints during the mbsc tests.
 - **S8a** (`.shbin` writer inside mbsc, `--emit-pica` stays) after the PICA output is tested on a real 3DS. **S8b** (`.gxp`):

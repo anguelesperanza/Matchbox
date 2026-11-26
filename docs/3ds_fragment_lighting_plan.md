@@ -584,7 +584,7 @@ The 3DS today differs from PC only in the highlight: the unit indexes D0 by |N.H
 Two targets are possible, and which one is wanted is the user's call: (a) **match PC as it is**: a signed D0 table (negative N.H
 gives 0); (b) **a true back face on all three**: flip the normal when the part is seen from behind (light on the viewer's side
 lights it, light through the plane does not), which changes PC and the Vita's shader as well (`mesh_lit.mbs`).
-- L9-0. **3DS hardware spike**, `light_test5` (source `docs/spikes/light_test5_main.odin.txt` and `light_test5.mbs.txt`; build
+- L9-0. **3DS hardware spike**, `light_test5` (its source was removed from the repo after the spike passed; build
   `build/hardware/light_test5.3dsx`, title LightTest5): a plane, culling off, tilted so no normal is exactly +Z/-Z (the quaternion's
   degenerate case), seen from the front and the back by a sun on the viewer's side ("near") or the other ("far"); two probes, diffuse
   and specular read back from its own framebuffer, got/expected per step. Steps: S0 front near (control); S1 back far; S2 back near;
@@ -607,4 +607,4 @@ lights it, light through the plane does not), which changes PC and the Vita's sh
   shader works on hardware: back faces get the flipped normal's lighting (S7 lit, S8 dark), front faces unchanged (S9, S10).
   **L9 closed 2026-11-25 (the user's decision): no runtime change.** D5 needs nothing on the 3DS: on hardware the unsigned D0 table already
   draws highlight 0 on a back face lit through the plane, which is what PC draws. The signed D0 table and two-sided diffuse are not
-  used. The spike sources stay in `docs/spikes/`. Flipping the normal for back faces is a post-G2 item (below).
+  used. The spike sources were removed from `docs/spikes/` once the spike had passed. Flipping the normal for back faces is a post-G2 item (below).

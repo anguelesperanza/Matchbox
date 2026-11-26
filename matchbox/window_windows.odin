@@ -309,18 +309,18 @@ init :: proc(title:string, width:i32, height:i32) {
 		create_depth_buffer()
 		create_pipeline()
 
-		sprite_vertices, sprite_indices := mesh_quad()
+		sprite_vertices, sprite_indices := create_quad_geometry()
 		mbi.sprite_mesh = create_mesh(sprite_vertices, sprite_indices)
 		delete(sprite_vertices)
 		delete(sprite_indices)
 
 
-		triangle_vertices, triangle_indices := mesh_triangle()
+		triangle_vertices, triangle_indices := create_triangle_geometry()
 		mbi.triangle_mesh = create_mesh(triangle_vertices, triangle_indices)
 		delete(triangle_vertices)
 		delete(triangle_indices)
 
-		circle_vertices, circle_indices := mesh_circle()
+		circle_vertices, circle_indices := create_circle_geometry()
 		mbi.circle_mesh = create_mesh(circle_vertices, circle_indices)
 		delete(circle_vertices)
 		delete(circle_indices)		

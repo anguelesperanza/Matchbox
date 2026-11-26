@@ -26,7 +26,7 @@ Lit_Vertex :: struct {
 /*A cube centred on the origin, `size` units on each side. Each face has its own colour, and its own
 vertices so each corner carries that face's normal. The caller frees both slices (after
 create_lit_mesh has copied them to the GPU)*/
-mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
+create_cube_geometry :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 
 	// A face is described by its outward normal, and two axes along it:
 	// `u` points right and `v` points up as seen from outside. u x v == normal.
@@ -81,7 +81,7 @@ mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.alloca
 
 /*A square in the XY plane facing +Z, `size` units on each side, centred on the origin.
 This is also the shape sprites are drawn with. The caller frees both slices*/
-mesh_quad :: proc(size:f32 = 1, color:[4]f32 = {1, 1, 1, 1}, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+create_quad_geometry :: proc(size:f32 = 1, color:[4]f32 = {1, 1, 1, 1}, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
 	half := size / 2
 
 	vertices = make([]Vertex, 4, allocator)
@@ -99,7 +99,7 @@ mesh_quad :: proc(size:f32 = 1, color:[4]f32 = {1, 1, 1, 1}, allocator := contex
 }
 
 /*A right triangle with corners (0,0), (1,0) and (0,1). render_triangle maps it onto any three points*/
-mesh_triangle :: proc(allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+create_triangle_geometry :: proc(allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
 	vertices = make([]Vertex, 3, allocator)
 	indices = make([]u16, 3, allocator)
 
@@ -113,7 +113,7 @@ mesh_triangle :: proc(allocator := context.allocator) -> (vertices:[]Vertex, ind
 }
 
 /*A circle of radius 1 centred on the origin, as a fan of `segments` triangles*/
-mesh_circle :: proc(segments:int = 48, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+create_circle_geometry :: proc(segments:int = 48, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
 	assert(segments >= 3 && segments <= 65534, "A circle needs 3 to 65534 segments")
 
 	vertices = make([]Vertex, segments + 1, allocator)
@@ -141,7 +141,7 @@ mesh_circle :: proc(segments:int = 48, allocator := context.allocator) -> (verti
 	A flat square of `size` units on the ground plane (x and z), facing up: the same four
 	corners as the cube's top face, wound the same way. The caller frees both slices
 */
-mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
+create_plane_geometry :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 	half := size * 0.5
 	white := [4]f32{1, 1, 1, 1}
 	up := [3]f32{0, 1, 0}
@@ -163,7 +163,7 @@ mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]
 	whole texture back across itself. The normal is the direction from the centre, so the
 	shading is round however coarse the rings are. The caller frees both slices
 */
-mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
+create_sphere_geometry :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 	rings := max(rings, 2)
 	sectors := max(sectors, 3)
 	assert((rings + 1) * (sectors + 1) <= 65536, "A sphere this fine needs more than 16-bit indices")
@@ -206,7 +206,7 @@ mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator 
 	vertex would have to average a cap's normal and the side's, and light the edge as if it
 	were rounded off. The caller frees both slices
 */
-mesh_cylinder :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
+create_cylinder_geometry :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16) {
 	sectors := max(sectors, 3)
 	half := height * 0.5
 	white := [4]f32{1, 1, 1, 1}

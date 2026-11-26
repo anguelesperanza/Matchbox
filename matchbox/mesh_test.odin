@@ -8,7 +8,7 @@ import "core:testing"
 mesh_cube_colored_false_is_white_so_a_texture_shows_as_it_is :: proc(t:^testing.T) {
 	// colored = false used to be worked out and then ignored, so a textured cube came out
 	// tinted by the six face colours
-	vertices, indices := mesh_cube(colored = false)
+	vertices, indices := create_cube_geometry(colored = false)
 	defer delete(vertices)
 	defer delete(indices)
 	for vertex in vertices {
@@ -18,7 +18,7 @@ mesh_cube_colored_false_is_white_so_a_texture_shows_as_it_is :: proc(t:^testing.
 
 @(test)
 mesh_cube_colored_gives_each_face_its_own_colour :: proc(t:^testing.T) {
-	vertices, indices := mesh_cube()
+	vertices, indices := create_cube_geometry()
 	defer delete(vertices)
 	defer delete(indices)
 	// Four corners a face, all the face's colour; the first two faces differ

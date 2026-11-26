@@ -43,7 +43,7 @@ start_device :: proc() -> (saved:Saved_Device, ok:bool) {
 	mbi.depth_view = nil
 	create_pipeline()
 	create_white_texture()
-	vertices, indices := mesh_quad()
+	vertices, indices := create_quad_geometry()
 	mbi.sprite_mesh = create_mesh(vertices, indices)
 	delete(vertices)
 	delete(indices)

@@ -319,29 +319,29 @@ calculate_vertex_bounds :: proc(vertices:[]Lit_Vertex) -> (min_corner, max_corne
 }
 
 // ---- Generated models ----------------------------------------------------------------------
-// The geometry is mesh.odin's (mesh_cube, mesh_plane, mesh_sphere, mesh_cylinder), where it can
+// The geometry is mesh.odin's (create_cube_geometry, create_plane_geometry, create_sphere_geometry, create_cylinder_geometry), where it can
 // be tested without a GPU. White, so the tint is the colour
 
 /*A cube `size` units on each side, centred on its own origin. Each face has its own vertices and the whole texture*/
 create_cube_model :: proc(size:f32 = 1) -> Model {
-	vertices, indices := mesh_cube(size, colored = false, allocator = context.temp_allocator)
+	vertices, indices := create_cube_geometry(size, colored = false, allocator = context.temp_allocator)
 	return create_model_from_mesh(vertices, indices)
 }
 
 /*A flat square of `size` units on the ground plane (x and z), facing up*/
 create_plane_model :: proc(size:f32 = 1) -> Model {
-	vertices, indices := mesh_plane(size, context.temp_allocator)
+	vertices, indices := create_plane_geometry(size, context.temp_allocator)
 	return create_model_from_mesh(vertices, indices)
 }
 
 /*A sphere of `radius`, in rings of latitude and sectors of longitude*/
 create_sphere_model :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24) -> Model {
-	vertices, indices := mesh_sphere(radius, rings, sectors, context.temp_allocator)
+	vertices, indices := create_sphere_geometry(radius, rings, sectors, context.temp_allocator)
 	return create_model_from_mesh(vertices, indices)
 }
 
 /*A cylinder of `radius` and `height`, upright about Y and centred on its own origin*/
 create_cylinder_model :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24) -> Model {
-	vertices, indices := mesh_cylinder(radius, height, sectors, context.temp_allocator)
+	vertices, indices := create_cylinder_geometry(radius, height, sectors, context.temp_allocator)
 	return create_model_from_mesh(vertices, indices)
 }

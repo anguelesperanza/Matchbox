@@ -21,7 +21,9 @@ Will have claude do this change since it's just nameing refactoring
 
 ## [x] create_camera_2d(...) should have default of window height if no arugment is provided
 
-## Center is (0, 0, 0) which makes positioning things tedious -- need a way to position them more seamlessly. Might have to use procs like Citro does it but would like to avoid if possible.
+## [x] Center is (0, 0, 0) which makes positioning things tedious -- need a way to position them more seamlessly. Might have to use procs like Citro does it but would like to avoid if possible.
+
+Done: `calculate_visible_rectangle` and `calculate_anchor_position` (and the camera and bottom-screen versions) place things from the corners and edges of what is visible.
 
 ## [x] when no .meta is present, the code should make assumptions on how the sprite sheet works
 
@@ -54,11 +56,17 @@ example: assets/images/sprites/meme.png => mb.create_sprite("sprites/meme.png") 
 
 Make a parallax struct that contains a `[dynamic]Sprite` to make some of the values like scale consistant across other create_* procs. May not do this though as it's not a crazy thing.
 
-## Review cooldown.odin file. It's awkward to use and needs rework
+## [x] Review cooldown.odin file. It's awkward to use and needs rework
+
+Done: `Cooldown` is delta-driven with `start_cooldown`, `update_cooldown`, `stop_cooldown`, `is_cooldown_finished`, `is_cooldown_running` and `calculate_cooldown_progress`.
 
 ## create_sprite calls create_texture under the hood
 Right now, creating a sprite requires a texture. Really, calling create_sprite should create the texture it needs. Will look into feasibility of this
 
+## create_mesh should create a mesh. If no values are provided, it should use defaults instead
+## [x] mesh_cube(...) and related names should be changed to reflect that they are procedures and not something else
+
+Done: `create_cube_geometry`, `create_quad_geometry`, `create_triangle_geometry`, `create_circle_geometry`, `create_plane_geometry`, `create_sphere_geometry` and `create_cylinder_geometry`. They build vertices and indices on the CPU; `create_mesh` and `create_lit_mesh` upload them.
 
 # Nice to haves
 

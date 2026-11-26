@@ -70,7 +70,7 @@ read_free_memory :: proc() -> Memory {
 }
 
 make_cube :: proc(colored:bool) -> mb.Mesh {
-	vertices, indices := mb.mesh_cube(colored = colored)
+	vertices, indices := mb.create_cube_geometry(colored = colored)
 	defer delete(vertices)
 	defer delete(indices)
 	return mb.create_lit_mesh(vertices, indices)
@@ -129,7 +129,7 @@ main :: proc() {
 		{0, 1, 2},
 	)
 	textured_cube := make_cube(colored = false)
-	quad_vertices, quad_indices := mb.mesh_quad()
+	quad_vertices, quad_indices := mb.create_quad_geometry()
 	pane := mb.create_mesh(quad_vertices, quad_indices)
 	delete(quad_vertices)
 	delete(quad_indices)

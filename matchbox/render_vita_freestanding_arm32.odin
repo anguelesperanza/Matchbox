@@ -151,8 +151,10 @@ when VITA {
 		// The same vertex program: the copy differs only in having no `discard`, which the fragment stage alone holds
 		load_render_pipeline(&mbi.lit_opaque_pipeline, #load("shaders/mesh_lit_v.gxp"), #load("shaders/mesh_lit_opaque_f.gxp"), .PER_PIXEL, has_alpha_test = false)
 		load_render_pipeline(&mbi.vertex_lit_pipeline, #load("shaders/mesh_vertex_lit_v.gxp"), #load("shaders/mesh_vertex_lit_f.gxp"), .PER_VERTEX)
+		print("pipelines: plain ones made, making the skinned ones")
 		load_render_pipeline(&mbi.skinned_pipeline, #load("shaders/mesh_skinned_v.gxp"), #load("shaders/mesh_skinned_f.gxp"), nil, skinned = true)
 		load_render_pipeline(&mbi.skinned_lit_pipeline, #load("shaders/mesh_skinned_lit_v.gxp"), #load("shaders/mesh_skinned_lit_f.gxp"), .PER_PIXEL, skinned = true)
+		print("pipelines: skinned ones made")
 
 		// 8 x 8 because a linear texture's rows are padded to 8 pixels anyway
 		ok:bool
@@ -177,15 +179,23 @@ when VITA {
 		vertex := pipeline.vertex_shader
 		if skinned {
 			// Joints are whole numbers 0 to 255 for the program to use as an index; weights are normalised to 0 to 1
-			attributes := [?]sce.GxmVertexAttribute {
-				gfx.attribute(vertex, "a_position", u16(offset_of(Lit_Vertex, position)), sce.GXM_ATTRIBUTE_FORMAT_F32, 3),
-				gfx.attribute(vertex, "a_texcoord", u16(offset_of(Lit_Vertex, uv)), sce.GXM_ATTRIBUTE_FORMAT_F32, 2),
-				gfx.attribute(vertex, "a_color", u16(offset_of(Lit_Vertex, color)), sce.GXM_ATTRIBUTE_FORMAT_F32, 4),
-				gfx.attribute(vertex, "a_normal", u16(offset_of(Lit_Vertex, normal)), sce.GXM_ATTRIBUTE_FORMAT_F32, 3),
-				gfx.attribute(vertex, "a_joints", u16(offset_of(Skinned_Vertex, joints)), sce.GXM_ATTRIBUTE_FORMAT_U8, 4),
-				gfx.attribute(vertex, "a_weights", u16(offset_of(Skinned_Vertex, weights)), sce.GXM_ATTRIBUTE_FORMAT_U8N, 4),
+			attributes: [6]sce.GxmVertexAttribute
+			count := 0
+			// psp2cgc drops an input the shader never reads: the unlit skinned shader has no a_normal. gfx.attribute gives a
+			// missing one register 0, which is a_position's. Vita3K accepts two attributes on one register where real GXM
+			// may not (the real Vita crashed), so an input the program dropped is left out of the attribute list
+			add :: proc(attributes:^[6]sce.GxmVertexAttribute, count:^int, program:gfx.Program, name:cstring, offset:uintptr, format:u8, components:u8) {
+				if gfx.parameter(program, name) == nil do return
+				attributes[count^] = gfx.attribute(program, name, u16(offset), format, components)
+				count^ += 1
 			}
-			pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:], size_of(Skinned_Vertex))
+			add(&attributes, &count, vertex, "a_position", offset_of(Lit_Vertex, position), sce.GXM_ATTRIBUTE_FORMAT_F32, 3)
+			add(&attributes, &count, vertex, "a_texcoord", offset_of(Lit_Vertex, uv), sce.GXM_ATTRIBUTE_FORMAT_F32, 2)
+			add(&attributes, &count, vertex, "a_color", offset_of(Lit_Vertex, color), sce.GXM_ATTRIBUTE_FORMAT_F32, 4)
+			add(&attributes, &count, vertex, "a_normal", offset_of(Lit_Vertex, normal), sce.GXM_ATTRIBUTE_FORMAT_F32, 3)
+			add(&attributes, &count, vertex, "a_joints", offset_of(Skinned_Vertex, joints), sce.GXM_ATTRIBUTE_FORMAT_U8, 4)
+			add(&attributes, &count, vertex, "a_weights", offset_of(Skinned_Vertex, weights), sce.GXM_ATTRIBUTE_FORMAT_U8N, 4)
+			pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:count], size_of(Skinned_Vertex))
 			if pipeline.vertex_program == nil do fail_pipeline("The skinned mesh vertex program could not be made")
 		} else if lighting != nil {
 			attributes := [?]sce.GxmVertexAttribute {

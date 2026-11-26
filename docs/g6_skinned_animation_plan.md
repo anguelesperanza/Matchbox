@@ -341,7 +341,8 @@ the 3DS. On the Vita it is 37 draws of per-pixel-lit skinned meshes at a frame r
 - [x] G6-7. Vita runtime; run in Vita3K.
 - [x] G6-8. 3DS runtime; run in Azahar. The hardware gate (the vertex shader's `mova` indexing on a real New 3DS LL) is the user's: `animation_check_g6_gate.3dsx`.
 - [x] G6-9. `examples/animation-check`; checks and tests green.
-- [ ] G6-10. **The user's hardware check.** If the gate fails on the 3DS, CPU skinning (the same data and the same palettes) replaces the vertex shader there.
+- [x] G6-10a. **3DS hardware check passed** (2026-11-26, the user: "everything works on 3DS"). The vertex shader's `mova` indexing and the `UNSIGNED_BYTE` loaders work on the real New 3DS LL, so GPU skinning stays on the 3DS and the CPU fallback is not needed. Which of `animation_check_g6_gate` / `animation_check_g6` / `animation_check_g6_arms` the user ran was not said.
+- [ ] G6-10b. **Real Vita: the animation-check build crashed** (the user did not say which build or when). Vita3K runs it fine. The first suspect, found by reading the program parameters of the generated `.gxp` files, is below; `animation_check_g6_v1/v2/v3.vpk` are the bisect builds.
 
 ## Not verified
 
@@ -460,3 +461,29 @@ The top face button (X on the 3DS, Triangle on the Vita, K on the PC) turns the 
 3. **Additive mode**, which `main` does not have. In, as proposed, or left out?
 4. **Automatic fade in and out of a layer** (`main` leaves it to the game); in as proposed, with `fade.duration` 0 turning it off?
 5. **Layer counts:** an array of 4, limits 4 PC / 2 Vita / 2 3DS. Acceptable (all three "revisit later", measured on hardware)?
+
+## Vita crash on real hardware (2026-11-26)
+
+**Found by reading, not yet confirmed on the console:** the unlit skinned vertex program (`mesh_skinned_v.gxp`) has no `a_normal`: psp2cgc drops an input the shader never reads, and
+`strings` on the `.gxp` shows `a_position a_texcoord a_color a_joints a_weights` only. The Vita backend built the attribute list with all six names and `gfx.attribute` gives a missing
+parameter register index 0, so `a_normal` sat on `a_position`'s register: two attributes on one register. Vita3K accepts that; real GXM may refuse it or fault. `init` makes both skinned pipelines
+whatever the lighting, so a build would fail at launch, before the first frame. **Fix:** the attribute list now leaves out an input the program does not have (`render_vita_freestanding_arm32.odin`).
+The unskinned unlit mesh never had this: its list is the three inputs it reads.
+
+**Ruled out by reading:** the vertex uniform buffer (the palette is 3 x 64 x 16 = 3 KiB plus the other uniforms, a draw reserves it from the 2 MiB vertex ring buffer, `GXM_DEFAULT_VERTEX_RING_BUFFER_SIZE`; the
+64 KiB in this plan was a recollection and is not a limit that is near), the stream stride (56 is a multiple of 4), the attribute offsets (joints at 48, weights at 52), the index alignment
+(the indices follow a vertex block that is a multiple of 4 bytes), and mesh size (6 vertices for the test ribbon, 758 for `arms_rig`, far from the 65,536 a 16-bit index allows).
+**Not ruled out:** that a raw `U8` attribute (not normalised) reaches a `float4` input as 0..255 on the real GPU (Vita3K does it that way; no source here says otherwise); the integer indexing of a Cg array
+by a float cast; the real `sceGxmSetUniformDataF` on a 64-element array parameter.
+
+**Builds, one change apart** (all `examples/animation-check` with `test_arm.glb`, in `build/hardware/`, each writes lines to `ux0:data/matchbox.log` before each stage: `stage 1: init`, `2: init done`, `3: model loaded`,
+`4: animators made`, `5: frame n start`, `6: frame n drawn`, and `pipelines: ...` lines in `init`; the last line says how far it got):
+
+| build | title (id) | differs from the one above by |
+|---|---|---|
+| `animation_check_g6_v1.vpk` | AnimCheck G6 v1 (MBOX00064) | the `a_normal` fix, plus the stage prints. Everything else as `animation_check_g6.vpk` |
+| `animation_check_g6_v2.vpk` | AnimCheck G6 v2 (MBOX00065) | v1 without the palette upload (`set_uniform` of the three row arrays): a skinned part draws with whatever the uniform buffer holds |
+| `animation_check_g6_v3.vpk` | AnimCheck G6 v3 (MBOX00066) | v1 without drawing any skinned item: pipelines and models load, nothing skinned is issued |
+
+Reading the result: v1 runs, done. v1 crashes and v3 runs: the draw is the problem (vertex format or palette upload), and v2 says which. v3 crashes too: it is pipeline creation, and the last printed line says which.
+**To get the log:** after a crash open `ux0:data/matchbox.log` with VitaShell (or FTP) and send the last lines; a crash screen or a `C2-xxxx-x` code is also worth writing down.

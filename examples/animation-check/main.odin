@@ -35,9 +35,12 @@ import mb "../../matchbox"
 MODEL :: #config(MODEL, "test_arm.glb")
 
 main :: proc() {
+	mb.print("stage 1: init")
 	mb.init("animation check", 960, 544)
+	mb.print("stage 2: init done, loading", MODEL)
 
 	model := mb.load_model(MODEL)
+	mb.print("stage 3: model loaded, parts", len(model.parts), "animations", len(model.animations))
 	font := mb.create_font(mb.DEFAULT_FONT_BYTES, 32)
 	names := mb.get_animation_names(model, context.allocator)
 
@@ -50,6 +53,7 @@ main :: proc() {
 		mb.play_animation_index(&right, model, 0)
 	}
 	right_clip := 0
+	mb.print("stage 4: animators made")
 
 	size := mb.calculate_model_size(model)
 	center := mb.calculate_model_center(model)
@@ -69,7 +73,9 @@ main :: proc() {
 	lighting_on := true
 	mb.set_lighting({enabled = lighting_on, ambient = {0.25, 0.25, 0.25, 1}})
 
+	frame := 0
 	for mb.is_running() {
+		if frame < 3 do mb.print("stage 5: frame", frame, "start")
 		mb.poll_events()
 		if mb.is_key_pressed(.ESCAPE) || mb.is_gamepad_pressed(.SELECT) do mb.stop_running()
 		if mb.is_key_pressed(.L) || mb.is_gamepad_pressed(.FACE_DOWN) {
@@ -115,6 +121,8 @@ main :: proc() {
 		mb.screen_end()
 
 		mb.render_end()
+		if frame < 3 do mb.print("stage 6: frame", frame, "drawn")
+		frame += 1
 	}
 
 	mb.destroy_animator(&left)

@@ -22,5 +22,6 @@ when VITA {
 
 		vito.input_update(&mbi.input)
 		update_touch_state(&mbi.touch, mbi.input.front)
+		update_mouse_motion(&mbi.mouse_motion, mbi.touch.position, mbi.touch.held)
 	}
 }

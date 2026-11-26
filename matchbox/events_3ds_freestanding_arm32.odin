@@ -43,6 +43,7 @@ when !VITA {
 			ctru.hidTouchRead(&touch)
 			mbi.touch_position = {f32(touch.px), f32(touch.py)}
 		}
+		update_mouse_motion(&mbi.mouse_motion, mbi.touch_position, mbi.gamepad_held & ctru.KEY_TOUCH != 0)
 
 		/*
 			Circle Pad and CStick / Circle Pad Pro

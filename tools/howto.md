@@ -190,3 +190,18 @@ sheetpack -o assets/images/shia.png -ppu 256 -3ds assets/3ds/images/shia.png -3d
 - The PC sheet can be at most 16384 pixels on a side, and the 3DS sheet at most 1024, and the Vita sheet at most 4096.
 - Do not write the output sheet into the frames folder, or the next run will pack it as a frame.
 - With the `LINEAR` filter, the edge of a frame can pick up a sliver of its neighbour. `POINT` does not.
+
+---
+
+# console_deploy
+
+**console_deploy** uploads a `.3dsx` (New 3DS LL) or `.vpk` (PS Vita) to the console over FTP. Switch the console's FTP server on first.
+Settings are in `tools/console_deploy.ini` (a password goes in the gitignored `tools/console_deploy.local.ini`).
+
+```bat
+odin build tools/console_deploy.odin -file -out:tools/console_deploy.exe -o:speed
+tools\console_deploy build\hardware\some_build.vpk
+```
+
+Options: `-target:3ds|vita` (instead of choosing by extension), `-ini:<path>`. Exit code 0 only if every file uploaded.
+Tests (against a fake server on 127.0.0.1): `odin test tools/console_deploy.odin -file`.

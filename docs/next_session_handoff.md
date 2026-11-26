@@ -248,6 +248,21 @@ Open items (see the file for the user's wording and legend):
 - Other tools: `tools/sheetpack.odin` (`odin build tools/sheetpack.odin -file -out:tools/sheetpack.exe -o:speed`),
   `tools/tritex.odin`, `tools/mp3towav.odin`, `tools/mbsc_probe.odin`; usage in `tools/howto.md`.
 
+### Putting a hardware test build on a console (`tools/console_deploy.odin`)
+
+Whenever a new `.3dsx` or `.vpk` needs testing on hardware:
+
+1. Tell the user the build is ready (full path in the main checkout's `build\hardware\`).
+2. **Wait until they say the FTP ports are open.** They switch each console's FTP server on by hand (it shuts off while an
+   app runs). **Nothing is ever uploaded, and no connection is made to the consoles' addresses, without that go-ahead.**
+3. Then run `console_deploy <full path to the build>` (the extension picks the console: `.3dsx` is the 3DS, `.vpk` is the Vita;
+   `-target:3ds|vita` overrides). It prints one `uploaded ...` line per file and exits 0 only if every file arrived.
+4. Ask the user to confirm the build shows on the console (3DS: `sdmc:/3ds`, Vita: `ux0:downloads/`).
+
+Build it once with `odin build tools/console_deploy.odin -file -out:tools/console_deploy.exe -o:speed`. Settings (addresses,
+ports, folders) are in `tools/console_deploy.ini`; a password goes in the gitignored `tools/console_deploy.local.ini`.
+Tests (a throwaway FTP server on 127.0.0.1, never a console): `odin test tools/console_deploy.odin -file`.
+
 ## Suggested order for the next stretch
 
 1. Finish the PC side of the plan while the 2D game keeps feeding `fixes.md`: B8 (viewport, fit policy, overscan), F2 closure,

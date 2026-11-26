@@ -26,5 +26,9 @@ odin_asm/
 *.3dsx
 *.vpk
 
+# console_deploy.local.ini holds anything private (a password) that the committed
+# tools/console_deploy.ini must not.
+tools/console_deploy.local.ini
+
 # Local reference material, not the repository's to share.
 3ds_adv_prog_man.html

@@ -76,18 +76,29 @@ a_skinned_file_reads_as_its_skeleton_clips_and_weights :: proc(t:^testing.T) {
 	testing.expect_value(t, part.mesh_node, 0)
 	if testing.expect_value(t, len(part.joint_map), 3) do testing.expect_value(t, [3]u32{part.joint_map[0], part.joint_map[1], part.joint_map[2]}, [3]u32{0, 1, 2})
 
-	// The mesh node's transform is not baked into a skinned mesh's vertices: they stay in the mesh's own space
-	testing.expect_value(t, part.skinned_vertices[4].position, [3]f32{2, 1, -0.1})
+	// The vertices are in the order the triangles first use them, so each is found by where it is. The mesh node's
+	// transform is not baked into a skinned mesh's vertices: they stay in the mesh's own space
+	find_vertex :: proc(part:Model_Data_Part, position:[3]f32) -> (vertex:Skinned_Vertex, found:bool) {
+		for candidate in part.skinned_vertices {
+			if candidate.position == position do return candidate, true
+		}
+		return {}, false
+	}
+	near_end, has_near_end := find_vertex(part, {2, 0.85, 0})
+	middle, has_middle := find_vertex(part, {1, 0.85, 0})
+	root, has_root := find_vertex(part, {0, 0.85, 0})
+	if testing.expect(t, has_near_end && has_middle && has_root) == false do return
 
-	// Weights are bytes that sum to 255: vertex 2 is half J0 and half J1, 128 each would be 256, so the first of the equal pair gives one back
+	// Weights are bytes that sum to 255: the middle vertex is half J0 and half J1, 128 each would be 256, so the first
+	// of the equal pair gives one back
 	for vertex, index in part.skinned_vertices {
 		total := int(vertex.weights[0]) + int(vertex.weights[1]) + int(vertex.weights[2]) + int(vertex.weights[3])
 		testing.expectf(t, total == 255, "vertex %d's weights sum to %d", index, total)
 	}
-	testing.expect_value(t, part.skinned_vertices[0].weights, [4]u8{255, 0, 0, 0})
-	testing.expect_value(t, [2]u8{part.skinned_vertices[4].joints[0], part.skinned_vertices[4].joints[1]}, [2]u8{1, 2})
-	testing.expect_value(t, [2]u8{part.skinned_vertices[4].weights[0], part.skinned_vertices[4].weights[1]}, [2]u8{64, 191})
-	testing.expect_value(t, [2]u8{part.skinned_vertices[2].weights[0], part.skinned_vertices[2].weights[1]}, [2]u8{127, 128})
+	testing.expect_value(t, root.weights, [4]u8{255, 0, 0, 0})
+	testing.expect_value(t, [2]u8{near_end.joints[0], near_end.joints[1]}, [2]u8{1, 2})
+	testing.expect_value(t, [2]u8{near_end.weights[0], near_end.weights[1]}, [2]u8{64, 191})
+	testing.expect_value(t, [2]u8{middle.weights[0], middle.weights[1]}, [2]u8{127, 128})
 }
 
 @(test)

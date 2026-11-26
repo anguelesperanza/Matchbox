@@ -24,90 +24,91 @@
 	mov r2.xyzw, mbs_k0.xxxx
 	mov r3.xyzw, mbs_k0.xxxx
 	mov r4.xyz, mbs_k0.xxxx
-	mov r5.xyzw, v5.xyzw
-	mul r6.xyzw, mbs_k1.xxxx, v5.xyzw
-	mov r5.xyzw, r6.xyzw
-	mov r6.xyzw, mbs_k0.xyzw
+	mov r5.xyzw, v4.xyzw
+	mov r6.xyzw, v5.xyzw
+	mul r7.xyzw, mbs_k1.xxxx, v5.xyzw
+	mov r6.xyzw, r7.xyzw
 	mov r7.xyzw, mbs_k0.xyzw
 	mov r8.xyzw, mbs_k0.xyzw
-	mov r9.x, r5.xxxx
-	mova a0.x, v4.xxxx
-	mov r10.xyzw, skin_row0[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r6.xyzw, r11.xyzw
-	mov r6.xyzw, r10.xyzw
-	mova a0.x, v4.xxxx
-	mov r10.xyzw, skin_row1[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r7.xyzw, r11.xyzw
-	mov r7.xyzw, r10.xyzw
-	mova a0.x, v4.xxxx
-	mov r10.xyzw, skin_row2[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r8.xyzw, r11.xyzw
-	mov r8.xyzw, r10.xyzw
-	mov r9.x, r5.yyyy
-	mova a0.x, v4.yyyy
-	mov r10.xyzw, skin_row0[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r6.xyzw, r11.xyzw
-	mov r6.xyzw, r10.xyzw
-	mova a0.x, v4.yyyy
-	mov r10.xyzw, skin_row1[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r7.xyzw, r11.xyzw
-	mov r7.xyzw, r10.xyzw
-	mova a0.x, v4.yyyy
-	mov r10.xyzw, skin_row2[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r8.xyzw, r11.xyzw
-	mov r8.xyzw, r10.xyzw
-	mov r9.x, r5.zzzz
-	mova a0.x, v4.zzzz
-	mov r10.xyzw, skin_row0[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r6.xyzw, r11.xyzw
-	mov r6.xyzw, r10.xyzw
-	mova a0.x, v4.zzzz
-	mov r10.xyzw, skin_row1[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r7.xyzw, r11.xyzw
-	mov r7.xyzw, r10.xyzw
-	mova a0.x, v4.zzzz
-	mov r10.xyzw, skin_row2[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r8.xyzw, r11.xyzw
-	mov r8.xyzw, r10.xyzw
-	mov r9.x, r5.wwww
-	mova a0.x, v4.wwww
-	mov r10.xyzw, skin_row0[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r6.xyzw, r11.xyzw
-	mov r6.xyzw, r10.xyzw
-	mova a0.x, v4.wwww
-	mov r10.xyzw, skin_row1[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r7.xyzw, r11.xyzw
-	mov r7.xyzw, r10.xyzw
-	mova a0.x, v4.wwww
-	mov r10.xyzw, skin_row2[a0.x].xyzw
-	mul r11.xyzw, r10.xyzw, r9.xxxx
-	add r10.xyzw, r8.xyzw, r11.xyzw
-	mov r8.xyzw, r10.xyzw
+	mov r9.xyzw, mbs_k0.xyzw
+	mov r10.x, r6.xxxx
+	mova a0.x, r5.xxxx
+	mov r11.xyzw, skin_row0[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r7.xyzw, r12.xyzw
+	mov r7.xyzw, r11.xyzw
+	mova a0.x, r5.xxxx
+	mov r11.xyzw, skin_row1[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r8.xyzw, r12.xyzw
+	mov r8.xyzw, r11.xyzw
+	mova a0.x, r5.xxxx
+	mov r11.xyzw, skin_row2[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r9.xyzw, r12.xyzw
+	mov r9.xyzw, r11.xyzw
+	mov r10.x, r6.yyyy
+	mova a0.x, r5.yyyy
+	mov r11.xyzw, skin_row0[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r7.xyzw, r12.xyzw
+	mov r7.xyzw, r11.xyzw
+	mova a0.x, r5.yyyy
+	mov r11.xyzw, skin_row1[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r8.xyzw, r12.xyzw
+	mov r8.xyzw, r11.xyzw
+	mova a0.x, r5.yyyy
+	mov r11.xyzw, skin_row2[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r9.xyzw, r12.xyzw
+	mov r9.xyzw, r11.xyzw
+	mov r10.x, r6.zzzz
+	mova a0.x, r5.zzzz
+	mov r11.xyzw, skin_row0[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r7.xyzw, r12.xyzw
+	mov r7.xyzw, r11.xyzw
+	mova a0.x, r5.zzzz
+	mov r11.xyzw, skin_row1[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r8.xyzw, r12.xyzw
+	mov r8.xyzw, r11.xyzw
+	mova a0.x, r5.zzzz
+	mov r11.xyzw, skin_row2[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r9.xyzw, r12.xyzw
+	mov r9.xyzw, r11.xyzw
+	mov r10.x, r6.wwww
+	mova a0.x, r5.wwww
+	mov r11.xyzw, skin_row0[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r7.xyzw, r12.xyzw
+	mov r7.xyzw, r11.xyzw
+	mova a0.x, r5.wwww
+	mov r11.xyzw, skin_row1[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r8.xyzw, r12.xyzw
+	mov r8.xyzw, r11.xyzw
+	mova a0.x, r5.wwww
+	mov r11.xyzw, skin_row2[a0.x].xyzw
+	mul r12.xyzw, r11.xyzw, r10.xxxx
+	add r11.xyzw, r9.xyzw, r12.xyzw
+	mov r9.xyzw, r11.xyzw
 	mov r5.xyz, v0.xyzw
 	mov r5.w, mbs_k2.xyzx
-	mov r9.xyz, v3.xyzw
-	mov r9.w, mbs_k0.xyzx
-	dp4 r10.x, r6.xyzw, r5.xyzw
-	dp4 r11.x, r7.xyzw, r5.xyzw
-	dp4 r12.x, r8.xyzw, r5.xyzw
+	mov r6.xyz, v3.xyzw
+	mov r6.w, mbs_k0.xyzx
+	dp4 r10.x, r7.xyzw, r5.xyzw
+	dp4 r11.x, r8.xyzw, r5.xyzw
+	dp4 r12.x, r9.xyzw, r5.xyzw
 	mov r13.x, r10.xyzw
 	mov r13.y, r11.xxzw
 	mov r13.z, r12.xyxw
 	mov r13.w, mbs_k2.xyzx
-	dp4 r5.x, r6.xyzw, r9.xyzw
-	dp4 r10.x, r7.xyzw, r9.xyzw
-	dp4 r11.x, r8.xyzw, r9.xyzw
+	dp4 r5.x, r7.xyzw, r6.xyzw
+	dp4 r10.x, r8.xyzw, r6.xyzw
+	dp4 r11.x, r9.xyzw, r6.xyzw
 	mov r12.x, r5.xyzw
 	mov r12.y, r10.xxzw
 	mov r12.z, r11.xyxw

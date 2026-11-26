@@ -39,7 +39,13 @@ Varying :: struct {
 vertex_main :: proc(input: Vertex_In) -> Varying {
 	output: Varying
 
+	// The engine hands a joint as a byte: the 3DS and the Vita load it as the number 0..255, the PC as 0..1 (a UINT format
+	// reaches a float input as the integer's bits, a denormal that casts to 0: every vertex would follow joint 0)
+	joints := input.joints
 	weights := input.weights
+	when TARGET == .PC {
+		joints = input.joints * 255.0 + 0.5
+	}
 	when TARGET == .PICA200 {
 		weights = input.weights * 0.003921568859368563
 	}
@@ -51,9 +57,9 @@ vertex_main :: proc(input: Vertex_In) -> Varying {
 	row2 := [4]f32{0.0, 0.0, 0.0, 0.0}
 	for k in 0 ..< 4 {
 		weight := weights[k]
-		row0 = row0 + skin.row0[i32(input.joints[k])] * weight
-		row1 = row1 + skin.row1[i32(input.joints[k])] * weight
-		row2 = row2 + skin.row2[i32(input.joints[k])] * weight
+		row0 = row0 + skin.row0[i32(joints[k])] * weight
+		row1 = row1 + skin.row1[i32(joints[k])] * weight
+		row2 = row2 + skin.row2[i32(joints[k])] * weight
 	}
 	at := [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
 	moved := [4]f32{dot(row0, at), dot(row1, at), dot(row2, at), 1.0}

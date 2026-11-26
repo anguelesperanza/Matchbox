@@ -43,15 +43,16 @@ float4 mbs_normal_quaternion(float3 n) {
 
 Varying vertex_main(Vertex_In input) {
     Varying output = (Varying)0;
+    float4 joints = input.joints;
     float4 weights = input.weights;
     float4 row0 = float4(0.0, 0.0, 0.0, 0.0);
     float4 row1 = float4(0.0, 0.0, 0.0, 0.0);
     float4 row2 = float4(0.0, 0.0, 0.0, 0.0);
     for (int k = 0; k < 4; k++) {
         float weight = weights[k];
-        row0 = row0 + (skin_row0[((int)(input.joints[k]))] * weight);
-        row1 = row1 + (skin_row1[((int)(input.joints[k]))] * weight);
-        row2 = row2 + (skin_row2[((int)(input.joints[k]))] * weight);
+        row0 = row0 + (skin_row0[((int)(joints[k]))] * weight);
+        row1 = row1 + (skin_row1[((int)(joints[k]))] * weight);
+        row2 = row2 + (skin_row2[((int)(joints[k]))] * weight);
     }
     float4 at = float4(input.position.x, input.position.y, input.position.z, 1.0);
     float4 along = float4(input.normal.x, input.normal.y, input.normal.z, 0.0);

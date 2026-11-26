@@ -6,7 +6,7 @@ and prints the joint palettes an independent implementation (numpy, no Matchbox 
 test_arm.glb -- three joints in a chain along +X, under a plain "armature" node that is NOT a joint and sits at (0, 1, 0)
 (VRoid hangs its skeleton under a node like that, and dropping it loses the transform that stands the character up).
   nodes: 0 "arm" (mesh + skin), 1 "armature" (0,1,0), 2 "J0", 3 "J1" (1,0,0 from J0), 4 "J2" (1,0,0 from J1)
-  mesh: a strip of six vertices at x = 0, 1, 2 (y = 1, z = +-0.1), four triangles. Weights: x=0 all J0;
+  mesh: a ribbon in the XY plane facing +Z: six vertices at x = 0, 1, 2 (y = 0.85 and 1.15), four triangles. Weights: x=0 all J0;
         x=1 half J0 half J1; x=2 a quarter J1 and three quarters J2
   clip "Wave", 2 s:  J1 rotation LINEAR  0 -> 90 degrees about Z -> 0 at t = 0, 1, 2
                      J0 translation STEP (0,0,0) at t=0, (0,0.5,0) at t=1
@@ -71,7 +71,7 @@ def skinned_mesh(b, positions, joints, weights, indices, joint_count, inverse_bi
     attributes = {
         "POSITION": b.accessor(pack("<3f", positions), FLOAT, n, "VEC3", 34962,
                                min=[min(p[i] for p in positions) for i in range(3)], max=[max(p[i] for p in positions) for i in range(3)]),
-        "NORMAL": b.accessor(pack("<3f", [(0, 1, 0)] * n), FLOAT, n, "VEC3", 34962),
+        "NORMAL": b.accessor(pack("<3f", [(0, 0, 1)] * n), FLOAT, n, "VEC3", 34962),
         "JOINTS_0": b.accessor(pack("<4B", joints), U8, n, "VEC4", 34962),
         "WEIGHTS_0": b.accessor(pack("<4f", weights), FLOAT, n, "VEC4", 34962),
     }
@@ -82,10 +82,10 @@ def skinned_mesh(b, positions, joints, weights, indices, joint_count, inverse_bi
 # ---- the arm ---------------------------------------------------------------------------------------------------------
 def make_arm(path):
     b = Builder()
-    positions = [(0, 1, -.1), (0, 1, .1), (1, 1, -.1), (1, 1, .1), (2, 1, -.1), (2, 1, .1)]
+    positions = [(0, .85, 0), (0, 1.15, 0), (1, .85, 0), (1, 1.15, 0), (2, .85, 0), (2, 1.15, 0)]
     joints = [(0, 0, 0, 0), (0, 0, 0, 0), (0, 1, 0, 0), (0, 1, 0, 0), (1, 2, 0, 0), (1, 2, 0, 0)]
     weights = [(1, 0, 0, 0), (1, 0, 0, 0), (.5, .5, 0, 0), (.5, .5, 0, 0), (.25, .75, 0, 0), (.25, .75, 0, 0)]
-    indices = [0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4]
+    indices = [0, 2, 1, 2, 3, 1, 2, 4, 3, 4, 5, 3]
     # Rest world matrices: armature (0,1,0), J0 there, J1 at +1, J2 at +2
     rest_local = {1: trs((0, 1, 0), (0, 0, 0, 1), (1, 1, 1)), 2: trs((0, 0, 0), (0, 0, 0, 1), (1, 1, 1)),
                   3: trs((1, 0, 0), (0, 0, 0, 1), (1, 1, 1)), 4: trs((1, 0, 0), (0, 0, 0, 1), (1, 1, 1))}

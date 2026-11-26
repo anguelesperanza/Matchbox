@@ -116,8 +116,8 @@ BACKEND_DEFAULTS :: Backend_State {
 			{"texcoord", "[2]f32", .R32G32_FLOAT, u32(offset_of(Vertex, uv)), false, false},
 			{"color", "[4]f32", .R32G32B32A32_FLOAT, u32(offset_of(Vertex, color)), false, false},
 			{"normal", "[3]f32", .R32G32B32_FLOAT, u32(offset_of(Lit_Vertex, normal)), true, false},
-			// A joint is a whole number 0..255 that the input assembler widens to a float; a weight is a byte read as 0..1
-			{"joints", "[4]f32", .R8G8B8A8_UINT, u32(offset_of(Skinned_Vertex, joints)), true, true},
+			// Both are bytes read as 0..1 (a joint is scaled back to 0..255 in the shader: a UINT format would hand a float input the integer's bits)
+			{"joints", "[4]f32", .R8G8B8A8_UNORM, u32(offset_of(Skinned_Vertex, joints)), true, true},
 			{"weights", "[4]f32", .R8G8B8A8_UNORM, u32(offset_of(Skinned_Vertex, weights)), true, true},
 		},
 	},

@@ -55,7 +55,7 @@ Render_Target_Settings :: struct {
 /*A texture the GPU draws into*/
 Render_Target :: struct {
 	using backend:Backend_Render_Target, // the colour and depth GPU objects, which differ per target
-	texture:Texture, // the colour: draw it with render_sprite, put it on a model, or use render_upscaled_target
+	texture:Texture, // the colour: draw it with render_sprite, put it on a model, or use render_upscaled_target. The target owns it: do not destroy_sprite a sprite made from it, destroy the target
 	width:i32, // the size that was asked for (on the 3DS the GPU object is padded up to a power of two)
 	height:i32,
 	has_depth:bool,

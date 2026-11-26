@@ -100,7 +100,8 @@ create_sample_pair :: proc(filter:mb.Filter_Mode) -> (pair:Sample_Pair) {
 }
 
 destroy_sample_pair :: proc(pair:^Sample_Pair) {
-	mb.destroy_sprite(pair.sprite)
+	// Not destroy_sprite: it frees the texture, which belongs to the target. Freeing it twice corrupted the heap
+	// and killed the real 3DS in malloc a few seconds later (Azahar does not notice)
 	mb.destroy(&pair.copy)
 	mb.destroy(&pair.source)
 }

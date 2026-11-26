@@ -180,3 +180,19 @@ camera-facing normal, per target; also recorded in `docs/g2_remaining_work.md`).
    measured on a real pad**: whether 0.15 covers this user's pad is what the hardware check shows (the HUD prints both sticks). The Vita
    already has a dead zone in vito; PC's XInput path has none and was not reported, so it is untouched.
 3. `screen_size` is in window pixels, so a marker covers a larger share of the 3DS top screen (400 wide) than of the Vita's (960): expected, now in the example's header.
+
+## 3DS crash of g4b (2026-11-26): bisect builds
+
+`billboard_check_g4b.3dsx` crashed on a real New 3DS LL; `g4` ran; Azahar ran both. The difference is e7590e6. The suspect is the new first-frame
+sweep: it called `camera_end` 216 times, so 216 real draws in one frame (a normal frame here is a few dozen), where Azahar is forgiving about a
+full command buffer and hardware is not. **This is a hypothesis; the cause is not confirmed until the console runs g4d.** The builds, each one change
+from g4b (all in `build\hardware\`):
+
+| Build | Differs from g4b by | If it runs | If it crashes |
+| --- | --- | --- | --- |
+| `billboard_check_g4d.3dsx` | the sweep is kept but never drawn (`mbi.discard_pass = true` after each `camera_start`) | the 216 draws were it; this is the committed fix | not the draws: go to g4c |
+| `billboard_check_g4c.3dsx` | no sweep at all (dead zone and HUD lines kept) | the sweep, drawn or not, is it | the dead zone or the new HUD lines: go to g4e |
+| `billboard_check_g4e.3dsx` | g4c with the dead zone also removed | the dead zone was it | only the new HUD lines are left |
+
+Azahar: g4d prints "through the queue, 16 passed, 0 failed". The committed example is g4d's. Nothing was found by reading the dead-zone code (a guard
+on zero length, no trig, the `sqrt` was already in that path).

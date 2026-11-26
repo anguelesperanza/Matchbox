@@ -154,7 +154,7 @@ normalize :: proc(v:[3]f32) -> [3]f32 {
 run_queue_checks :: proc(sprite:mb.Sprite, result:^Check_Result) {
 	sprite := sprite
 	sprite.position = {3, 1.5, -2}
-	sprite.scale = {0.01, 0.01} // a speck: the camera_end below draws it once, before the first real frame
+	sprite.scale = {0.01, 0.01}
 	world_up := [3]f32{0, 1, 0}
 
 	all_ok := [mb.Billboard_Mode]bool{.UPRIGHT = true, .CAMERA_POSITION = true, .CAMERA_PLANE = true}
@@ -174,6 +174,9 @@ run_queue_checks :: proc(sprite:mb.Sprite, result:^Check_Result) {
 
 				for mode in mb.Billboard_Mode {
 					mb.camera_start(camera)
+					// Read the queue, never draw it: 216 draws in one frame was the one thing g4b did that g4 did not, and g4b crashed
+					// on a real 3DS (Azahar took it). camera_end drops a discarded pass without a draw call
+					mb.mbi.discard_pass = true
 					mb.render_billboard(sprite, {mode = mode})
 					right, up, normal := queued_axes()
 					mb.camera_end()

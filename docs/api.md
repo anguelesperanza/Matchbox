@@ -150,13 +150,13 @@ set_lights :: proc(lights:[]Light)
 set_lighting :: proc(settings := Lighting_Settings{enabled = true, ambient = {0.2, 0.2, 0.2, 1}})
 get_max_lights :: proc() -> int
 
-mesh_cube :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
-mesh_quad :: proc(size:f32 = 1, color:[4]f32 = {1, 1, 1, 1}, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16)
-mesh_triangle :: proc(allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16)
-mesh_circle :: proc(segments:int = 48, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16)
-mesh_plane :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
-mesh_sphere :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
-mesh_cylinder :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
+create_cube_geometry :: proc(size:f32 = 1, colored:bool = true, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
+create_quad_geometry :: proc(size:f32 = 1, color:[4]f32 = {1, 1, 1, 1}, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16)
+create_triangle_geometry :: proc(allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16)
+create_circle_geometry :: proc(segments:int = 48, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16)
+create_plane_geometry :: proc(size:f32 = 1, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
+create_sphere_geometry :: proc(radius:f32 = 1, rings:int = 16, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
+create_cylinder_geometry :: proc(radius:f32 = 0.5, height:f32 = 1, sectors:int = 24, allocator := context.allocator) -> (vertices:[]Lit_Vertex, indices:[]u16)
 
 create_transform :: proc(position:[3]f32 = {}, rotation:quaternion128 = linalg.QUATERNIONF32_IDENTITY, scale:f32 = 1) -> Transform
 calculate_transform_matrix :: proc(transform:Transform) -> matrix[4, 4]f32

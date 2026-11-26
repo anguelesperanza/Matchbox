@@ -64,6 +64,14 @@ call :stage_images assets\images
 call :stage_images assets\vita\images
 if exist assets\audio       xcopy /E /Y /I assets\audio       %STAGE%\audio  >nul
 if exist assets\vita\audio  xcopy /E /Y /I assets\vita\audio  %STAGE%\audio  >nul
+:: A game in its own folder brings its own assets, which win over the root's, as in 3ds_build.bat.
+:: Without this its images never reached the .vpk and load_texture panicked on the Vita
+if not "%SRC%"=="." (
+    call :stage_images %SRC%\assets\images
+    call :stage_images %SRC%\assets\vita\images
+    if exist %SRC%\assets\audio       xcopy /E /Y /I %SRC%\assets\audio       %STAGE%\audio  >nul
+    if exist %SRC%\assets\vita\audio  xcopy /E /Y /I %SRC%\assets\vita\audio  %STAGE%\audio  >nul
+)
 :: Matchbox: the models, packed as app0:/assets/models/<name>.mbm, with the images each uses
 :: joining the staged images. The Vita's own folder wins, as for images
 echo Converting models...
@@ -71,6 +79,12 @@ call :pack_models assets\models
 if errorlevel 1 goto :fail
 call :pack_models assets\vita\models
 if errorlevel 1 goto :fail
+if not "%SRC%"=="." (
+    call :pack_models %SRC%\assets\models
+    if errorlevel 1 goto :fail
+    call :pack_models %SRC%\assets\vita\models
+    if errorlevel 1 goto :fail
+)
 echo.
 echo === Building %TARGET% ===
 :: ---------------------------------------------------------------

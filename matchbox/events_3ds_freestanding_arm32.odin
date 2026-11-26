@@ -57,5 +57,10 @@ when !VITA {
 		mbi.right_thumbstick_axis = {f32(right_thumbstick.dx), f32(right_thumbstick.dy)} / mbi.right_thumbstick_max
 		l = linalg.length(mbi.right_thumbstick_axis)
 		if l > 1 do  mbi.right_thumbstick_axis = mbi.right_thumbstick_axis / l
+
+		// A pad at rest is a few counts off zero, not at it, and read as it was it walked the character at 0.1 a frame.
+		// After the clamp, so the dead zone is a circle of the same size on every side
+		mbi.left_thumbstick_axis = calculate_thumbstick_dead_zone(mbi.left_thumbstick_axis)
+		mbi.right_thumbstick_axis = calculate_thumbstick_dead_zone(mbi.right_thumbstick_axis)
 	}
 }

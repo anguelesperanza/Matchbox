@@ -286,3 +286,4 @@ target-specific light limits (D8) once the API is stable.
 - Target-specific light limits (D8).
 - The Vita's per-pixel lighting with the two bulbs on: closed at about 36 fps (30 fps is the Vita's target for per-pixel lit 3D; per vertex is faster but looks different). See "L8-7 closed" in `docs/3ds_fragment_lighting_plan.md`.
 - Normal and bump maps, environment mapping, procedural textures and fog (the plan's "What the same unit opens"); stereoscopic 3D.
+- Lit billboards (added 2026-11-25, from G4): a lit quad mesh with its normal toward the camera, per target, so `render_billboard` can be shaded by the lights. G4 draws billboards unlit (the shared sprite quad); see `docs/g4_billboards_plan.md`.

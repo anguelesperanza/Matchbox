@@ -83,15 +83,9 @@ calculate_sprite_bounds :: proc(sprite:Sprite) -> (min, max:[2]f32) {
 	return
 }
 
-/*Queues a sprite to be drawn at camera_end. Sprites are see-through by default*/
-render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
-	ensure(sprite.texture.width > 0, "Sprite has no texture") // not `view`: that is only the PC's
-	ensure(sprite.pixels_per_unit > 0, "Sprite pixels_per_unit must be above zero")
-
-	// Which part of the image to show, in pixels
-	source := calculate_sprite_source(sprite)
-
-	// As 0..1 texture coordinates. v = 0 is the top of the image
+// A sprite's `source` as 0..1 texture coordinates {u0, v0, u1, v1}, flips included. v = 0 is the top of the image
+@(private)
+calculate_sprite_uv_rectangle :: proc(sprite:Sprite, source:[4]f32) -> [4]f32 {
 	u0 := source[0] / f32(sprite.texture.width)
 	v0 := source[1] / f32(sprite.texture.height)
 	u1 := (source[0] + source[2]) / f32(sprite.texture.width)
@@ -100,6 +94,25 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 	// Flipping is just reading the region backwards
 	if sprite.flip_x == true do u0, u1 = u1, u0
 	if sprite.flip_y == true do v0, v1 = v1, v0
+	return {u0, v0, u1, v1}
+}
+
+// How a Sprite_Mode is queued: cut-outs are opaque with an alpha test, blended ones blend with none
+@(private)
+calculate_sprite_blend :: proc(mode:Sprite_Mode) -> (blend:Blend_Mode, alpha_cutoff:f32) {
+	if mode == .BLENDED do return .ALPHA, 0
+	return .NONE, 0.5
+}
+
+/*Queues a sprite to be drawn at camera_end. Sprites are see-through by default*/
+render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
+	ensure(sprite.texture.width > 0, "Sprite has no texture") // not `view`: that is only the PC's
+	ensure(sprite.pixels_per_unit > 0, "Sprite pixels_per_unit must be above zero")
+
+	// Which part of the image to show, in pixels
+	source := calculate_sprite_source(sprite)
+
+	uv_rectangle := calculate_sprite_uv_rectangle(sprite, source)
 
 	// World size: pixels -> units, then the user's scale
 	size := [2]f32{source[2], source[3]} / sprite.pixels_per_unit * sprite.scale
@@ -121,14 +134,9 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 		model = calculate_model_matrix(centre, linalg.QUATERNIONF32_IDENTITY, {right - left, top - bottom, 1})
 	}
 
-	blend := Blend_Mode.NONE
-	alpha_cutoff:f32 = 0.5
-	if mode == .BLENDED {
-		blend = .ALPHA
-		alpha_cutoff = 0
-	}
+	blend, alpha_cutoff := calculate_sprite_blend(mode)
 
-	queue_render(mbi.sprite_mesh, model, sprite.tint, blend, .NONE, sprite.texture, {u0, v0, u1, v1}, alpha_cutoff)
+	queue_render(mbi.sprite_mesh, model, sprite.tint, blend, .NONE, sprite.texture, uv_rectangle, alpha_cutoff)
 }
 
 /*Destroys the sprite -- calls destory_texture under the hood as sprite as the texture*/

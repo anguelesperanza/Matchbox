@@ -1,6 +1,6 @@
 # G4: billboards (plan)
 
-Written 2026-11-25. Status: **stage 1, waiting for the user to approve the public API.** No code in `matchbox/` yet.
+Written 2026-11-25. Status: **API approved 2026-11-25** (names kept, `screen_size` kept, unlit only, separate example). Implemented; checked on PC, Azahar and Vita3K; hardware builds are waiting for the user's check. Ticked below.
 Source of truth for the phase: `render_plan.md`, "G4. Billboards" ("sprites facing the camera in a perspective scene;
 they reuse E1"). Camera conventions are `docs/g3_cameras_plan.md`'s: world units, +Y up, right-handed, looking down -Z.
 
@@ -68,7 +68,7 @@ No new constants, no globals, no callbacks, no `create_`/`destroy_` (nothing is 
 - **`rotation` is a roll** about the facing axis for `CAMERA_POSITION` and `CAMERA_PLANE`. It is **ignored** by `UPRIGHT`
   (an upright thing that rolls is no longer upright); the doc comment says so.
 - **`UPRIGHT` uses world +Y**, not `camera.up`. If the eye is (almost) straight above or below the sprite there is no
-  horizontal direction to face; it falls back to the camera's right vector instead of producing NaN.
+  horizontal direction to face; it faces the way the camera is turned (back along the camera's own horizontal heading; +Z if that is also vertical) instead of producing NaN. `CAMERA_POSITION` uses the camera's right made perpendicular to the normal.
 - **Depth and alpha:** nothing new. `.CUTOUT` (default) writes depth and needs no sorting, `.BLENDED` is sorted and does
   not write depth, so billboards and meshes interleave correctly with the existing queue. A blended billboard is
   sorted by its pivot position, which is the same thing blended sprites do now.
@@ -111,19 +111,19 @@ All three read `mbi.view`, so no `Camera` has to be threaded through `render_bil
 ## Steps
 
 - [x] G4-1. Read the code, search `main`, write this plan.
-- [ ] G4-2. **User approves the public API** (proposal with this file). Nothing below starts before.
-- [ ] G4-3. `billboard.odin`: the rotation / size maths from a view matrix, `calculate_billboard_matrix`, `render_billboard`,
+- [x] G4-2. **User approves the public API** (proposal with this file). Nothing below starts before.
+- [x] G4-3. `billboard.odin`: the rotation / size maths from a view matrix, `calculate_billboard_matrix`, `render_billboard`,
   `render_animated_billboard`. Doc comments say why (UPRIGHT vs +Y, the roll rule, the offset axes).
-- [ ] G4-4. `billboard_test.odin`: the table above as assertions on numbers, checked against numpy; queue-level tests
+- [x] G4-4. `billboard_test.odin`: the table above as assertions on numbers worked out by hand (not checked against numpy); queue-level tests
   with synthetic `mbi` state (the existing `render_test.odin` shows how).
-- [ ] G4-5. `examples/billboard-check`: a floor, a ring of upright billboards (a tree strip and an animated coin, three modes
+- [x] G4-5. `examples/billboard-check`: a floor, a ring of upright billboards (a tree strip and an animated coin, three modes
   side by side), a blended one, a `screen_size` one, the orbiting/walking `Third_Person_Camera` from G3 to move round them.
   It runs a self-check of the matrix numbers on the target at start and prints `billboard-check: N passed, M failed`
   (the `camera-check` pattern, so the 3DS soft-float maths is exercised on the device).
-- [ ] G4-6. `odin check` for matchbox, level, tether, eko; `odin test matchbox`; `3ds_check.bat` and `vita_check.bat` for the
+- [x] G4-6. `odin check` for matchbox, level, tether, eko; `odin test matchbox`; `3ds_check.bat` and `vita_check.bat` for the
   example; regenerate `cheatsheet.md` only if the branch has the generator (it covers `main` only today).
-- [ ] G4-7. Run in Azahar (3DS) and Vita3K; read the self-check lines.
-- [ ] G4-8. Hardware builds with their own names, `billboard_check_g4.3dsx` and `billboard_check_g4.vpk`, copied to the main
+- [x] G4-7. Run in Azahar (3DS) and Vita3K; read the self-check lines.
+- [ ] G4-8 (builds done, committed; **waiting for the user's hardware check**). Hardware builds with their own names, `billboard_check_g4.3dsx` and `billboard_check_g4.vpk`, copied to the main
   checkout's `build\hardware\`. Commit, do not push. Then **wait for the user's hardware check**.
 
 ## Open questions for the user
@@ -135,3 +135,21 @@ All three read `mbi.view`, so no `Camera` has to be threaded through `render_bil
 3. **Lit billboards:** unlit only in G4 (proposed), or add a lit quad later as a G2 follow-up?
 4. **Example:** extend `camera-check` or a separate `billboard-check` (proposed: separate, so it has its own hardware
    build name and does not make `camera-check` longer)?
+
+## Answers (2026-11-25) and deferred
+
+1. Names kept: `UPRIGHT / CAMERA_POSITION / CAMERA_PLANE`. 2. `screen_size` kept. 3. Unlit only; **lit billboards are deferred** (a lit quad with a
+camera-facing normal, per target; also recorded in `docs/g2_remaining_work.md`). 4. Separate `examples/billboard-check`.
+
+## What was done and how it was checked (2026-11-25)
+
+- `matchbox/billboard.odin`, `billboard_test.odin` (15 numeric tests, 164 in the package pass), `examples/billboard-check` (13 on-target checks).
+- `Matchbox_Info` gained `camera_fov_y` and `camera_window_height`, set in each target's `camera_start`, because `screen_size` needs the
+  fov and the height of the target being drawn to (the 3DS bottom screen is not the top one). `sprite.odin` shares its uv and blend
+  helpers with the billboards; `render_sprite` draws exactly as before (a test compares the two).
+- `vita_build.bat` did not stage a game folder's own `assets\` (the 3DS script does); without it the example's images never reached the
+  .vpk. Added the same block (images, audio, models).
+- Run: PC (13/0, screenshot), Azahar (13/0, 60 FPS, scene drawn), Vita3K (13/0, scene drawn). **Not run on a real 3DS or Vita.**
+- `level`, `tether` and `eko` do not exist on this branch (they are `main`'s), so their `odin check` could not be run.
+- The test lock `render_queue_lock` in `collision_test.odin` is no longer file-private: the billboard tests queue items too. `mbi` is
+  one global on this branch (CLAUDE.md's thread-local note describes `main`).

@@ -1,0 +1,4 @@
+# billboard-check: four frames of a spinning coin, 16 pixels to the unit
+ppu     = 16
+columns = 4
+rows    = 1

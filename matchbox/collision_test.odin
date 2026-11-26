@@ -91,10 +91,9 @@ clamping_keeps_the_collision_box_inside_the_area :: proc(t:^testing.T) {
 	testing.expect_value(t, calculate_sprite_clamped_position(sprite, area_min, area_max), [3]f32{4, 0, 0})
 }
 
-// The outline tests queue real render items, which writes `mbi`. Only these tests touch
+// The outline tests queue real render items, which writes `mbi`. Only these tests and the billboard tests touch
 // camera_active and the item lists, so a lock of their own keeps them off each other
 // (the bottom screen tests' lock guards different fields)
-@(private="file")
 render_queue_lock:sync.Mutex
 
 // The world rectangles {min, max} of what was queued: each item is the unit quad

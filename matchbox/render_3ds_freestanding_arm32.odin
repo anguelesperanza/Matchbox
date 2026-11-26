@@ -650,6 +650,8 @@ when !VITA {
 		mbi.view = calculate_camera_view_matrix(used) // render_mesh needs it to sort transparent items
 		mbi.camera_active = true
 		mbi.screen_pass = camera.screen
+		mbi.camera_fov_y = used.fov_y if used.projection == .PERSPECTIVE else 0 // billboards read these two (billboard.odin)
+		mbi.camera_window_height = window.y
 
 		mbi.camera_view_projection = TILT_TO_PANEL * GL_TO_PICA_DEPTH * calculate_camera_projection_gl(used, window.x / window.y) * mbi.view
 		set_camera_uniforms(mbi.bound_pipeline)

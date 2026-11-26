@@ -613,6 +613,8 @@ camera_start :: proc(camera:Camera) {
 	mbi.view = calculate_camera_view_matrix(used) // render_mesh needs it to sort transparent items
 	mbi.camera_active = true
 	mbi.screen_pass = camera.screen
+	mbi.camera_fov_y = used.fov_y if used.projection == .PERSPECTIVE else 0 // billboards read these two (billboard.odin)
+	mbi.camera_window_height = window.y
 	// While the bottom screen fills the window, the world and HUD are not shown. bottom_screen_start
 	// sets this again for its own pass (bottom_screen_one_surface.odin)
 	mbi.discard_pass = is_top_screen_hidden()

@@ -29,6 +29,8 @@ Matchbox_Info :: struct {
 	screen_pass:bool,
 	discard_pass:bool,
 	view:matrix[4,4]f32,
+	camera_fov_y:f32, // degrees, of the camera being drawn through; 0 for an orthographic one
+	camera_window_height:f32, // pixels tall, of the target that camera draws to (the 3DS bottom screen is not the top one's)
 	opaque_items:[dynamic]Render_Item,
 	transparent_items:[dynamic]Render_Item,
 	pixel_scale:f32,

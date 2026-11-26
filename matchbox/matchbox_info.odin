@@ -45,6 +45,7 @@ Matchbox_Info :: struct {
 
 	font_settings:Font_Settings,
 	screen_settings:Screen_Settings,
+	mouse_motion:Mouse_Motion, // pointer drag between frames, sampled by poll_events (camera_input.odin)
 	clock:Clock, // frame timing, sampled by poll_events (clock.odin)
 
 	using backend:Backend_State, // so PC code that wrote `mbi.device` still does

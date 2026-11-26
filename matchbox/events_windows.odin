@@ -141,6 +141,8 @@ poll_events :: proc() {
 		win.DispatchMessageW(lpMsg = &event_message)
 	}
 
+	update_mouse_motion(&mbi.mouse_motion, {f32(mbi.mouse_position.x), f32(mbi.mouse_position.y)}, true)
+
 	// GameInput Checking for controller/gampad
 	connected:bool = false
 	result := mbi.input->GetCurrentReading({.Gamepad}, mbi.gamepad, &mbi.reading)

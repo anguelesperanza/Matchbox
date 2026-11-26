@@ -616,6 +616,15 @@ when !VITA {
 	}
 
 	/*
+		The last frame's cost as the hardware measured it, in milliseconds: {the CPU's time to build the commands, the
+		GPU's time to draw them}, from citro3d's own counters. PC and Vita answer {0, 0}. It tells a frame bound by
+		pixels (the GPU time falls when set_internal_resolution lowers them) from one bound by something else
+	*/
+	get_gpu_times :: proc() -> [2]f32 {
+		return {c3d.C3D_GetProcessingTime(), c3d.C3D_GetDrawingTime()}
+	}
+
+	/*
 		Binds the unlit pipeline afresh every frame rather than trusting what is bound: citro3d
 		keeps this state, but anything else that draws (a future citro2d overlay, a debug tool)
 		can change it, and setting it again is cheap

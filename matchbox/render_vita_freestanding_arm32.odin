@@ -357,6 +357,11 @@ when VITA {
 		}
 	}
 
+	/*Only the 3DS measures the GPU's time (render_3ds_freestanding_arm32.odin); the Vita answers {0, 0}*/
+	get_gpu_times :: proc() -> [2]f32 {
+		return {}
+	}
+
 	render_start :: proc() {
 		mbi.screen_scene_open = false
 		mbi.pending_clear = nil

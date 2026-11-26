@@ -287,6 +287,10 @@ note_screen_drawn :: proc() {
 	(the Vita's frame time is its pixel cost). Everything measured in pixels follows: get_window_size is not
 	changed, but cameras, anchors and calculate_visible_rectangle answer in internal pixels, and the mouse and
 	touch maths unscale through `fit`. Takes effect next frame; the zero value turns it off
+	**Measured, not assumed:** on the Vita a smaller picture is a faster frame (its cost is its pixels). On the real New 3DS LL
+	the first measurement went the other way (full 21.6 ms, 2/3 and 1/2 size 33.5 ms), because the extra pass, the clear and the
+	upscale cost more than the pixels saved; get_gpu_times says how much of a frame is the GPU's. Do not turn this on for the
+	3DS's top screen without measuring the game on the console
 */
 set_internal_resolution :: proc(settings := Internal_Resolution_Settings{}) {
 	ensure(mbi.render_target_state.internal_frame == false, "set_internal_resolution was called between render_start and render_end")
@@ -345,6 +349,11 @@ end_internal_frame :: proc() {
 	if state.internal_frame == false do return
 	state.internal_frame = false
 	render_target_end()
-	clear_screen([4]f32{0, 0, 0, 1})
+	// The bars are the only part the picture leaves, so a picture that covers the screen needs no clear (on the 3DS a
+	// clear is a synchronous memory fill the CPU waits for)
+	top_left, bottom_right := calculate_upscaled_rectangle(state.internal_target, state.internal.fit)
+	screen := get_screen_size()
+	covers := top_left.x <= 0 && top_left.y <= 0 && bottom_right.x >= f32(screen.x) && bottom_right.y >= f32(screen.y)
+	if covers == false do clear_screen([4]f32{0, 0, 0, 1})
 	render_upscaled_target(state.internal_target, state.internal.fit)
 }

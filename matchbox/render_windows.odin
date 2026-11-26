@@ -395,6 +395,11 @@ set_lights_constants :: proc() {
 	update_buffer(mbi.lights_constants, &block, size_of(Lights_Block))
 }
 
+/*Only the 3DS measures the GPU's time (render_3ds_freestanding_arm32.odin); the PC answers {0, 0}*/
+get_gpu_times :: proc() -> [2]f32 {
+	return {}
+}
+
 /*Starts a frame. Call once per frame before drawing anything*/
 render_start :: proc() {
 	if mbi.did_resize {

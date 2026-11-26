@@ -33,6 +33,7 @@ import mb "../../matchbox"
 
 SPEED :: 4
 BENCH_FRAMES :: 120
+BENCH_STEPS :: 4 // the scene straight to the screen, then through a target at each of the three sizes
 SCALES :: [3]f32{1, 0.6667, 0.5}
 FITS :: [4]mb.Fit_Mode{.FIT, .INTEGER, .FILL, .STRETCH}
 
@@ -124,10 +125,14 @@ draw_sample :: proc(pair:^Sample_Pair) {
 check_sample :: proc(pair:Sample_Pair, name:string, result:^Check_Result) -> string {
 	pixels := mb.read_render_target_pixels(pair.copy)
 	defer delete(pixels)
-	bad, top, bottom, left, right := 0, 0, 0, 0, 0
+	bad, top, bottom, left, right, worst := 0, 0, 0, 0, 0, 0
 	for y in 0 ..< SAMPLE_HEIGHT {
 		for x in 0 ..< SAMPLE_WIDTH {
-			if pixel(pixels, SAMPLE_WIDTH, x, y) == {0, 255, 0, 255} do continue
+			got := pixel(pixels, SAMPLE_WIDTH, x, y)
+			// Off by how much from green: rounding in the GPU's filter is a unit or two, the padding's magenta is hundreds
+			deviation := abs(int(got.r)) + abs(int(got.g) - 255) + abs(int(got.b)) + abs(int(got.a) - 255)
+			worst = max(worst, deviation)
+			if deviation <= 3 do continue
 			bad += 1
 			if y < SAMPLE_HEIGHT / 2 do top += 1
 			else do bottom += 1
@@ -137,7 +142,7 @@ check_sample :: proc(pair:Sample_Pair, name:string, result:^Check_Result) -> str
 	}
 	check(result, bad == 0, fmt.tprintf("sampling %s", name))
 	// Short: every glyph is a draw on the 3DS, and a screenful of text overflowed its command buffer
-	return fmt.aprintf("%d t%d b%d l%d r%d", bad, top, bottom, left, right)
+	return fmt.aprintf("%d t%d b%d l%d r%d d%d", bad, top, bottom, left, right, worst)
 }
 
 pixel :: proc(pixels:[]u8, width, x, y:int) -> [4]u8 {
@@ -205,7 +210,9 @@ main :: proc() {
 	scene_dirty := false
 
 	checks:Check_Result
-	bench_lines:[3]string
+	bench_lines:[BENCH_STEPS]string
+	bench_gpu, bench_cpu:f32
+	direct := true // the benchmark starts with the scene drawn straight to the screen, as a game with no target would
 	bench_frame := 0
 	bench_time:f32 = 0
 
@@ -230,17 +237,29 @@ main :: proc() {
 			scene_dirty = true
 		}
 
-		// The first 360 frames walk through the three sizes, one after another, and print what each cost
-		if frame > 3 && bench_frame < 3 * BENCH_FRAMES {
+		// The first four steps: the scene drawn straight to the screen, then through a target at each of the three sizes.
+		// Each line is the frame time, then the GPU's and the CPU's share of it as citro3d counts them (3DS only)
+		gpu_times := mb.get_gpu_times()
+		if frame > 3 && bench_frame < BENCH_STEPS * BENCH_FRAMES {
 			bench_time += delta_time
+			bench_cpu += gpu_times[0]
+			bench_gpu += gpu_times[1]
 			if (frame - 3) % BENCH_FRAMES == 0 {
 				step := bench_frame / BENCH_FRAMES
-				size := mb.get_internal_resolution() if internal else [2]i32{scene.width, scene.height}
-				bench_lines[step] = fmt.aprintf("%.2f %dx%d %dpx %.1fms", scales[step], size.x, size.y, size.x * size.y, bench_time / BENCH_FRAMES * 1000)
-				mb.print("render-target-check: bench", bench_lines[step])
-				bench_time = 0
-				if step < 2 {
-					scale_index = step + 1
+				size := [2]i32{scene.width, scene.height}
+				if internal do size = mb.get_internal_resolution()
+				if direct {
+					window := mb.get_window_size()
+					size = {window[0], window[1]}
+				}
+				name := "direct" if direct else fmt.tprintf("%.2f", scales[scale_index])
+				bench_lines[step] = fmt.aprintf("%s %dx%d %.1fms g%.1f c%.1f", name, size.x, size.y, bench_time / BENCH_FRAMES * 1000, bench_gpu / BENCH_FRAMES, bench_cpu / BENCH_FRAMES)
+				bench_time, bench_gpu, bench_cpu = 0, 0, 0
+				if direct {
+					direct = false
+					scale_index = 0
+				} else if step < BENCH_STEPS - 1 {
+					scale_index = step // step 1 is scale 0 done, next is scale 1
 					scene_dirty = true
 				}
 			}
@@ -283,7 +302,8 @@ main :: proc() {
 			mb.print(fmt.tprintf("render-target-check: %d passed, %d failed %s", checks.passed, checks.failed, checks.first_failure))
 		}
 
-		if internal == false do mb.render_target_start(&scene, [4]f32{0.15, 0.17, 0.22, 1})
+		use_target := internal == false && direct == false
+		if use_target do mb.render_target_start(&scene, [4]f32{0.15, 0.17, 0.22, 1})
 		else do mb.clear_background({0.15, 0.17, 0.22, 1})
 		mb.camera_start(third.camera)
 		mb.render_model(floor, [3]f32{0, 0, 0}, tint = {0.4, 0.4, 0.45, 1})
@@ -299,7 +319,7 @@ main :: proc() {
 			mb.render_billboard(tree)
 		}
 		mb.camera_end()
-		if internal == false {
+		if use_target {
 			mb.render_target_end()
 			mb.clear_background({0, 0, 0, 1})
 			mb.render_upscaled_target(scene, fits[fit_index])

@@ -162,6 +162,22 @@ when !VITA {
 	@(private)
 	calculate_canvas_uv_rectangle :: proc(texture:Texture, uv:[4]f32) -> [4]f32 {
 		canvas := calculate_texture_canvas_size(texture.width, texture.height)
+		uv := uv
+		if texture.filter == .LINEAR {
+			// LINEAR blends the four texels around a sample, and clamping holds at the CANVAS's edge, not the picture's:
+			// a sample on the picture's own edge reaches into the padding (a render target's clear colour, a loaded
+			// image's black) and tints that edge. Coordinates that sit on the picture's border are pulled half a
+			// texel in, where the nearest centres are the picture's own last texels. POINT never blends, so it needs none.
+			// Azahar's filter does not show the tint; the real GPU does (render-target-check, "sample L")
+			pull_in :: proc(value, size:f32) -> f32 {
+				half := 0.5 / size
+				if value <= 0 do return value + half
+				if value >= 1 do return value - half
+				return value
+			}
+			size := [2]f32{f32(texture.width), f32(texture.height)}
+			uv = {pull_in(uv[0], size.x), pull_in(uv[1], size.y), pull_in(uv[2], size.x), pull_in(uv[3], size.y)}
+		}
 		scale := [2]f32{f32(texture.width) / f32(canvas.x), f32(texture.height) / f32(canvas.y)}
 		return {uv[0] * scale.x, 1 - uv[1] * scale.y, uv[2] * scale.x, 1 - uv[3] * scale.y}
 	}

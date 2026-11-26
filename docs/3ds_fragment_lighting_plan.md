@@ -553,6 +553,23 @@ Per-vertex remains the Vita's smooth path; whether it becomes the Vita's default
 
 **L8-7, Vita speed, measured (2026-11-25).** Probes on the real Vita (`examples/model-check` plus a floor toggle), per pixel, sun and two bulbs: 24-25 fps; the floor hidden: 60, so the cost is the big floor's fragment program. Without `discard` 28-29 (and the sun alone 54 to 60); without the specular term 38-40; both 44-46; the specular skipped on the floor only (strength 0), 31-32. One probe with that skip and no `discard` read 60, but the same program rebuilt (and the committed build) reads 36-37 on the same console and the 60 never came back, so it is not counted; why is unknown (not the title ID, not the board, not the draw order). Changes (Vita only; PC, the 3DS and what a game calls are unchanged): (1) the Cg highlight is skipped when `render_specular_strength` is 0, and N.H is worked from the unnormalised half vector (same number, 8 fewer instructions); (2) `mesh_lit_opaque.mbs` is `mesh_lit.mbs` without the alpha test, and a part with `alpha_cutoff` 0 draws with it (`lit_opaque_pipeline`; its fragment program has no `render_alpha_cutoff`, so the engine skips that uniform). A game gets the full gain by giving a floor `specular_strength = 0` (model-check does). Parts with the default 0.5 still pay for the highlight: 28-29 fps with the bulbs on, 60 sun alone. **Measured in one app** (`perf_modes`, a scratch build switching the shaders at run time, so one install and one sitting; real Vita, per pixel, sun and two bulbs, floor at strength 0): old shader 24-26 fps, this change 36-37, the skip with `discard` kept 30-32; with the bulbs off 60 against 52-54. Test build `build/hardware/model_check_fast1.vpk` (MBOX00073). Open: a cheaper highlight for every part would change how it looks, so it is the user's call.
 
+**L8-7 closed: 30 fps is the Vita's target for per-pixel lit 3D (user's decision, 2026-11-25).** The per-pixel path now measures
+about 36 fps with the sun and both bulbs on, and 60 with the sun alone, on a floor at `specular_strength` 0; that is the
+accepted result, and the Vita's per-pixel speed is not to be pushed further here. What the last tests showed, for whoever
+picks it up again (real Vita, `examples/model-check`, bulbs on): drawing the 3D scene at 100%, 90%, 80%, 70% and 60% of each
+side read 36, 35, 36, 44 and 52 fps, and at 50% (480 x 272) and 25% (240 x 136) it read 60. So shaded pixels are part of the
+cost, but not all of it: fps stayed flat from 100% to 80%, and what holds it there was not found (a frame-time histogram, or the
+floor drawn in tiles, would be the next probes). Holding 60 would take about half the width and height. A render resolution is not
+a lighting setting: it would have to be done for the whole of Matchbox on the Vita so every game and every screen stays
+consistent, so it is left out of this work. Two results that did not reproduce are not counted: a probe that read 60 with bulbs
+on (the same program rebuilt, and under other title IDs, read 36), and a run where the fps stuck at 60 until the app was
+restarted (floor removed, bulbs toggled; the build was not recorded). **Per vertex is faster than per pixel**: 60 fps in every
+case measured on the Vita, bulbs on or off. It is the choice for a scene that needs the frame rate, with the cost that lighting
+computed at the corners looks different from lighting computed per pixel (highlights, spot cones and bulbs over a large flat
+part are coarser). A game picks per part with `Material.lighting`; whether per vertex becomes the Vita's default stays the
+user's call. For a game on the Vita: give large flat parts (a floor) `specular_strength = 0`, which skips the highlight for every
+pixel of them, and a part with no cut-out takes the shader without `discard`.
+
 **L9. Back faces on two-sided parts, 3DS (W5 of `docs/g2_remaining_work.md`, decision D5).** Written 2026-11-25 before any
 runtime code. **What PC and the Vita do today, measured:** neither flips the normal for a back face. `light_diffuse` and
 `light_specular` take the interpolated normal as it is (nothing in mbsc reads a facing), so a part seen from behind is lit as

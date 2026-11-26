@@ -284,5 +284,5 @@ target-specific light limits (D8) once the API is stable.
   PC and the Vita draw, not the API).
 - The cheatsheet (D1), once the API has stabilised.
 - Target-specific light limits (D8).
-- The Vita's per-pixel lighting with the two bulbs on, 24 fps on the real console: to revisit in the optimization pass (L8-6).
+- The Vita's per-pixel lighting with the two bulbs on: closed at about 36 fps (30 fps is the Vita's target for per-pixel lit 3D; per vertex is faster but looks different). See "L8-7 closed" in `docs/3ds_fragment_lighting_plan.md`.
 - Normal and bump maps, environment mapping, procedural textures and fog (the plan's "What the same unit opens"); stereoscopic 3D.

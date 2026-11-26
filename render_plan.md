@@ -1696,6 +1696,7 @@ above all the same.
 
 ## Decisions to make (and record here with dates)
 
+- [ ] **Render resolution as a performance lever (noted 2026-11-26, for later).** The Vita's per-pixel lighting now runs at about 30 fps after the user's own optimization pass, accepted as the sweet spot for now. Next gain: look into render resolutions for Matchbox as a whole (an internal resolution per target, scaled up), probably with G5 (render targets). Show the user the API before writing it.
 - [x] Up axis and handedness: right-handed, +Y up, camera looks down -Z, everywhere including 2D (decided 2026-11-12). Screen/HUD pixel space stays top-left, y-down.
 - [x] 3DS FPU: `-microarch:mpcore` in `3ds_build.bat` (2026-11-12, runs in the emulator).
 - [x] 3DS float calls: stay soft-float; hard-float via a Farlite-built Odin in Phase H (2026-11-12). Odin's own libm calls are fixed at link time by `o3dx/libm` (2026-11-14); calls into citro3d / ctru with float parameters still use `u32` bridges.

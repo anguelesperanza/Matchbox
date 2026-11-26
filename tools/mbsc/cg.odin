@@ -280,6 +280,8 @@ engine_type :: proc(key: string) -> string {
 		return "float3"
 	case key == "[4]f32":
 		return "float4"
+	case key == "[JOINT_SLOT_COUNT][4]f32":
+		return "float4" // the array suffix names the count (engine_array_suffix)
 	case strings.has_prefix(key, "matrix[") && len(key) == len("matrix[4,4]f32"):
 		return fmt.aprintf("float%cx%c", key[9], key[7])
 	}
@@ -373,7 +375,7 @@ write_uniforms :: proc(h: ^Cg, builder: ^strings.Builder) {
 		}
 		fmt.sbprintfln(builder, "\n// %s", uniform.name)
 		for field in get_engine_fields(uniform.kind) {
-			fmt.sbprintfln(builder, "uniform %s %s;", engine_type(field.type), block_field_name(uniform.name, field.name))
+			fmt.sbprintfln(builder, "uniform %s %s%s;", engine_type(field.type), block_field_name(uniform.name, field.name), engine_array_suffix(field.type, h.ir.target))
 		}
 	}
 	for uniform in h.ir.uniforms {

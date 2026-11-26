@@ -1,0 +1,15 @@
+mbs-tev 2
+target 3ds
+
+texture 0 tex texcoord 0
+
+stage 0 MODULATE TEXTURE0 PRIMARY_COLOR
+stage 1 MULTIPLY_ADD FRAGMENT_PRIMARY PREVIOUS FRAGMENT_SECONDARY
+
+lighting diffuse specular
+lighting_table D0 NH
+lighting_clamp_highlights true
+lighting_two_sided false
+lighting_fresnel secondary_alpha_zero
+
+alphatest GEQUAL uniform render_alpha_cutoff

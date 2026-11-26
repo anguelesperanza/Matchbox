@@ -177,6 +177,26 @@ The scene's lights are a third block (G2 L5), filled by `set_lights` and `set_li
 - It can be read in either stage. Per-vertex lighting reads it in the vertex stage, where the 3DS unrolls the loop
   (an index there must be a constant or a loop counter, `MBS-E10`).
 
+A skinned draw's joints are a fourth engine block (G6), `skin`, filled by the engine from the frame's joint arena:
+
+```odin
+@(uniform = .SKIN) skin: struct {
+	row0: [JOINT_SLOT_COUNT][4]f32, // the first row of every joint's skin matrix (the last row is always 0 0 0 1)
+	row1: [JOINT_SLOT_COUNT][4]f32,
+	row2: [JOINT_SLOT_COUNT][4]f32,
+}
+```
+
+- **`JOINT_SLOT_COUNT`** is the target's most joints per draw: 256 on PC, 64 on the Vita, 22 on the 3DS
+  (`mbi.skin_settings.joint_limit`; provisional, see `docs/g6_skinned_animation_plan.md`). A shader built for one limit is refused by an
+  engine with another.
+- The vertex input gains the attributes **`joints`** and **`weights`**, `[4]f32` each, which only a skinned mesh has. The 3DS and the
+  Vita read `joints` as the numbers 0..255, the PC as 0..1 (scale by 255 under `when TARGET == .PC`); `weights` are 0..1 on the PC
+  and the Vita and 0..255 on the 3DS (scale by 1/255 under `when TARGET == .PICA200`). `mesh_skinned_lit.mbs` is the model.
+- **Indexing with a joint.** `skin.row0[i32(input.joints[k])]` is allowed on the 3DS, where an index otherwise has to be a constant or a
+  loop counter (`MBS-E10`): the cast must be written inline in the index, and mbsc reads the register through the vertex unit's
+  address register (`mova a0.x`). One such read per instruction operand; the generated program reads each row array into a temporary.
+
 ### Game-owned uniforms
 
 A uniform the game sets by name:

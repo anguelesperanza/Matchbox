@@ -40,6 +40,22 @@ import "core:strings"
 // get_max_lights is how many light slots a target has, which sizes the lights block. The 3DS's unit has 8 and the
 // Vita matches it; PC has 64 (the engine's MAX_PC_LIGHTS). The engine's array size for each target must say the same
 // (matchbox/light.odin), since the engine fills the block this sizes.
+// get_max_joints is how many joints one skinned draw carries on a target (G6): the palette's size, and what a shader's
+// JOINT_SLOT_COUNT is. The engine's limit for the target (mbi.skin_settings in matchbox/backend_*.odin) must say the
+// same, since the engine fills the block this sizes. 22 on the 3DS is what its 96 float registers leave (three a joint)
+// after the lit shader's own; revisit with the PC's 256 and the Vita's 64 (docs/g6_skinned_animation_plan.md)
+get_max_joints :: proc(target: Target) -> int {
+	switch target {
+	case .PC:
+		return 256
+	case .VITA:
+		return 64
+	case .PICA200:
+		return 22
+	}
+	return 22
+}
+
 get_max_lights :: proc(target: Target) -> int {
 	switch target {
 	case .PC:

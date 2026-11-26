@@ -44,6 +44,7 @@ when !VITA {
 		indices:rawptr,
 		index_count:u32,
 		lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
+		skinned:bool, // made by create_skinned_mesh: Skinned_Vertex, 56 bytes a vertex (also lit)
 	}
 
 	/*Everything one shader needs to draw. Two live in Backend_State: `mbi.pipeline` and `mbi.lit_pipeline`*/
@@ -56,6 +57,7 @@ when !VITA {
 			lit per pixel with the lighting unit bound, or per vertex from the light uniforms below
 		*/
 		lighting:Maybe(Lighting_Mode),
+		skinned:bool, // reads a Skinned_Vertex: six attributes, and a joint palette in registers
 
 		// Register of each engine uniform, found by name. mbsc names them <block>_<field>
 		model_uniform:i32,
@@ -72,6 +74,11 @@ when !VITA {
 		specular_strength_uniform:i32,
 		tint_uniform:i32,
 		uv_rectangle_uniform:i32,
+		// The skinned shaders' alone, -1 in the others: the joint palette as three arrays of float4, one a matrix row,
+		// `mbi.skin_settings.joint_limit` registers each
+		skin_row0_uniform:i32,
+		skin_row1_uniform:i32,
+		skin_row2_uniform:i32,
 
 		tev:Tev_Plan,
 		white_texture:c3d.C3D_Tex, // bound for untextured draws, so the plan's TEXTURE0 leaves the colour alone. mbi.pipeline's serves both
@@ -144,7 +151,15 @@ when !VITA {
 		return
 	}
 
-	/*The two kinds of mesh differ only in how many bytes a vertex has; the memory is filled the same way*/
+	/*Copies skinned vertices and indices into linear memory, for a skinned model part. The slices can be freed afterwards*/
+	create_skinned_mesh :: proc(vertices:[]Skinned_Vertex, indices:[]u16) -> (mesh:Mesh) {
+		mesh = create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+		mesh.lit = true
+		mesh.skinned = true
+		return
+	}
+
+	/*The three kinds of mesh differ only in how many bytes a vertex has; the memory is filled the same way*/
 	@(private = "file")
 	create_mesh_from_bytes :: proc(vertex_bytes:[]u8, vertex_count:int, indices:[]u16) -> (mesh:Mesh) {
 		assert(vertex_count > 0 && len(indices) > 0, "A mesh needs vertices and indices")
@@ -187,6 +202,8 @@ when !VITA {
 	@(private)
 	create_render_pipeline :: proc() {
 		load_render_pipeline(&mbi.pipeline, "shaders/mesh.shbin", #load("shaders/mesh.3ds.tev", string), nil)
+		load_render_pipeline(&mbi.skinned_pipeline, "shaders/mesh_skinned.shbin", #load("shaders/mesh_skinned.3ds.tev", string), nil, skinned = true)
+		load_render_pipeline(&mbi.skinned_lit_pipeline, "shaders/mesh_skinned_lit.shbin", #load("shaders/mesh_skinned_lit.3ds.tev", string), .PER_PIXEL, skinned = true)
 		load_render_pipeline(&mbi.lit_pipeline, "shaders/mesh_lit.shbin", #load("shaders/mesh_lit.3ds.tev", string), .PER_PIXEL)
 		load_render_pipeline(&mbi.vertex_lit_pipeline, "shaders/mesh_vertex_lit.shbin", #load("shaders/mesh_vertex_lit.3ds.tev", string), .PER_VERTEX)
 
@@ -201,8 +218,9 @@ when !VITA {
 
 	/*Loads one shader from romfs, finds its uniforms and reads its TexEnv plan*/
 	@(private = "file")
-	load_render_pipeline :: proc(pipeline:^Render_Pipeline, shader_path:string, tev_text:string, lighting:Maybe(Lighting_Mode)) {
+	load_render_pipeline :: proc(pipeline:^Render_Pipeline, shader_path:string, tev_text:string, lighting:Maybe(Lighting_Mode), skinned := false) {
 		pipeline.lighting = lighting
+		pipeline.skinned = skinned
 		path_buffer:[256]u8
 		path, path_ok := build_path(path_buffer[:], mbi.asset_path, shader_path)
 		ensure(path_ok, "Shader path is too long")
@@ -240,6 +258,9 @@ when !VITA {
 		pipeline.lights_cone_uniform = find(pipeline, shader_path, "lights_cone") if per_vertex else -1
 		pipeline.shininess_uniform = find(pipeline, shader_path, "render_shininess") if per_vertex else -1
 		pipeline.specular_strength_uniform = find(pipeline, shader_path, "render_specular_strength") if per_vertex else -1
+		pipeline.skin_row0_uniform = find(pipeline, shader_path, "skin_row0") if skinned else -1
+		pipeline.skin_row1_uniform = find(pipeline, shader_path, "skin_row1") if skinned else -1
+		pipeline.skin_row2_uniform = find(pipeline, shader_path, "skin_row2") if skinned else -1
 		pipeline.tint_uniform = find(pipeline, shader_path, "render_tint")
 		pipeline.uv_rectangle_uniform = find(pipeline, shader_path, "render_uv_rectangle")
 
@@ -274,6 +295,8 @@ when !VITA {
 		for _, table in mbi.lighting_unit.spot_tables do free(table)
 		delete(mbi.lighting_unit.spot_tables)
 		c3d.C3D_TexDelete(&mbi.pipeline.white_texture)
+		unload_render_pipeline(&mbi.skinned_lit_pipeline)
+		unload_render_pipeline(&mbi.skinned_pipeline)
 		unload_render_pipeline(&mbi.vertex_lit_pipeline)
 		unload_render_pipeline(&mbi.lit_pipeline)
 		unload_render_pipeline(&mbi.pipeline)
@@ -416,6 +439,7 @@ when !VITA {
 	*/
 	@(private = "file")
 	choose_render_pipeline :: proc(item:Render_Item) -> ^Render_Pipeline {
+		if item.mesh.skinned do return &mbi.skinned_lit_pipeline if mbi.lighting.settings.enabled else &mbi.skinned_pipeline
 		if !item.mesh.lit || !mbi.lighting.settings.enabled do return &mbi.pipeline
 		switch get_lighting_mode(item.material) {
 		case .PER_PIXEL:  return &mbi.lit_pipeline
@@ -444,7 +468,13 @@ when !VITA {
 		c3d.AttrInfo_AddLoader(attributes, 0, .FLOAT, 3) // position
 		c3d.AttrInfo_AddLoader(attributes, 1, .FLOAT, 2) // uv
 		c3d.AttrInfo_AddLoader(attributes, 2, .FLOAT, 4) // color
-		if pipeline.lighting != nil do c3d.AttrInfo_AddLoader(attributes, 3, .FLOAT, 3) // normal
+		if pipeline.lighting != nil || pipeline.skinned do c3d.AttrInfo_AddLoader(attributes, 3, .FLOAT, 3) // normal
+		if pipeline.skinned {
+			// Bytes, which the loader hands the shader as the numbers 0 to 255: a joint is used as an address, a weight is
+			// scaled by 1/255 in the program (mesh_skinned_lit.mbs, under `when TARGET == .PICA200`)
+			c3d.AttrInfo_AddLoader(attributes, 4, .UNSIGNED_BYTE, 4) // joints
+			c3d.AttrInfo_AddLoader(attributes, 5, .UNSIGNED_BYTE, 4) // weights
+		}
 
 		for i in 0 ..< TEV_STAGE_COUNT {
 			environment := c3d.C3D_GetTexEnv(i32(i))
@@ -573,6 +603,21 @@ when !VITA {
 		}
 	}
 
+	/*
+		Sets the draw's joints in the program's registers: the three row arrays, padded with the identity to the limit
+		(get_skin_rows). 66 registers a draw, which is why a character is few draws on this target
+	*/
+	@(private = "file")
+	set_skin_uniforms :: proc(pipeline:^Render_Pipeline, item:Render_Item) {
+		rows := get_skin_rows(item)
+		limit := mbi.skin_settings.joint_limit
+		for joint in 0 ..< limit {
+			set_vector_uniform(pipeline.skin_row0_uniform + i32(joint), rows[joint])
+			set_vector_uniform(pipeline.skin_row1_uniform + i32(joint), rows[limit + joint])
+			set_vector_uniform(pipeline.skin_row2_uniform + i32(joint), rows[2 * limit + joint])
+		}
+	}
+
 	/*Issues the draw call for one queued item. The pipeline is bound and the render state set*/
 	@(private)
 	render_item :: proc(pipeline:^Render_Pipeline, item:Render_Item) {
@@ -602,7 +647,10 @@ when !VITA {
 
 		buffers := c3d.C3D_GetBufInfo()
 		c3d.BufInfo_Init(buffers)
-		if pipeline.lighting != nil {
+		if pipeline.skinned {
+			set_skin_uniforms(pipeline, item)
+			c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Skinned_Vertex), 6, 0x543210) // attributes 0 to 5 in order
+		} else if pipeline.lighting != nil {
 			c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Lit_Vertex), 4, 0x3210) // attributes 0 to 3, the normal last
 		} else if item.mesh.lit {
 			// Lighting is off: 0xE is a 12-byte padding component that steps over the normal, so
@@ -680,6 +728,7 @@ when !VITA {
 		defer {
 			clear(&mbi.opaque_items)
 			clear(&mbi.transparent_items)
+			clear(&mbi.skin_state.rows)
 			mbi.camera_active = false
 			mbi.screen_pass = false
 			mbi.discard_pass = false

@@ -39,6 +39,8 @@ Render_Item :: struct {
 	uv_rectangle:[4]f32,
 	alpha_cutoff:f32,
 	material:Material, // how a lit mesh takes a highlight; an unlit one ignores it
+	joint_offset:int, // a skinned mesh's palette: where its joints start in mbi.skin_state.rows (skin.odin), in joints
+	joint_count:int, // 0 for a skinned mesh drawn in its bind pose (the identity), and for everything that is not skinned
 }
 
 /*Queues a mesh to be drawn at camera_end. `model` places it in the world.
@@ -60,10 +62,10 @@ render_mesh :: proc(
 	rather than not at all. Sprites and shapes aren't lit and leave it
 */
 @(private)
-queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32, material:Material = mbi.model_settings.default_material) {
+queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32, material:Material = mbi.model_settings.default_material, joint_offset:int = 0, joint_count:int = 0) {
 	ensure(mbi.camera_active == true, "Drawing must happen between camera_start and camera_end")
 
-	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff, material = material}
+	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff, material = material, joint_offset = joint_offset, joint_count = joint_count}
 
 	switch blend {
 	case .NONE:

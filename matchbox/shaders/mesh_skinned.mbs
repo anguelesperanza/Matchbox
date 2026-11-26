@@ -1,0 +1,78 @@
+// The skinned unlit model shader (G6): mesh.mbs for a Skinned_Vertex, drawn while lighting is off. The `normal` is
+// declared though nothing reads it, so the attributes keep the order of mesh_skinned_lit.mbs (the 3DS loads them by
+// position, and the engine fills one vertex layout for both). The skinning is mesh_skinned_lit.mbs's; keep them in step.
+
+@(texture = 0) tex:Texture2D
+
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+	normal: [3]f32 `attr:"normal"`,
+	joints: [4]f32 `attr:"joints"`,
+	weights: [4]f32 `attr:"weights"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv: [2]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32
+}
+
+@(uniform = .SKIN) skin: struct {
+	row0: [JOINT_SLOT_COUNT][4]f32,
+	row1: [JOINT_SLOT_COUNT][4]f32,
+	row2: [JOINT_SLOT_COUNT][4]f32,
+}
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+
+	// The engine hands a joint as a byte: the 3DS and the Vita load it as the number 0..255, the PC as 0..1 (a UINT format
+	// reaches a float input as the integer's bits, a denormal that casts to 0: every vertex would follow joint 0)
+	joints := input.joints
+	weights := input.weights
+	when TARGET == .PC {
+		joints = input.joints * 255.0 + 0.5
+	}
+	when TARGET == .PICA200 {
+		weights = input.weights * 0.003921568859368563
+	}
+
+	// The weighted sum of the joints' rows, then the vertex through them: a matrix built once and used twice, so the
+	// position and the normal are moved by provably the same deformation
+	row0 := [4]f32{0.0, 0.0, 0.0, 0.0}
+	row1 := [4]f32{0.0, 0.0, 0.0, 0.0}
+	row2 := [4]f32{0.0, 0.0, 0.0, 0.0}
+	for k in 0 ..< 4 {
+		weight := weights[k]
+		row0 = row0 + skin.row0[i32(joints[k])] * weight
+		row1 = row1 + skin.row1[i32(joints[k])] * weight
+		row2 = row2 + skin.row2[i32(joints[k])] * weight
+	}
+	at := [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	moved := [4]f32{dot(row0, at), dot(row1, at), dot(row2, at), 1.0}
+
+	world := render.model * moved
+	output.position = frame.view_projection * world
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+	return output
+}
+
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	color := sample(tex, v.uv) * v.color
+	if color.a < render.alpha_cutoff do discard()
+	return color
+}

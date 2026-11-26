@@ -137,6 +137,8 @@ engine_field_type :: proc(key: string, target: Target) -> ^Type {
 	switch {
 	case key == "[LIGHT_SLOT_COUNT][4]f32":
 		return make_sized_array(make_vector(&TYPE_F32, 4), get_max_lights(target))
+	case key == "[JOINT_SLOT_COUNT][4]f32":
+		return make_sized_array(make_vector(&TYPE_F32, 4), get_max_joints(target))
 	case key == "f32":
 		return &TYPE_F32
 	case key == "[2]f32":

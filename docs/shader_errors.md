@@ -257,7 +257,7 @@ as indexes into uniform arrays. `a + b` on two `i32` values is an error there.
 
 **Why.** Indexing a uniform array with anything other than a constant, a loop counter or one of the two
 address registers is not possible. Also, only one operand of an instruction can use an index register.
-**Fix.** Loop over the array, or use constants.
+**Fix.** Loop over the array, or use constants. A joint index read straight from a vertex attribute is the exception on the 3DS: `array[i32(joints[k])]`, with the cast written inline in the index (`docs/shader_pica.md`, "Indexing with a computed value").
 
 ---
 

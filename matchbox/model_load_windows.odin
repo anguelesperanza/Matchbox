@@ -14,7 +14,8 @@ package matchbox
 	- `load_model` uploads that: one Mesh per part, one Texture per image.
 
 	The parsing is the vendored `matchbox/gltf2`'s. What is here is everything after it,
-	ported from main's model_load.odin without its GPU code, skinning, VRM and PBR materials:
+	ported from main's model_load.odin without its GPU code, VRM and PBR materials (skins and
+	animations are model_skin_load.odin's):
 	- The node hierarchy is flattened. Every node's transform is accumulated down the tree and
 	  baked into its vertices, so the model is in the file's own space. Without that, a model
 	  built from parts (a stove with its doors as separate nodes) arrives as a heap at the origin.
@@ -23,8 +24,9 @@ package matchbox
 	  also handles interleaved vertices.
 	- Read: positions, normals, the first texture coordinates and vertex colours, indices, and a
 	  material's base colour factor and texture, alpha mode and cutoff, and double-sidedness.
-	  Skipped rather than failed on: skins and animations (G6), cameras, morph targets, line and
-	  point primitives, and the other material channels.
+	  Skipped rather than failed on: cameras, morph targets, line and point primitives, and the other
+	  material channels. A skinned primitive keeps its vertices in the mesh's own space (see
+	  model_skin_load.odin) and is cut into parts of at most the target's joint limit
 */
 
 import "core:image"
@@ -52,8 +54,8 @@ load_model :: proc(filename:string, filter:Filter_Mode = .POINT) -> (model:Model
 	path := get_asset(filename, .MODEL)
 	defer delete(path)
 
-	data, ok := read_gltf_model(path)
-	defer destroy_model_data(data)
+	data, ok := read_gltf_model(path, mbi.skin_settings.joint_limit)
+	defer destroy_model_data_leftovers(data)
 	if ok == false {
 		print("Could not read model", path)
 		panic("Failed to load model")
@@ -77,9 +79,12 @@ load_model :: proc(filename:string, filter:Filter_Mode = .POINT) -> (model:Model
 /*
 	Reads a `.gltf` or `.glb` at `path` (a real path, not an asset name) into Model_Data. `ok` is
 	false, with a printed reason, when the file can't be read, isn't glTF, or has nothing to
-	draw. Free the result with destroy_model_data
+	draw. Free the result with destroy_model_data. `joint_limit` is the most joints one skinned part may use,
+	a target's (mbi.skin_settings); the handhelds' build passes the console's, so the file it writes is cut
+	for it. 0 means no cut beyond 256, the most an 8-bit joint can name
 */
-read_gltf_model :: proc(path:string) -> (data:Model_Data, ok:bool) {
+read_gltf_model :: proc(path:string, joint_limit:int = 0) -> (data:Model_Data, ok:bool) {
+	joint_limit := joint_limit if joint_limit > 0 else 256
 	bytes, read_error := os.read_entire_file(path, context.allocator)
 	if read_error != nil {
 		print("No such model file:", path)
@@ -109,10 +114,12 @@ read_gltf_model :: proc(path:string) -> (data:Model_Data, ok:bool) {
 	// mesh at the origin
 	scene := file.scene.? or_else 0
 	if len(file.scenes) > 0 && int(scene) < len(file.scenes) {
-		for root in file.scenes[scene].nodes do gather_gltf_node(file, root, linalg.MATRIX4F32_IDENTITY, &data, &images)
+		for root in file.scenes[scene].nodes do gather_gltf_node(file, root, linalg.MATRIX4F32_IDENTITY, &data, &images, joint_limit)
 	} else {
-		for _, mesh in file.meshes do gather_gltf_mesh(file, gltf.Integer(mesh), linalg.MATRIX4F32_IDENTITY, &data, &images)
+		for _, mesh in file.meshes do gather_gltf_mesh(file, gltf.Integer(mesh), linalg.MATRIX4F32_IDENTITY, &data, &images, joint_limit)
 	}
+	data.skeleton = build_gltf_skeleton(file)
+	data.animations = build_gltf_animations(file)
 
 	if len(data.parts) == 0 {
 		print("Nothing to draw in", path, "(no triangle primitives)")
@@ -128,17 +135,25 @@ read_gltf_model :: proc(path:string) -> (data:Model_Data, ok:bool) {
 	multiplying both in is right either way
 */
 @(private)
-gather_gltf_node :: proc(file:^gltf.Data, index:gltf.Integer, parent:matrix[4, 4]f32, data:^Model_Data, images:^map[gltf.Integer]int) {
+gather_gltf_node :: proc(file:^gltf.Data, index:gltf.Integer, parent:matrix[4, 4]f32, data:^Model_Data, images:^map[gltf.Integer]int, joint_limit:int) {
 	if int(index) >= len(file.nodes) do return
 	node := file.nodes[index]
 	world := parent * node.mat * calculate_model_matrix(node.translation, node.rotation, node.scale)
-	if mesh, has_mesh := node.mesh.?; has_mesh do gather_gltf_mesh(file, mesh, world, data, images)
-	for child in node.children do gather_gltf_node(file, child, world, data, images)
+	if mesh, has_mesh := node.mesh.?; has_mesh {
+		// A skinned mesh ignores its node's transform (glTF), so it is read in its own space, not baked into the model's
+		skin, is_skinned := node.skin.?
+		if is_skinned && int(skin) < len(file.skins) {
+			gather_gltf_mesh(file, mesh, linalg.MATRIX4F32_IDENTITY, data, images, joint_limit, int(skin), int(index))
+		} else {
+			gather_gltf_mesh(file, mesh, world, data, images, joint_limit)
+		}
+	}
+	for child in node.children do gather_gltf_node(file, child, world, data, images, joint_limit)
 }
 
 /*One mesh's triangle primitives, each becoming a part with `world` baked into its vertices*/
 @(private)
-gather_gltf_mesh :: proc(file:^gltf.Data, index:gltf.Integer, world:matrix[4, 4]f32, data:^Model_Data, images:^map[gltf.Integer]int) {
+gather_gltf_mesh :: proc(file:^gltf.Data, index:gltf.Integer, world:matrix[4, 4]f32, data:^Model_Data, images:^map[gltf.Integer]int, joint_limit:int, skin:int = -1, mesh_node:int = -1) {
 	if int(index) >= len(file.meshes) do return
 
 	// Normals are directions: no translation, and under an uneven scale the inverse transpose,
@@ -185,6 +200,11 @@ gather_gltf_mesh :: proc(file:^gltf.Data, index:gltf.Integer, world:matrix[4, 4]
 			continue
 		}
 		part.indices = indices
+
+		if skin >= 0 {
+			if gather_gltf_skinned_primitive(file, primitive, &part, skin, mesh_node, count, joint_limit, data, images) do continue
+			// Nothing to skin it with: drawn as an ordinary part, in the mesh's own space
+		}
 		if has_normals == false && split_gltf_flat_normals(&part) == false {
 			delete(part.vertices)
 			delete(part.indices)
@@ -450,4 +470,40 @@ read_gltf_indices :: proc(file:^gltf.Data, primitive:gltf.Mesh_Primitive, vertex
 		indices[i] = u16(value)
 	}
 	return indices, true
+}
+
+/*
+	A skinned primitive: its influences read, quantised, and the primitive cut into parts of at most
+	`joint_limit` joints, each appended to the model. True when it was handled (the parts are in `data`, and
+	`part`'s own arrays are freed), false when the primitive has no joints and weights and should be drawn as
+	an ordinary part
+*/
+@(private)
+gather_gltf_skinned_primitive :: proc(file:^gltf.Data, primitive:gltf.Mesh_Primitive, part:^Model_Data_Part, skin, mesh_node, count, joint_limit:int, data:^Model_Data, images:^map[gltf.Integer]int) -> bool {
+	influences, influences_ok := read_gltf_influences(file, primitive.attributes, count)
+	if influences_ok == false do return false
+
+	pieces, split_ok := split_skinned_primitive(part.vertices, influences, part.indices, len(file.skins[skin].joints), joint_limit)
+	if split_ok == false {
+		print("A skinned glTF primitive needs more joints in one triangle than this target's limit of", joint_limit, "allows; it is skipped")
+		delete(part.vertices)
+		delete(part.indices)
+		return true
+	}
+	defer delete(pieces)
+
+	read_gltf_material(file, primitive.material, part, data, images)
+	for piece in pieces {
+		piece_part := part^
+		piece_part.vertices = nil
+		piece_part.indices = piece.indices
+		piece_part.skinned_vertices = piece.vertices
+		piece_part.skin = skin
+		piece_part.mesh_node = mesh_node
+		piece_part.joint_map = piece.joint_map
+		append(&data.parts, piece_part)
+	}
+	delete(part.vertices)
+	delete(part.indices)
+	return true
 }

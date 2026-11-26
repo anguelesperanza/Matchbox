@@ -198,7 +198,7 @@ for %%m in ("%~1\*.gltf" "%~1\*.glb") do (
         echo %MODELPACK% is missing. Build it with: odin build tools/modelpack.odin -file -out:tools/modelpack.exe
         exit /b 1
     )
-    "%MODELPACK%" "%%~m" "%MODELOUT%" "%STAGE%\images"
+    "%MODELPACK%" "%%~m" "%MODELOUT%" "%STAGE%\images" 64
     if errorlevel 1 exit /b 1
 )
 exit /b 0

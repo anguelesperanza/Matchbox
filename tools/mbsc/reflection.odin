@@ -74,8 +74,9 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 		}
 	}
 
-	has_frame, has_render, has_game := false, false, false
+	has_frame, has_render, has_game, has_skin := false, false, false, false
 	for uniform in ir.uniforms {
+		has_skin ||= uniform.kind == .SKIN
 		has_frame ||= uniform.kind == .FRAME
 		has_render ||= uniform.kind == .RENDER
 		if uniform.kind == .GAME {
@@ -108,6 +109,9 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	if lights {
 		write_light_reflection(&builder, false)
 	}
+	if has_skin {
+		write_block(&builder, "skin", SKIN_REGISTER, engine_layout(ir, .SKIN))
+	}
 
 	fmt.sbprintln(&builder)
 	if has_frame {
@@ -121,6 +125,9 @@ generate_reflection :: proc(ir: ^IR_Module, allocator := context.allocator) -> (
 	}
 	if lights {
 		write_light_reflection(&builder, true)
+	}
+	if has_skin {
+		write_values(&builder, "skin", engine_layout(ir, .SKIN))
 	}
 
 	if len(ir.textures) > 0 {

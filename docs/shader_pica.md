@@ -36,6 +36,14 @@ known to run on hardware, changing one thing at a time.
 `--emit-reflection` with `-target:3ds` writes the file the runtime reads. The fragment stage is not a program on this
 hardware; it is the TexEnv plan (S6).
 
+## Indexing with a computed value (G6)
+
+The vertex unit has two address registers, and a read through one is `mov r0, array[a0.x]` after `mova a0.x, <register>`; only one operand of an
+instruction may be indexed. mbsc emits this for an inline `array[i32(<f32 expression>)]` (the joint palette of a skinned vertex), and nothing
+else: an index kept in a local, or any whole-number arithmetic, is still `MBS-E10` / `MBS-E9`, since the vertex unit has no integer ALU.
+`mova` converts the float to an integer by truncating, so a joint attribute loaded as `UNSIGNED_BYTE` (the numbers 0..255) indexes exactly.
+**Verified in Azahar only.** The gate build (`animation_check_g6_gate.3dsx`) is the real New 3DS LL's check.
+
 ## Fragment lighting (L0)
 
 What `light_test1` established on 2026-11-24 (hand-written shader and citro3d calls; it ran on the New 3DS LL and in

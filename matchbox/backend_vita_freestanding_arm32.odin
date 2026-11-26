@@ -37,6 +37,10 @@ when VITA {
 		lit_pipeline:Render_Pipeline,
 		lit_opaque_pipeline:Render_Pipeline, // lit_pipeline without the alpha test, for parts with no cut-out (shaders/mesh_lit_opaque.mbs)
 		vertex_lit_pipeline:Render_Pipeline,
+		// Skinned meshes (G6): `skinned_pipeline` unlit, `skinned_lit_pipeline` per pixel. A skinned part asking for per-vertex
+		// lighting is drawn per pixel (no per-vertex skinned shader), as on every target
+		skinned_pipeline:Render_Pipeline,
+		skinned_lit_pipeline:Render_Pipeline,
 		// GXM has no uniforms that outlive a draw: each draw gets a fresh default uniform buffer, so
 		// the camera's matrix and lights are kept here and written into every one
 		camera_view_projection:matrix[4, 4]f32,
@@ -46,10 +50,13 @@ when VITA {
 		// every render target (render_vita_freestanding_arm32.odin: ensure_screen_scene)
 		screen_scene_open:bool,
 		pending_clear:Maybe([4]f32), // a clear_background asked for before the screen's scene opened
+		skin_settings:Skin_Settings,
 	}
 
 	/*The backend's fixed values, which matchbox_info.odin puts in `mbi` where it is declared*/
 	BACKEND_DEFAULTS :: Backend_State {
+		// A float4 array in the vertex uniform buffer, 3 a joint. **Revisit later:** a target's number, not the engine's
+		skin_settings = {joint_limit = 64, layer_limit = 2},
 		print_log = {path = "ux0:data/matchbox.log"},
 	}
 
@@ -73,6 +80,7 @@ when VITA {
 		index_count:u32,
 		uid:sce.UID, // the block, for gfx.free
 		lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
+		skinned:bool, // made by create_skinned_mesh: Skinned_Vertex, 56 bytes a vertex (also lit)
 	}
 
 	/*

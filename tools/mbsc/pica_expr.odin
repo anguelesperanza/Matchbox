@@ -281,7 +281,12 @@ pica_eval :: proc(h: ^Pica, e: ^IR_Expr) -> Pica_Value {
 		base := pica_eval(h, node.base)
 		index, known := pica_const_int(h, node.index)
 		if known == false {
-			return pica_fail(h, e, "an index the shader computes can't be written on the 3DS; use a constant or a `for` counter")
+			// A whole number made from a float, `skin.row0[i32(input.joints.x)]` (G6): the vertex unit's address register
+			// takes a float and keeps its whole part (`mova`), which is how a vertex picks its joint
+			if conversion, is_conversion := node.index.variant.(IR_Convert); is_conversion && node.base.type.kind == .ARRAY {
+				return pica_indexed_read(h, e, base, conversion.operand)
+			}
+			return pica_fail(h, e, "an index the shader computes can't be written on the 3DS; use a constant, a `for` counter or a conversion `i32(...)` of a number")
 		}
 		#partial switch node.base.type.kind {
 		case .ARRAY:
@@ -750,4 +755,31 @@ pica_polynomial :: proc(h: ^Pica, argument: Pica_Operand, lanes: int, sine: bool
 	}
 	pica_release(h, r)
 	return p
+}
+
+/*
+	An array element chosen by a computed whole number: `mova a0.x, <number>`, then the element addressed as
+	`array[a0.x]`, copied straight into a temporary. Copied at once because `a0` is one register: a second
+	indexed read evaluated before this one is used would move it, and the first operand would then name another
+	element. The copy costs one `mov`, and it keeps picasso's rule that only one operand of an instruction may be
+	indexed (a `dp4` with the joint's row and a vertex register would be two inputs meeting)
+*/
+@(private = "file")
+pica_indexed_read :: proc(h: ^Pica, e: ^IR_Expr, array: Pica_Value, number: ^IR_Expr) -> Pica_Value {
+	size := pica_registers_of(h, e.type)
+	if size != 1 || len(array) == 0 || array[0].kind != .UNIFORM {
+		return pica_fail(h, e, "only an array of vectors in a uniform can be indexed by a computed number on the 3DS")
+	}
+	// `name[0]` -> `name[a0.x]`
+	name := array[0].base
+	open := strings.last_index_byte(name, '[')
+	if open < 0 do return pica_fail(h, e, "an indexed uniform has no array in its register name")
+	relative := fmt.aprintf("%s[a0.x]", name[:open])
+
+	source := pica_eval(h, number)
+	pica_emit(h, "mova", "a0", []int{0}, source[0])
+	pica_release(h, source[0])
+
+	element := Pica_Operand{kind = .UNIFORM, base = relative, swz = array[0].swz, temp = -1}
+	return pica_one(pica_to_temp(h, element, pica_lanes_of(h, e.type)[0]))
 }

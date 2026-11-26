@@ -176,6 +176,10 @@ picasso -o %ROMFS%\shaders\mesh_lit.shbin matchbox\shaders\mesh_lit.3ds.v.pica
 if errorlevel 1 goto :fail
 picasso -o %ROMFS%\shaders\mesh_vertex_lit.shbin matchbox\shaders\mesh_vertex_lit.3ds.v.pica
 if errorlevel 1 goto :fail
+picasso -o %ROMFS%\shaders\mesh_skinned.shbin matchbox\shaders\mesh_skinned.3ds.v.pica
+if errorlevel 1 goto :fail
+picasso -o %ROMFS%\shaders\mesh_skinned_lit.shbin matchbox\shaders\mesh_skinned_lit.3ds.v.pica
+if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
 :: Compile Odin → ARM assembly
 :: ---------------------------------------------------------------
@@ -290,7 +294,7 @@ for %%m in ("%~1\*.gltf" "%~1\*.glb") do (
         echo %MODELPACK% is missing. Build it with: odin build tools/modelpack.odin -file -out:tools/modelpack.exe
         exit /b 1
     )
-    "%MODELPACK%" "%%~m" "%MODELOUT%" "%STAGE%\images"
+    "%MODELPACK%" "%%~m" "%MODELOUT%" "%STAGE%\images" 22
     if errorlevel 1 exit /b 1
 )
 exit /b 0

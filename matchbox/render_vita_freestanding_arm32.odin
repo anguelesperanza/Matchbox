@@ -39,6 +39,7 @@ when VITA {
 			material: in the fragment program per pixel, in the vertex program per vertex
 		*/
 		lighting:Maybe(Lighting_Mode),
+		skinned:bool, // reads a Skinned_Vertex and a joint palette
 		vertex_program:^sce.GxmVertexProgram, // for the meshes the shader is meant for: Vertex, or Lit_Vertex when lit
 		/*
 			The unlit shader reading Lit_Vertex, for lit meshes while lighting is off: GXM fixes a
@@ -69,6 +70,11 @@ when VITA {
 		shininess_uniform:^sce.GxmProgramParameter,
 		specular_strength_uniform:^sce.GxmProgramParameter,
 
+		// The skinned shaders' alone, nil in the others: the joint palette as three arrays of float4, `mbi.skin_settings.joint_limit` each
+		skin_row0_uniform:^sce.GxmProgramParameter,
+		skin_row1_uniform:^sce.GxmProgramParameter,
+		skin_row2_uniform:^sce.GxmProgramParameter,
+
 		white_texture:gfx.Texture, // bound for untextured draws: the shader always samples. mbi.pipeline's serves both
 	}
 
@@ -88,7 +94,15 @@ when VITA {
 		return
 	}
 
-	/*The two kinds of mesh differ only in how many bytes a vertex has; the memory is filled the same way*/
+	/*Copies skinned vertices and indices into GPU-mapped memory, for a skinned model part. The slices can be freed afterwards*/
+	create_skinned_mesh :: proc(vertices:[]Skinned_Vertex, indices:[]u16) -> (mesh:Mesh) {
+		mesh = create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+		mesh.lit = true
+		mesh.skinned = true
+		return
+	}
+
+	/*The three kinds of mesh differ only in how many bytes a vertex has; the memory is filled the same way*/
 	@(private = "file")
 	create_mesh_from_bytes :: proc(vertex_bytes:[]u8, vertex_count:int, indices:[]u16) -> (mesh:Mesh) {
 		assert(vertex_count > 0 && len(indices) > 0, "A mesh needs vertices and indices")
@@ -137,6 +151,10 @@ when VITA {
 		// The same vertex program: the copy differs only in having no `discard`, which the fragment stage alone holds
 		load_render_pipeline(&mbi.lit_opaque_pipeline, #load("shaders/mesh_lit_v.gxp"), #load("shaders/mesh_lit_opaque_f.gxp"), .PER_PIXEL, has_alpha_test = false)
 		load_render_pipeline(&mbi.vertex_lit_pipeline, #load("shaders/mesh_vertex_lit_v.gxp"), #load("shaders/mesh_vertex_lit_f.gxp"), .PER_VERTEX)
+		print("pipelines: plain ones made, making the skinned ones")
+		load_render_pipeline(&mbi.skinned_pipeline, #load("shaders/mesh_skinned_v.gxp"), #load("shaders/mesh_skinned_f.gxp"), nil, skinned = true)
+		load_render_pipeline(&mbi.skinned_lit_pipeline, #load("shaders/mesh_skinned_lit_v.gxp"), #load("shaders/mesh_skinned_lit_f.gxp"), .PER_PIXEL, skinned = true)
+		print("pipelines: skinned ones made")
 
 		// 8 x 8 because a linear texture's rows are padded to 8 pixels anyway
 		ok:bool
@@ -147,8 +165,9 @@ when VITA {
 
 	/*Registers one shader's two programs, makes its vertex and fragment programs and finds its uniforms*/
 	@(private = "file")
-	load_render_pipeline :: proc(pipeline:^Render_Pipeline, vertex_gxp:[]u8, fragment_gxp:[]u8, lighting:Maybe(Lighting_Mode), has_alpha_test := true) {
+	load_render_pipeline :: proc(pipeline:^Render_Pipeline, vertex_gxp:[]u8, fragment_gxp:[]u8, lighting:Maybe(Lighting_Mode), has_alpha_test := true, skinned := false) {
 		pipeline.lighting = lighting
+		pipeline.skinned = skinned
 		ok:bool
 		pipeline.vertex_shader, ok = gfx.register_program(vertex_gxp)
 		if !ok do fail_pipeline("A vertex .gxp could not be registered")
@@ -158,7 +177,27 @@ when VITA {
 		// The names are the Cg main's parameters (<name>_v.cg), in Vertex's field order, with
 		// Lit_Vertex's normal after them in the lit shaders
 		vertex := pipeline.vertex_shader
-		if lighting != nil {
+		if skinned {
+			// Joints are whole numbers 0 to 255 for the program to use as an index; weights are normalised to 0 to 1
+			attributes: [6]sce.GxmVertexAttribute
+			count := 0
+			// psp2cgc drops an input the shader never reads: the unlit skinned shader has no a_normal. gfx.attribute gives a
+			// missing one register 0, which is a_position's. Vita3K accepts two attributes on one register where real GXM
+			// may not (the real Vita crashed), so an input the program dropped is left out of the attribute list
+			add :: proc(attributes:^[6]sce.GxmVertexAttribute, count:^int, program:gfx.Program, name:cstring, offset:uintptr, format:u8, components:u8) {
+				if gfx.parameter(program, name) == nil do return
+				attributes[count^] = gfx.attribute(program, name, u16(offset), format, components)
+				count^ += 1
+			}
+			add(&attributes, &count, vertex, "a_position", offset_of(Lit_Vertex, position), sce.GXM_ATTRIBUTE_FORMAT_F32, 3)
+			add(&attributes, &count, vertex, "a_texcoord", offset_of(Lit_Vertex, uv), sce.GXM_ATTRIBUTE_FORMAT_F32, 2)
+			add(&attributes, &count, vertex, "a_color", offset_of(Lit_Vertex, color), sce.GXM_ATTRIBUTE_FORMAT_F32, 4)
+			add(&attributes, &count, vertex, "a_normal", offset_of(Lit_Vertex, normal), sce.GXM_ATTRIBUTE_FORMAT_F32, 3)
+			add(&attributes, &count, vertex, "a_joints", offset_of(Skinned_Vertex, joints), sce.GXM_ATTRIBUTE_FORMAT_U8, 4)
+			add(&attributes, &count, vertex, "a_weights", offset_of(Skinned_Vertex, weights), sce.GXM_ATTRIBUTE_FORMAT_U8N, 4)
+			pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:count], size_of(Skinned_Vertex))
+			if pipeline.vertex_program == nil do fail_pipeline("The skinned mesh vertex program could not be made")
+		} else if lighting != nil {
 			attributes := [?]sce.GxmVertexAttribute {
 				gfx.attribute(vertex, "a_position", u16(offset_of(Lit_Vertex, position)), sce.GXM_ATTRIBUTE_FORMAT_F32, 3),
 				gfx.attribute(vertex, "a_texcoord", u16(offset_of(Lit_Vertex, uv)), sce.GXM_ATTRIBUTE_FORMAT_F32, 2),
@@ -206,6 +245,11 @@ when VITA {
 		// The shader without the test never reads the cutoff, so psp2cgc leaves it out: nil, and render_item skips it
 		if has_alpha_test do pipeline.alpha_cutoff_uniform = find(pipeline.fragment_shader, "render_alpha_cutoff")
 		pipeline.texture_unit = gfx.texture_unit(pipeline.fragment_shader, "tex")
+		if skinned {
+			pipeline.skin_row0_uniform = find(vertex, "skin_row0")
+			pipeline.skin_row1_uniform = find(vertex, "skin_row1")
+			pipeline.skin_row2_uniform = find(vertex, "skin_row2")
+		}
 		if mode, lit := lighting.?; lit {
 			pipeline.view_uniform = find(vertex, "frame_view")
 			// psp2cgc keeps a uniform only in the program that reads it: the fragment one per pixel, the vertex
@@ -245,6 +289,8 @@ when VITA {
 	@(private)
 	destroy_render_pipeline :: proc() {
 		gfx.destroy_texture(&mbi.pipeline.white_texture)
+		unload_render_pipeline(&mbi.skinned_lit_pipeline)
+		unload_render_pipeline(&mbi.skinned_pipeline)
 		unload_render_pipeline(&mbi.vertex_lit_pipeline)
 		unload_render_pipeline(&mbi.lit_opaque_pipeline)
 		unload_render_pipeline(&mbi.lit_pipeline)
@@ -272,8 +318,9 @@ when VITA {
 			case .PER_VERTEX: pipeline = &mbi.vertex_lit_pipeline
 			}
 		}
+		if item.mesh.skinned do pipeline = &mbi.skinned_lit_pipeline if lit else &mbi.skinned_pipeline
 		vertex_program := pipeline.vertex_program
-		if !lit && item.mesh.lit do vertex_program = pipeline.lit_vertex_program
+		if !lit && item.mesh.lit && !item.mesh.skinned do vertex_program = pipeline.lit_vertex_program
 		vertex_uniforms, fragment_uniforms := gfx.use_programs(vertex_program, pipeline.fragment_programs[blend])
 
 		// Odin's matrix memory goes in unchanged: mbsc wrote the Cg with mul(v, m) to match
@@ -288,6 +335,14 @@ when VITA {
 		gfx.set_uniform(vertex_uniforms, pipeline.uv_rectangle_uniform, uv[:])
 		if pipeline.alpha_cutoff_uniform != nil do gfx.set_uniform(fragment_uniforms, pipeline.alpha_cutoff_uniform, ([^]f32)(&cutoff)[:1])
 		if lit do set_light_uniforms(pipeline, vertex_uniforms, fragment_uniforms, item.material)
+		if item.mesh.skinned {
+			// The three row arrays, padded with the identity to the limit (get_skin_rows)
+			rows := get_skin_rows(item)
+			limit := mbi.skin_settings.joint_limit
+			gfx.set_uniform(vertex_uniforms, pipeline.skin_row0_uniform, ([^]f32)(raw_data(rows))[:4 * limit])
+			gfx.set_uniform(vertex_uniforms, pipeline.skin_row1_uniform, ([^]f32)(raw_data(rows[limit:]))[:4 * limit])
+			gfx.set_uniform(vertex_uniforms, pipeline.skin_row2_uniform, ([^]f32)(raw_data(rows[2 * limit:]))[:4 * limit])
+		}
 
 		// No texture is white, as on PC: the shader always samples, and white times the tint is the tint
 		texture := item.texture.texture if item.texture.texture != nil else &mbi.pipeline.white_texture
@@ -423,6 +478,7 @@ when VITA {
 		defer {
 			clear(&mbi.opaque_items)
 			clear(&mbi.transparent_items)
+			clear(&mbi.skin_state.rows)
 			mbi.camera_active = false
 			mbi.screen_pass = false
 			mbi.discard_pass = false

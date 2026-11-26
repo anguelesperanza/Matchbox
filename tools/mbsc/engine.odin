@@ -45,6 +45,15 @@ LIGHTS_FIELDS := [?]Engine_Field {
 	{"cone", "[LIGHT_SLOT_COUNT][4]f32"},
 }
 
+/*
+	The joint palette of a skinned draw (G6): a skin matrix is an affine 3 x 4, so only its three rows are kept, and the
+	block is three arrays of rows, one row per joint in each. Row arrays rather than one array indexed `joint * 3 + row`,
+	because the 3DS's vertex unit indexes with an address register it loads from a vertex attribute and has no integer
+	maths to scale it with (MBS-E9). A block named `skin`, like `lights`: the runtimes find `skin_row0`, ...
+*/
+@(rodata)
+SKIN_FIELDS := [?]Engine_Field{{"row0", "[JOINT_SLOT_COUNT][4]f32"}, {"row1", "[JOINT_SLOT_COUNT][4]f32"}, {"row2", "[JOINT_SLOT_COUNT][4]f32"}}
+
 // get_engine_fields is an engine block's fields in the engine's order; a game's own uniforms have none.
 get_engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
 	switch kind {
@@ -54,6 +63,8 @@ get_engine_fields :: proc(kind: Uniform_Kind) -> []Engine_Field {
 		return RENDER_FIELDS[:]
 	case .LIGHTS:
 		return LIGHTS_FIELDS[:]
+	case .SKIN:
+		return SKIN_FIELDS[:]
 	case .GAME:
 	}
 	return nil
@@ -68,14 +79,17 @@ get_engine_block_name :: proc(kind: Uniform_Kind) -> string {
 		return "render"
 	case .LIGHTS:
 		return "lights"
+	case .SKIN:
+		return "skin"
 	case .GAME:
 	}
 	return ""
 }
 
-// The vertex attributes the engine's mesh format has: `normal` is a Lit_Vertex's (G2 L4).
+// The vertex attributes the engine's mesh format has: `normal` is a Lit_Vertex's (G2 L4); `joints` and `weights` a
+// Skinned_Vertex's (G6), four bytes each: joints as 0..255 whole numbers, weights as 0..1 on PC and the Vita and as 0..255 on the 3DS.
 @(rodata)
-VERTEX_ATTRIBUTES := [?]string{"position", "texcoord", "color", "normal"}
+VERTEX_ATTRIBUTES := [?]string{"position", "texcoord", "color", "normal", "joints", "weights"}
 
 // The names a vertex stage can write for the fragment stage (part 1, section 4, "Varyings").
 @(rodata)
@@ -88,7 +102,7 @@ VARYING_OUTPUTS := [?]string{"position", "color", "texcoord0", "texcoord1", "tex
 	would be read wrong
 */
 @(rodata)
-PREDECLARED_NAMES := [?]string{"TARGET", "Target", "Texture2D", "LIGHT_SLOT_COUNT"}
+PREDECLARED_NAMES := [?]string{"TARGET", "Target", "Texture2D", "LIGHT_SLOT_COUNT", "JOINT_SLOT_COUNT"}
 
 // type_key writes a type the way the engine tables do, with the spaces taken out, so `matrix[4, 4]f32` and
 // `matrix[4,4]f32` compare equal.

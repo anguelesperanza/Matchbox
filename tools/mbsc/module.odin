@@ -35,6 +35,7 @@ Uniform_Kind :: enum {
 	RENDER, // the engine's per-draw block (`render`)
 	GAME, // one the game sets by name
 	LIGHTS, // the engine's lights, per camera (`lights`, G2 L5)
+	SKIN, // the engine's joint palette, per skinned draw (`skin`, G6): three rows a joint, a row array each
 }
 
 Uniform_Info :: struct {
@@ -104,6 +105,7 @@ build_module :: proc(parsed: ^Parsed, target: Target) -> ^Module {
 
 	collect_statements(module, parsed.file.decls[:])
 	add_light_slot_count(module)
+	add_joint_slot_count(module)
 	check_engine_uniforms(module)
 	check_declarations(module)
 	check_texture_slots(module)
@@ -131,6 +133,20 @@ add_light_slot_count :: proc(module: ^Module) {
 		text = fmt.aprintf("%d", get_max_lights(module.target)),
 	}
 	append(&module.constants, Constant_Info{name = "LIGHT_SLOT_COUNT", value = literal, node = literal})
+}
+
+/*
+	add_joint_slot_count gives the shader JOINT_SLOT_COUNT, how many joints one skinned draw can carry on this target
+	(get_max_joints), the way LIGHT_SLOT_COUNT is given: an ordinary constant, so the engine's `skin` block can be sized by it
+*/
+@(private = "file")
+add_joint_slot_count :: proc(module: ^Module) {
+	literal := ast.new(ast.Basic_Lit, tokenizer.Pos{}, tokenizer.Pos{})
+	literal.tok = tokenizer.Token {
+		kind = .Integer,
+		text = fmt.aprintf("%d", get_max_joints(module.target)),
+	}
+	append(&module.constants, Constant_Info{name = "JOINT_SLOT_COUNT", value = literal, node = literal})
 }
 
 find_struct :: proc(module: ^Module, name: string) -> ^Struct_Info {
@@ -382,6 +398,8 @@ read_uniform_kind :: proc(module: ^Module, value: ^ast.Expr) -> (kind: Uniform_K
 			return .RENDER, true
 		case "LIGHTS":
 			return .LIGHTS, true
+		case "SKIN":
+			return .SKIN, true
 		}
 	}
 	error(
@@ -389,9 +407,9 @@ read_uniform_kind :: proc(module: ^Module, value: ^ast.Expr) -> (kind: Uniform_K
 		"MBS-E24",
 		"unknown uniform block",
 		value,
-		"not `.FRAME`, `.RENDER` or `.LIGHTS`",
-		"the engine provides three blocks: `.FRAME` (once per frame), `.RENDER` (once per draw) and `.LIGHTS` (the scene's lights). A uniform of your own has no value: `@(uniform)`",
-		"write `@(uniform = .FRAME)`, `@(uniform = .RENDER)`, `@(uniform = .LIGHTS)` or `@(uniform)`",
+		"not `.FRAME`, `.RENDER`, `.LIGHTS` or `.SKIN`",
+		"the engine provides four blocks: `.FRAME` (once per frame), `.RENDER` (once per draw), `.LIGHTS` (the scene's lights) and `.SKIN` (a skinned draw's joints). A uniform of your own has no value: `@(uniform)`",
+		"write `@(uniform = .FRAME)`, `@(uniform = .RENDER)`, `@(uniform = .LIGHTS)`, `@(uniform = .SKIN)` or `@(uniform)`",
 	)
 	return .GAME, false
 }

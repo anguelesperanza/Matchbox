@@ -108,7 +108,7 @@ BACKEND_DEFAULTS :: Backend_State {
 	// The most joints one draw may use. **Revisit later:** the user plans a PC-only pass that raises this for PC games
 	// at the cost of models that no longer compile to the other targets. It is a setting rather than shared code so
 	// that raising it is this number and the shaders' JOINT_SLOT_COUNT (tools/mbsc/lighting.odin get_max_joints)
-	skin_settings = {joint_limit = 256},
+	skin_settings = {joint_limit = 256, layer_limit = 4},
 	shader_format = {
 		reflection_version = 1,
 		vertex_attributes = {

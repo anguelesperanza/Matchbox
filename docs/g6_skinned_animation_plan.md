@@ -487,3 +487,23 @@ by a float cast; the real `sceGxmSetUniformDataF` on a 64-element array paramete
 
 Reading the result: v1 runs, done. v1 crashes and v3 runs: the draw is the problem (vertex format or palette upload), and v2 says which. v3 crashes too: it is pipeline creation, and the last printed line says which.
 **To get the log:** after a crash open `ux0:data/matchbox.log` with VitaShell (or FTP) and send the last lines; a crash screen or a `C2-xxxx-x` code is also worth writing down.
+
+## Outcome (layers, 2026-11-26): the approved layer API, as built
+
+Approved as written in the addendum (names, per-node weight masks, additive mode, automatic fades, array of 4 with limits 4 PC / 2 Vita / 2 3DS, all "revisit later"). In `animator.odin`, `skeleton.odin`
+(`sample_skeleton_pose_masked`, `calculate_transform_additive`) and `skin.odin` (`Skin_Settings.layer_limit`, set per backend). Where the code settled a detail the addendum left open:
+
+- **`mask` is optional.** `play_animation_layer(..., mask = nil)` means every node for a layer that was not playing, and keeps the mask a playing layer has, so a state machine calling it every frame
+  changes nothing. An additive layer needs no mask (a node its clip does not touch changes by nothing).
+- **`weight` starts at 1** on every layer; the fade starts at 0 and rises over `fade.duration` (0.2 s default per layer, set it on `animator.layers[i].fade.duration`; 0 snaps).
+- **The first frame an additive layer measures from** is sampled in full once, when the clip starts, into `pose.layer_first[i]`. The per-layer scratch pose and that first frame are allocated in `create_animator` for the
+  slots below `layer_limit` only (a handheld's third and fourth slot hold nothing) and freed in `destroy_animator`.
+- **A layer with weight 0, or at fade level 0 with no time passed, does not advance its clock**; one that is switched off by `stop_animation_layer` keeps running while it fades.
+- **A masked node takes its whole pose from the layer's clip**, rest where the clip has no track for it (as `main`), so a replace mask should cover the joints the clip drives. This is in the type's comment.
+
+**Verified (numbers, not by eye):** 7 new tests in `skeleton_windows_test.odin` against numpy's palettes for the layered cases (`python tools/make_test_skinned_model.py` prints them): "Bend" replacing J1 and J2 of "Wave" at weights 1 and 0.5,
+a 0.5 mask weight on J1 alone, a mask of nothing equal to the base, "Nod" additive at weights 1 and 0.5, translation and scale added by hand, the fades (half strength after half a fade, in and out, 67.5 degrees
+between 90 and 45), a one-shot's `playing` going false at its end and `active` a fade later, an inactive layer and a zero-weight layer not advancing their clocks, the same clip asked again changing nothing,
+two layers in order, two animators with different layers apart, the mask builders by hand (a subtree of the arm, a ramp, named, 35 nodes of the rope), and a limit of 2 making only two layers. 198 matchbox tests pass.
+`test_arm.glb` gained the third clip "Nod" (index 2). **Not verified:** nothing about the cost of a layer has been measured; the figures in the addendum are still arithmetic. `animation_check_g6_layers.3dsx` is the build
+that shows a layer on a real 3DS (top face button, X). Nothing layered was built for the Vita yet: the Vita crash comes first.

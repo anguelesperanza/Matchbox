@@ -29,6 +29,10 @@ Skinned_Vertex :: struct {
 /*Fixed values the engine uses for skinning, held in mbi.skin_settings (written in each backend's BACKEND_DEFAULTS)*/
 Skin_Settings :: struct {
 	joint_limit:int, // the most joints one draw may use: 256 PC, 64 Vita, 22 3DS. A target's own, revisit later (see above)
+	// The most animation layers an animator works on top of its base clip: 4 PC, 2 Vita, 2 3DS. A layer is a second pass over every
+	// masked joint on the CPU, which the handhelds' soft-float cores feel (docs/g6_skinned_animation_plan.md, the layer addendum).
+	// A target's own, revisit later once measured on hardware. At most MAX_ANIMATION_LAYERS, the size of the array
+	layer_limit:int,
 }
 
 /*

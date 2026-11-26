@@ -56,7 +56,7 @@ when VITA {
 	/*The backend's fixed values, which matchbox_info.odin puts in `mbi` where it is declared*/
 	BACKEND_DEFAULTS :: Backend_State {
 		// A float4 array in the vertex uniform buffer, 3 a joint. **Revisit later:** a target's number, not the engine's
-		skin_settings = {joint_limit = 64},
+		skin_settings = {joint_limit = 64, layer_limit = 2},
 		print_log = {path = "ux0:data/matchbox.log"},
 	}
 

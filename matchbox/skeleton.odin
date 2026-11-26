@@ -154,6 +154,35 @@ sample_skeleton_pose :: proc(model:Model, clip:int, time:f32, into:[]Transform) 
 	}
 }
 
+/*
+	sample_skeleton_pose for the nodes whose `mask` weight is above 0 only: a layer that touches the upper body reads the tracks of the upper
+	body, not the whole rig's. Every node still starts from rest, so a masked node the clip has no track for is at rest rather than stale
+*/
+sample_skeleton_pose_masked :: proc(model:Model, clip:int, time:f32, mask:[]f32, into:[]Transform) {
+	copy(into, model.skeleton.rest)
+	if clip < 0 || clip >= len(model.animations) do return
+
+	for track in model.animations[clip].tracks {
+		if int(track.node) >= len(into) || int(track.node) >= len(mask) do continue
+		if mask[track.node] <= 0 do continue
+		sample_track(track, time, &into[track.node])
+	}
+}
+
+/*
+	`sample` laid on `base` as a change from `first` (the same node at the start of the layer's clip), scaled by `strength`: translation and
+	scale are the difference added; rotation is `sample * inverse(first)`, slerped from the identity by `strength` and turned onto the base.
+	If `base` is `first` the result is `sample` (at strength 1), so a clip authored from its rest pose adds its motion and nothing else
+*/
+calculate_transform_additive :: proc(base, sample, first:Transform, strength:f32) -> Transform {
+	delta := sample.rotation * conj(first.rotation)
+	return Transform {
+		position = base.position + (sample.position - first.position) * strength,
+		rotation = linalg.quaternion_slerp_f32(linalg.QUATERNIONF32_IDENTITY, delta, strength) * base.rotation,
+		scale = base.scale + (sample.scale - first.scale) * strength,
+	}
+}
+
 /*One transform part-way between two others: slerp for rotation (a component-wise mix takes the chord and shortens a limb), lerp for the rest*/
 calculate_transform_mix :: proc(a, b:Transform, t:f32) -> Transform {
 	return Transform {

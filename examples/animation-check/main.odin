@@ -20,9 +20,13 @@ package animation_check
 	- the left face button (Y on the 3DS, Square on the Vita, M) switches that fade off, so the change snaps
 	- the bottom face button (B on the 3DS, Cross on the Vita, L) switches lighting off and on; the shape must
 	  not change, only the shading
+	- the top face button (X on the 3DS, Triangle on the Vita, K on the PC) puts a layer on the right ribbon: "Bend" (LAYER_CLIP)
+	  over its base clip, on the joint LAYER_ROOT and everything under it (a one-joint ramp up its parent), faded in over a
+	  fifth of a second; the next press fades it out. The base keeps waving underneath. With another rig:
+	  `-define:LAYER_CLIP=<clip> -define:LAYER_ROOT=<node>`. No layer line shows when the model has no such clip or node
 	- a model with no clips (a rig with no animation) stands in its bind pose
 
-	The HUD has four lines: how many parts the model draws and the most joints one may use on this target; the left
+	The HUD has four lines, and a fifth for the layer: how many parts the model draws and the most joints one may use on this target; the left
 	animator's clip, time and whether it is playing; the right one's; and "pose ok" while every palette it works
 	out is a finite number. The ribbon is one draw, so the 3DS command buffer has nothing to do with it.
 	SELECT or Escape quits
@@ -33,6 +37,8 @@ import "core:math"
 import mb "../../matchbox"
 
 MODEL :: #config(MODEL, "test_arm.glb")
+LAYER_CLIP :: #config(LAYER_CLIP, "Bend")
+LAYER_ROOT :: #config(LAYER_ROOT, "J1")
 
 main :: proc() {
 	mb.print("stage 1: init")
@@ -53,6 +59,14 @@ main :: proc() {
 		mb.play_animation_index(&right, model, 0)
 	}
 	right_clip := 0
+
+	// The layer on the right animator: the clip and the joint it drives, found once. A mask is one weight per node
+	layer_clip, has_layer_clip := mb.get_animation_index(model, LAYER_CLIP)
+	layer_root, has_layer_root := mb.get_node_index(model, LAYER_ROOT)
+	has_layer := has_layer_clip && has_layer_root && mb.is_model_skinned(model)
+	layer_mask: []f32
+	if has_layer do layer_mask = mb.calculate_animation_mask_below(model, layer_root, 1, context.allocator)
+	layer_on := false
 	mb.print("stage 4: animators made")
 
 	size := mb.calculate_model_size(model)
@@ -90,6 +104,15 @@ main :: proc() {
 			mb.play_animation_index(&right, model, right_clip)
 		}
 
+		if has_layer && (mb.is_key_pressed(.K) || mb.is_gamepad_pressed(.FACE_UP)) {
+			layer_on = !layer_on
+			if layer_on {
+				mb.play_animation_layer_index(&right, model, 0, layer_clip, layer_mask)
+			} else {
+				mb.stop_animation_layer(&right, 0)
+			}
+		}
+
 		delta_time := mb.get_delta_time()
 		mb.update_animator(&left, model, delta_time)
 		mb.update_animator(&right, model, delta_time)
@@ -109,10 +132,11 @@ main :: proc() {
 		margin :f32 = 0.2
 		baseline := visible_max.y - margin - font.ascent / font.pixels_per_unit
 		lines := [?]string {
-			fmt.tprintf("parts %d  joints %d", len(model.parts), mb.mbi.skin_settings.joint_limit),
+			fmt.tprintf("parts %d  joints %d  layers %d", len(model.parts), mb.mbi.skin_settings.joint_limit, mb.mbi.skin_settings.layer_limit),
 			describe_animator(model, left, "L"),
 			describe_animator(model, right, "R"),
 			"pose ok" if is_pose_finite(left) && is_pose_finite(right) else "POSE NOT FINITE",
+			describe_layer(model, right, has_layer),
 		}
 		for line in lines {
 			mb.render_text(font, line, {visible_min.x + margin, baseline, 0})
@@ -125,6 +149,7 @@ main :: proc() {
 		frame += 1
 	}
 
+	delete(layer_mask)
 	mb.destroy_animator(&left)
 	mb.destroy_animator(&right)
 	mb.destroy(model)
@@ -136,6 +161,14 @@ main :: proc() {
 describe_animator :: proc(model:mb.Model, animator:mb.Animator, label:string) -> string {
 	if animator.clip < 0 || animator.clip >= len(model.animations) do return fmt.tprintf("%s no clip", label)
 	return fmt.tprintf("%s %s %.1f %s", label, model.animations[animator.clip].name, animator.time, "playing" if animator.playing else "done")
+}
+
+// The right animator's layer, asked for by what it reports: the clip, whether it is still running, whether it is in the pose and how far faded in
+describe_layer :: proc(model:mb.Model, animator:mb.Animator, has_layer:bool) -> string {
+	if has_layer == false do return "no layer (this model has no such clip or node)"
+	layer := animator.layers[0]
+	if layer.clip < 0 || layer.clip >= len(model.animations) do return "layer off"
+	return fmt.tprintf("layer %s %s %s %.0f%%", model.animations[layer.clip].name, "playing" if layer.playing else "done", "on" if layer.active else "off", layer.fade.level * 100)
 }
 
 // A character whose palette holds a NaN draws as a streak or nothing; this says so on screen instead of by eye

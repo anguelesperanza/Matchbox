@@ -80,7 +80,7 @@ when !VITA {
 	BACKEND_DEFAULTS :: Backend_State {
 		// 96 vertex float registers hold the palette (3 a joint) beside the matrices, the lights' and the constants:
 		// 22 joints leave 86 of 96 used (mesh_skinned_lit). **Revisit later:** a target's number, not the engine's
-		skin_settings = {joint_limit = 22},
+		skin_settings = {joint_limit = 22, layer_limit = 2},
 		display_settings = {transfer_flags = 0x1000},
 		print_log_settings = {
 			pixel_size = 12,

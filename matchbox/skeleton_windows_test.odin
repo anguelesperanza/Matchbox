@@ -60,12 +60,13 @@ a_skinned_file_reads_as_its_skeleton_clips_and_weights :: proc(t:^testing.T) {
 		testing.expect_value(t, arm.data.skeleton.skins[0].joints[0], 2) // the first joint is node 2: a joint index is not a node index
 		testing.expect_value(t, len(arm.data.skeleton.skins[0].joints), 3)
 	}
-	if testing.expect_value(t, len(arm.data.animations), 2) {
+	if testing.expect_value(t, len(arm.data.animations), 3) {
 		testing.expect_value(t, arm.data.animations[0].name, "Wave")
 		testing.expect_value(t, arm.data.animations[0].duration, 2)
 		testing.expect_value(t, len(arm.data.animations[0].tracks), 3)
 		testing.expect_value(t, arm.data.animations[1].name, "Bend")
 		testing.expect_value(t, arm.data.animations[1].duration, 1)
+		testing.expect_value(t, arm.data.animations[2].name, "Nod")
 	}
 
 	// One part of six vertices that uses all three joints, whole, in file order
@@ -376,4 +377,284 @@ the_joint_arena_hands_the_shader_row_arrays_padded_with_the_identity :: proc(t:^
 	// No palette is the bind pose: the identity throughout
 	bind := get_skin_rows(Render_Item{})
 	testing.expect_value(t, bind[4], [4]f32{0, 1, 0, 0})
+}
+
+/*
+	Animation layers, against `python tools/make_test_skinned_model.py`'s layered cases (numpy, the glTF formulas, no Matchbox code). Every case
+	has "Wave" as the base, stopped at t = 1 (J0 raised half a unit, J1 at 90 degrees, J2 scaled 2 in x) so the base is the same on every
+	frame of the case, and a layer over it. Node numbers on the arm: 1 armature, 2 J0, 3 J1, 4 J2
+*/
+
+/*An animator whose base is "Wave" frozen at t = 1, and layer fades of `fade` seconds*/
+@(private = "file")
+create_layered_animator :: proc(t:^testing.T, model:Model, fade:f32) -> Animator {
+	animator := create_animator(model)
+	for &layer in animator.layers do layer.fade.duration = fade
+	testing.expect(t, play_animation(&animator, model, "Wave"))
+	update_animator(&animator, model, 1.0)
+	stop_animation(&animator)
+	return animator
+}
+
+@(private = "file")
+expect_arm_palettes :: proc(t:^testing.T, label:string, animator:Animator, palettes:[3][12]f32) {
+	for slot in 0 ..< 3 do expect_palette(t, label, animator.pose.palettes[0][slot], palettes[slot])
+}
+
+@(test)
+a_replace_layer_takes_over_its_masked_joints_and_leaves_the_base_the_rest :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	j1, found := get_node_index(arm.model, "J1")
+	testing.expect(t, found)
+	below_j1 := calculate_animation_mask_below(arm.model, j1)
+	testing.expect_value(t, [5]f32{below_j1[0], below_j1[1], below_j1[2], below_j1[3], below_j1[4]}, [5]f32{0, 0, 0, 1, 1})
+
+	// "Bend" holds J1 at 45 degrees; the mask is J1 and J2, so J2 goes to its rest (scale 1, the clip has no track for it) and J0
+	// keeps the base's raise. At weight 1, then at 0.5 (J1 half way between 90 and 45, J2's scale half way between 2 and 1)
+	animator := create_layered_animator(t, arm.model, 0)
+	defer destroy_animator(&animator)
+	testing.expect(t, play_animation_layer(&animator, arm.model, 0, "Bend", below_j1))
+	update_animator(&animator, arm.model, 0)
+	expect_arm_palettes(t, "Bend over Wave, weight 1", animator, {
+		{1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1, 0},
+		{0.707107, -0.707107, 0, 1.0, 0.707107, 0.707107, 0, 0.085786, 0, 0, 1, 0},
+		{0.707107, -0.707107, 0, 1.0, 0.707107, 0.707107, 0, 0.085786, 0, 0, 1, 0},
+	})
+
+	set_animation_layer_weight(&animator, 0, 0.5)
+	update_animator(&animator, arm.model, 0)
+	expect_arm_palettes(t, "Bend over Wave, weight 0.5", animator, {
+		{1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1, 0},
+		{0.382683, -0.92388, 0, 1.541196, 0.92388, 0.382683, 0, 0.193437, 0, 0, 1, 0},
+		{0.574025, -0.92388, 0, 1.158513, 1.385819, 0.382683, 0, -0.730442, 0, 0, 1, 0},
+	})
+
+	// A mask weight of 0.5 on J1 alone is the same mix of J1 and leaves J2 to the base: this is what a ramp does at a seam
+	set_animation_layer_weight(&animator, 0, 1)
+	testing.expect(t, set_animation_layer_mask(&animator, 0, {0, 0, 0, 0.5, 0}))
+	update_animator(&animator, arm.model, 0)
+	expect_arm_palettes(t, "Bend over Wave, J1 mask 0.5", animator, {
+		{1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1, 0},
+		{0.382683, -0.92388, 0, 1.541196, 0.92388, 0.382683, 0, 0.193437, 0, 0, 1, 0},
+		{0.765367, -0.92388, 0, 0.775829, 1.847759, 0.382683, 0, -1.654322, 0, 0, 1, 0},
+	})
+
+	// A mask of nothing is the base exactly
+	testing.expect(t, set_animation_layer_mask(&animator, 0, {0, 0, 0, 0, 0}))
+	update_animator(&animator, arm.model, 0)
+	expect_arm_palettes(t, "mask of nothing", animator, {
+		{1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1, 0},
+		{0, -1, 0, 2.0, 1, 0, 0, 0.5, 0, 0, 1, 0},
+		{0, -1, 0, 2.0, 2, 0, 0, -1.5, 0, 0, 1, 0},
+	})
+
+	// Refused without touching the layer: a mask of the wrong length, a layer that is not there
+	testing.expect(t, set_animation_layer_mask(&animator, 0, {1, 1}) == false)
+	testing.expect(t, set_animation_layer_mask(&animator, MAX_ANIMATION_LAYERS, {0, 0, 0, 0, 0}) == false)
+}
+
+@(test)
+an_additive_layer_adds_its_clips_change_from_its_first_frame :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	// "Nod" turns J2 from 0 to 30 degrees over a second. Put the layer at its end (t = 1) and the change from its first frame is
+	// 30 degrees, laid on a base that has J2 straight; at weight 0.5, 15. J1 and J0 are the base's: the clip has no track for them,
+	// so their change from the first frame is none, which is why an additive layer needs no mask
+	animator := create_layered_animator(t, arm.model, 0)
+	defer destroy_animator(&animator)
+	// Played as a one-shot and set to its end: a looping clip would wrap t = 1 to 0. Its fade is switched on after the play, so the layer is
+	// at full level (a fade of 0 snaps in) and, finished, fades out over frames that are no time at all
+	testing.expect(t, play_animation_layer(&animator, arm.model, 0, "Nod", nil, .ADDITIVE, looping = false))
+	animator.layers[0].fade.duration = 0.2
+	animator.layers[0].time = 1
+	update_animator(&animator, arm.model, 0)
+	expect_arm_palettes(t, "Nod additive, weight 1", animator, {
+		{1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1, 0},
+		{0, -1, 0, 2.0, 1, 0, 0, 0.5, 0, 0, 1, 0},
+		{-1.0, -0.866025, 0, 3.866025, 1.732051, -0.5, 0, -0.464102, 0, 0, 1, 0},
+	})
+	set_animation_layer_weight(&animator, 0, 0.5)
+	update_animator(&animator, arm.model, 0)
+	expect_arm_palettes(t, "Nod additive, weight 0.5", animator, {
+		{1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1, 0},
+		{0, -1, 0, 2.0, 1, 0, 0, 0.5, 0, 0, 1, 0},
+		{-0.517638, -0.965926, 0, 3.001202, 1.931852, -0.258819, 0, -1.104884, 0, 0, 1, 0},
+	})
+
+	// Translation and scale are the difference added: base (1, 2, 3) + half of (2, 2, 5) less (1, 0, 1)
+	added := calculate_transform_additive(
+		Transform{position = {1, 2, 3}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}},
+		Transform{position = {2, 2, 5}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {2, 1, 3}},
+		Transform{position = {1, 0, 1}, rotation = linalg.QUATERNIONF32_IDENTITY, scale = {1, 1, 1}},
+		0.5,
+	)
+	testing.expect_value(t, added.position, [3]f32{1.5, 3, 5})
+	testing.expect_value(t, added.scale, [3]f32{1.5, 1, 2})
+}
+
+@(test)
+a_layer_fades_in_and_out_and_a_one_shot_is_polled_not_called :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	j1_angle :: proc(animator:Animator) -> f32 {
+		return angle_about_z(animator.pose.locals[3].rotation)
+	}
+	whole_body := []f32{0, 0, 0, 1, 1}
+
+	// A one-shot "Bend" over the base at 90 degrees with a 0.2 s fade: halfway in the ease is 0.5, so J1 is half way to 45 (67.5)
+	animator := create_layered_animator(t, arm.model, 0.2)
+	defer destroy_animator(&animator)
+	testing.expect(t, play_animation_layer(&animator, arm.model, 0, "Bend", whole_body, looping = false))
+	testing.expect(t, animator.layers[0].active)
+	update_animator(&animator, arm.model, 0.1)
+	testing.expectf(t, abs(j1_angle(animator) - 67.5) < 1e-2, "half faded in: J1 at %v", j1_angle(animator))
+	update_animator(&animator, arm.model, 0.1)
+	update_animator(&animator, arm.model, 0.1)
+	testing.expectf(t, abs(j1_angle(animator) - 45) < 1e-2, "faded in: J1 at %v", j1_angle(animator))
+
+	// The clip is one second long. It ends: `playing` is false and the layer is still in the pose, fading out; a fade later it is gone
+	update_animator(&animator, arm.model, 0.9)
+	testing.expect(t, animator.layers[0].playing == false)
+	testing.expect(t, animator.layers[0].active)
+	update_animator(&animator, arm.model, 0.1)
+	testing.expectf(t, abs(j1_angle(animator) - 67.5) < 1e-2, "half faded out: J1 at %v", j1_angle(animator))
+	update_animator(&animator, arm.model, 0.1)
+	testing.expect(t, animator.layers[0].active == false)
+	testing.expectf(t, abs(j1_angle(animator) - 90) < 1e-2, "faded out: J1 at %v", j1_angle(animator))
+
+	// An inactive layer costs nothing and its clock stays where it stopped
+	time_at_the_end := animator.layers[0].time
+	update_animator(&animator, arm.model, 0.5)
+	testing.expect_value(t, animator.layers[0].time, time_at_the_end)
+
+	// stop_animation_layer fades a looping layer out the same way
+	looping := create_layered_animator(t, arm.model, 0.2)
+	defer destroy_animator(&looping)
+	play_animation_layer(&looping, arm.model, 0, "Bend", whole_body)
+	update_animator(&looping, arm.model, 0.3)
+	testing.expectf(t, abs(j1_angle(looping) - 45) < 1e-2, "looping layer at full: J1 at %v", j1_angle(looping))
+	stop_animation_layer(&looping, 0)
+	update_animator(&looping, arm.model, 0.1)
+	testing.expectf(t, abs(j1_angle(looping) - 67.5) < 1e-2, "stopping: J1 at %v", j1_angle(looping))
+	update_animator(&looping, arm.model, 0.1)
+	testing.expect(t, looping.layers[0].active == false)
+
+	// A layer with no weight is not run: its clock does not move
+	quiet := create_layered_animator(t, arm.model, 0)
+	defer destroy_animator(&quiet)
+	play_animation_layer(&quiet, arm.model, 0, "Nod", whole_body)
+	set_animation_layer_weight(&quiet, 0, 0)
+	update_animator(&quiet, arm.model, 0.5)
+	testing.expect_value(t, quiet.layers[0].time, 0)
+	set_animation_layer_weight(&quiet, 0, 1)
+	update_animator(&quiet, arm.model, 0.5)
+	testing.expect_value(t, quiet.layers[0].time, 0.5)
+}
+
+@(test)
+asking_for_a_layer_clip_again_changes_nothing_and_another_clip_snaps_to_it :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	animator := create_layered_animator(t, arm.model, 0.2)
+	defer destroy_animator(&animator)
+	// A state machine may call this every frame: the second call must not send the clip back to its start. A nil mask on a playing
+	// layer keeps the mask it has
+	play_animation_layer(&animator, arm.model, 0, "Nod", {0, 0, 0, 0, 1}, .ADDITIVE)
+	update_animator(&animator, arm.model, 0.1)
+	testing.expect(t, play_animation_layer(&animator, arm.model, 0, "Nod", nil, .ADDITIVE))
+	testing.expectf(t, abs(animator.layers[0].time - 0.1) < 1e-5, "asked again: the layer is at %v", animator.layers[0].time)
+	testing.expect_value(t, animator.layers[0].mask[4], 1)
+	testing.expect_value(t, animator.layers[0].mask[3], 0)
+
+	// Another clip on the playing layer is a snap to it that keeps how far faded in the layer is
+	level := animator.layers[0].fade.level
+	play_animation_layer(&animator, arm.model, 0, "Bend", {0, 0, 0, 1, 0}, .REPLACE)
+	testing.expect_value(t, animator.layers[0].clip, 1)
+	testing.expect_value(t, animator.layers[0].time, 0)
+	testing.expect_value(t, animator.layers[0].fade.level, level)
+
+	// Two layers: the higher is mixed over the lower. Layer 0 puts J1 at 45, layer 1 holds J2's rest over the base's scale of 2
+	animator2 := create_layered_animator(t, arm.model, 0)
+	defer destroy_animator(&animator2)
+	play_animation_layer(&animator2, arm.model, 0, "Bend", {0, 0, 0, 1, 0})
+	play_animation_layer(&animator2, arm.model, 1, "Bend", {0, 0, 0, 0, 1})
+	update_animator(&animator2, arm.model, 0)
+	testing.expectf(t, abs(angle_about_z(animator2.pose.locals[3].rotation) - 45) < 1e-3, "layer 0: J1 at %v", angle_about_z(animator2.pose.locals[3].rotation))
+	testing.expect_value(t, animator2.pose.locals[4].scale, [3]f32{1, 1, 1})
+}
+
+@(test)
+two_animators_with_different_layers_do_not_touch_each_other :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	layered := create_layered_animator(t, arm.model, 0)
+	defer destroy_animator(&layered)
+	plain := create_layered_animator(t, arm.model, 0)
+	defer destroy_animator(&plain)
+	play_animation_layer(&layered, arm.model, 0, "Bend", {0, 0, 0, 1, 1})
+	update_animator(&layered, arm.model, 0)
+	update_animator(&plain, arm.model, 0)
+	expect_palette(t, "layered", layered.pose.palettes[0][1], {0.707107, -0.707107, 0, 1.0, 0.707107, 0.707107, 0, 0.085786, 0, 0, 1, 0})
+	expect_palette(t, "plain", plain.pose.palettes[0][1], {0, -1, 0, 2.0, 1, 0, 0, 0.5, 0, 0, 1, 0})
+}
+
+@(test)
+mask_builders_cover_a_subtree_a_ramp_and_named_nodes :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	// J1 and what hangs from it, then with a two-bone ramp up its parents (J0 two thirds, the armature one third)
+	ramp := calculate_animation_mask_below(arm.model, 3, 2)
+	wants := [5]f32{0, 1.0 / 3, 2.0 / 3, 1, 1}
+	for want, node in wants do testing.expectf(t, abs(ramp[node] - want) < 1e-6, "ramp[%d] is %v, expected %v", node, ramp[node], want)
+
+	named := calculate_animation_mask_named(arm.model, {"J0", "J2"})
+	testing.expect_value(t, [5]f32{named[0], named[1], named[2], named[3], named[4]}, [5]f32{0, 0, 1, 0, 1})
+
+	// Out of range: all zero, not a crash
+	nothing := calculate_animation_mask_below(arm.model, 99)
+	testing.expect_value(t, len(nothing), 5)
+	testing.expect_value(t, nothing[3], 0)
+
+	// A subtree counted by hand: the rope is 40 joints in a chain from node 1; R5 is node 6, and 6 up to 40 is 35 nodes
+	rope, rope_ok := load_test_model(t, "tools/testdata/models/test_rope.glb", 256)
+	if rope_ok == false do return
+	defer destroy_model_data(rope.data)
+	below := calculate_animation_mask_below(rope.model, 6)
+	total:f32
+	for weight in below do total += weight
+	testing.expect_value(t, total, 35)
+}
+
+@(test)
+only_the_layers_a_target_allows_are_made :: proc(t:^testing.T) {
+	arm, ok := load_test_model(t, "tools/testdata/models/test_arm.glb", 256)
+	if ok == false do return
+	defer destroy_model_data(arm.data)
+
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
+	saved_limit := mbi.skin_settings.layer_limit
+	defer mbi.skin_settings.layer_limit = saved_limit
+
+	// The Vita's and the 3DS's two: slots 0 and 1 have a mask and a scratch pose, 2 and 3 have nothing and refuse a play. (Other tests only
+	// use layers 0 and 1, so a limit of 2 for a moment does not change what they see)
+	mbi.skin_settings.layer_limit = 2
+	animator := create_animator(arm.model)
+	defer destroy_animator(&animator)
+	testing.expect_value(t, len(animator.layers[1].mask), 5)
+	testing.expect_value(t, len(animator.layers[2].mask), 0)
+	testing.expect(t, set_animation_layer_mask(&animator, 2, {0, 0, 0, 0, 0}) == false)
 }

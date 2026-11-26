@@ -12,6 +12,7 @@ test_arm.glb -- three joints in a chain along +X, under a plain "armature" node 
                      J0 translation STEP (0,0,0) at t=0, (0,0.5,0) at t=1
                      J2 scale CUBICSPLINE (1,1,1) -> (2,1,1) -> (1,1,1), tangents (2,0,0) out of key 0, zero elsewhere
   clip "Bend", 1 s:  J1 rotation STEP, 45 degrees about Z at t = 0
+  clip "Nod", 1 s:   J2 rotation LINEAR 0 -> 30 degrees about Z at t = 0, 1 (an additive layer's clip)
 test_rope.glb -- 40 joints in a chain, each 1 up from the last, 41 rows of two vertices, each weighted whole to one joint.
   More joints than the 3DS's 22 allow in a draw, so the loader's split is tested on a real file. No clips.
 """
@@ -109,6 +110,9 @@ def make_arm(path):
     samplers_bend, channels_bend = [], []
     track(samplers_bend, channels_bend, 3, "rotation", times([0, 1]), quats([quat_z(45), quat_z(45)]), "STEP")
 
+    samplers_nod, channels_nod = [], []
+    track(samplers_nod, channels_nod, 4, "rotation", times([0, 1]), quats([quat_z(0), quat_z(30)]), "LINEAR")
+
     document = {
         "asset": {"version": "2.0", "generator": "tools/make_test_skinned_model.py"},
         "scene": 0, "scenes": [{"nodes": [0, 1]}],
@@ -118,7 +122,8 @@ def make_arm(path):
         "meshes": [{"primitives": [primitive]}],
         "skins": [{"joints": [2, 3, 4], "inverseBindMatrices": ibm, "skeleton": 1}],
         "animations": [{"name": "Wave", "samplers": samplers_wave, "channels": channels_wave},
-                       {"name": "Bend", "samplers": samplers_bend, "channels": channels_bend}],
+                       {"name": "Bend", "samplers": samplers_bend, "channels": channels_bend},
+                       {"name": "Nod", "samplers": samplers_nod, "channels": channels_nod}],
         "bufferViews": b.views, "accessors": b.accessors,
     }
     write_glb(path, document, b.blob)
@@ -157,6 +162,31 @@ def arm_palettes(t, inverse_binds):
     g1 = g0 @ trs((1, 0, 0), tuple(q), (1, 1, 1))
     g2 = g1 @ trs((1, 0, 0), (0, 0, 0, 1), (scale_x, 1, 1))
     return [g @ ibm for g, ibm in zip((g0, g1, g2), inverse_binds)]
+
+def pose_palettes(j0_t, q1, scale_x, q2, inverse_binds):
+    """The palettes for any pose of the arm: J0's translation, J1's rotation, J2's x scale and rotation (layers write these)."""
+    armature = trs((0, 1, 0), (0, 0, 0, 1), (1, 1, 1))
+    g0 = armature @ trs(j0_t, (0, 0, 0, 1), (1, 1, 1))
+    g1 = g0 @ trs((1, 0, 0), tuple(q1), (1, 1, 1))
+    g2 = g1 @ trs((1, 0, 0), tuple(q2), (scale_x, 1, 1))
+    return [g @ ibm for g, ibm in zip((g0, g1, g2), inverse_binds)]
+
+def layered_cases(binds):
+    """Layers over "Wave" at t = 1 (J0 raised (0, .5, 0), J1 at 90 degrees, J2 scaled 2 in x). A layer mixes or adds per joint,
+    on the base's local pose, as `main`'s layers did; every number is by the glTF formulas, with no Matchbox code."""
+    ident = (0, 0, 0, 1)
+    base = dict(j0_t=(0, .5, 0), q1=quat_z(90), scale_x=2.0, q2=ident)
+    cases = {}
+    # "Bend" (J1 at 45 degrees; J2 has no track, so it is at rest: scale 1) on a mask of J1 and J2, REPLACE
+    cases["Bend over Wave, mask J1+J2, weight 1"] = pose_palettes(base["j0_t"], quat_z(45), 1.0, ident, binds)
+    cases["Bend over Wave, mask J1+J2, weight 0.5"] = pose_palettes(base["j0_t"], slerp(quat_z(90), quat_z(45), .5), 1.5, ident, binds)
+    # mask J1 only, at 0.5: J1 half way, J2 untouched
+    cases["Bend over Wave, mask J1 at 0.5, weight 1"] = pose_palettes(base["j0_t"], slerp(quat_z(90), quat_z(45), .5), 2.0, ident, binds)
+    cases["no mask weight anywhere = the base"] = pose_palettes(base["j0_t"], quat_z(90), 2.0, ident, binds)
+    # "Nod" additive at its t = 1 (J2 at 30 degrees from a first frame of 0): J2 turns 30 on top of the base's none
+    cases["Nod additive over Wave, weight 1"] = pose_palettes(base["j0_t"], quat_z(90), 2.0, quat_z(30), binds)
+    cases["Nod additive over Wave, weight 0.5"] = pose_palettes(base["j0_t"], quat_z(90), 2.0, quat_z(15), binds)
+    return cases
 
 # ---- the rope --------------------------------------------------------------------------------------------------------
 def make_rope(path, joint_count=40):
@@ -202,6 +232,10 @@ if __name__ == "__main__":
     os.makedirs(assets, exist_ok=True)
     shutil.copy(os.path.join(root, "test_arm.glb"), os.path.join(assets, "test_arm.glb"))
     np.set_printoptions(precision=6, suppress=True, linewidth=200)
+    for name, palettes in layered_cases(binds).items():
+        print(f"{name}: palettes (rows 0..2 of each joint's matrix)")
+        for j, m in enumerate(palettes):
+            print(f"  J{j}", [round(float(v), 6) for v in m[:3].flatten()])
     for t in (0.0, 0.5, 1.0, 1.5):
         print(f"Wave at t = {t}: palettes (rows 0..2 of each joint's matrix)")
         for j, m in enumerate(arm_palettes(t, binds)):

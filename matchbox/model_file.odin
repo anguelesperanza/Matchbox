@@ -184,12 +184,18 @@ read_model_file :: proc(bytes:[]u8) -> (data:Model_Data, ok:bool, problem:string
 		part.material.shininess = read_value(&reader, f32)
 		part.material.specular_strength = read_value(&reader, f32)
 		if skinned {
-				part.skin = int(read_value(&reader, i32))
-				part.mesh_node = int(read_value(&reader, i32))
-				part.joint_map = read_slice(&reader, u32, int(read_value(&reader, u32)))
-				part.skinned_vertices = read_slice(&reader, Skinned_Vertex, vertex_count)
+			part.skin = int(read_value(&reader, i32))
+			part.mesh_node = int(read_value(&reader, i32))
+			part.joint_map = read_slice(&reader, u32, int(read_value(&reader, u32)))
+			part.skinned_vertices = read_slice(&reader, Skinned_Vertex, vertex_count)
+			// A vertex names a slot of the part's own joint map: one past it would read another draw's palette on the GPU
+			for vertex in part.skinned_vertices {
+				for slot in 0 ..< 4 {
+					if int(vertex.joints[slot]) >= len(part.joint_map) do reader.failed = true
+				}
+			}
 		} else {
-				part.vertices = read_slice(&reader, Lit_Vertex, vertex_count)
+			part.vertices = read_slice(&reader, Lit_Vertex, vertex_count)
 		}
 		part.indices = read_slice(&reader, u16, index_count)
 		skip_to_four(&reader)

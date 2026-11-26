@@ -280,6 +280,8 @@ engine_type :: proc(key: string) -> string {
 		return "float3"
 	case key == "[4]f32":
 		return "float4"
+	case key == "[JOINT_SLOT_COUNT][4]f32":
+		return "float4" // the array suffix names the count (engine_array_suffix)
 	case strings.has_prefix(key, "matrix[") && len(key) == len("matrix[4,4]f32"):
 		return fmt.aprintf("float%cx%c", key[9], key[7])
 	}

@@ -55,6 +55,10 @@ when !VITA {
 		pipeline:Render_Pipeline,
 		lit_pipeline:Render_Pipeline,
 		vertex_lit_pipeline:Render_Pipeline,
+		// Skinned meshes (G6): `skinned_pipeline` unlit, `skinned_lit_pipeline` per pixel. A skinned part that asks for per-vertex
+		// lighting is drawn per pixel (no per-vertex skinned shader), as on every target
+		skinned_pipeline:Render_Pipeline,
+		skinned_lit_pipeline:Render_Pipeline,
 		bound_pipeline:^Render_Pipeline, // the one citro3d has now, so a draw only switches when it changes
 		// The camera being drawn, set again after each switch: the programs' registers are shared
 		camera_view_projection:matrix[4, 4]f32,
@@ -66,6 +70,7 @@ when !VITA {
 		// Fixed values the 3DS backend works with
 		display_settings:Display_Settings,
 		print_log_settings:Print_Log_Settings,
+		skin_settings:Skin_Settings,
 	}
 
 	/*
@@ -73,6 +78,9 @@ when !VITA {
 		a global's initial value must be known at compile time
 	*/
 	BACKEND_DEFAULTS :: Backend_State {
+		// 96 vertex float registers hold the palette (3 a joint) beside the matrices, the lights' and the constants:
+		// 22 joints leave 86 of 96 used (mesh_skinned_lit). **Revisit later:** a target's number, not the engine's
+		skin_settings = {joint_limit = 22},
 		display_settings = {transfer_flags = 0x1000},
 		print_log_settings = {
 			pixel_size = 12,

@@ -21,9 +21,9 @@ uniform float frame_time;
 uniform float4x4 frame_view;
 
 // skin
-uniform float skin_row0[64];
-uniform float skin_row1[64];
-uniform float skin_row2[64];
+uniform float4 skin_row0[64];
+uniform float4 skin_row1[64];
+uniform float4 skin_row2[64];
 
 // render
 uniform float4x4 render_model;

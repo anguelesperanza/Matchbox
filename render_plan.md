@@ -1608,8 +1608,8 @@ quad lightens the background without replacing it, the quad lightens the cube on
 quad when it is through or behind. It prints `gate-check: N passed, M failed`, and the live scene shows the cube turning with the quad
 sliding through it.
 - **PC: 12 passed, 0 failed** (2026-11-26, a real D3D11 device). That the window keeps its aspect on resize was not checked by eye.
-- **3DS (Azahar), real 3DS, real Vita:** builds exist (`build/hardware/gate_check.3dsx` and `.vpk`); results go here when read.
-  Vita3K cannot read GPU-written pixels back, so the self-check fails in it by design; the real Vita is the check.
+- **Real New 3DS LL and real Vita: both work** (2026-11-26, the user ran `gate_check.3dsx` and `gate_check.vpk`; the user said "those work", the HUD
+  count was not reported). Not run in Azahar to a read result. Vita3K cannot read GPU-written pixels back, so the self-check fails in it by design.
 - B8, C5 and V8 (letterbox, integer scale, width cap) are still deferred, so "letterbox and expand both behave as in the mockups"
   from the Phase B gate is not covered; `Fit_Mode` in G5 is the nearest thing and applies to render targets.
 

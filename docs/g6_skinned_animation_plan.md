@@ -63,6 +63,11 @@ The mapping into this branch, kept deliberately close to `main` so a game ports 
   second pass over every joint; on the 3DS's soft-float CPU that is the part of `update_animator` that costs, and the milestone ("a small
   third-person scene") needs one clip at a time with a fade. They are a clean addition later: `Animator` gets one field, `update_animator`
   one loop. Say so now if the user wants them in.
+  **What leaving layers out costs, exactly (agreed 2026-11-26).** A character plays one clip at a time (with a fade into the next). Lost: (1) two clips at once on different
+  body parts, such as a walk on the legs and a wave on the arm; a game that wants that today has to author a combined clip. (2) Masks, so no "this clip drives only the
+  upper body". (3) Additive clips (a flinch or a head turn laid over whatever is playing). Not lost: blending between two clips (the fade), several characters on one model
+  (one `Animator` each), reading a joint's pose to attach something to it (`calculate_node_matrix`). The `Animator` is shaped so that layers are one field (a list of
+  `Animation_Playback` with a weight and a mask) and one loop in `update_animator` that mixes each into `pose.locals` before `resolve_skeleton_pose`.
 - **Morph targets / glTF `weights`**: skipped at parse on `main` and here.
 - **Per-vertex joint count above 4** (`WEIGHTS_1`): read as 4 and renormalised at load, as `main` does (see "Weights").
 
@@ -188,6 +193,12 @@ Rules, each answering a question the user will ask:
 | Reading a joint by a vertex's index | `palette[joint_offset + j]`, integer | `palette[j]`, a Cg array indexed by a float cast to int | `mova a0.x, v_joint.i` (the vertex unit's address register): the one operand of an instruction that may index, and two address registers (`MBS-E10`) |
 | Cost | negligible | 56 B vertex fetch; four 4x4 mad chains per vertex on a unit that already runs per-pixel lighting at ~30 fps | about 20 vertex instructions for the blend + about 20 for the normal, on top of the lit shader's ~70; 1,000 vertices x ~110 instructions ~ 110 k cycles ~ 0.4 ms at 268 MHz (arithmetic: 1 instruction per cycle; not measured) |
 
+**Revisit later (the user's decision, 2026-11-26).** These three numbers are provisional. The user plans a separate, PC-only pass that raises the PC figure at the
+cost of such models no longer compiling to the other targets. So the limit is a per-target settings field, `mbi.skin_settings.joint_limit` (`Skin_Settings`,
+`matchbox/skin.odin`), written in each backend's `BACKEND_DEFAULTS`, never in shared code; the shaders' `JOINT_SLOT_COUNT` is the same number per target
+(`tools/mbsc/lighting.odin`, `get_max_joints`), and a shader built for one limit is refused by an engine with another (`check_engine_blocks`). Raising the PC
+limit is those two numbers, the `cbuffer` size (a constant buffer holds 4096 float4s: 1,365 joints at three rows each) and nothing else.
+
 **What a limit means to a game:** a 3DS character's rig should have about 20 joints per *draw*, not per model: the loader splits a 60-joint rig into draws of
 at most 22 joints. A humanoid with fingers is 60 to 80 joints and splits into 3 or 4 draws; a low-poly one (the target of a 3DS game) is 15 to 25 and splits into 1 or 2. The split is
 the reason `joint_map` is per part. The honest consequence is draw calls: G4 and G5 both found that the 3DS's small command buffer overflows with hundreds of draws, and 3 to 4 per character
@@ -280,30 +291,62 @@ Small (under 5 KB each), generated deterministically, committed in `tools/testda
 (proving the two-characters rule); a HUD line prints the clip, the time, `animator.playing`, the draw count and the part count, and on PC the per-frame update cost in microseconds, and on the handhelds the measured frame time.
 Same layout as `model-check` (`examples/model-check/main.odin`).
 
+## Outcome (stage 2, 2026-11-26): what was built, and where it differs from the plan above
+
+The approved answers: names as proposed; a skinned model with no animator draws its bind pose; GPU skinning on every target behind the 3DS hardware gate (the CPU fallback
+only if the gate fails); joint limits 256 / 64 / 22 marked "revisit later" and kept as a per-target setting; layers left out; `.mbm` version 3; the small generated test asset.
+
+**Where it differs from the proposal:**
+
+- **The PC palette is a constant buffer, not a structured buffer.** `skin` is a `cbuffer` of three `float4[256]` arrays (12 KB, under D3D11's 64 KB), filled per draw from the
+  frame's joint arena (`set_skin_constants`), not one upload per `camera_end`. A structured buffer would need a second shader form for the same shaders (the Cg and
+  PICA backends have arrays of `float4` only), and the arrays are what lets one `.mbs` file build for all three targets. The cost is a 12 KB map per skinned draw.
+- **The palette is three row arrays (`row0[]`, `row1[]`, `row2[]`), not one array of three-row groups.** The 3DS indexes with an address register (`mova`) and has no integer
+  arithmetic to scale `joint * 3`; three arrays each indexed by the joint need none. Registers on the 3DS for `mesh_skinned_lit`: 66 palette + 14 uniforms + 6 constants = 86 of 96.
+- **Per-vertex-lit skinned parts draw per pixel on every target.** There is no `mesh_skinned_vertex_lit.mbs`: the per-vertex lights block takes 41 of the 3DS's registers, so
+  the joint limit would have fallen to 8. A skinned part that asks for `.PER_VERTEX` is shaded per pixel, the same on all three targets, so a model never differs between them
+  by its rig. If a game needs per-vertex skinned lighting on the 3DS, that is its own shader and a limit of 8.
+- **An unlit skinned shader was added** (`mesh_skinned.mbs`), drawn while lighting is off, so a skinned model never falls back to its bind pose when the lights go off (the plan
+  had assumed `mesh_lit` with ambient 1).
+- **The joint index is read from the vertex on each target its own way.** The 3DS and Vita load the joint byte as the number 0..255 (`UNSIGNED_BYTE` / `U8`). The PC cannot:
+  a `UINT` vertex format reaches a `float` input as the integer's bits, which is a denormal that casts to 0 (every vertex followed joint 0; found on the first PC render and
+  fixed), so the PC loads the byte as 0..1 (`UNORM`) and the shader scales by 255 under `when TARGET == .PC`.
+- **`mbsc` gained** a `SKIN` engine block (`skin.row0/row1/row2`), the vertex attributes `joints` and `weights`, the constant `JOINT_SLOT_COUNT`, and on the PICA an inline
+  `array[i32(<float>)]` read through the address register (`mova a0.x`), which is the one way a computed index is allowed (anything else is still `MBS-E10`).
+- **`Skin_Settings` and `Skin_State` are in `mbi`**, as the "no new globals" rule asks; the joint arena is cleared at every `camera_end`.
+
+**Skeleton and clips of the user's models** (read with `tools/modelpack.exe` at each target's limit; none is committed: `assets/` is git-ignored and stays so):
+
+| model | nodes | joints (all skins) | clips | vertices | parts at 256 / 64 / 22 | images | `.mbm` size |
+|---|---|---|---|---|---|---|---|
+| `arms_rig.glb` | 54 | 52 | 18 | 758 | 1 / 1 / 2 | 1 | 387 KB |
+| `bodychan.glb` | 965 | 782 | 0 | 44,804 | 37 / 37 / 38 | 0 | 3.0 MB |
+| `retargeted_animations.glb` | 80 | 858 (13 skins) | 31 | 18,572 | 13 / 13 / 14 | 13 | 2.1 MB |
+
+What the loader does with them: it keeps every node (not only the joints), reads each skin's joint list and inverse bind matrices, reads every clip's tracks (LINEAR, STEP and
+CUBICSPLINE; morph-target `weights` channels are skipped), cuts each skinned primitive into parts of at most the target's limit, and keeps weights as bytes that sum to 255.
+`arms_rig` is the one that suits a handheld: 758 vertices, 1 draw on the Vita and 2 on the 3DS. **`bodychan` (a VRoid-style body) is too big for the handhelds as it is**: 44,804
+vertices over 37 or 38 parts is 38 draws for one character on the 3DS, past what its small command buffer took in G4 and G5, and far over its vertex budget; it was not put on
+the 3DS. On the Vita it is 37 draws of per-pixel-lit skinned meshes at a frame rate nobody measured here, so it is not claimed to run. It is a PC model.
+`retargeted_animations.glb` (39 MB, 13 skins, an image for each) is the same story at a smaller size.
+
 ## Steps
 
 - [x] G6-1. Read the branch and `main`, write this plan.
-- [ ] G6-2. **User approves the public API** (this file's "Proposed public API"), the 3DS decision (vertex shader, with the CPU fallback only if the gate fails), the joint limits (22 / 64 / 256), and whether layers are left out. Nothing below starts before.
-- [ ] G6-3. Shared, no GPU: `skeleton.odin`, `animator.odin` (sampling, hierarchy, palette, blending, looping), the `Model` / `Model_Part` fields, `Skinned_Vertex`, the part split; the test asset generator and `tools/check_skinning.py`; the number tests above.
-- [ ] G6-4. Loading: `model_skin_load.odin` (PC), `.mbm` v3 (`model_file.odin`, `tools/modelpack.odin`), round-trip tests, `load_model` fills `Model.skeleton` on all three targets.
-- [ ] G6-5. `mbsc`: the attribute tags, the attribute-indexed palette read (PICA `mova`), the new `.mbs` files, generated shaders for all three, the tests that assemble them. **Gate:** Azahar draws a skinned vertex where the hand arithmetic says; then a hardware spike build (one character, one draw) before anything is built on it.
-- [ ] G6-6. PC: the arena, the structured-buffer upload at `camera_end`, `render_model(model, animator, transform)`, the lighting-equality pixel test. Check on PC first, since it is the cheapest place to read pixels.
-- [ ] G6-7. Vita: the uniform-array palette and the skinned vertex format; Vita3K. Verify the default uniform buffer size in `vito` (recollection above).
-- [ ] G6-8. 3DS: the register palette, the part split, per-vertex-lit falls back to per-pixel; Azahar. If the gate fails on hardware, the CPU skinning path (same data) goes here instead.
-- [ ] G6-9. `examples/animation-check` with the light self-check; `odin check` for matchbox and the examples; `odin test matchbox`; `odin test tools/mbsc`; `3ds_check.bat`, `vita_check.bat`; Azahar and Vita3K runs; frame-time numbers.
-- [ ] G6-10. Hardware builds `animation_check_g6.3dsx` and `animation_check_g6.vpk` in the main checkout's `build\hardware\`, full paths reported. Commit, do not push. **Wait for the user's hardware check.**
-
-## Open questions for the user
-
-1. **API.** Names: `Animator`, `create_animator`, `update_animator` (kept, not `update_animation`, which is the sprite verb), `play_animation`, `render_model(model, animator, transform)`, the `get_` / `calculate_` renames of `main`'s `node_index`, `node_matrix`, `animation_names`. Right vocabulary?
-2. **A skinned model without an animator** draws its bind pose (T-pose) instead of asserting. Right?
-3. **3DS:** vertex-shader skinning with a 22-joint draw limit (8 with per-vertex lighting, which therefore falls back to per-pixel), behind a hardware gate that falls back to CPU skinning. Or CPU skinning from the start (no `mbsc` work, ~3.5 ms per 1,000 vertices soft-float, 96 KB linear memory per 1,000 vertices)?
-4. **Joint limits** 256 (PC) / 64 (Vita) / 22 (3DS) per draw, with the loader splitting parts to fit. Acceptable? A 3DS character under 22 joints draws in one call.
-5. **Layers** left out of G6 (a later addition). Agreed?
-6. **Test asset** generated by `tools/make_test_skinned_model.py` (a 3-joint arm and a 40-joint rope), rather than a downloaded character. Agreed? If the user has a real rigged character in mind for the hardware pass, say where it is.
-7. **`.mbm` version 3** (skeleton and clips in the file; version 2 refused). Agreed?
+- [x] G6-2. The user approves the API, the 3DS decision, the limits (marked "revisit later"), and that layers are left out. 2026-11-26.
+- [x] G6-3. Shared: `skeleton.odin`, `animator.odin`, `skin.odin`, `model_skin_split.odin`; the test asset generator (`tools/make_test_skinned_model.py`, which also prints the numpy palettes the tests assert on); the number tests (`skeleton_windows_test.odin`).
+- [x] G6-4. Loading: `model_skin_load.odin` (PC), `.mbm` version 3, `tools/modelpack.odin` takes the joint limit, round-trip test.
+- [x] G6-5. `mbsc`: the block, the attributes, the constant, PICA relative addressing, `mesh_skinned.mbs` and `mesh_skinned_lit.mbs` generated for all three targets (picasso and psp2cgc assemble them).
+- [x] G6-6. PC runtime; checked by screenshots on a real D3D11 device and by the palette numbers.
+- [x] G6-7. Vita runtime; run in Vita3K.
+- [x] G6-8. 3DS runtime; run in Azahar. The hardware gate (the vertex shader's `mova` indexing on a real New 3DS LL) is the user's: `animation_check_g6_gate.3dsx`.
+- [x] G6-9. `examples/animation-check`; checks and tests green.
+- [ ] G6-10. **The user's hardware check.** If the gate fails on the 3DS, CPU skinning (the same data and the same palettes) replaces the vertex shader there.
 
 ## Not verified
 
-Nothing here has been run. The 3DS and Vita cost figures are arithmetic (instruction counts, 1 instruction per cycle on the PICA vertex unit, ~40 cycles per soft-float op, a recollection of the GXM uniform buffer size);
-G6-5 and G6-7 replace them with measurements, and Azahar and Vita3K do not give hardware frame times (both sit at 60 fps vsync).
+- Nothing has run on a real New 3DS LL or a real Vita. The 3DS vertex shader's `mova a0.x` indexing and the `UNSIGNED_BYTE` attribute loaders are exactly what the gate build checks:
+  Azahar accepted them and drew the pose the numbers say, and Azahar has accepted shaders the real GPU hung on before (`docs/shader_pica.md`).
+- The PC render was checked against screenshots and the palettes by the unit tests (against numpy); there is no pixel-level test that a skinned draw with the identity palette lights
+  identically to an unskinned one. The bug that test would have caught (joints reaching the shader as denormals) was found by the first render instead.
+- The 3DS and Vita cost figures in this plan are still arithmetic; no frame times were measured on hardware. Azahar and Vita3K sit at 60 fps vsync.

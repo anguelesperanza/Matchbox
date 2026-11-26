@@ -196,6 +196,11 @@ if __name__ == "__main__":
     binds = make_arm(os.path.join(root, "test_arm.glb"))
     make_rope(os.path.join(root, "test_rope.glb"))
     print("wrote test_arm.glb and test_rope.glb in", root)
+    # examples/animation-check loads test_arm.glb from assets/models, which git ignores (assets are the game's own)
+    import shutil
+    assets = os.path.join(here, "..", "assets", "models")
+    os.makedirs(assets, exist_ok=True)
+    shutil.copy(os.path.join(root, "test_arm.glb"), os.path.join(assets, "test_arm.glb"))
     np.set_printoptions(precision=6, suppress=True, linewidth=200)
     for t in (0.0, 0.5, 1.0, 1.5):
         print(f"Wave at t = {t}: palettes (rows 0..2 of each joint's matrix)")

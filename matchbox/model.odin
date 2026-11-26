@@ -11,8 +11,8 @@ package matchbox
 
 	Ported from main's model.odin and render3d.odin with the names brought to the house rules:
 	draw_model -> render_model, model_center -> calculate_model_center, transform_matrix ->
-	calculate_transform_matrix. Left out until their phases: skinning and the animator (G6),
-	shadows, and the line models (wire cube, grid), which need a line topology no backend has
+	calculate_transform_matrix. Skinning and the animator are here since G6 (skeleton.odin, animator.odin,
+	render_model_animated). Left out until their phases: shadows, and the line models (wire cube, grid), which need a line topology no backend has
 	yet.
 
 	Every part is a lit mesh (Lit_Vertex, create_lit_mesh) with a Material, loaded or generated

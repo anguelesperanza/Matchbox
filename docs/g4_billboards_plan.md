@@ -153,3 +153,30 @@ camera-facing normal, per target; also recorded in `docs/g2_remaining_work.md`).
 - `level`, `tether` and `eko` do not exist on this branch (they are `main`'s), so their `odin check` could not be run.
 - The test lock `render_queue_lock` in `collision_test.odin` is no longer file-private: the billboard tests queue items too. `mbi` is
   one global on this branch (CLAUDE.md's thread-local note describes `main`).
+
+## Hardware findings, round 1 (2026-11-26) and the g4b build
+
+1. **"CAMERA_POSITION goes the opposite way" -- not reproduced; the maths is right on every target we can run.** Nothing in the code was
+   changed for it. What was measured: `every_mode_faces_the_eye_from_every_side_through_the_real_view` (billboard_test.odin) sweeps the eye
+   round the sprite at three heights, with the camera aimed at it and aimed away from it, and asserts, for each mode, that the
+   normal is the eye direction (position) / the camera's back (plane) / the horizontal eye direction (upright), that the right
+   edge is on the screen's right, that up is not upside down and that the basis is not mirrored. The example runs the same
+   sweep on the target through the real `camera_start` -> `render_billboard` -> `mbi.opaque_items` path ("through the queue", 16 checks): 16/0 on PC, Azahar and
+   Vita3K. Every backend uploads `item.model` unchanged, as for models. So a billboard that faces the wrong way on hardware is not a maths or
+   matrix-upload error that an emulator can show. Two things it may be, both for the user to say:
+   - the 3DS circle pad and C-stick were drifting (round 1's second finding): a camera that yaws on its own while the character creeps looks
+     like billboards turning the wrong way. Fixed below; the g4b HUD shows the stick values;
+   - what "square" means. `CAMERA_POSITION` faces the **camera's eye**, which in the third person scene is behind and above the
+     character, not the character; and in perspective a quad facing the eye looks turned relative to the screen when it is off to one
+     side. A screen-parallel look is `CAMERA_PLANE`. If the user wants billboards to face the player, that is a different mode (a target
+     position), not a bug.
+   The g4b HUD line "middle faces the eye: x.xx" is that billboard's normal dotted with the direction to the eye, read from the queued
+   matrix on the console; 1.00 means it faces the eye exactly.
+2. **3DS stick drift: fixed.** `poll_events` (3DS) took the circle pad and C-stick as libctru gives them, scaled by 156 / 146. A pad rests a
+   few counts off zero (about 15, which is 0.096), and nothing cut that off, so `get_movement_input` and the look read saw it on every frame.
+   `get_thumbstick_value` does not latch anything: it returns the value of the current frame. New `Thumbstick_Settings.dead_zone` (0.15, in `mbi`'s declaration) and
+   `calculate_thumbstick_dead_zone` (matchbox/thumbstick.odin): a circular dead zone with the rest of the travel stretched back to 0..1, applied
+   to both sticks after the diagonal clamp. Tested on PC with the rest values (15/156 on either axis and diagonally), the stretch and full travel; **not
+   measured on a real pad**: whether 0.15 covers this user's pad is what the hardware check shows (the HUD prints both sticks). The Vita
+   already has a dead zone in vito; PC's XInput path has none and was not reported, so it is untouched.
+3. `screen_size` is in window pixels, so a marker covers a larger share of the 3DS top screen (400 wide) than of the Vita's (960): expected, now in the example's header.

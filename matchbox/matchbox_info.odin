@@ -47,6 +47,7 @@ Matchbox_Info :: struct {
 
 	font_settings:Font_Settings,
 	screen_settings:Screen_Settings,
+	thumbstick_settings:Thumbstick_Settings, // read by the 3DS's poll_events (thumbstick.odin)
 	mouse_motion:Mouse_Motion, // pointer drag between frames, sampled by poll_events (camera_input.odin)
 	clock:Clock, // frame timing, sampled by poll_events (clock.odin)
 
@@ -63,6 +64,9 @@ mbi := Matchbox_Info {
 	model_settings = {
 		default_material = {shininess = 16, specular_strength = 0.5}, // a soft highlight, neither matte nor glossy
 		max_shininess = 128,
+	},
+	thumbstick_settings = {
+		dead_zone = 0.15, // above the 3DS circle pad's rest offset (about 0.1); a stick is not worth feeling for below it
 	},
 	screen_settings = {
 		default_height = 12,

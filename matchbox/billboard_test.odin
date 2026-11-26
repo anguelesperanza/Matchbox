@@ -273,3 +273,55 @@ animation_offset_slides_along_the_billboards_own_axes :: proc(t:^testing.T) {
 		testing.expectf(t, near(origin, {0, 0.5, -1}), "origin %v", origin)
 	})
 }
+
+// Where the eye is, read back out of mbi.view the way a game never does: the camera's position is not stored anywhere else
+@(test)
+every_mode_faces_the_eye_from_every_side_through_the_real_view :: proc(t:^testing.T) {
+	// Eyes all the way round, high and low, some of them behind the sprite's first facing, looking at the sprite and
+	// also looking well off to one side of it, since a billboard turns toward where the eye IS, not where it looks
+	for height_step in 0 ..< 3 {
+		for step in 0 ..< 16 {
+			angle := f32(step) * math.TAU / 16 + 0.1
+			eye := [3]f32{3 + 7 * math.cos(angle), 0.5 + f32(height_step) * 3, -2 + 7 * math.sin(angle)}
+			sprite_position := [3]f32{3, 1.5, -2}
+			for aim_step in 0 ..< 2 {
+				aim := sprite_position if aim_step == 0 else sprite_position + {6 * math.cos(angle + 1.2), 0, 6 * math.sin(angle + 1.2)}
+				camera := look(eye, aim)
+				with_camera(t, camera, 240, proc(t:^testing.T) {})
+				for mode in Billboard_Mode {
+					check_one_mode(t, camera, eye, sprite_position, mode, angle)
+				}
+			}
+		}
+	}
+}
+
+@(private="file")
+check_one_mode :: proc(t:^testing.T, camera:Camera, eye, sprite_position:[3]f32, mode:Billboard_Mode, angle:f32) {
+	saved_view, saved_fov := mbi.view, mbi.camera_fov_y
+	defer mbi.view, mbi.camera_fov_y = saved_view, saved_fov
+	mbi.view = calculate_camera_view_matrix(camera) // what camera_start leaves behind
+	mbi.camera_fov_y = camera.fov_y
+
+	basis := calculate_billboard_basis(mbi.view, mbi.camera_fov_y, sprite_position, mode)
+	to_eye := linalg.normalize(eye - sprite_position)
+	view_right := [3]f32{mbi.view[0, 0], mbi.view[0, 1], mbi.view[0, 2]}
+	view_up := [3]f32{mbi.view[1, 0], mbi.view[1, 1], mbi.view[1, 2]}
+
+	// The front of the quad looks at the eye. For UPRIGHT only the heading counts, and the plane one follows the
+	// camera's own back axis instead of the eye, so it is square to the screen wherever the sprite is
+	view_back := [3]f32{mbi.view[2, 0], mbi.view[2, 1], mbi.view[2, 2]}
+	switch mode {
+	case .CAMERA_PLANE:
+		testing.expectf(t, near(basis.normal, view_back), "plane at angle %v: normal %v, camera back %v", angle, basis.normal, view_back)
+	case .CAMERA_POSITION:
+		testing.expectf(t, near(basis.normal, to_eye), "position at angle %v: normal %v, eye direction %v", angle, basis.normal, to_eye)
+	case .UPRIGHT:
+		testing.expectf(t, linalg.dot(basis.normal, to_eye) > 0.3, "upright at angle %v: normal %v does not face the eye %v", angle, basis.normal, to_eye)
+	}
+
+	// What reaches the screen: the quad's right edge goes to the screen's right (not mirrored), and its top goes up it
+	testing.expectf(t, linalg.dot(basis.right, view_right) > 0, "%v at angle %v: right %v is on the wrong side of the screen", mode, angle, basis.right)
+	testing.expectf(t, linalg.dot(basis.up, view_up) > 0, "%v at angle %v: up %v is upside down", mode, angle, basis.up)
+	testing.expectf(t, near(linalg.cross(basis.right, basis.up), basis.normal), "%v at angle %v: a mirrored basis", mode, angle)
+}

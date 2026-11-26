@@ -23,7 +23,12 @@ package billboard_check
 	No marker is ever mirrored (the red corner stays at the top left).
 	Four trees stand upright whatever the camera does. A half see-through marker (blended) sits among them; the coin
 	beside the trees spins, as an animated billboard. The far marker keeps its size on screen as you walk away from it
-	(screen_size): it is 64 pixels wide whether it is near or far
+	(screen_size): it is 64 pixels wide whether it is near or far. That is window pixels, so on the 3DS (a 400 pixel
+	wide top screen) it covers more than twice the share of the screen it does on the Vita (960 wide)
+
+	The second self-check ("through the queue") does the real thing once, on the first frame: camera_start, render_billboard
+	for every mode, and a read of the matrix that was queued, from eyes all round the sprite, behind it included and with
+	the camera looking away from it. A billboard that faces the wrong way on a target shows up there as a failure
 */
 
 import "core:fmt"
@@ -132,6 +137,70 @@ run_checks :: proc() -> Check_Result {
 	return result
 }
 
+// The three axes of what render_billboard queued, read back from the render queue
+queued_axes :: proc() -> (right, up, normal:[3]f32) {
+	// Unit lengths: the queued matrix carries the sprite's size too
+	model := mb.mbi.opaque_items[len(mb.mbi.opaque_items) - 1].model
+	right, up, normal = axes(model)
+	return normalize(right), normalize(up), normalize(normal)
+}
+
+normalize :: proc(v:[3]f32) -> [3]f32 {
+	return v / length(v)
+}
+
+// The real path, on the target: a camera_start, render_billboard and the matrix it queued, for every mode, from eyes all round
+// the sprite. The expected axes come from the eye and the camera by plain geometry, not from the billboard code
+run_queue_checks :: proc(sprite:mb.Sprite, result:^Check_Result) {
+	sprite := sprite
+	sprite.position = {3, 1.5, -2}
+	sprite.scale = {0.01, 0.01} // a speck: the camera_end below draws it once, before the first real frame
+	world_up := [3]f32{0, 1, 0}
+
+	all_ok := [mb.Billboard_Mode]bool{.UPRIGHT = true, .CAMERA_POSITION = true, .CAMERA_PLANE = true}
+	first_failure := ""
+	for height in 0 ..< 3 {
+		for step in 0 ..< 12 {
+			angle := f32(step) * math.TAU / 12 + 0.1
+			eye := [3]f32{3 + 7 * math.cos(angle), 0.5 + f32(height) * 3, -2 + 7 * math.sin(angle)}
+			for aim_step in 0 ..< 2 {
+				aim := sprite.position
+				if aim_step == 1 do aim = sprite.position + {6 * math.cos(angle + 1.2), 0, 6 * math.sin(angle + 1.2)}
+				camera := look(eye, aim)
+
+				to_eye := normalize(eye - sprite.position)
+				back := normalize(eye - aim) // the camera looks down its own -Z
+				screen_right := normalize([3]f32{world_up.y * back.z - world_up.z * back.y, world_up.z * back.x - world_up.x * back.z, world_up.x * back.y - world_up.y * back.x})
+
+				for mode in mb.Billboard_Mode {
+					mb.camera_start(camera)
+					mb.render_billboard(sprite, {mode = mode})
+					right, up, normal := queued_axes()
+					mb.camera_end()
+
+					ok := true
+					switch mode {
+					case .CAMERA_POSITION: ok = near(normal, to_eye, 1e-2)
+					case .CAMERA_PLANE: ok = near(normal, back, 1e-2) && near(right, screen_right, 1e-2)
+					case .UPRIGHT:
+						horizontal := normalize({to_eye.x, 0, to_eye.z})
+						ok = near(normal, horizontal, 1e-2) && near(up, world_up, 1e-2)
+					}
+					// Never mirrored, and the right edge is on the screen's right
+					if right.x * screen_right.x + right.y * screen_right.y + right.z * screen_right.z <= 0 do ok = false
+					if !ok && all_ok[mode] {
+						all_ok[mode] = false
+						first_failure = fmt.tprintf("queue %v angle %.2f height %d aim %d", mode, angle, height, aim_step)
+					}
+				}
+			}
+		}
+	}
+	check(result, all_ok[.UPRIGHT], first_failure)
+	check(result, all_ok[.CAMERA_POSITION], first_failure)
+	check(result, all_ok[.CAMERA_PLANE], first_failure)
+}
+
 main :: proc() {
 	mb.init("billboard check", 960, 544)
 
@@ -149,6 +218,7 @@ main :: proc() {
 	tree := mb.create_sprite(tree_texture)
 	tree.pivot = {0.5, 0} // stands on the floor
 	marker := mb.create_sprite(marker_texture)
+	queue_checked := false
 	coin := mb.create_animated_sprite_from_clip(mb.create_animation_clip(coin_texture, 0.12), 1)
 	coin.pivot = {0.5, 0}
 
@@ -179,6 +249,13 @@ main :: proc() {
 		mb.render_start()
 		mb.clear_background({0.15, 0.17, 0.22, 1})
 
+		// Once, on the first frame, the checks that go through camera_start and the render queue
+		if queue_checked == false {
+			queue_checked = true
+			run_queue_checks(marker, &checks)
+			mb.print(fmt.tprintf("billboard-check: through the queue, %d passed, %d failed %s", checks.passed, checks.failed, checks.first_failure))
+		}
+
 		mb.camera_start(third.camera)
 		mb.render_model(floor, [3]f32{0, 0, 0}, tint = {0.4, 0.4, 0.45, 1})
 		mb.render_model(character, mb.create_transform(player + {0, 0.85, 0}), {1, 0.9, 0.3, 1})
@@ -189,6 +266,9 @@ main :: proc() {
 		mb.render_billboard(marker, {mode = .CAMERA_PLANE})
 		marker.position = {0, 1.5, 0}
 		mb.render_billboard(marker, {mode = .CAMERA_POSITION})
+		// Live, from the queue: 1.00 when the middle marker faces the eye exactly, whatever the target and wherever you stand
+		_, _, queued_normal := queued_axes()
+		facing := queued_normal.x * normalize(third.camera.position - marker.position).x + queued_normal.y * normalize(third.camera.position - marker.position).y + queued_normal.z * normalize(third.camera.position - marker.position).z
 		marker.position = {4, 1.5, 0}
 		mb.render_billboard(marker, {mode = .UPRIGHT}) // rotation is ignored
 
@@ -221,6 +301,8 @@ main :: proc() {
 			"plane | position | upright",
 			fmt.tprintf("roll %v [C / down]", "on" if rolling else "off"),
 			fmt.tprintf("at %.1f %.1f", player.x, player.z),
+			fmt.tprintf("middle faces the eye: %.2f", facing),
+			fmt.tprintf("sticks %.2f %.2f | %.2f %.2f", mb.get_thumbstick_value(.LEFT_THUMBSTICK).x, mb.get_thumbstick_value(.LEFT_THUMBSTICK).y, mb.get_thumbstick_value(.RIGHT_THUMBSTICK).x, mb.get_thumbstick_value(.RIGHT_THUMBSTICK).y),
 		}
 
 		mb.screen_start()

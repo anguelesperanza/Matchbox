@@ -148,13 +148,13 @@ Vita:  vita_check.bat
 | Phase | State |
 |---|---|
 | A (shared foundations) | PC-first decision (2026-11-14): `core:math/linalg`, no shared `math.odin` yet. **A0b done** (2026-11-21, T0-T4: target selection, the backend contract, Vita scripts, the handhelds' entry file; since 2026-11-22 that is `matchbox/handheld_entry`, which the scripts build with the game imported through the `matchbox_game` collection, so games carry no entry file). **A0 verified in Citra** (the o3dx context: `fmt.tprintf`, `make`/`append`, and a failed `assert` printed its message). A1/A4 shared maths moves over when a handheld needs it. |
-| B (PC 3D core) | Done on PC. **B8 (viewport/scissor, fit policy, overscan cap) deferred** by the user. |
-| C (3DS core) | **C0-C4 done** (2026-11-22, Azahar). **Runs on the real New 3DS LL since 2026-11-23** (`gpu_test5`: rectangles, textured sprites, background, circles, lines, blended boxes, text), after the hang fix in `docs/shader_pica.md` ("Output registers are written whole"). C5 waits on B8; C6 optional. The cube-scene gate itself not run on hardware. |
+| B (PC 3D core) | Done on PC. **B8 (viewport/scissor, fit policy, overscan cap) deferred** by the user. Gate scene: `examples/gate-check`, PC 12 passed 0 failed (2026-11-26). |
+| C (3DS core) | **C0-C4 done** (2026-11-22, Azahar). **Runs on the real New 3DS LL since 2026-11-23** (`gpu_test5`: rectangles, textured sprites, background, circles, lines, blended boxes, text), after the hang fix in `docs/shader_pica.md` ("Output registers are written whole"). C5 waits on B8; C6 optional. The cube-scene gate is `examples/gate-check` since 2026-11-26 (PC 12 passed, 0 failed; handhelds: see `render_plan.md`, "Gate scene"). |
 | V (Vita core) | **Done in Vita3K** (2026-11-23) except V8 (deferred with B8) and audio (the user's). See `render_plan.md`, "Phase V: status". **Hardware pass 1 passed** (2026-11-23): `examples/vita-check` runs on a real Vita, and RunTeddyRun plays. Pass 2 comes after Phase G. |
 | D (textures/assets) | D1-D3 done on PC. The 3DS half of D1, D2 and D4 done (2026-11-22, Azahar). The Vita half (V5) done in Vita3K (2026-11-23). |
 | E (2D) | E1-E7 done on PC (shia-test ported, `examples/shia-test`). E7 done on the 3DS (Azahar) and the Vita (Vita3K, 2026-11-23). |
 | F (HUD/text/input/bottom screen) | F1, F3, F4 done on PC. **F2 text**: each target uses its native text: the 3DS's system font (2026-11-22; draws on hardware since 2026-11-23), the Vita's through ScePvf (2026-11-23, Vita3K). Vita front touch is the mouse (2026-11-23). |
-| G (3D games) | Not started (models, lighting, 3D cameras, billboards, render targets, skinning). |
+| G (3D games) | **Done and merged (2026-11-26)**: G1 models, G2 lighting, G3 cameras (incl. PSX drift/fixed and character steering), G4 billboards, G5 render targets and `set_internal_resolution`, G6 skinned animation with layers. Each checked on the real New 3DS LL and the real Vita. Plans: `docs/g3_cameras_plan.md` to `docs/g6_skinned_animation_plan.md`; summary in `render_plan.md`, "Phase G: status". Open: the PSX shader effect (the user will port it later), lit billboards, the second Vita hardware pass as a whole. |
 | H (hard-float via Farlite) | Late, not started. |
 | S (shader language) | S0-S7 done; see below. |
 
@@ -263,7 +263,25 @@ Build it once with `odin build tools/console_deploy.odin -file -out:tools/consol
 ports, folders) are in `tools/console_deploy.ini`; a password goes in the gitignored `tools/console_deploy.local.ini`.
 Tests (a throwaway FTP server on 127.0.0.1, never a console): `odin test tools/console_deploy.odin -file`.
 
-## Suggested order for the next stretch
+## Where things stand (2026-11-26)
+
+The render plan is complete through Phase G. The user is now building a game with Matchbox to stress-test the framework; **nothing
+further is planned until that game shows what is needed**, and Claude should not propose or start speculative work (the user
+wants changes to rest on observed need, not "it might be good"). Open items kept for reference, none scheduled:
+- Deferred by decision: B8 / C5 / V8 (viewport, letterbox, integer scale, width cap), C6 (stereoscopic 3D), Vita MSAA, the design aspect and
+  default fit policy, S8a / S8b (writing `.shbin` / `.gxp` directly), Phase H (hard-float via a Farlite Odin).
+- Follow-ups from G: lit billboards (a G2 follow-up), flipping back-face normals on all targets, normal and bump maps, environment mapping,
+  procedural textures, fog, target-specific light limits, the PSX geometry effect, the cheatsheet generator (it covers `main` only).
+- "Revisit later": joint limits (256 / 64 / 22) and layer limits (4 / 2 / 2) in `Skin_Settings`, and the user's PC-only pass for greater PC capability.
+- Not measured on hardware: layer cost, skinning cost, render-resolution gains (the 3DS did not speed up in G5).
+- The second Vita hardware pass as a whole, planned for after Phase G.
+- **Handheld limits learned in G (Azahar and Vita3K hide them):** a few hundred draws in one 3DS frame overflow its command buffer;
+  creating or freeing a GPU object (a render target) mid-frame kills the real 3DS, so make them between frames; check every
+  allocation return; a 3DS build packs every model in `assets/models` (a model with textures over 1024x1024 fails the build, so
+  PC-scale models belong in `assets/pc/models`); Vita3K cannot read GPU-written textures back.
+- Hardware tests go through `tools/console_deploy` (above): tell the user, wait for the go-ahead that the FTP ports are open, then upload.
+
+## Suggested order for the next stretch (written 2026-11-21, kept for history; superseded by "Where things stand")
 
 1. Finish the PC side of the plan while the 2D game keeps feeding `fixes.md`: B8 (viewport, fit policy, overscan), F2 closure,
    the open decisions above, the `[c]` renames.

@@ -41,6 +41,7 @@ Updated 2026-11-22 (later still): **F2 on the 3DS done: text uses the console's 
 See "F2: status (3DS)".
 Updated 2026-11-22 (later still): **the 3DS bottom screen draws** (its own render target), and `print` is drawn on it in
 place of the ctru console. Checked in Azahar only. See "Bottom screen: status (3DS)" in Phase F.
+Updated 2026-11-26: **Phase G (G1 to G6) is done and merged**, checked on the real New 3DS LL and the real Vita as each step landed (model-check, camera-check, billboard-check, render-target-check, animation-check). See "Phase G: status". The Phase B and C gate scene was never built; it is `examples/gate-check` now, see "Gate scene (Phases B and C)". Decisions still open are unchanged.
 
 ## The decision
 
@@ -770,7 +771,7 @@ How the build differs from the steps below, which are kept as written:
   - C6 is optional.
   - The bottom screen was queued and thrown away here. It has its own target since 2026-11-22 (Phase F,
     "Bottom screen: status (3DS)").
-  - The gate below (the cube scene) has not been run.
+  - The gate below (the cube scene) had not been run; `examples/gate-check` runs it since 2026-11-26 (see "Gate scene (Phases B and C)").
 
 **C0. Shader toolchain.**
 - Only `romfs/vshader.shbin` (a compiled binary) is in the repo; its source
@@ -1573,6 +1574,44 @@ reuse E1.
 - Port main's animator logic.
 - 3DS skinning on the CPU, or in the vertex shader with a small bone limit.
   Measure before choosing.
+
+**Phase G: status (2026-11-26).** G1 to G6 are done, merged into `full-rewrite` and checked on the real New 3DS LL and the real Vita
+(the user ran each hardware build; where a hardware run found a bug the emulators missed, the fix is noted).
+- **G1 models** (`examples/model-check`) and **G2 lighting** (`docs/3ds_fragment_lighting_plan.md`, `docs/g2_remaining_work.md`):
+  directional, point and spot lights, per vertex and per pixel on all three targets. Vita per-pixel runs at about 30 fps
+  after the user's own optimisation pass (accepted for now).
+- **G3 cameras** (`docs/g3_cameras_plan.md`, `examples/camera-check`): first-person, third-person (also the orbit camera), the
+  PSX drift and fixed cameras, character steering (`movement.odin`), `get_mouse_delta`. Hardware found the 3DS circle pad resting
+  about 0.1 off zero, so a 0.15 dead zone was added (in the G4 commit).
+- **G4 billboards** (`docs/g4_billboards_plan.md`, `examples/billboard-check`): `UPRIGHT` / `CAMERA_POSITION` / `CAMERA_PLANE`,
+  `screen_size`. Unlit only; a lit quad is a G2 follow-up. A first example build killed the real 3DS with 216 draws in one frame
+  (Azahar does not mind); the command buffer is small.
+- **G5 render targets** (`docs/g5_render_targets_plan.md`, `examples/render-target-check`): `Render_Target`, `render_target_start/_end`,
+  `render_upscaled_target`, `Fit_Mode`, `set_internal_resolution`. One frame-order rule on all targets: every target first, then the screen.
+  Hardware found the 3DS target's viewport at the bottom of its padded canvas, and that a target made or freed mid-frame kills the 3DS;
+  the first is fixed and the second documented. **On the 3DS, lowering the resolution did not make the benchmark scene faster** (the
+  extra pass costs about what the pixels save), so the render-resolution lever is for the Vita and PC; the plan has the numbers.
+- **G6 skinned animation** (`docs/g6_skinned_animation_plan.md`, `examples/animation-check`): skeletons and clips in `.mbm` version 3,
+  `Animator`, blending, replace and additive layers with per-node mask weights, vertex-shader skinning on all three targets (the 3DS
+  `mova` addressing mode was proven on the real 3DS; the Vita crash was an input the compiler dropped sharing a register). Joint limits
+  256 PC / 64 Vita / 22 per draw 3DS and layer limits 4 / 2 / 2 are settings fields marked "revisit later" (the user plans a PC-only
+  pass for greater PC capability). Cost figures for layers and skinning are arithmetic, not hardware measurements.
+- **Not done in G, by decision:** the PSX geometry shader effect (`psx_geometry` on `main`; the user will port it later), lit billboards,
+  normal and bump maps, environment mapping, procedural textures, fog, stereoscopic 3D.
+- **The 3D milestone's own test** ("a small third-person scene: a model, lighting, a camera rig and a HUD, on PC, 3DS and Vita") is
+  met by `render-target-check` and `camera-check`. The second Vita hardware pass (planned for after G) has not been run as a whole.
+
+**Gate scene (Phases B and C), added 2026-11-26.** The gate asked for a spinning textured cube with a half-transparent quad passing
+through it. No example drew that, so `examples/gate-check` does. It draws the scene four times into 64x64 render targets (quad absent,
+in front of the cube, through its middle, behind it), reads them back and asserts: the cube's four texels sit where they should, the
+quad lightens the background without replacing it, the quad lightens the cube only when it is in front, and the cube's depth hides the
+quad when it is through or behind. It prints `gate-check: N passed, M failed`, and the live scene shows the cube turning with the quad
+sliding through it.
+- **PC: 12 passed, 0 failed** (2026-11-26, a real D3D11 device). That the window keeps its aspect on resize was not checked by eye.
+- **3DS (Azahar), real 3DS, real Vita:** builds exist (`build/hardware/gate_check.3dsx` and `.vpk`); results go here when read.
+  Vita3K cannot read GPU-written pixels back, so the self-check fails in it by design; the real Vita is the check.
+- B8, C5 and V8 (letterbox, integer scale, width cap) are still deferred, so "letterbox and expand both behave as in the mockups"
+  from the Phase B gate is not covered; `Fit_Mode` in G5 is the nearest thing and applies to render targets.
 
 **3D milestone done when:** a small third-person scene (a model, lighting, a
 camera rig, and a HUD) runs on PC, the 3DS and the Vita.

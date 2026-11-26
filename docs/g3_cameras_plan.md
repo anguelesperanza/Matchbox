@@ -2,7 +2,7 @@
 
 Written 2026-11-25. Source: `main:matchbox/camera3d.odin`, `camera3d_drift.odin`, `camera3d_fixed.odin` (and their
 tests). Target: `matchbox/camera.odin`'s `Camera`, which is already world units, +Y up, right-handed, looking down -Z,
-with `fov_y` in degrees. Status of each step is ticked here; the public API (step 2) is the user's to approve.
+with `fov_y` in degrees. Status of each step is ticked here. The API was approved 2026-11-25. Files: `camera_3d.odin`, `camera_drift.odin`, `camera_fixed.odin`, `movement.odin`, `camera_input.odin` (all with `_test.odin`), and `examples/camera-check`.
 
 ## What "PSX camera systems" means
 
@@ -40,19 +40,20 @@ is vertex snapping and affine texturing done in the model's vertex/fragment shad
 | `Third_Person_Camera`, `create_third_person_camera`, `third_person_input`, `third_person_follow`, `third_person_walk` | `Third_Person_Camera`, `create_third_person_camera`, `update_third_person_input`, `follow_third_person_camera`, `walk_third_person_camera` | this is also the orbit camera: nothing in `main` orbits without it |
 | `Camera3D_Shoulder`, `Camera3D_Steering` | `Camera_Shoulder`, `Camera_Steering` | values unchanged |
 | `yaw_from_direction`, `turn_toward` | `calculate_yaw_from_direction`, `turn_angle_toward` | |
-| `facing_rotation`, `Model_Facing`, `model_facing_rotation`, `facing_rotation_of`, `aim_rotation` | `calculate_facing_rotation`, `Model_Facing`, `calculate_aim_rotation` | character helpers, not cameras; small; optional |
+| `facing_rotation`, `Model_Facing`, `model_facing_rotation`, `facing_rotation_of`, `aim_rotation` | `calculate_facing_rotation(yaw, facing)`, `Model_Facing` (`NEG_Z` default), `calculate_aim_rotation` | ported; `facing_rotation_of` merged into `calculate_facing_rotation` |
 | `Drift_Camera`, `create_drift_camera`, `drift_camera_follow`, `drift_camera_snap` | `Drift_Camera`, `create_drift_camera`, `follow_drift_camera`, `snap_drift_camera` | needs `exp`; check the 3DS libm |
 | `Fixed_Camera`, `Camera_Shot`, `Camera_Shot_Aim`, `create_fixed_camera`, `fixed_camera_add_shot`, `fixed_camera_follow`, `destroy_fixed_camera` | same types, `create_fixed_camera`, `add_fixed_camera_shot`, `follow_fixed_camera`; no `destroy` | `[MAX_CAMERA_SHOTS]Camera_Shot` plus a count |
-| `Character_Controls`, `character_steer` (movement3d.odin) | not ported | not a camera; only mentioned in main's comments |
-| `psx_geometry.odin` | not ported | see above |
+| `Control_Scheme`, `Character_Controls`, `create_character_controls`, `get_movement_input`, `character_steer`, `character_walk` (movement3d.odin) | same types, `create_character_controls`, `get_movement_input` (no `pad` argument), `steer_character`, `walk_character` | ported on the user's 2026-11-25 instruction; `MOVEMENT_DEFAULTS` became constructor defaults; tank turns right = smaller yaw |
+| `character_basis_yaw`, `camera_ground_yaw`, `stick_swing` | `calculate_character_basis_yaw`, `calculate_camera_ground_yaw`, `calculate_stick_swing` | private |
+| `psx_geometry.odin` | not ported | a shader effect; the user will port it later |
 
 ## Steps
 
-- [ ] G3-1. Read main's cameras and write this plan. (done with this file)
-- [ ] G3-2. **User approves the public API** (proposal sent with this file). Nothing below starts before.
-- [ ] G3-3. Input: `get_mouse_delta` on PC (from `WM_MOUSEMOVE`), touch drag on the handhelds; tests drive `mbi`.
-- [ ] G3-4. `create_camera_3d`, `Camera_Look`, direction/angle/walk helpers, `turn_angle_toward`; tests against numpy-checked values.
-- [ ] G3-5. First- and third-person rigs; tests with synthetic input.
-- [ ] G3-6. Drift and fixed cameras; tests ported from main's `camera3d_drift_test` and `camera3d_fixed_test`.
-- [ ] G3-7. `examples/camera-check`: each camera, measured view matrices; `odin check`, `odin test`, `3ds_check.bat`, `vita_check.bat`, Azahar, Vita3K.
-- [ ] G3-8. Uniquely named hardware builds in the main checkout's `build/hardware/`, then ask the user for the hardware check.
+- [x] G3-1. Read main's cameras and write this plan. (done with this file)
+- [x] G3-2. **User approves the public API** (proposal sent with this file). Nothing below starts before.
+- [x] G3-3. Input: `get_mouse_delta` (PC pointer, touch drag on the handhelds) through `mbi.mouse_motion`, sampled in each `poll_events`; tests drive `mbi`.
+- [x] G3-4. `create_camera_3d`, `Camera_Look`, direction/angle/walk helpers, `turn_angle_toward`; tests against numpy-checked values.
+- [x] G3-5. First- and third-person rigs; tests with synthetic input.
+- [x] G3-6. Drift and fixed cameras; tests ported from main's `camera3d_drift_test` and `camera3d_fixed_test`.
+- [x] G3-7. `examples/camera-check`: each camera, measured view matrices; `odin check`, `odin test`, `3ds_check.bat`, `vita_check.bat`, Azahar, Vita3K.
+- [ ] G3-8. Uniquely named hardware builds `camera_check_g3.3dsx` and `camera_check_g3.vpk` in the main checkout's `build/hardware/` (done); **waiting for the user's hardware check**.

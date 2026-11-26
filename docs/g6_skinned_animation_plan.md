@@ -350,3 +350,113 @@ the 3DS. On the Vita it is 37 draws of per-pixel-lit skinned meshes at a frame r
 - The PC render was checked against screenshots and the palettes by the unit tests (against numpy); there is no pixel-level test that a skinned draw with the identity palette lights
   identically to an unskinned one. The bug that test would have caught (joints reaching the shader as denormals) was found by the first render instead.
 - The 3DS and Vita cost figures in this plan are still arithmetic; no frame times were measured on hardware. Azahar and Vita3K sit at 60 fps vsync.
+
+## Addendum: animation layers are in G6 (proposed API, needs the user's approval before any of it is coded)
+
+**Scope change (2026-11-26, the user):** layers are part of G6, not deferred, because a game the user plans needs them. This **supersedes** the "layers left out" text above
+(the bullet "What leaving layers out costs", the approved answer "layers left out", and the Outcome line that says the same). The joint limits stay a per-target `Skin_Settings` field, as already built.
+
+### What `main` has (read from `main:matchbox/animation3d.odin`)
+
+- `MAX_ANIMATION_LAYERS :: 2`, an array size. `Animator.layers: [2]Animation_Layer`; `Animation_Pose.layer_locals: [2][]Transform` is one scratch pose per layer.
+- `Animation_Layer` = a playback (`using`), `mask: []bool` (one bool per skeleton node, a copy the layer owns), `weight` (0..1, set by the game), `active`.
+- `animation_mask_below(model, root)` (a node and everything under it) and `animation_mask_named(model, names)` build masks.
+- `play_animation_layer(animator, model, layer, name, mask, looping)` (idempotent for the clip already playing), `stop_animation_layer`, `set_animation_layer_weight`.
+- `update_animator`: after the base clip and its fade have settled into `locals`, each active layer with weight > 0 advances its clock, samples into its own scratch pose, and for every masked node
+  mixes `locals[n] = mix(locals[n], layer_locals[n], weight)` (slerp / lerp). Layers run in index order, later ones on top. An unused layer costs nothing.
+- **Not in `main`:** additive clips, per-joint mask weights (a mask is on or off), automatic fade in or out of a layer (the game ramps `weight` itself), a crossfade between two clips on one layer (a switch snaps).
+
+### Proposed here, in this branch's style
+
+**Types** (in `animator.odin`):
+
+```odin
+MAX_ANIMATION_LAYERS :: 4 // an array size, the one exception CLAUDE.md allows: Animator holds a fixed array of layers, so no heap list and nothing new to destroy
+
+Animation_Layer_Mode :: enum {
+	REPLACE,  // the layer's pose takes over its masked joints, mixed by strength: an upper-body clip over a walk
+	ADDITIVE, // the layer's pose minus its clip's own first frame is laid on top: a flinch, a head turn, breathing
+}
+
+Animation_Layer_Fade :: struct {
+	duration:  f32, // seconds to ease in on play and out on stop or finish; 0 snaps. Default 0.2, as the base clip's fade
+	level:     f32, // 0..1, where the fade is now: the layer's strength is weight * level
+	direction: int, // +1 in, -1 out, 0 steady
+}
+
+Animation_Layer :: struct {
+	using playback: Animation_Playback, // clip, time, speed, looping, playing: a game polls `layer.playing` to see a one-shot finish
+	mode:   Animation_Layer_Mode,
+	mask:   []f32, // one weight 0..1 per skeleton node, a copy owned by the animator; 0 = the layer does not touch that node
+	weight: f32,   // the game's strength, 0..1
+	fade:   Animation_Layer_Fade,
+	active: bool,  // contributing to the pose: from play until the fade-out ends
+}
+```
+
+`Animator` gets `layers: [MAX_ANIMATION_LAYERS]Animation_Layer`; `Animation_Pose` gets one scratch `[]Transform` per layer, and each layer a mask of node-count floats. All of it is allocated in `create_animator` and freed
+by `destroy_animator`: the same single allocate and single free the animator already has, nothing mid-frame. Slots at or above `mbi.skin_settings.layer_limit` allocate nothing and refuse a play.
+
+**Why the layer count is a constant:** a fixed array is what keeps the animator one allocation with no list to grow or destroy. The constant is the array's size (the exception CLAUDE.md names), and the limit that
+actually applies on each target is a settings field (below), so the constant only has to cover the largest target.
+
+**Why a mask of weights, not `main`'s bools:** an upper-body mask with a hard edge at the spine shows a seam where the layer's pose meets the walk's. A ramp (spine 0.3, chest 0.6, shoulders 1) hides it, and a bool mask is the 0-or-1 case of the same thing, so nothing is lost.
+
+**Procedures** (one verb per action; layers are numbered from 0, a higher one draws over a lower one):
+
+| Procedure | Does |
+|---|---|
+| `play_animation_layer(animator, model, layer, name, mask, mode := .REPLACE, looping := true) -> bool` | starts the clip on a layer (false and a log line for a bad layer, name or mask length). The clip already playing only updates `looping`, `mode` and the mask, so a state machine may call it every frame. A *different* clip on a playing layer snaps to it (as `main`) and keeps the fade level. Fades in over `fade.duration` |
+| `play_animation_layer_index(animator, model, layer, index, mask, mode, looping) -> bool` | the same by clip index |
+| `stop_animation_layer(animator, layer)` | fades the layer out over `fade.duration`, then clears `active`; with a duration of 0 it is gone at once and the masked joints return to the base |
+| `set_animation_layer_weight(animator, layer, weight)` | sets `weight` (clamped 0..1); the game may animate it itself |
+| `set_animation_layer_mask(animator, layer, mask) -> bool` | replaces the mask without touching the clip (false for a wrong length) |
+| `calculate_animation_mask_below(model, root, falloff := 0, allocator := context.temp_allocator) -> []f32` | the node `root` and everything under it at 1; `falloff` > 0 also gives that many ancestors a ramp (3 gives 0.25, 0.5, 0.75 up the spine) |
+| `calculate_animation_mask_named(model, names, allocator := context.temp_allocator) -> []f32` | exactly the named nodes at 1 (an unknown name logs an error and is left out) |
+
+The mask builders are `calculate_` because they work the answer out of the skeleton on each call; they return temp memory by default because `play_animation_layer` copies the mask in, so a game never frees one.
+
+**Finished is polled, never called back.** A non-looping layer clip that reaches its end sets `layer.playing = false`, then fades out on its own over `fade.duration` and clears `layer.active`. A game reads
+`animator.layers[1].playing` (the one-shot ended) or `.active` (it has left the pose entirely). No `on_finished`.
+
+**How `update_animator` composes** (after the base clip and its fade have settled into `pose.locals`, before `resolve_skeleton_pose`): for each layer from 0 up that is `active` with strength `weight * fade.level` above 0:
+advance its clock; sample **only the nodes whose mask weight is above 0** into its scratch pose; then for each such node, with `s = strength * mask[n]`:
+
+- `REPLACE` mixes `locals[n]` towards the layer's pose by `s` (slerp for rotation, lerp for translation and scale).
+- `ADDITIVE` takes the layer's sampled pose against its clip's own first frame (translation and scale as a difference, rotation as `layer * inverse(first)`) and applies that scaled by `s`: translation and scale added, rotation slerped from identity by `s` and multiplied in.
+  The first frame is sampled once, when the clip starts. A clip that is meant to be additive should be authored so its first frame is its rest.
+
+An inactive layer, or a strength of 0, costs nothing and does not advance its clock.
+
+**Additive is proposed even though `main` has none:** the game the user plans will want a hit reaction or a breathing loop over whatever the base is doing, which a replace layer cannot do without the base clip's pose being known. It costs one extra multiply per node and a stored first frame, and leaving it out later would be an API break.
+
+### Cost, and the per-target limit
+
+`layer_limit` joins `Skin_Settings` (per target in each backend's defaults, "revisit later" like the joint limit): **4 on PC, 2 on the Vita, 2 on the 3DS**. `MAX_ANIMATION_LAYERS` is 4 only because the array is sized for the largest target.
+
+Per update, per layer, as arithmetic (nothing measured, the same basis as the 3DS figures above): per masked node a layer samples its tracks (a bisect and an interpolation, one of them a slerp) and mixes into the pose (another slerp and two lerps).
+With soft-float at about 40 cycles an operation and `acos` and `sin` at about 1,000 cycles each in a slerp, that is on the order of **14,000 cycles a node: about 17 microseconds on a New 3DS (804 MHz), about 50 on an old 3DS (268 MHz)**.
+A layer masked to the 20 joints of an upper body is about 0.35 ms on a New 3DS; the same layer over a 60-joint skeleton is about 1 ms, which roughly doubles the base pass.
+Hence: the pass runs over masked nodes only, a zero-strength layer is free, and two layers is the sensible handheld ceiling. The palette work is **not** multiplied by layers: it runs once, after all of them. `ADDITIVE` costs the same as `REPLACE` plus one rotation multiply a node.
+
+### Tests that assert on numbers (written with the layer code)
+
+- `tools/make_test_skinned_model.py` gains a third clip on the test arm, `"Nod"` (J2 rotating LINEAR 0 to 30 degrees about Z over one second), and prints numpy palettes, from the glTF spec's formulas and no Matchbox code, for each case below.
+- **Upper-body over base, worked by hand:** base "Wave" at t = 1 with layer "Bend" (a fixed 45 degree bend at J1) masked to J1 and below at weight 1: J1 is 45 degrees and J0 is still the base's (the mask leaves it alone). At weight 0.5: J1 is the half-way
+  mix of the two rotations. With a mask of 0.5 on J1 and weight 1: the same half-way mix. A mask of zero everywhere: the base pose exactly.
+- **Additive:** "Nod" over "Wave" at t = 1 (layer at t = 1 too): J1 as the base, J2 turned a further 30 degrees; at layer weight 0.5, 15 degrees.
+- **Fades and polling:** a one-shot layer's `playing` goes false at its end and `active` false a fade later; `stop_animation_layer` with a fade of 0.2 is at half strength after 0.1 s (eased as the base fade is); an inactive layer does not advance its clock.
+- Two animators on one model with different layers do not touch each other; `calculate_animation_mask_below` against a hand-counted subtree of the arm and the rope; a wrong-length mask is refused; a layer at or over `layer_limit` is refused.
+
+### The example
+
+`examples/animation-check` gains a layer: the right ribbon's base clip plays "Wave" and a layer plays "Bend" masked to J1 and below (with `-define:MODEL=arms_rig.glb`, a base clip plus an upper-body clip on a layer masked below a node named by a `#config`).
+The top face button (X on the 3DS, Triangle on the Vita, K on the PC) turns the layer on and off to show the fade; the HUD gains a line with the layer's clip, `playing` and `active`.
+
+### Open questions for the user (the layer part only)
+
+1. **Names and shape** as above: `play_animation_layer`, `stop_animation_layer`, `set_animation_layer_weight`, `set_animation_layer_mask`, `calculate_animation_mask_below` and `_named`, `Animation_Layer`, `Animation_Layer_Mode`. Right?
+2. **Mask as per-node weights** (a ramp for a soft shoulder) rather than `main`'s bool per node. Agreed?
+3. **Additive mode**, which `main` does not have. In, as proposed, or left out?
+4. **Automatic fade in and out of a layer** (`main` leaves it to the game); in as proposed, with `fade.duration` 0 turning it off?
+5. **Layer counts:** an array of 4, limits 4 PC / 2 Vita / 2 3DS. Acceptable (all three "revisit later", measured on hardware)?

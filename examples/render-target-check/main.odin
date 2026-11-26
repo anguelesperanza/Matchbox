@@ -136,7 +136,8 @@ check_sample :: proc(pair:Sample_Pair, name:string, result:^Check_Result) -> str
 		}
 	}
 	check(result, bad == 0, fmt.tprintf("sampling %s", name))
-	return fmt.aprintf("sample %s: %d off (top %d bottom %d left %d right %d)", name, bad, top, bottom, left, right)
+	// Short: every glyph is a draw on the 3DS, and a screenful of text overflowed its command buffer
+	return fmt.aprintf("%d t%d b%d l%d r%d", bad, top, bottom, left, right)
 }
 
 pixel :: proc(pixels:[]u8, width, x, y:int) -> [4]u8 {
@@ -235,7 +236,7 @@ main :: proc() {
 			if (frame - 3) % BENCH_FRAMES == 0 {
 				step := bench_frame / BENCH_FRAMES
 				size := mb.get_internal_resolution() if internal else [2]i32{scene.width, scene.height}
-				bench_lines[step] = fmt.aprintf("%.2f: %dx%d = %d px, %.1f ms", scales[step], size.x, size.y, size.x * size.y, bench_time / BENCH_FRAMES * 1000)
+				bench_lines[step] = fmt.aprintf("%.2f %dx%d %dpx %.1fms", scales[step], size.x, size.y, size.x * size.y, bench_time / BENCH_FRAMES * 1000)
 				mb.print("render-target-check: bench", bench_lines[step])
 				bench_time = 0
 				if step < 2 {
@@ -279,8 +280,6 @@ main :: proc() {
 			check_probe(probe, minimap, &checks)
 			sample_lines[0] = check_sample(sample_point, "POINT", &checks)
 			sample_lines[1] = check_sample(sample_linear, "LINEAR", &checks)
-			mb.print(sample_lines[0])
-			mb.print(sample_lines[1])
 			mb.print(fmt.tprintf("render-target-check: %d passed, %d failed %s", checks.passed, checks.failed, checks.first_failure))
 		}
 
@@ -311,7 +310,7 @@ main :: proc() {
 		{
 			shown := mb.Render_Target{width = mb.get_internal_resolution().x, height = mb.get_internal_resolution().y} if internal else scene
 			top_left, bottom_right := mb.calculate_upscaled_rectangle(shown, fits[fit_index])
-			rectangle_line = fmt.tprintf("%dx%d at %.0f,%.0f to %.0f,%.0f", shown.width, shown.height, top_left.x, top_left.y, bottom_right.x, bottom_right.y)
+			rectangle_line = fmt.tprintf("%dx%d %.0f,%.0f-%.0f,%.0f", shown.width, shown.height, top_left.x, top_left.y, bottom_right.x, bottom_right.y)
 		}
 
 		// The HUD: after the upscale it is in screen pixels (crisp); in internal mode it is inside the picture
@@ -319,8 +318,7 @@ main :: proc() {
 			fmt.tprintf("checks: %d passed, %d failed", checks.passed, checks.failed),
 			checks.first_failure,
 			fmt.tprintf("%s %v %v", "internal" if internal else "target", fits[fit_index], filter),
-			sample_lines[0],
-			sample_lines[1],
+			fmt.tprintf("sample P %s L %s", sample_lines[0], sample_lines[1]),
 			rectangle_line,
 			bench_lines[0],
 			bench_lines[1],

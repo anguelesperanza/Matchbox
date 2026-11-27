@@ -63,7 +63,7 @@ SKY_DEFAULT_TINT :: [4]f32{1, 1, 1, 1}
 	retried, and logged, sixty times a second.
 */
 Sky_Runtime :: struct {
-	skybox: Skybox,
+	skybox: mb.Skybox,
 	path:   string,
 	kind:   Sky_Kind,
 	failed: bool,
@@ -94,13 +94,26 @@ load_level_sky :: proc(level: ^Level) -> bool {
 
 	if sky.kind == .NONE || sky.path == "" do return false
 
-	loaded: Skybox
+	loaded: mb.Skybox
 	err: bool
 
 	switch sky.kind {
 	case .NONE: // handled above
-	case .PANORAMA: loaded, err = load_skybox_pending(sky.path)
-	case .CUBEMAP:  loaded, err = load_skybox_pending(sky.path)
+	case .PANORAMA, .CUBEMAP:
+		// Matchbox's loaders stop on a missing file, and a level should fall back to its background colour instead, so the
+		// file is looked for first. The editor writes paths from the project root; Matchbox looks inside assets/images
+		name := strings.trim_prefix(sky.path, SKY_PATH_PREFIX)
+		found_path, found := mb.find_asset(name, .IMAGE)
+		if !found {
+			err = true
+		} else {
+			delete(found_path)
+			if sky.kind == .PANORAMA {
+				loaded = mb.load_skybox_panorama(name)
+			} else {
+				loaded = mb.load_skybox_cubemap(name)
+			}
+		}
 	}
 
 	if err {
@@ -140,7 +153,7 @@ set_level_sky :: proc(level: ^Level, kind: Sky_Kind, path: string) {
 // calls, and what `load_level_sky` calls before loading another.
 unload_level_sky :: proc(level: ^Level) {
 	rt := &level.runtime.sky
-	if rt.skybox.texture != nil do destroy_skybox_pending(&rt.skybox)
+	if rt.skybox.texture != nil do mb.destroy_skybox(rt.skybox)
 	delete(rt.path, level_allocator(level))
 	rt^ = {}
 }
@@ -166,7 +179,7 @@ render_level_sky :: proc(level: ^Level) {
 
 	drawn := rt.skybox
 	drawn.tint = sky_tint(level.settings.sky)
-	render_skybox_pending(drawn)
+	mb.render_skybox(drawn)
 }
 
 // What a sky is drawn at: its own tint, or white when it has none. A level
@@ -183,20 +196,6 @@ sky_failed :: proc(level: ^Level) -> bool {
 	return level.runtime.sky.failed
 }
 
-// SKYBOX PENDING: Matchbox has no skybox yet (the `skybox-pc` session adds one). Until it lands these stand in for its
-// `Skybox`, loader, destroy and render, so the level loads and its `sky` settings round-trip but nothing is drawn.
-// Replace each with the `mb.` call and delete this block.
-Skybox :: struct {
-	texture: rawptr,
-	tint:    [4]f32,
-}
-
-load_skybox_pending :: proc(path: string) -> (skybox: Skybox, failed: bool) {
-	return {}, true
-}
-
-destroy_skybox_pending :: proc(skybox: ^Skybox) {
-	skybox^ = {}
-}
-
-render_skybox_pending :: proc(skybox: Skybox) {}
+// What the editor writes in front of every sky path, which Matchbox's image lookup supplies itself
+@(private)
+SKY_PATH_PREFIX :: "assets/images/"

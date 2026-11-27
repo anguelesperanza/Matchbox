@@ -40,6 +40,15 @@ load_skybox_panorama :: proc(filename:string) -> (skybox:Skybox)
 render_skybox :: proc(skybox:Skybox)
 destroy_skybox :: proc(skybox:Skybox)
 
+// Runtime humanoid retargeting. PC only (humanoid_windows.odin, retarget_windows.odin): not compiled for the handhelds, and not in the `destroy` group
+// Types: Humanoid_Bone, Humanoid_Map, Humanoid_Bone_Name, Animation_Source, Retarget_Options{names, fit}, Retarget_Fit{PROPORTIONS, ROTATION_ONLY}
+// Name tables: UNITY_BONE_NAMES (a character's usual), UNREAL_BONE_NAMES (Mesh2Motion and Quaternius clip libraries; the default source)
+map_humanoid_bones :: proc(model:Model, names:[]Humanoid_Bone_Name = UNITY_BONE_NAMES) -> (humanoid:Humanoid_Map, mapped:int)
+get_humanoid_node :: proc(humanoid:Humanoid_Map, bone:Humanoid_Bone) -> (node:u32, found:bool)
+load_animation_source :: proc(path:string, rest_pose_path := "") -> (source:Animation_Source, ok:bool)
+destroy_animation_source :: proc(source:Animation_Source)
+retarget_animations :: proc(model:^Model, humanoid:Humanoid_Map, source:Animation_Source, options:Retarget_Options = {}) -> (added:int)
+
 load_audio :: proc(filepath:string) -> (audio:Audio)
 play_audio :: proc(audio:Audio)
 destroy_audio :: proc(audio:Audio)

@@ -292,10 +292,11 @@ the_psx_picture_filter_dithers_reduces_colour_and_draws_scanlines :: proc(t: ^te
 	if loaded == false do return
 	defer destroy_shader(post)
 
-	// A flat mid grey, 128 / 255, in a target 16 pixels wide, sampled on a grid of 4 cells: each cell is 4 x 4 pixels
+	// A flat mid grey, 0.502 in display space, in a target 16 pixels wide, sampled on a grid of 4 cells: each cell is 4 x 4 pixels
 	source := create_render_target({width = SIZE, height = SIZE})
 	defer destroy_render_target(&source)
-	render_target_start(&source, [4]f32{128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0, 1})
+	grey := math.pow(f32(0.502), 2.2) // 0.502 as the screen shows it; the filter works in display space
+	render_target_start(&source, [4]f32{grey, grey, grey, 1})
 	render_target_end()
 
 	destination := create_render_target({width = SIZE, height = SIZE})
@@ -310,15 +311,16 @@ the_psx_picture_filter_dithers_reduces_colour_and_draws_scanlines :: proc(t: ^te
 	pixels := read_render_target_pixels(destination)
 	defer delete(pixels)
 
-	// Worked by hand from the shader's own steps, for 0.502 grey. dither = bayer(x, y) / 16 - 0.5, then + dither * 2/31,
+	// Worked by hand from the shader's own steps, for 0.502 grey in display space. dither = bayer(x, y) / 16 - 0.5, then + dither * 2/31,
 	// then rounded to five bits (n / 31), then darkened by 12% on every odd cell row:
 	//   cell (0,0): bayer 0   -> 0.4697 -> 15/31 = 0.4839
 	//   cell (1,0): bayer 8   -> 0.5020 -> 16/31 = 0.5161
 	//   cell (0,1): bayer 12, odd row -> 0.5181 -> 16/31 * 0.88 = 0.4542
 	//   cell (1,1): bayer 4 (-0.25), odd row -> 0.4859 -> 15/31 * 0.88 = 0.4258
-	// The shader works in linear light and the target is sRGB, so what is read back is the encoded value (the clear colour
-	// went in as 0.502 linear for the same reason). The encode is the sRGB standard's, written here rather than borrowed
-	encode :: proc(linear: f32) -> u8 {
+	// The shader takes the result back to linear (gamma 2.2) and the target is sRGB, so what is read back is the sRGB
+	// encode of display^2.2: within a step or two of the display value. The encode is the standard's, written here
+	encode :: proc(display: f32) -> u8 {
+		linear := math.pow(display, 2.2)
 		encoded := 12.92 * linear if linear <= 0.0031308 else 1.055 * math.pow(linear, 1.0 / 2.4) - 0.055
 		return u8(encoded * 255 + 0.5)
 	}

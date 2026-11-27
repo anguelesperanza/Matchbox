@@ -61,7 +61,10 @@ fragment_main :: proc(v:Varying) -> [4]f32 {
 	// 1. Snap to the coarse grid: the centre of each cell, so the pixels are square rather than smeared
 	cell := floor(v.uv * cells)
 	centre := (cell + 0.5) / cells
-	colour := sample(tex, centre).xyz
+	// Taken to display space (gamma 2.2) first: the five-bit steps and the dither are the PlayStation's, and it worked on
+	// the values the screen showed. In linear light the same steps are far too coarse in the darks, which crushes them to
+	// black under the dither (measured in spirit-game: walls and floor lost most of their detail)
+	colour := pow(sample(tex, centre).xyz, [3]f32{0.4545454545, 0.4545454545, 0.4545454545})
 
 	// 2. Ordered dither, before the colour is reduced: a 4 x 4 Bayer matrix, which is the 2 x 2 one inside itself. The
 	// PlayStation dithered before reducing colour depth, so gradients break into a weave instead of banding
@@ -78,5 +81,6 @@ fragment_main :: proc(v:Varying) -> [4]f32 {
 	scan := mod(cell.y, 2.0)
 	colour = colour * (1.0 - 0.12 * scan)
 
-	return [4]f32{saturate(colour.x), saturate(colour.y), saturate(colour.z), 1.0}
+	colour = pow(saturate(colour), [3]f32{2.2, 2.2, 2.2})
+	return [4]f32{colour.x, colour.y, colour.z, 1.0}
 }

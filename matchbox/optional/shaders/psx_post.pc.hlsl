@@ -59,7 +59,7 @@ float4 fragment_main(Varying v) : SV_TARGET {
     }
     float2 cell = floor((v.uv * cells));
     float2 centre = (cell + 0.5) / cells;
-    float3 colour = tex.Sample(mbs_sampler, centre).xyz;
+    float3 colour = pow(tex.Sample(mbs_sampler, centre).xyz, float3(0.45454547, 0.45454547, 0.45454547));
     float x = mbs_mod(cell.x, 4.0);
     float y = mbs_mod(cell.y, 4.0);
     float index = (4.0 * bayer_two(mbs_mod(x, 2.0), mbs_mod(y, 2.0))) + bayer_two(floor((x / 2.0)), floor((y / 2.0)));
@@ -68,5 +68,6 @@ float4 fragment_main(Varying v) : SV_TARGET {
     colour = floor(((colour * 31.0) + 0.5)) / 31.0;
     float scan = mbs_mod(cell.y, 2.0);
     colour = colour * (1.0 - (0.12 * scan));
-    return float4(saturate(colour.x), saturate(colour.y), saturate(colour.z), 1.0);
+    colour = pow(saturate(colour), float3(2.2, 2.2, 2.2));
+    return float4(colour.x, colour.y, colour.z, 1.0);
 }

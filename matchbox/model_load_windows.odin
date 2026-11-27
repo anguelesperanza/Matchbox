@@ -51,14 +51,30 @@ _ :: png
 	most handheld games use
 */
 load_model :: proc(filename:string, filter:Filter_Mode = .POINT) -> (model:Model) {
-	path := get_asset(filename, .MODEL)
+	ok:bool
+	model, ok = load_model_checked(filename, filter)
+	if ok == false do panic("Failed to load model")
+	return
+}
+
+/*
+	The same as load_model, but reports a file that is missing, isn't glTF or has nothing to draw as
+	`ok` = false (with the reason printed) instead of stopping. For a level that would rather draw a
+	placeholder than not start. Nothing is allocated when `ok` is false
+*/
+load_model_checked :: proc(filename:string, filter:Filter_Mode = .POINT) -> (model:Model, ok:bool) {
+	path, found := find_asset(filename, .MODEL)
+	if found == false {
+		print("No such model file:", filename)
+		return {}, false
+	}
 	defer delete(path)
 
-	data, ok := read_gltf_model(path, mbi.skin_settings.joint_limit)
+	data, read_ok := read_gltf_model(path, mbi.skin_settings.joint_limit)
 	defer destroy_model_data_leftovers(data)
-	if ok == false {
+	if read_ok == false {
 		print("Could not read model", path)
-		panic("Failed to load model")
+		return {}, false
 	}
 
 	textures := make([]Texture, len(data.images))
@@ -73,7 +89,7 @@ load_model :: proc(filename:string, filter:Filter_Mode = .POINT) -> (model:Model
 		textures[index] = create_texture_from_pixels(raw_data(decoded.pixels), i32(decoded.width), i32(decoded.height), filter)
 		image.destroy(decoded)
 	}
-	return create_model_from_data(data, textures)
+	return create_model_from_data(data, textures), true
 }
 
 /*

@@ -52,6 +52,16 @@ get_window_size :: proc() -> [4]i32 {
 	The caller owns the returned string and should delete it
 */
 get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
+	path, found := find_asset(filename, asset_type)
+	if found == false {
+		print("Asset not found")
+		panic("Asset not found")
+	}
+	return path
+}
+
+/*The same lookup as get_asset, but a file that is not there is `found` = false and not a stop*/
+find_asset :: proc(filename:string, asset_type:Asset_Type) -> (path:string, found:bool) {
 
 	folder := "images/"
 	if asset_type == .AUDIO do folder = "audio/"
@@ -61,16 +71,14 @@ get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
 	dir := strings.concatenate({mbi.target_asset_path, folder})
 	file := strings.concatenate({dir, filename})
 	delete(dir)
-	if os.is_file(file) do return file
+	if os.is_file(file) do return file, true
 	delete(file)
 
 	// Then shared
 	dir = strings.concatenate({mbi.asset_path, folder})
 	file = strings.concatenate({dir, filename})
 	delete(dir)
-	if os.is_file(file) do return file
+	if os.is_file(file) do return file, true
 	delete(file)
-
-	print("Asset not found")
-	panic("Asset not found")
+	return "", false
 }

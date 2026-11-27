@@ -578,6 +578,7 @@ create_pipeline :: proc() {
 	}
 
 	create_states()
+	create_skybox_state()
 }
 
 /*
@@ -683,6 +684,7 @@ camera_end :: proc() {
 
 	// A hidden pass was queued but is never drawn
 	if mbi.discard_pass == true {
+		mbi.skybox.has_pending = false
 		clear(&mbi.opaque_items)
 		clear(&mbi.transparent_items)
 		clear(&mbi.skin_state.rows)
@@ -703,6 +705,7 @@ camera_end :: proc() {
 
 	sort_render_queue()
 	set_lights_constants()
+	draw_pending_skybox() // first, so everything else covers it
 
 	for item in mbi.opaque_items {
 		set_render_state(depth_opaque, .NONE, item.cull)
@@ -735,6 +738,7 @@ destroy_pipeline :: proc() {
 	delete(mbi.game_shadow)
 
 	destroy_states()
+	destroy_skybox_state()
 
 	destroy_render_pipeline(&mbi.skinned_lit_pipeline)
 	destroy_render_pipeline(&mbi.skinned_pipeline)

@@ -95,6 +95,9 @@ Backend_State :: struct {
 	game_dirty:bool,
 	lights_constants:^d3d11.IBuffer, // the lights block, filled from mbi.lighting at camera_end (light.odin)
 
+	// The sky (skybox_windows.odin): its shader, and the one render_skybox recorded for the camera being drawn
+	skybox:Skybox_State,
+
 	// Fixed values the PC backend works with
 	shader_format:Shader_Format,
 	skin_settings:Skin_Settings,

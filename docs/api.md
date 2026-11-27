@@ -30,6 +30,16 @@ set_animation_layer_mask :: proc(animator:^Animator, layer:int, mask:[]f32) -> b
 calculate_animation_mask_below :: proc(model:Model, root:u32, falloff := 0, allocator := context.temp_allocator) -> []f32
 calculate_animation_mask_named :: proc(model:Model, names:[]string, allocator := context.temp_allocator) -> []f32
 
+calculate_skybox_rays :: proc(view:matrix[4, 4]f32, fov_y:f32, aspect:f32) -> Skybox_Rays
+split_cubemap_cross :: proc(pixels:[][4]u8, width, height:int, allocator := context.allocator) -> (faces:[6][][4]u8, face_size:int, ok:bool)
+// PC only. On the 3DS and Vita these names exist and panic "A skybox is PC only for now"; destroy_skybox is empty there
+create_skybox_cubemap :: proc(faces:[6]rawptr, face_size:i32) -> (skybox:Skybox)
+create_skybox_panorama :: proc(pixels:rawptr, width, height:i32) -> (skybox:Skybox)
+load_skybox_cubemap :: proc(filename:string) -> (skybox:Skybox)
+load_skybox_panorama :: proc(filename:string) -> (skybox:Skybox)
+render_skybox :: proc(skybox:Skybox)
+destroy_skybox :: proc(skybox:Skybox)
+
 load_audio :: proc(filepath:string) -> (audio:Audio)
 play_audio :: proc(audio:Audio)
 destroy_audio :: proc(audio:Audio)
@@ -120,7 +130,7 @@ is_cooldown_finished :: proc(cooldown:Cooldown) -> bool
 is_cooldown_running :: proc(cooldown:Cooldown) -> bool
 calculate_cooldown_progress :: proc(cooldown:Cooldown) -> f32
 
-destroy :: proc{ destroy_audio, destroy_mesh, destroy_model, destroy_texture, destroy_render_target, destroy_sprite, destroy_animation_clip, destroy_parallax, destroy_font }
+destroy :: proc{ destroy_audio, destroy_mesh, destroy_model, destroy_texture, destroy_render_target, destroy_sprite, destroy_animation_clip, destroy_parallax, destroy_font, destroy_skybox }
 
 poll_events :: proc()
 

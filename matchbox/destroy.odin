@@ -21,4 +21,5 @@ destroy :: proc {
 	destroy_animation_clip,
 	destroy_parallax,
 	destroy_font,
+	destroy_skybox,
 }

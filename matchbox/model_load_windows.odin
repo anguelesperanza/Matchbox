@@ -33,6 +33,7 @@ import "core:image"
 import "core:image/jpeg"
 import "core:image/png"
 import "core:math/linalg"
+import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -80,6 +81,16 @@ load_model_checked :: proc(filename:string, filter:Filter_Mode = .POINT) -> (mod
 	textures := make([]Texture, len(data.images))
 	for encoded, index in data.images {
 		decoded, err := image.load_from_bytes(encoded, options = {.alpha_add_if_missing})
+		if err == nil && decoded.depth == 16 && decoded.channels == 4 {
+			// A 16-bit PNG (Blender and some exporters write them): the top byte of each channel is the 8-bit value
+			pixels := mem.slice_data_cast([]u16, decoded.pixels[:])
+			narrow := make([]u8, len(pixels))
+			defer delete(narrow)
+			for value, index in pixels do narrow[index] = u8(value >> 8)
+			textures[index] = create_texture_from_pixels(raw_data(narrow), i32(decoded.width), i32(decoded.height), filter)
+			image.destroy(decoded)
+			continue
+		}
 		if err != nil || decoded.depth != 8 || decoded.channels != 4 {
 			// The geometry is still worth having: the part draws in its colour alone
 			print("A texture in", path, "could not be decoded:", err)

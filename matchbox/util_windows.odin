@@ -17,6 +17,7 @@ Asset_Type :: enum {
 	IMAGE,
 	AUDIO,
 	MODEL,
+	SHADER,
 }
 
 
@@ -66,6 +67,7 @@ find_asset :: proc(filename:string, asset_type:Asset_Type) -> (path:string, foun
 	folder := "images/"
 	if asset_type == .AUDIO do folder = "audio/"
 	if asset_type == .MODEL do folder = "models/"
+	if asset_type == .SHADER do folder = "shaders/"
 
 	// Target-specific first
 	dir := strings.concatenate({mbi.target_asset_path, folder})

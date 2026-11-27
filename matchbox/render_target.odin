@@ -249,7 +249,7 @@ render_target_end :: proc() {
 	Draws the target over the screen in `fit`, as a pass of its own, with no camera needed: between render_start and
 	render_end, outside render_target_start. The bars (if any) are left as they are, so clear the screen first
 */
-render_upscaled_target :: proc(target:Render_Target, fit := Fit_Mode.FIT, tint := [4]f32{1, 1, 1, 1}) {
+render_upscaled_target :: proc(target:Render_Target, fit := Fit_Mode.FIT, tint := [4]f32{1, 1, 1, 1}, shader := Shader{}) {
 	ensure(mbi.camera_active == false, "render_upscaled_target was called inside camera_start")
 	ensure(target.width > 0, "The render target was never created")
 
@@ -260,7 +260,7 @@ render_upscaled_target :: proc(target:Render_Target, fit := Fit_Mode.FIT, tint :
 	centre := (min + max) / 2 - {f32(size.x), f32(size.y)} / 2
 	camera_start(create_screen_camera(f32(size.y)))
 	model := calculate_model_matrix({centre.x, -centre.y, 0}, linalg.QUATERNIONF32_IDENTITY, {max.x - min.x, max.y - min.y, 1})
-	queue_render(mbi.sprite_mesh, model, tint, .NONE, .NONE, target.texture, {0, 0, 1, 1}, 0)
+	queue_render(mbi.sprite_mesh, model, tint, .NONE, .NONE, target.texture, {0, 0, 1, 1}, 0, shader = shader)
 	camera_end()
 }
 

@@ -52,6 +52,7 @@ Skybox_Constants :: struct {
 */
 create_skybox_cubemap :: proc(faces:[6]rawptr, face_size:i32) -> (skybox:Skybox) {
 	ensure(face_size > 0, "A skybox face needs a size")
+	make_skybox_state()
 
 	description := d3d11.TEXTURE2D_DESC {
 		Width = u32(face_size),
@@ -85,6 +86,7 @@ create_skybox_cubemap :: proc(faces:[6]rawptr, face_size:i32) -> (skybox:Skybox)
 /*A panorama from RGBA pixels (8 bits a channel, `width * 4` bytes a row) of an equirectangular picture, normally 2:1. The
 caller owns the pixels and can free them afterwards*/
 create_skybox_panorama :: proc(pixels:rawptr, width, height:i32) -> (skybox:Skybox) {
+	make_skybox_state()
 	description := d3d11.TEXTURE2D_DESC {
 		Width = u32(width),
 		Height = u32(height),
@@ -204,7 +206,16 @@ draw_pending_skybox :: proc() {
 	context_->Draw(3, 0)
 }
 
-/*Compiles the sky's shaders and makes its buffer and sampler. Called by create_pipeline*/
+/*
+	Makes the sky's state the first time a sky is made, and not before: it is a shader compile, and a game with no sky
+	should not pay for one at startup. Not in `create_pipeline`, where it used to be
+*/
+@(private = "file")
+make_skybox_state :: proc() {
+	if mbi.skybox.constants == nil do create_skybox_state()
+}
+
+/*Compiles the sky's shaders and makes its buffer and sampler. Called once, by make_skybox_state*/
 @(private)
 create_skybox_state :: proc() {
 	source := #load("shaders/skybox.pc.hlsl")

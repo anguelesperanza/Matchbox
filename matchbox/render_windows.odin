@@ -163,6 +163,14 @@ render_item :: proc(item:Render_Item) {
 		}
 	}
 
+	// A game shader replaces the built-in for the meshes it has a pipeline for (shader_windows.odin)
+	game_buffer := mbi.game_constants
+	if custom := choose_shader(item); custom != nil {
+		pipeline = &custom.skinned if item.mesh.skinned else &custom.plain
+		game_buffer = custom.game_constants
+		upload_shader_constants(custom)
+	}
+
 	set_render_constants(item)
 
 	vertex_buffer := item.mesh.vertex_buffer
@@ -181,7 +189,7 @@ render_item :: proc(item:Render_Item) {
 	mbi.device_context->PSSetShader(pipeline.pixel_shader, nil, 0)
 
 	// Each constant buffer goes to the register the shader's reflection file names
-	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = mbi.game_constants, .LIGHTS = mbi.lights_constants, .SKIN = mbi.skin_constants}
+	buffers := [Block_Kind]^d3d11.IBuffer{.FRAME = mbi.frame_constants, .RENDER = mbi.render_constants, .GAME = game_buffer, .LIGHTS = mbi.lights_constants, .SKIN = mbi.skin_constants}
 	for block, kind in pipeline.reflection.blocks {
 		if block.present == false do continue
 		buffer := buffers[kind]
@@ -366,15 +374,6 @@ set_frame_constants :: proc(view_projection:matrix[4, 4]f32, view:matrix[4, 4]f3
 
 	constants := Frame_Constants{view_projection = view_projection, time = seconds, view = view}
 	if mbi.frame_constants != nil do update_buffer(mbi.frame_constants, &constants, size_of(Frame_Constants))
-}
-
-/*Sets a uniform the shader declares with `@(uniform)`, by its name. The value stays until it is set again.
-`value` has the uniform's type: 0.5 for an f32, a [3]f32 for a [3]f32, a matrix[4, 4]f32 for a matrix, and a slice or
-array with every element for an array uniform. A struct's field is named as in the shader: "key_light.strength"*/
-set_shader_value :: proc(name:string, value:any) {
-	ok, message := write_shader_value(&mbi.pipeline.reflection, mbi.game_shadow, name, value)
-	ensure(ok, message)
-	mbi.game_dirty = true
 }
 
 /*Copies the game's uniforms to the GPU if one was set since the last draw*/
@@ -578,7 +577,6 @@ create_pipeline :: proc() {
 	}
 
 	create_states()
-	create_skybox_state()
 }
 
 /*

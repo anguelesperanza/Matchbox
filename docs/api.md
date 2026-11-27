@@ -139,7 +139,7 @@ is_cooldown_finished :: proc(cooldown:Cooldown) -> bool
 is_cooldown_running :: proc(cooldown:Cooldown) -> bool
 calculate_cooldown_progress :: proc(cooldown:Cooldown) -> f32
 
-destroy :: proc{ destroy_audio, destroy_mesh, destroy_model, destroy_texture, destroy_render_target, destroy_sprite, destroy_animation_clip, destroy_parallax, destroy_font, destroy_skybox }
+destroy :: proc{ destroy_audio, destroy_mesh, destroy_model, destroy_texture, destroy_render_target, destroy_sprite, destroy_animation_clip, destroy_parallax, destroy_font, destroy_skybox, destroy_shader }
 
 poll_events :: proc()
 
@@ -212,7 +212,7 @@ create_render_target :: proc(settings := Render_Target_Settings{}) -> (target:Re
 destroy_render_target :: proc(target:^Render_Target)
 render_target_start :: proc(target:^Render_Target, clear_color:Maybe([4]f32) = [4]f32{0, 0, 0, 0})
 render_target_end :: proc()
-render_upscaled_target :: proc(target:Render_Target, fit := Fit_Mode.FIT, tint := [4]f32{1, 1, 1, 1})
+render_upscaled_target :: proc(target:Render_Target, fit := Fit_Mode.FIT, tint := [4]f32{1, 1, 1, 1}, shader := Shader{})
 set_internal_resolution :: proc(settings := Internal_Resolution_Settings{})
 get_internal_resolution :: proc() -> [2]i32
 
@@ -222,7 +222,15 @@ create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh)
 create_lit_mesh :: proc(vertices:[]Lit_Vertex, indices:[]u16) -> (mesh:Mesh)
 create_skinned_mesh :: proc(vertices:[]Skinned_Vertex, indices:[]u16) -> (mesh:Mesh)
 destroy_mesh :: proc(mesh:Mesh)
-set_shader_value :: proc(name:string, value:any)
+set_shader_value :: proc(name:string, value:any, shader := Shader{})
+
+// Game shaders (shader.odin, docs/game_shaders_plan.md). A shader exists only after the game loads it; the PSX ones are in
+// matchbox/optional/shaders/ and a game copies the ones it uses into assets/pc/shaders/. PC only: on the 3DS and Vita
+// load_shader panics "Custom shaders are PC only for now"
+load_shader :: proc(name:string) -> Shader
+load_shader_checked :: proc(name:string) -> (Shader, bool)
+destroy_shader :: proc(shader:Shader)
+set_shader :: proc(shader:Shader)
 get_gpu_times :: proc() -> [2]f32
 render_start :: proc()
 render_end :: proc()

@@ -39,6 +39,7 @@ Render_Item :: struct {
 	uv_rectangle:[4]f32,
 	alpha_cutoff:f32,
 	material:Material, // how a lit mesh takes a highlight; an unlit one ignores it
+	shader:Shader, // set_shader's, as it was when this was queued; the zero value is the built-in
 	joint_offset:int, // a skinned mesh's palette: where its joints start in mbi.skin_state.rows (skin.odin), in joints
 	joint_count:int, // 0 for a skinned mesh drawn in its bind pose (the identity), and for everything that is not skinned
 }
@@ -62,10 +63,10 @@ render_mesh :: proc(
 	rather than not at all. Sprites and shapes aren't lit and leave it
 */
 @(private)
-queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32, material:Material = mbi.model_settings.default_material, joint_offset:int = 0, joint_count:int = 0) {
+queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_Mode, cull:Cull_Mode, texture:Texture, uv_rectangle:[4]f32, alpha_cutoff:f32, material:Material = mbi.model_settings.default_material, joint_offset:int = 0, joint_count:int = 0, shader:Shader = mbi.shader_state.current) {
 	ensure(mbi.camera_active == true, "Drawing must happen between camera_start and camera_end")
 
-	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff, material = material, joint_offset = joint_offset, joint_count = joint_count}
+	item := Render_Item{mesh = mesh, model = model, tint = tint, cull = cull, texture = texture, uv_rectangle = uv_rectangle, alpha_cutoff = alpha_cutoff, material = material, joint_offset = joint_offset, joint_count = joint_count, shader = shader}
 
 	switch blend {
 	case .NONE:
@@ -94,6 +95,8 @@ queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_M
 sort_render_queue :: proc() {
 	if mbi.screen_pass == false {
 		slice.stable_sort_by(mbi.opaque_items[:], proc(a, b:Render_Item) -> bool {
+			// The shader first: a pipeline switch costs more than a texture switch
+			if a.shader.data != b.shader.data do return uintptr(a.shader.data) < uintptr(b.shader.data)
 			key_a := calculate_render_item_sort_key(a)
 			key_b := calculate_render_item_sort_key(b)
 			if key_a[0] != key_b[0] do return key_a[0] < key_b[0]

@@ -1,0 +1,82 @@
+// The PlayStation's picture as a game shader (docs/game_shaders_plan.md): coarse pixels, ordered dither, 15-bit colour and
+// scanlines, as a full-screen pass over a render target. Load it with load_shader("psx_post") and give it to
+// render_upscaled_target(target, fit, tint, shader). Ported from PsxGame's psx.fs and main's psx.frag.hlsl, constant for
+// constant.
+//
+// The image is sampled on a coarse grid rather than rendered at that size. That is what the game already did, and a native
+// low-resolution target is a cheaper and different picture; changing the picture is not what this is for. Set `grid` with
+// set_shader_value("grid", [2]f32{320, 240}, shader); zero reads as 320 x 240. Pair it with psx.mbs's `psx_grid`, so the
+// triangles' edges fall on the edges of the coarse pixels.
+//
+// Draw the target with a POINT filter (the Render_Target_Settings default): the cell centre is sampled, and a smoothing
+// sampler would smear the square pixels this is for.
+
+@(texture = 0) tex:Texture2D
+
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv: [2]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32
+}
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+}
+
+@(uniform) grid: [2]f32
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.position = frame.view_projection * world
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+	return output
+}
+
+// The 2 x 2 Bayer matrix {0 2; 3 1}, as arithmetic: shaders here have no constant tables. a and b are 0 or 1
+bayer_two :: proc(a: f32, b: f32) -> f32 {
+	return 2.0 * a + 3.0 * b - 4.0 * a * b
+}
+
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	cells := grid
+	if cells.x <= 0.0 || cells.y <= 0.0 {
+		cells = [2]f32{320.0, 240.0}
+	}
+
+	// 1. Snap to the coarse grid: the centre of each cell, so the pixels are square rather than smeared
+	cell := floor(v.uv * cells)
+	centre := (cell + 0.5) / cells
+	colour := sample(tex, centre).xyz
+
+	// 2. Ordered dither, before the colour is reduced: a 4 x 4 Bayer matrix, which is the 2 x 2 one inside itself. The
+	// PlayStation dithered before reducing colour depth, so gradients break into a weave instead of banding
+	x := mod(cell.x, 4.0)
+	y := mod(cell.y, 4.0)
+	index := 4.0 * bayer_two(mod(x, 2.0), mod(y, 2.0)) + bayer_two(floor(x / 2.0), floor(y / 2.0))
+	dither := index / 16.0 - 0.5
+	colour = colour + dither * (2.0 / 31.0) // two steps at five bits
+
+	// 3. Five bits a channel, the 15-bit colour the hardware had
+	colour = floor(colour * 31.0 + 0.5) / 31.0
+
+	// 4. One dark line every two coarse pixels, for a television
+	scan := mod(cell.y, 2.0)
+	colour = colour * (1.0 - 0.12 * scan)
+
+	return [4]f32{saturate(colour.x), saturate(colour.y), saturate(colour.z), 1.0}
+}

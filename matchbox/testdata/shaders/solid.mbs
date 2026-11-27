@@ -1,0 +1,45 @@
+// A test shader for the game-shader loader (shader_windows_test.odin): every pixel is the `paint` uniform, so a test
+// can tell from a read-back pixel which shader drew it and whether set_shader_value reached it.
+// Rebuild with:
+//     mbsc matchbox/testdata/shaders/solid.mbs -target:pc --emit-hlsl -o:matchbox/testdata/shaders/solid.pc.hlsl
+//     mbsc matchbox/testdata/shaders/solid.mbs -target:pc --emit-reflection -o:matchbox/testdata/shaders/solid.pc.refl
+
+@(texture = 0) tex:Texture2D
+
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uv: [2]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32
+}
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+}
+
+@(uniform) paint: [4]f32
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.position = frame.view_projection * world
+	output.color = input.color * render.tint
+	output.uv = lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+	return output
+}
+
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	return paint + sample(tex, v.uv) * 0.0
+}

@@ -22,4 +22,5 @@ destroy :: proc {
 	destroy_parallax,
 	destroy_font,
 	destroy_skybox,
+	destroy_shader,
 }

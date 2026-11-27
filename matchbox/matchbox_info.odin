@@ -43,6 +43,7 @@ Matchbox_Info :: struct {
 	triangle_mesh:Mesh,
 	circle_mesh:Mesh,
 
+	shader_state:Shader_State, // set_shader: the game shader everything queued next is drawn with (shader.odin)
 	lighting:Lighting_State, // set_lights and set_lighting; off and empty until a game calls them (light.odin)
 	model_settings:Model_Settings,
 	skin_state:Skin_State, // the frame's joint palettes (skin.odin); the limit is mbi.skin_settings, a backend's

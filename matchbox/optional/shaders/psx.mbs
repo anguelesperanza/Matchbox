@@ -1,0 +1,95 @@
+// The PlayStation's two rasterizer quirks as a game shader (docs/game_shaders_plan.md): mesh_lit.mbs with vertices snapped to
+// a coarse grid, and textures mapped affinely. Load it with load_shader("psx"); a game that doesn't never carries it.
+//
+// **Snapping.** The PlayStation had no subpixel precision, so every vertex sat on a whole pixel of its 320x240 screen and a
+// slow model jittered from one to the next. The clip position is rounded to a corner of `psx_grid` cells across the
+// destination. Only x and y move: z stays so the depth test sees what it always did, and w stays so the divide is undone by
+// the same number. A vertex behind the eye (w <= 0) is about to be clipped and is left as it came. `psx_grid` wants to be
+// the grid psx_post.mbs samples on (the picture is the same coarse pixels); zero reads as 320 x 240, since a snap to no
+// cells is not something anyone means.
+//
+// **Affine textures.** The rasterizer interpolates every varying perspective-correctly: a value `a` arrives as
+// sum(b_i * a_i / w_i) / sum(b_i / w_i). Handing it `uv * w` and `w` makes the w_i cancel on top, so the ratio the
+// fragment stage takes, uv / q, is sum(b_i * uv_i): the texture coordinate interpolated linearly across the screen, which
+// is affine mapping. Not `noperspective`: this needs no compiler feature and works the same on every target. No guard for
+// w <= 0 here: the clipper interpolates both `uv * w` and `w` for its new corner, so that corner's q is its own w
+// like every other, and a fallback would bend the texture along the clipped edge.
+//
+// Lighting is mesh_lit.mbs's, per pixel, unchanged. Keep the two in step.
+
+@(texture = 0) tex:Texture2D
+
+// The attributes are in Lit_Vertex's order, so the normal is the fourth: the 3DS loads it as attribute 3 and the
+// first three line up with mesh.mbs's
+Vertex_In :: struct {
+	position: [3]f32 `attr:"position"`,
+	uv: [2]f32 `attr:"texcoord"`,
+	color: [4]f32 `attr:"color"`,
+	normal: [3]f32 `attr:"normal"`,
+}
+
+Varying :: struct {
+	position: [4]f32 `out:"position"`,
+	uvq: [3]f32 `out:"texcoord0"`,
+	color: [4]f32 `out:"color"`,
+	quat: [4]f32 `out:"normalquat"`,
+	view: [3]f32 `out:"view"`,
+}
+
+@(uniform = .FRAME) frame: struct {
+	view_projection:matrix[4,4]f32,
+	view:matrix[4,4]f32,
+}
+
+@(uniform) psx_grid: [2]f32
+
+@(uniform = .RENDER) render: struct {
+	model: matrix[4,4]f32,
+	tint: [4]f32,
+	uv_rectangle: [4]f32,
+	alpha_cutoff: f32,
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+
+	world := render.model * [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.color = input.color * render.tint
+	uv := lerp(render.uv_rectangle.xy, render.uv_rectangle.zw, input.uv)
+	clip := frame.view_projection * world
+	grid := psx_grid
+	if grid.x <= 0.0 || grid.y <= 0.0 {
+		grid = [2]f32{320.0, 240.0}
+	}
+	if clip.w > 0.0 {
+		// NDC -1..1 to 0..grid, round to a whole cell corner, and back. Through 0..grid, not `ndc * grid / 2`: an odd grid's
+		// corners are whole cells from the edge, which is not whole half-grids from the middle
+		ndc := clip.xy / clip.w
+		cells := floor((ndc * 0.5 + 0.5) * grid + 0.5)
+		snapped := (cells / grid * 2.0 - 1.0) * clip.w
+		clip = [4]f32{snapped.x, snapped.y, clip.z, clip.w}
+	}
+	output.position = clip
+	output.uvq = [3]f32{uv.x * clip.w, uv.y * clip.w, clip.w}
+
+	// The eye sits at the origin of eye space, so the way back to it is the position negated
+	eye := frame.view * world
+	output.view = [3]f32{-eye.x, -eye.y, -eye.z}
+
+	// w = 0 turns the normal without moving it. The model matrix is used as it is rather than its inverse transpose:
+	// that is exact for a Transform scaled the same on every axis, which normalize then undoes. A model stretched
+	// along one axis gets normals leaning slightly the wrong way; the inverse transpose costs a matrix the engine
+	// doesn't upload yet, and no model here is stretched
+	turned := frame.view * (render.model * [4]f32{input.normal.x, input.normal.y, input.normal.z, 0.0})
+	output.quat = normal_quaternion(normalize(turned.xyz))
+	return output
+}
+
+// The texture and the vertex colour first, then the light: diffuse scales the surface's colour, and the highlight
+// is added on top with alpha 0 so it leaves the surface's alpha, and with it the cut-out, alone (L4-0)
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	surface := sample(tex, v.uvq.xy / v.uvq.z) * v.color
+	color := light_diffuse(v.quat, v.view) * surface + light_specular(v.quat, v.view)
+	if color.a < render.alpha_cutoff do discard()
+	return color
+}

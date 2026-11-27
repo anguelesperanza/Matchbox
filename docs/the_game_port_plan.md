@@ -10,7 +10,7 @@ Decided 2026-11-27: PC only first; 3DS and Vita come after the port works. Colli
 
 ## Pieces
 1. **Renames in the game** (about 30 names, mechanical).
-2. **`level` package** copied from `main` into `level/` here, minus the sky code. Needs from Matchbox:
+2. **`level` package** copied from `main` into `matchbox/level/` here (inside the matchbox folder so farlite carries it), minus the sky code. Needs from Matchbox:
    `Transform` from a matrix (and back), `Camera_Shot`/`fixed_camera` (present), `set_lights` (present), 3D debug wires for bounds (optional; the game calls `draw_bounds_wires`).
    Area light: map to a point light for now, with a logged note. Shadows: the level reads the setting and ignores it until Matchbox has shadow maps.
 3. **Retargeting**, PC-only files named `*_windows.odin` so handheld builds never see them:

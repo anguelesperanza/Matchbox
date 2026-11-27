@@ -256,7 +256,7 @@ is a useful sentence.
 
   ```
   odin check matchbox -no-entry-point
-  odin check level -no-entry-point
+  odin check matchbox/level -no-entry-point
   odin check tether -no-entry-point
   odin check eko -no-entry-point
   ```
@@ -264,7 +264,7 @@ is a useful sentence.
   `odin check matchbox` does **not** reach the others -- they are four separate
   packages, none of them under `matchbox/`. A change to `Entity` that breaks
   `level` passes the first line
-- **Tests.** `odin test matchbox`, `odin test level`, and
+- **Tests.** `odin test matchbox`, `odin test matchbox/level`, and
   `odin test tether -define:ODIN_TEST_THREADS=1`. **Tether's want the define**:
   every test there makes and destroys the one world in `tpi`, and the runner
   otherwise runs them side by side against that same global. `matchbox`'s do

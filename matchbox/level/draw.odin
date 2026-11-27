@@ -10,7 +10,7 @@ package level
 
 import "core:math/linalg"
 
-import mb "../matchbox"
+import mb ".."
 
 // What a model that could not be loaded is drawn as instead: a box this
 // colour where it would have been, so a missing file is a visible gap.

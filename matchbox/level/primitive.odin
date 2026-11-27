@@ -30,7 +30,7 @@ package level
 
 import "core:strings"
 
-import mb "../matchbox"
+import mb ".."
 
 /*
 	What `primitive:` can name. `NONE` is not a primitive at all -- a path with

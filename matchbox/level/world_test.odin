@@ -18,7 +18,7 @@ import "core:math/linalg"
 import "core:strings"
 import "core:testing"
 
-import mb "../matchbox"
+import mb ".."
 
 @(private)
 turned :: proc(axis: [3]f32, degrees: f32) -> [4]f32 {

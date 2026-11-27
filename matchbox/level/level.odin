@@ -4,38 +4,25 @@ package level
 	Levels
 	------
 	A level saved by the Stargate editor, loaded by the editor or by any
-	Matchbox game -- `import "matchbox/level"` beside `import "matchbox/matchbox"`.
+	Matchbox game -- `import "matchbox/level"` beside `import "matchbox"`.
 	Stargate's `level_editor_plan.md`, sections 3, 4 and 5.11, is the design
 	and the alternatives it turned down.
 
-	**A package of its own in the Matchbox repository**, at `level/`, beside
-	`matchbox/`, `tether/` and `eko/` -- rather than files in package `matchbox`
-	or a repository outside it:
+	**A package of its own, inside the matchbox folder**, at `matchbox/level/`
+	-- not files in package `matchbox`:
 
-	- **in the repository**, because a level describes what to render and wants
-	  to change alongside the renderer, and because a package outside would
-	  reach Matchbox by a path of its own. Two paths to Matchbox are two
-	  packages: two `mbi` globals, and an `mb.Model` from one is not an
-	  `mb.Model` to the other.
+	- **inside the folder**, since 2026-11-27 on `full-rewrite`: farlite copies
+	  only the repository's `matchbox/` folder into a project, so a sibling
+	  `level/` never arrived. (It was a sibling of `matchbox/`, `tether/` and
+	  `eko/` on `main`, and a child before 2026-09-18.) It imports Matchbox as
+	  `..`, its own parent folder.
 	- **its own package**, so the format's churn while the editor is young stays
 	  out of `matchbox`'s own namespace, and so a game that only wants to draw a
 	  sprite does not carry a level loader.
-	- **a sibling rather than a child.** It lived at `matchbox/level/` until
-	  2026-09-18 and imported Matchbox as `..`, its own parent folder. When
-	  physics and audio arrived as `tether/` and `eko/` at the repository root,
-	  one package nested inside another was the odd one out, and it moved up to
-	  sit with them. It now says `../matchbox`, which resolves to exactly the
-	  same directory as before.
 
-	**`../matchbox` is still one Matchbox**, which is the only thing the old
-	nesting was protecting. Odin resolves a relative import against the
-	importing file's own directory and identifies a package by the full path it
-	lands on, so `../matchbox` from here, `matchbox/matchbox` from a game, and
-	`../../Matchbox/matchbox` from Stargate's editor are three spellings of one
-	directory and therefore one package. Asserted by the editor compiling at
-	all: it hands `mb.Model` values straight into `Model_Component.model` while
-	reaching the two packages by different paths, which would not typecheck if
-	they were two.
+	**`..` is still one Matchbox.** Odin identifies a package by the full path it
+	lands on, so an `mb.Model` from the game's `matchbox` import is this
+	package's `mb.Model` too.
 
 	**Where things are:**
 
@@ -67,7 +54,7 @@ import "core:math"
 import "core:reflect"
 import "core:strings"
 
-import mb "../matchbox"
+import mb ".."
 
 /*
 	What this build of the package reads and writes.

@@ -77,7 +77,7 @@ package level
 
 import "core:math/linalg"
 
-import mb "../matchbox"
+import mb ".."
 
 /*
 	What shape the collider is.

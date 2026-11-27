@@ -21,7 +21,7 @@ import "core:encoding/json"
 import "core:strings"
 import "core:testing"
 
-import mb "../matchbox"
+import mb ".."
 
 // Every shape the format has: a model, a light with enums that are not the
 // zero value, a marker with neither component, a parent, and floats with no

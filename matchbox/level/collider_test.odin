@@ -18,7 +18,7 @@ import "core:math/linalg"
 import "core:strings"
 import "core:testing"
 
-import mb "../matchbox"
+import mb ".."
 
 @(private = "file")
 near :: proc(a, b: [3]f32, tolerance: f32 = 1e-4) -> bool {

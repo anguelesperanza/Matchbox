@@ -235,3 +235,8 @@ release_mouse_capture :: proc() {
 is_mouse_captured :: proc() -> bool {
 	return false
 }
+
+/*The handhelds' screens are not multisampled: answers 1, so that a game written for the PC builds*/
+set_window_samples :: proc(samples:i32) -> i32 {
+	return 1
+}

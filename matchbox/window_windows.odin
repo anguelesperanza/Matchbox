@@ -283,6 +283,7 @@ init :: proc(title:string, width:i32, height:i32) {
 		mbi.swapchain_description.Width = 0
 		mbi.swapchain_description.Height = 0
 		mbi.swapchain_description.Format = .B8G8R8A8_UNORM_SRGB
+		mbi.window_samples = 1
 		mbi.swapchain_description.SampleDesc = {Count = 1,Quality = 0}
 		mbi.swapchain_description.BufferUsage = {.RENDER_TARGET_OUTPUT}
 		mbi.swapchain_description.BufferCount = 2

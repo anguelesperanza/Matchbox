@@ -32,6 +32,7 @@ Backend_State :: struct {
 	typed_text: [MAX_TEXT_INPUT]u8, // UTF-8 typed this frame (WM_CHAR)
 	typed_text_length: int,
 	typed_high_surrogate: u16, // the first half of a character outside the BMP, waiting for its second
+	window_samples: i32, // set_window_samples: the swapchain's sample count, 1 when off
 	close_confirmation: bool, // set_close_confirmation: the close button asks the game instead of closing
 	minimum_window_size: [2]i32, // set_minimum_window_size, the drawing area in pixels; zero is no limit
 	close_requested: bool, // the window's close button was pressed this frame (WM_CLOSE)
@@ -86,6 +87,10 @@ Backend_State :: struct {
 	depth_states:[Depth_Mode]^d3d11.IDepthStencilState,
 	blend_states:[Blend_Mode]^d3d11.IBlendState,
 	rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
+	// The same with MultisampleEnable, for drawing into a multisampled target: that is what makes a line smooth there, but with one sample it
+	// draws a line wider than a pixel, so a plain target keeps the first set
+	multisampled_rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
+	drawing_multisampled:bool, // what the target being drawn into is, kept by bind_screen and bind_render_target for set_render_state
 	samplers:[Filter_Mode]^d3d11.ISamplerState,
 
 	// The three shaders, each with what it reads (render_windows.odin). `pipeline` (shaders/mesh.mbs) draws
@@ -143,7 +148,8 @@ BACKEND_DEFAULTS :: Backend_State {
 
 /*What only a PC render target has besides its texture: the views the GPU draws through (render_target_windows.odin)*/
 Backend_Render_Target :: struct {
-	color_view:^d3d11.IRenderTargetView,
+	color_view:^d3d11.IRenderTargetView, // what is drawn into: the multisampled texture's when there is one, else `texture`'s own
+	msaa_texture:^d3d11.ITexture2D, // nil unless the target is multisampled; resolved into `texture` by unbind_render_target
 	depth_texture:^d3d11.ITexture2D,
 	depth_view:^d3d11.IDepthStencilView,
 }

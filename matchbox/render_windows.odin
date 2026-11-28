@@ -309,6 +309,9 @@ create_states :: proc() {
 	for &description, mode in rasterizer_descs {
 		result := mbi.device->CreateRasterizerState(&description, &mbi.rasterizer_states[mode])
 		ensure(win.SUCCEEDED(result), "Create RasterizerState Failed")
+		description.MultisampleEnable = true
+		result = mbi.device->CreateRasterizerState(&description, &mbi.multisampled_rasterizer_states[mode])
+		ensure(win.SUCCEEDED(result), "Create multisampled RasterizerState Failed")
 	}
 
 	sampler_descs := [Filter_Mode]d3d11.SAMPLER_DESC {
@@ -341,6 +344,7 @@ destroy_states :: proc() {
 	for state in mbi.depth_states do state->Release()
 	for state in mbi.blend_states do state->Release()
 	for state in mbi.rasterizer_states do state->Release()
+	for state in mbi.multisampled_rasterizer_states do state->Release()
 	for state in mbi.samplers do state->Release()
 }
 
@@ -350,7 +354,7 @@ set_render_state :: proc(depth:Depth_Mode, blend:Blend_Mode, cull:Cull_Mode) {
 
 	mbi.device_context->OMSetDepthStencilState(mbi.depth_states[depth], 0)
 	mbi.device_context->OMSetBlendState(mbi.blend_states[blend], &blend_factor, 0xFFFFFFFF)
-	mbi.device_context->RSSetState(mbi.rasterizer_states[cull])
+	mbi.device_context->RSSetState(mbi.multisampled_rasterizer_states[cull] if mbi.drawing_multisampled else mbi.rasterizer_states[cull])
 }
 
 @(private)
@@ -466,6 +470,37 @@ render_end :: proc() {
 	mbi.swapchain->Present(1, {})
 }
 
+/*
+	Smooths the edges of everything drawn to the window: `samples` is 2, 4 or 8, and 1 turns it off (how a window starts).
+	Returns what the GPU gave, which is `samples` or the next count down it does. Call it between frames; it remakes the swapchain, so a
+	frame is not the place, and the first frame after it is the one that shows the change. Costs memory and fill rate in proportion
+	to the count, so 4 is the usual choice. A render target is separate: it asks for its own in Render_Target_Settings
+*/
+set_window_samples :: proc(samples:i32) -> i32 {
+	count := get_supported_sample_count(mbi.swapchain_description.Format, samples)
+	if count == mbi.window_samples do return count
+
+	mbi.device_context->OMSetRenderTargets(0, nil, nil)
+	mbi.framebuffer_view->Release()
+	mbi.framebuffer->Release()
+	destroy_depth_buffer()
+	mbi.swapchain->Release()
+
+	mbi.window_samples = count
+	mbi.swapchain_description.SampleDesc = {Count = u32(count), Quality = 0}
+	// The size is 0 to take the window's, which is what init does
+	mbi.swapchain_description.Width = 0
+	mbi.swapchain_description.Height = 0
+	result := mbi.factory->CreateSwapChainForHwnd(mbi.device, mbi.window, &mbi.swapchain_description, nil, nil, &mbi.swapchain)
+	ensure(win.SUCCEEDED(result), "Recreating the swapchain failed")
+	result = mbi.swapchain->GetBuffer(0, d3d11.ITexture2D_UUID, (^rawptr)(&mbi.framebuffer))
+	ensure(win.SUCCEEDED(result), "Get Framebuffer failed")
+	result = mbi.device->CreateRenderTargetView(mbi.framebuffer, nil, &mbi.framebuffer_view)
+	ensure(win.SUCCEEDED(result), "Create RenderTargetView failed")
+	create_depth_buffer()
+	return count
+}
+
 /*Fills the whole window with `color`*/
 clear_background :: proc(color:[4]f32) {
 	color := color
@@ -512,7 +547,7 @@ create_depth_buffer :: proc() {
 		MipLevels = 1,
 		ArraySize = 1,
 		Format = .D32_FLOAT,
-		SampleDesc = {Count = 1},
+		SampleDesc = framebuffer_description.SampleDesc, // the same count as the colour it is drawn with
 		Usage = .DEFAULT,
 		BindFlags = {.DEPTH_STENCIL},
 	}

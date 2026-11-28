@@ -339,3 +339,52 @@ the_minimum_window_size_is_grown_by_the_frame :: proc(t:^testing.T) {
 	testing.expect_value(t, large.x - small.x, i32(640))
 	testing.expect_value(t, large.y - small.y, i32(400))
 }
+
+// How many pixels of a picture are neither the black behind nor the white drawn: the ones an edge only half covers
+count_blended_pixels :: proc(pixels:[]u8) -> int {
+	count := 0
+	for index := 0; index < len(pixels); index += 4 {
+		if pixels[index] != 0 && pixels[index] != 255 do count += 1
+	}
+	return count
+}
+
+@(test)
+a_multisampled_target_smooths_a_slanted_edge_and_a_plain_one_does_not :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	blended:[2]int
+	for samples, index in ([2]i32{1, 4}) {
+		target := create_render_target({width = 32, height = 32, samples = samples})
+		defer destroy_render_target(&target)
+		if samples == 4 do testing.expect(t, target.samples > 1, "WARP should do at least 2 samples")
+
+		render_target_start(&target, [4]f32{0, 0, 0, 1})
+		camera_start(create_screen_camera(32))
+		render_line({-12, -12, 0}, {12, 12, 0}, 6, {1, 1, 1, 1}) // a thick diagonal: two slanted edges
+		camera_end()
+		render_target_end()
+
+		pixels := read_render_target_pixels(target, context.temp_allocator)
+		blended[index] = count_blended_pixels(pixels)
+		testing.expect_value(t, pixel_at(pixels, 32, 16, 16), [4]u8{255, 255, 255, 255}) // the middle of the line
+		testing.expect_value(t, pixel_at(pixels, 32, 28, 3), [4]u8{0, 0, 0, 255}) // far from it
+		free_all(context.temp_allocator)
+	}
+	testing.expect_value(t, blended[0], 0)
+	testing.expect(t, blended[1] >= 20, "two slanted edges 34 pixels long should leave many half-covered pixels")
+
+	// A resize keeps the sample count, and the new size is drawable
+	target := create_render_target({width = 32, height = 32, samples = 4})
+	defer destroy_render_target(&target)
+	counted := target.samples
+	testing.expect(t, resize_render_target(&target, 40, 24))
+	testing.expect_value(t, target.samples, counted)
+	render_target_start(&target, [4]f32{1, 0, 0, 1})
+	render_target_end()
+	pixels := read_render_target_pixels(target, context.temp_allocator)
+	testing.expect_value(t, pixel_at(pixels, 40, 39, 23), [4]u8{255, 0, 0, 255})
+}

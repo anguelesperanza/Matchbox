@@ -18,9 +18,28 @@ package matchbox
 import win "core:sys/windows"
 
 import "vendor:directx/d3d11"
+import "vendor:directx/dxgi"
+
+/*
+	The most samples the GPU does for `format` that do not exceed `wanted`: 8, 4, 2, then 1. Asked rather than assumed, because
+	a software device or an old card may stop at 4, and creating a texture past what it does fails outright
+*/
+@(private)
+get_supported_sample_count :: proc(format:dxgi.FORMAT, wanted:i32) -> i32 {
+	count := max(wanted, 1)
+	for count > 1 {
+		levels:u32
+		if win.SUCCEEDED(mbi.device->CheckMultisampleQualityLevels(format, u32(count), &levels)) && levels > 0 do return count
+		count /= 2
+	}
+	return 1
+}
 
 @(private)
 allocate_render_target :: proc(target:^Render_Target, filter:Filter_Mode) {
+	target.samples = get_supported_sample_count(.R8G8B8A8_UNORM_SRGB, target.samples)
+	multisampled := target.samples > 1
+
 	description := d3d11.TEXTURE2D_DESC {
 		Width = u32(target.width),
 		Height = u32(target.height),
@@ -35,7 +54,17 @@ allocate_render_target :: proc(target:^Render_Target, filter:Filter_Mode) {
 	ensure(win.SUCCEEDED(result), "Create render target texture failed")
 	result = mbi.device->CreateShaderResourceView(target.texture.texture, nil, &target.texture.view)
 	ensure(win.SUCCEEDED(result), "Create render target shader view failed")
-	result = mbi.device->CreateRenderTargetView(target.texture.texture, nil, &target.color_view)
+
+	// A multisampled texture cannot be sampled, so it is drawn into and then resolved into the one above (unbind_render_target)
+	drawn_into := target.texture.texture
+	if multisampled {
+		description.SampleDesc = {Count = u32(target.samples)}
+		description.BindFlags = {.RENDER_TARGET}
+		result = mbi.device->CreateTexture2D(&description, nil, &target.msaa_texture)
+		ensure(win.SUCCEEDED(result), "Create multisampled render target texture failed")
+		drawn_into = target.msaa_texture
+	}
+	result = mbi.device->CreateRenderTargetView(drawn_into, nil, &target.color_view)
 	ensure(win.SUCCEEDED(result), "Create render target view failed")
 
 	if target.has_depth == false do return
@@ -46,7 +75,7 @@ allocate_render_target :: proc(target:^Render_Target, filter:Filter_Mode) {
 		MipLevels = 1,
 		ArraySize = 1,
 		Format = .D32_FLOAT,
-		SampleDesc = {Count = 1},
+		SampleDesc = {Count = u32(target.samples)}, // the depth must have as many samples as the colour
 		Usage = .DEFAULT,
 		BindFlags = {.DEPTH_STENCIL},
 	}
@@ -61,12 +90,14 @@ free_render_target :: proc(target:^Render_Target) {
 	if target.depth_view != nil do target.depth_view->Release()
 	if target.depth_texture != nil do target.depth_texture->Release()
 	if target.color_view != nil do target.color_view->Release()
+	if target.msaa_texture != nil do target.msaa_texture->Release()
 	destroy_texture(target.texture)
 }
 
 /*Points the GPU at the target, sizes the viewport to it and clears it unless `clear_color` is nil*/
 @(private)
 bind_render_target :: proc(target:^Render_Target, clear_color:Maybe([4]f32)) {
+	mbi.drawing_multisampled = target.samples > 1
 	color_view := target.color_view
 	mbi.device_context->OMSetRenderTargets(1, &color_view, target.depth_view)
 
@@ -87,6 +118,10 @@ bind_render_target :: proc(target:^Render_Target, clear_color:Maybe([4]f32)) {
 @(private)
 unbind_render_target :: proc(target:^Render_Target) {
 	mbi.device_context->OMSetRenderTargets(0, nil, nil)
+	if target.msaa_texture != nil {
+		// sRGB formats resolve in linear light, so the average of an edge is the right grey rather than a dark one
+		mbi.device_context->ResolveSubresource(target.texture.texture, 0, target.msaa_texture, 0, .R8G8B8A8_UNORM_SRGB)
+	}
 	bind_screen()
 }
 
@@ -100,6 +135,7 @@ bind_screen :: proc() {
 	}
 	mbi.device_context->RSSetViewports(1, &viewport)
 	set_scissor({}, false, {mbi.window_size[0], mbi.window_size[1]})
+	mbi.drawing_multisampled = mbi.window_samples > 1
 	mbi.device_context->OMSetRenderTargets(1, &mbi.framebuffer_view, mbi.depth_view)
 	set_render_state(.OPAQUE, .NONE, .BACK)
 }
@@ -129,6 +165,20 @@ read_window_pixels :: proc(allocator := context.allocator) -> (pixels:[]u8, size
 read_texture_pixels :: proc(texture:^d3d11.ITexture2D, allocator := context.allocator) -> (pixels:[]u8, size:[2]i32) {
 	description:d3d11.TEXTURE2D_DESC
 	texture->GetDesc(&description)
+
+	// A multisampled picture cannot be copied to the CPU: average its samples into a plain one of the same size first
+	source_texture := texture
+	if description.SampleDesc.Count > 1 {
+		description.SampleDesc = {Count = 1}
+		description.BindFlags = {}
+		resolved:^d3d11.ITexture2D
+		result := mbi.device->CreateTexture2D(&description, nil, &resolved)
+		ensure(win.SUCCEEDED(result), "Create resolve texture failed")
+		mbi.device_context->ResolveSubresource(resolved, 0, texture, 0, description.Format)
+		source_texture = resolved
+	}
+	defer if source_texture != texture do source_texture->Release()
+
 	description.Usage = .STAGING
 	description.BindFlags = {}
 	description.CPUAccessFlags = {.READ}
@@ -138,7 +188,7 @@ read_texture_pixels :: proc(texture:^d3d11.ITexture2D, allocator := context.allo
 	result := mbi.device->CreateTexture2D(&description, nil, &staging)
 	ensure(win.SUCCEEDED(result), "Create staging texture failed")
 	defer staging->Release()
-	mbi.device_context->CopyResource(staging, texture)
+	mbi.device_context->CopyResource(staging, source_texture)
 
 	mapped:d3d11.MAPPED_SUBRESOURCE
 	result = mbi.device_context->Map(staging, 0, .READ, {}, &mapped)

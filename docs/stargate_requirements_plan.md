@@ -127,7 +127,7 @@ sky-crash finding.
 (cheap and independent first, the shader work last because every lit shader changes and the `.dxil`/`.spv` must be rebuilt together):
 
 - **7a, A9 small items.** `set_minimum_window_size` (WM_GETMINMAXINFO) and `read_window_pixels` (the back buffer as RGBA). *Done.*
-- **7b, MSAA.** The swapchain's flip-model is not used (`SwapEffect = .DISCARD`), so a multisampled swapchain is allowed; the work is the depth
+- **7b, MSAA.** *Done.* The swapchain's flip-model is not used (`SwapEffect = .DISCARD`), so a multisampled swapchain is allowed; the work is the depth
   buffer, the rasteriser's `MultisampleEnable`, and render targets (Stargate draws its viewport into one, where the grid lines shimmer), which need a
   multisampled colour+depth pair resolved into the texture the UI samples. Shape: a `samples` field on `Render_Target_Description` and an
   `init` option for the window; tested on WARP by counting edge pixels that are neither colour.
@@ -266,6 +266,17 @@ tested to grow by exactly the area's difference). `read_window_pixels()` returns
 *Not seen:* a real drag against the minimum on a real window, a real swapchain read. The screenshot must be taken before `render_end` (the swapchain
 discards on present).
 
+**Phase 7b, MSAA: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 275 pass; level 57; 3DS, Vita, ui checks pass.
+*Render targets:* `Render_Target_Settings.samples` (2, 4, 8; a count the GPU lacks drops to the next lower, asked with `CheckMultisampleQualityLevels`). The target draws
+into a multisampled texture and `render_target_end` resolves it into `texture` (sRGB resolves in linear light), so everything that samples or reads a target
+is unchanged; `resize_render_target` keeps the count. *Window:* `set_window_samples(samples)` remakes the swapchain (it cannot change count in place; init is
+untouched, a window starts at 1) and the depth buffer follows the colour's count; `read_window_pixels` resolves first. *Lines:* a second set of rasteriser
+states with `MultisampleEnable`, chosen while drawing into a multisampled target, because that flag is what smooths a line and with one sample it would
+widen every 1-pixel line (the grid test caught it: 8 lit pixels in a row instead of 5), so plain targets keep the old states and draw byte-identically.
+*Measured:* WARP test, a thick diagonal: 0 half-covered pixels at 1 sample, many at 4. `examples/msaa-check` on this PC's real GPU and window: a 3D line has
+0 half-covered pixels at 1 and 568 (window) / 324 (256 px target) at 4. *Not measured:* the GPU cost of 4x (fill rate, memory) on a real editor frame; the
+handhelds ignore it (`set_window_samples` answers 1). The internal-resolution target is not multisampled.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -286,6 +297,8 @@ New public names so far (the user reads this list at the end):
 | `Key` values: `NUMPAD_0`..`NUMPAD_9`, `MULTIPLY`, `ADD`, `SEPARATOR`, `SUBTRACT`, `DECIMAL`, `DIVIDE`, `KEYPAD_ENTER`, `F1`..`F12`, `NUMLOCK`, `SCROLL_LOCK`, `SEMICOLON`, `EQUALS`, `COMMA`, `MINUS`, `PERIOD`, `SLASH`, `GRAVE`, `LEFT_BRACKET`, `BACKSLASH`, `RIGHT_BRACKET`, `APOSTROPHE` | enum values | `input_windows.odin`, handheld `Key` |
 | `set_minimum_window_size(width, height)` | procedure | `input_windows.odin`, handheld stub |
 | `read_window_pixels(allocator := context.allocator)` | procedure | `render_target_windows.odin`, handheld stub |
+| `set_window_samples(samples)` | procedure | `render_windows.odin`, handheld stub |
+| `Render_Target_Settings.samples`, `Render_Target.samples` | struct fields | `render_target.odin` (shared) |
 | `clip_start(min, max)` | procedure | `clip_windows.odin`, handheld stub |
 | `clip_end()` | procedure | `clip_windows.odin`, handheld stub |
 | `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |

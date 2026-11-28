@@ -49,6 +49,7 @@ Render_Target_Settings :: struct {
 	height:i32,
 	scale:f32, // used only when width and height are 0: the screen's size times this. 0.5 = a quarter of the pixels. 0 means 1
 	filter:Filter_Mode, // how it is sampled when drawn bigger. POINT (the zero value) is pixel-perfect; LINEAR smooths
+	samples:i32, // PC: 2, 4 or 8 for multisampling, which smooths edges and thin lines; 0 or 1 is off. The picture is resolved into `texture` at render_target_end. A count the GPU lacks drops to the next lower one. The handhelds ignore it
 	no_depth:bool, // a 2D-only target has no depth buffer, which saves memory (the 3DS has 6 MB of VRAM). A world camera cannot draw into it
 }
 
@@ -59,6 +60,7 @@ Render_Target :: struct {
 	width:i32, // the size that was asked for (on the 3DS the GPU object is padded up to a power of two)
 	height:i32,
 	has_depth:bool,
+	samples:i32, // what the target was made with after the GPU's say, 1 when off
 }
 
 /*How the whole game is drawn smaller (or bigger) than the screen, then scaled to it. The zero value is off*/
@@ -195,6 +197,7 @@ create_render_target :: proc(settings := Render_Target_Settings{}) -> (target:Re
 	target.width = size.x
 	target.height = size.y
 	target.has_depth = settings.no_depth == false
+	target.samples = settings.samples
 
 	allocate_render_target(&target, settings.filter)
 
@@ -230,8 +233,9 @@ resize_render_target :: proc(target:^Render_Target, width, height:i32) -> (resiz
 
 	filter := target.texture.filter
 	no_depth := target.has_depth == false
+	samples := target.samples
 	destroy_render_target(target)
-	target^ = create_render_target({width = width, height = height, filter = filter, no_depth = no_depth})
+	target^ = create_render_target({width = width, height = height, filter = filter, no_depth = no_depth, samples = samples})
 	return true
 }
 

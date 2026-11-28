@@ -61,13 +61,22 @@ get_asset :: proc(filename:string, asset_type:Asset_Type) -> string {
 	return path
 }
 
+// The folder under assets/ that holds a kind of asset, with its trailing slash
+@(private)
+get_asset_folder_name :: proc(asset_type:Asset_Type) -> string {
+	switch asset_type {
+	case .AUDIO: return "audio/"
+	case .MODEL: return "models/"
+	case .SHADER: return "shaders/"
+	case .IMAGE: return "images/"
+	}
+	return "images/"
+}
+
 /*The same lookup as get_asset, but a file that is not there is `found` = false and not a stop*/
 find_asset :: proc(filename:string, asset_type:Asset_Type) -> (path:string, found:bool) {
 
-	folder := "images/"
-	if asset_type == .AUDIO do folder = "audio/"
-	if asset_type == .MODEL do folder = "models/"
-	if asset_type == .SHADER do folder = "shaders/"
+	folder := get_asset_folder_name(asset_type)
 
 	// Target-specific first
 	dir := strings.concatenate({mbi.target_asset_path, folder})

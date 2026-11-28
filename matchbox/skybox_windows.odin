@@ -115,42 +115,73 @@ create_skybox_panorama :: proc(pixels:rawptr, width, height:i32) -> (skybox:Skyb
 	horizontal would load into six wrong faces without complaint
 */
 load_skybox_cubemap :: proc(filename:string) -> (skybox:Skybox) {
-	pixels, width, height := read_skybox_image(filename)
+	ok:bool
+	skybox, ok = load_skybox_cubemap_checked(filename)
+	ensure(ok, "Failed to load the cube map: see the message above")
+	return
+}
+
+/*The same as load_skybox_cubemap, but a missing file, one that will not decode, one that is not 8 bits a channel or a picture of the wrong shape is `ok` = false (with the reason printed) and not a stop. Nothing is allocated when `ok` is false*/
+load_skybox_cubemap_checked :: proc(filename:string) -> (skybox:Skybox, ok:bool) {
+	pixels, width, height, read_ok := read_skybox_image(filename)
+	if read_ok == false do return {}, false
 	defer delete(pixels)
 
-	faces, face_size, ok := split_cubemap_cross(pixels, width, height)
-	ensure(ok, "A cube map picture must be a horizontal cross of square faces: four cells across, three down")
+	faces, face_size, split_ok := split_cubemap_cross(pixels, width, height)
+	if split_ok == false {
+		print(filename, "is not a horizontal cross of square faces: four cells across, three down")
+		return {}, false
+	}
 	defer delete(faces[0])
 
-	return create_skybox_cubemap({raw_data(faces[0]), raw_data(faces[1]), raw_data(faces[2]), raw_data(faces[3]), raw_data(faces[4]), raw_data(faces[5])}, i32(face_size))
+	return create_skybox_cubemap({raw_data(faces[0]), raw_data(faces[1]), raw_data(faces[2]), raw_data(faces[3]), raw_data(faces[4]), raw_data(faces[5])}, i32(face_size)), true
 }
 
 /*A panorama from an equirectangular picture in assets/images. Meant to be 2:1; another ratio still loads, a crop being
 legitimate, but a cube cross handed to this loader looks like a squashed sky that turns at the wrong rate*/
 load_skybox_panorama :: proc(filename:string) -> (skybox:Skybox) {
-	pixels, width, height := read_skybox_image(filename)
+	ok:bool
+	skybox, ok = load_skybox_panorama_checked(filename)
+	ensure(ok, "Failed to load the panorama: see the message above")
+	return
+}
+
+/*The same as load_skybox_panorama, but a missing file, one that will not decode or one that is not 8 bits a channel is `ok` = false (with the reason printed) and not a stop. Nothing is allocated when `ok` is false*/
+load_skybox_panorama_checked :: proc(filename:string) -> (skybox:Skybox, ok:bool) {
+	pixels, width, height, read_ok := read_skybox_image(filename)
+	if read_ok == false do return {}, false
 	defer delete(pixels)
 
 	ratio := f32(width) / f32(height)
 	if abs(ratio - 2) > 0.01 {
 		print(filename, "is", width, "x", height, ", not the 2:1 of an equirectangular panorama")
 	}
-	return create_skybox_panorama(raw_data(pixels), i32(width), i32(height))
+	return create_skybox_panorama(raw_data(pixels), i32(width), i32(height)), true
 }
 
-/*Reads a picture as RGBA pixels. The caller deletes them*/
+/*Reads a picture as RGBA pixels, or says why it could not (printed). The caller deletes the pixels*/
 @(private = "file")
-read_skybox_image :: proc(filename:string) -> (pixels:[][4]u8, width, height:int) {
-	path := get_asset(filename, .IMAGE)
+read_skybox_image :: proc(filename:string) -> (pixels:[][4]u8, width, height:int, ok:bool) {
+	path, found := find_asset(filename, .IMAGE)
+	if found == false {
+		print("No such image file:", filename)
+		return nil, 0, 0, false
+	}
 	defer delete(path)
 
 	loaded, err := image.load_from_file(path, options = {.alpha_add_if_missing})
-	ensure(err == nil, "Failed to load skybox image")
+	if err != nil {
+		print("Could not read image", path)
+		return nil, 0, 0, false
+	}
 	defer image.destroy(loaded)
-	ensure(loaded.depth == 8 && loaded.channels == 4, "A skybox picture must be 8 bits per channel")
+	if loaded.depth != 8 || loaded.channels != 4 {
+		print("A skybox picture must be 8 bits per channel:", path)
+		return nil, 0, 0, false
+	}
 
 	pixels = slice.clone(slice.reinterpret([][4]u8, loaded.pixels[:]))
-	return pixels, loaded.width, loaded.height
+	return pixels, loaded.width, loaded.height, true
 }
 
 /*Frees the sky's texture*/

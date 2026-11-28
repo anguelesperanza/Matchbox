@@ -217,6 +217,25 @@ destroy_render_target :: proc(target:^Render_Target) {
 }
 
 /*
+	Makes `target` `width` by `height`, keeping its filter and whether it has a depth buffer. Does nothing and returns false when
+	it is that size already, so it can be called every frame with a panel's size. The old picture is gone: draw into it again.
+
+	Frees and makes GPU objects, so it is for between render_end and the next render_start (or before the first frame), never
+	while the target is being drawn into. The 3DS dies if a GPU object is made mid-frame, so this is for the PC, where
+	dragging a splitter calls it several frames in a row (measured in render_target_windows_test.odin)
+*/
+resize_render_target :: proc(target:^Render_Target, width, height:i32) -> (resized:bool) {
+	ensure(target.width > 0, "The render target was never created")
+	if width == target.width && height == target.height do return false
+
+	filter := target.texture.filter
+	no_depth := target.has_depth == false
+	destroy_render_target(target)
+	target^ = create_render_target({width = width, height = height, filter = filter, no_depth = no_depth})
+	return true
+}
+
+/*
 	Everything drawn until render_target_end goes into `target`: cameras, screen_start, text, as usual, in the
 	target's pixels. Clears colour (and depth) to `clear_color`; pass nil to keep what was drawn before.
 	Between render_start and render_end, before anything is drawn to the screen, not inside camera_start, not nested

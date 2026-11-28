@@ -100,20 +100,17 @@ load_level_sky :: proc(level: ^Level) -> bool {
 	switch sky.kind {
 	case .NONE: // handled above
 	case .PANORAMA, .CUBEMAP:
-		// Matchbox's loaders stop on a missing file, and a level should fall back to its background colour instead, so the
-		// file is looked for first. The editor writes paths from the project root; Matchbox looks inside assets/images
+		// The checked loaders say no to a missing file, a picture of the wrong shape or one that is not 8 bits a channel, and a
+		// level falls back to its background colour. The editor writes paths from the project root; Matchbox looks inside
+		// assets/images
 		name := strings.trim_prefix(sky.path, SKY_PATH_PREFIX)
-		found_path, found := mb.find_asset(name, .IMAGE)
-		if !found {
-			err = true
+		ok: bool
+		if sky.kind == .PANORAMA {
+			loaded, ok = mb.load_skybox_panorama_checked(name)
 		} else {
-			delete(found_path)
-			if sky.kind == .PANORAMA {
-				loaded = mb.load_skybox_panorama(name)
-			} else {
-				loaded = mb.load_skybox_cubemap(name)
-			}
+			loaded, ok = mb.load_skybox_cubemap_checked(name)
 		}
+		err = !ok
 	}
 
 	if err {

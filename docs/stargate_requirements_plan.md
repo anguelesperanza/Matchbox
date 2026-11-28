@@ -215,6 +215,20 @@ dropdown over everything, typing with a caret, a 3D viewport in a render target 
 pointer. Not seen: odd window heights, a UI scale other than 1, a second monitor.
 *Not ported:* Stargate's `Input.dropped` (use `mb.get_dropped_files`; its position is in window pixels) and its keyboard wrappers (use `mb.is_key_*`).
 
+**Phase 5, D3 + D4 + D5: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 272 pass; level 57; 3DS, Vita and `ui` checks pass.
+*D4:* `load_texture_checked`, `load_skybox_panorama_checked`, `load_skybox_cubemap_checked` return `ok` for a missing file, bytes that are not a picture,
+a picture that is not 8 bits a channel, a cube cross of the wrong shape, or a texture that does not divide into its columns and rows; the
+plain loaders are now these plus an `ensure`. `matchbox/level`'s sky uses the checked ones, which closes the F finding (a bad picture used to
+stop a level that should fall back to its background colour). Tested for missing and not-a-picture files, with no device.
+*D3 (the user's layout decision):* `get_asset_names(asset_type, extensions, allocator)` lists every asset of a kind across `assets/pc/<kind>/` and
+`assets/<kind>/`, in folders below too, as the names `find_asset` takes (`props/crate.glb`), sorted, a name in both listed once, extension filter
+case-insensitive. Tested on a tree built under the temp folder.
+*D5:* `resize_render_target(&target, width, height)` keeps the filter and depth, does nothing at the same size (so a panel can call it every
+frame), and is for between frames. Measured on the software device (WARP): resize + draw + read back 120 times in a row costs 0.09 ms a frame
+and the target stays drawable with the new size. **That is a software device; a real GPU's cost of freeing and making a small texture was not
+measured.** `destroy_render_target` was already guarded against the target being drawn into.
+*Not done:* anything for D3 on the handhelds (the listing and the checked loaders are PC only; a handheld level still loads what `find_asset` finds).
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -252,3 +266,7 @@ New public names so far (the user reads this list at the end):
 | `create_font_metrics(bytes, pixel_size, pixels_per_unit)` | procedure | `font.odin` |
 | `Cursor_Shape` values `RESIZE_DIAGONAL_DOWN`, `RESIZE_DIAGONAL_UP`, `MOVE`, `NOT_ALLOWED` | enum values | `desktop_input.odin` |
 | the `matchbox/ui` package | package | see its files: `Rectangle`, `create_rectangle`, `create_rectangle_centred`, `calculate_rectangle_size`, `calculate_rectangle_centre`, `calculate_rectangle_intersection`, `get_rectangle_top_left`, `is_point_in_rectangle`, `begin_frame`, `end_frame`, `shutdown`, `set_scale`, `get_scale`, `get_display_scale`, `get_screen_rectangle`, `calculate_pixels`, pointer (`get_pointer_position`, `get_pointer_delta`, `get_pointer_wheel`, `is_button_pressed`, `is_button_held`, `is_button_released`, `claim_pointer`, `release_pointer`, `is_pointer_claimed`, `is_pointer_over_rectangle`), typing (`start_text_input`, `end_text_input`, `is_text_input_open`, `get_text_input`), drawing (`render_rectangle`, `render_rectangle_border`, `render_line`, `render_circle`, `render_circle_outline`, `render_triangle`, `render_texture`, `begin_clip`, `end_clip`, `is_point_in_clip`), text (`get_font`, `default_font`, `calculate_text_size`, `calculate_line_height`, `calculate_baseline_centred`, `render_text`, `wrap_text`), widgets (`button`, `calculate_button_enabled_if`, `toggle`, `Text_Field` with `update_text_field`, `render_text_field`, `set_text_field_text`, `insert_text_field_text`, `place_text_field`, `get_text_field_string`, `destroy_text_field`, `calculate_text_field_height`, `calculate_text_field_label_height`; `number_field`, `is_number_field_active`, `destroy_number_field`; `begin_scroll`, `end_scroll`, `scroll_to`, `get_scroll_max`; `dropdown`, `open_context_menu`, `context_menu`, `render_dropdown_overlay`, `is_dropdown_open`, `close_dropdown`, `calculate_dropdown_list`, `calculate_dropdown_row`, `get_dropdown_row_at`; `open_modal`, `close_modal`, `is_modal_open`, `modal_begin`, `modal_overlay`, `is_modal_dismissed`; `set_status`, `clear_status`, `get_status_text`, `calculate_status_alpha`, `render_status`), and their style and state structs and `*_STYLE` constants |
+| `load_texture_checked(filename, filter)` | procedure | `texture_windows.odin` |
+| `load_skybox_panorama_checked(filename)`, `load_skybox_cubemap_checked(filename)` | procedures | `skybox_windows.odin` |
+| `get_asset_names(asset_type, extensions, allocator)` | procedure | `assets_windows.odin` |
+| `resize_render_target(target, width, height)` | procedure | `render_target.odin` (shared) |

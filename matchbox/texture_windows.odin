@@ -21,14 +21,42 @@ import "vendor:directx/d3d11"
 
 
 load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture) {
+	ok:bool
+	texture, ok = load_texture_checked(filename, filter)
+	ensure(ok, "Failed to load texture") // Might change to a checkered pattern if no image is loaded
+	return
+}
 
-	path := get_asset(filename, .IMAGE)
+/*
+	The same as load_texture, but a file that is missing, will not decode, is not 8 bits a channel or does not divide into its
+	columns and rows is `ok` = false (with the reason printed) and not a stop. For a tool that opens whatever it is pointed at.
+	Nothing is allocated when `ok` is false
+*/
+load_texture_checked :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:Texture, ok:bool) {
+	path, found := find_asset(filename, .IMAGE)
+	if found == false {
+		print("No such image file:", filename)
+		return {}, false
+	}
+	defer delete(path)
+
 	meta, meta_found := load_texture_meta(path)
 
 	loaded_image, err := image.load_from_file(path, options = {.alpha_add_if_missing})
-	ensure(err == nil, "Failed to load image") // Might change to a checkered pattern if no image is loaded
-	ensure(loaded_image.depth == 8 && loaded_image.channels == 4, "Texutres must be 8 bits per channel")
-	
+	if err != nil {
+		print("Could not read image", path)
+		return {}, false
+	}
+	defer image.destroy(loaded_image)
+
+	if loaded_image.depth != 8 || loaded_image.channels != 4 {
+		print("Textures must be 8 bits per channel:", path)
+		return {}, false
+	}
+	if i32(loaded_image.width) % meta.columns != 0 || i32(loaded_image.height) % meta.rows != 0 {
+		print("Texture size must divide evenly into its columns and rows:", path)
+		return {}, false
+	}
 
 	texture = create_texture_from_pixels(raw_data(loaded_image.pixels), i32(loaded_image.width), i32(loaded_image.height), filter)
 
@@ -40,14 +68,7 @@ load_texture :: proc(filename:string, filter:Filter_Mode = .LINEAR) -> (texture:
 	if meta_found == false {
 		texture.guessed_meta = calculate_guessed_texture_meta(loaded_image.pixels[:], texture.width, texture.height)
 	}
-
-	ensure(texture.width % texture.columns == 0 && texture.height % texture.rows == 0, "Texture size must divide evenly into its columns and rows")
-
-	image.destroy(loaded_image)
-	delete(path)
-
-	return
-	
+	return texture, true
 }
 
 /*

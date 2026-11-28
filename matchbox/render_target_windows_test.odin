@@ -8,8 +8,10 @@ package matchbox
 	one grey is checked against the sRGB curve worked out separately (0.5 linear is 188/255)
 */
 
+import "core:log"
 import "core:sync"
 import "core:testing"
+import "core:time"
 
 import win "core:sys/windows"
 import "vendor:directx/d3d11"
@@ -248,4 +250,45 @@ a_frame_with_an_internal_resolution_reaches_the_screen_scaled :: proc(t:^testing
 
 	destroy_render_target(&mbi.render_target_state.internal_target)
 	set_internal_resolution({})
+}
+
+@(test)
+resizing_a_target_between_frames_keeps_it_drawable_and_costs_little :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	target := create_render_target({width = 64, height = 48, filter = .LINEAR})
+	defer destroy_render_target(&target)
+
+	testing.expect(t, resize_render_target(&target, 64, 48) == false, "the same size should do nothing")
+
+	// A splitter being dragged: a new size every frame, drawn into each time and read back so the GPU has to finish
+	started := time.now()
+	FRAMES :: 120
+	for frame in 0 ..< FRAMES {
+		width := i32(65 + frame % 40)
+		height := i32(48 + frame % 24)
+		testing.expect(t, resize_render_target(&target, width, height), "a new size should resize")
+		testing.expect_value(t, target.width, width)
+		testing.expect_value(t, target.height, height)
+		testing.expect_value(t, target.texture.filter, Filter_Mode.LINEAR) // kept across the resize
+
+		render_target_start(&target, [4]f32{0, 0, 1, 1})
+		camera_start(create_screen_camera(f32(height)))
+		render_rectangle({0, 0, 0}, {4, 4}, {1, 0, 0, 1})
+		camera_end()
+		render_target_end()
+
+		pixels := read_render_target_pixels(target, context.temp_allocator)
+		middle := (int(height / 2) * int(width) + int(width / 2)) * 4
+		if frame == FRAMES - 1 do testing.expect_value(t, [4]u8{pixels[middle], pixels[middle + 1], pixels[middle + 2], pixels[middle + 3]}, [4]u8{255, 0, 0, 255})
+		free_all(context.temp_allocator)
+	}
+	per_frame := time.duration_milliseconds(time.since(started)) / FRAMES
+	// Not an assertion on speed (a software device's numbers are not a GPU's): the figure goes in the plan, and a generous bound
+	// only catches something gone badly wrong
+	log.infof("resize + draw + read back: %.3f ms a frame on the software device", per_frame)
+	testing.expect(t, per_frame < 50, "resizing a small target every frame should be cheap")
 }

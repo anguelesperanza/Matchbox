@@ -21,9 +21,8 @@ import "core:log"
 	pixel atlas. A game wanting several sizes makes several fonts.
 */
 
-// Bitrimus, a pixel font made to be drawn at 16, 32, 64, 128 or 256 pixels. Shipped inside
-// the executable. Use one of those sizes so its design pixels land on whole screen pixels
-DEFAULT_FONT_BYTES :: #load("fonts/Bitrimus.ttf")
+// Zerove, shipped inside the executable. It replaced Bitrimus, whose pixel shapes were hard to read at small sizes
+DEFAULT_FONT_BYTES :: #load("fonts/Zerove-Regular.ttf")
 
 // How many printable ASCII glyphs a font holds. A constant because it sizes `baked_chars`
 FONT_GLYPH_COUNT :: 95

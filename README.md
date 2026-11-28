@@ -223,6 +223,6 @@ It is vendored into Matchbox with changes:
 
 See `matchbox/gltf2/README.md` for the full list.
 
-## Bitrimus font (`matchbox/fonts/Bitrimus.ttf`)
+## Default font (`matchbox/fonts/Zerove-Regular.ttf`)
 
-The default font is Bitrimus by GGBotNet (CC0, public domain: no attribution is required). It is made for 16, 32, 64, 128 and 256 pixels, and it is embedded in the Matchbox executable with `#load`.
+The default font is Zerove, embedded in the Matchbox executable with `#load`. It replaced Bitrimus, which was hard to read. Check its licence before shipping a game with it.

@@ -11,6 +11,7 @@ package matchbox
 	Overlapping solid shapes need different z values
 */
 
+import "core:math"
 import "core:math/linalg"
 
 /*A matrix that sends the unit axes to x, y and z, and the origin to `origin`*/
@@ -47,6 +48,38 @@ render_circle :: proc(position:[3]f32, radius:f32, color:[4]f32) {
 	model := calculate_model_matrix(position, linalg.QUATERNIONF32_IDENTITY, {radius, radius, 1})
 
 	queue_render(mbi.circle_mesh, model, color, shape_blend(color), .NONE, {}, {0, 0, 1, 1}, 0)
+}
+
+/*
+	A ring: a circle's outline, `thickness` wide, drawn inside `radius` so the outer edge is exactly the circle. A thickness
+	of the radius or more fills it. Built from two triangles a segment, sharing edges, so a see-through colour stays even
+	all the way round; render_line quads would overlap at every join
+*/
+render_circle_outline :: proc(position:[3]f32, radius, thickness:f32, color:[4]f32) {
+	if radius <= 0 || thickness <= 0 do return
+	if thickness >= radius {
+		render_circle(position, radius, color)
+		return
+	}
+
+	// Enough segments that the polygon stays within a fraction of a unit of the circle: more for a bigger ring
+	segments := clamp(int(radius * 8), 16, 96)
+	inner := radius - thickness
+
+	for index in 0 ..< segments {
+		angle_a := f32(index) / f32(segments) * math.TAU
+		angle_b := f32(index + 1) / f32(segments) * math.TAU
+		direction_a := [3]f32{math.cos(angle_a), math.sin(angle_a), 0}
+		direction_b := [3]f32{math.cos(angle_b), math.sin(angle_b), 0}
+
+		outer_a := position + direction_a * radius
+		outer_b := position + direction_b * radius
+		inner_a := position + direction_a * inner
+		inner_b := position + direction_b * inner
+
+		render_triangle(outer_a, outer_b, inner_a, color)
+		render_triangle(inner_a, outer_b, inner_b, color)
+	}
 }
 
 /*A filled triangle through three points. Either winding works*/

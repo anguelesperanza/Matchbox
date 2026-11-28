@@ -81,6 +81,40 @@ Font :: struct {
 	.POINT for a pixel font drawn with pixel snapping.
 */
 create_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0, filter:Filter_Mode = .LINEAR) -> (font:Font) {
+	bitmap:[]u8
+	font, bitmap = bake_font(bytes, pixel_size, pixels_per_unit)
+	defer delete(bitmap)
+	atlas := font.atlas_size
+
+	// Grayscale to RGBA: white, with the glyph coverage as alpha. The colour of the text
+	// comes from the sprite tint
+	rgba := make([]u8, atlas * atlas * 4)
+	defer delete(rgba)
+	for i in 0 ..< int(atlas * atlas) {
+		rgba[i * 4 + 0] = 255
+		rgba[i * 4 + 1] = 255
+		rgba[i * 4 + 2] = 255
+		rgba[i * 4 + 3] = bitmap[i]
+	}
+
+	font.texture = create_texture_from_pixels(raw_data(rgba), atlas, atlas, filter)
+	return
+}
+
+/*
+	A font that can measure and cannot draw: the same sizes and advances create_font gives, with no atlas texture, so no
+	window or GPU is needed. calculate_text_size, calculate_line_height and wrap_text work on it, so a layout can be tested
+	headless; render_text on it draws nothing visible. It owns nothing, so there is no destroy_font to call
+*/
+create_font_metrics :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0) -> Font {
+	font, bitmap := bake_font(bytes, pixel_size, pixels_per_unit)
+	delete(bitmap)
+	return font
+}
+
+// The baking half of create_font, which needs no GPU: the glyph rectangles, the metrics, and the grayscale atlas (the caller frees it)
+@(private)
+bake_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32) -> (font:Font, bitmap:[]u8) {
 	ensure(pixel_size >= 1, "A font needs a pixel size of at least 1")
 
 	font.size = pixel_size
@@ -88,7 +122,6 @@ create_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0, filte
 
 	// Every printable ASCII glyph, as a grayscale bitmap, in the smallest atlas they fit in
 	atlas := i32(mbi.font_settings.atlas_min_size)
-	bitmap:[]u8
 	for {
 		bitmap = make([]u8, atlas * atlas)
 
@@ -103,7 +136,6 @@ create_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0, filte
 		delete(bitmap)
 		atlas *= 2
 	}
-	defer delete(bitmap)
 	font.atlas_size = atlas
 
 	// Where text is placed is the baseline, so something positioning text from the top of a
@@ -113,19 +145,6 @@ create_font :: proc(bytes:[]byte, pixel_size:f32, pixels_per_unit:f32 = 0, filte
 		font.ascent = max(font.ascent, -c.yoff)
 		font.descent = max(font.descent, c.yoff + (f32(c.y1) - f32(c.y0)))
 	}
-
-	// Grayscale to RGBA: white, with the glyph coverage as alpha. The colour of the text
-	// comes from the sprite tint
-	rgba := make([]u8, atlas * atlas * 4)
-	defer delete(rgba)
-	for i in 0 ..< int(atlas * atlas) {
-		rgba[i * 4 + 0] = 255
-		rgba[i * 4 + 1] = 255
-		rgba[i * 4 + 2] = 255
-		rgba[i * 4 + 3] = bitmap[i]
-	}
-
-	font.texture = create_texture_from_pixels(raw_data(rgba), atlas, atlas, filter)
 	return
 }
 

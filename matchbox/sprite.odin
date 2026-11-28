@@ -143,3 +143,19 @@ render_sprite :: proc(sprite:Sprite, mode:Sprite_Mode = .CUTOUT) {
 destroy_sprite :: proc(sprite:Sprite) {
 	destroy_texture(sprite.texture)
 }
+
+/*
+	Draws `texture` filling the rectangle from `min` (bottom left) to `max` (top right) at depth `z`, whatever the texture's
+	size: for putting a render target (a 3D viewport) or an icon into a panel. `source` is the part of the texture to show as
+	{u0, v0, u1, v1}, where v = 0 is the top of the image, so a part can be cut out or, reversed, flipped. A `tint` with
+	alpha below 1 blends. Unlike render_sprite its size comes from the rectangle, not from pixels and a scale
+*/
+render_texture_rectangle :: proc(texture:Texture, min, max:[2]f32, z:f32 = 0, tint:[4]f32 = {1, 1, 1, 1}, source:[4]f32 = {0, 0, 1, 1}) {
+	ensure(texture.width > 0, "render_texture_rectangle needs a texture")
+	size := max - min
+	if size.x <= 0 || size.y <= 0 do return
+
+	centre := [3]f32{(min.x + max.x) * 0.5, (min.y + max.y) * 0.5, z}
+	model := calculate_model_matrix(centre, linalg.QUATERNIONF32_IDENTITY, {size.x, size.y, 1})
+	queue_render(mbi.sprite_mesh, model, tint, shape_blend(tint), .NONE, texture, source, 0)
+}

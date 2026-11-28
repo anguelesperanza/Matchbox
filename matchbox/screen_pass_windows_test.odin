@@ -21,6 +21,7 @@ Saved_Device :: struct {
 	transparent_items: [dynamic]Render_Item,
 	sprite_mesh:       Mesh,
 	line_mesh:         Mesh,
+	triangle_mesh:     Mesh,
 	camera_active:     bool,
 	state:             Render_Target_State,
 	clip:              Clip_State,
@@ -29,7 +30,7 @@ Saved_Device :: struct {
 @(private = "file")
 start_device :: proc() -> (saved: Saved_Device, ok: bool) {
 	sync.mutex_lock(&render_queue_lock)
-	saved = {mbi.backend, mbi.opaque_items, mbi.transparent_items, mbi.sprite_mesh, mbi.line_mesh, mbi.camera_active, mbi.render_target_state, mbi.clip}
+	saved = {mbi.backend, mbi.opaque_items, mbi.transparent_items, mbi.sprite_mesh, mbi.line_mesh, mbi.triangle_mesh, mbi.camera_active, mbi.render_target_state, mbi.clip}
 
 	device: ^d3d11.IDevice
 	device_context: ^d3d11.IDeviceContext
@@ -53,6 +54,10 @@ start_device :: proc() -> (saved: Saved_Device, ok: bool) {
 	mbi.line_mesh = create_line_mesh(line_vertices, line_indices)
 	delete(line_vertices)
 	delete(line_indices)
+	triangle_vertices, triangle_indices := create_triangle_geometry()
+	mbi.triangle_mesh = create_mesh(triangle_vertices, triangle_indices)
+	delete(triangle_vertices)
+	delete(triangle_indices)
 	return saved, true
 }
 
@@ -63,6 +68,7 @@ stop_device :: proc(saved: Saved_Device) {
 		device_context := mbi.device_context
 		destroy_mesh(mbi.sprite_mesh)
 		destroy_mesh(mbi.line_mesh)
+		destroy_mesh(mbi.triangle_mesh)
 		mbi.white_texture_view->Release()
 		mbi.white_texture->Release()
 		destroy_pipeline()
@@ -74,6 +80,7 @@ stop_device :: proc(saved: Saved_Device) {
 	mbi.transparent_items = saved.transparent_items
 	mbi.sprite_mesh = saved.sprite_mesh
 	mbi.line_mesh = saved.line_mesh
+	mbi.triangle_mesh = saved.triangle_mesh
 	mbi.camera_active = saved.camera_active
 	mbi.render_target_state = saved.state
 	mbi.clip = saved.clip
@@ -363,4 +370,71 @@ a_grid_draws_a_line_for_every_slice_and_a_box_draws_its_edges :: proc(t: ^testin
 	render_target_end()
 	boxed := count_pixels(read_render_target_pixels(target, context.temp_allocator), {255, 255, 255})
 	testing.expect(t, boxed > 40, "the box's outline should light a ring of pixels")
+}
+
+@(test)
+a_ring_is_hollow_and_its_outer_edge_is_the_circle :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	target := create_render_target({width = SIZE, height = SIZE, no_depth = true})
+	defer destroy_render_target(&target)
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(create_screen_camera(SIZE))
+	render_circle_outline({0, 0, 0}, 6, 2, RED) // between radius 4 and 6
+	camera_end()
+	render_target_end()
+
+	pixels := read_render_target_pixels(target, context.temp_allocator)
+	testing.expect_value(t, pixel_at(pixels, SIZE, 8, 8), [4]u8{0, 0, 0, 255}) // the middle is empty
+	testing.expect_value(t, pixel_at(pixels, SIZE, 8 + 5, 8), [4]u8{255, 0, 0, 255}) // on the ring, 5 from the middle
+	testing.expect_value(t, pixel_at(pixels, SIZE, 8, 8 - 6), [4]u8{255, 0, 0, 255}) // above, 5.5 from it
+	testing.expect_value(t, pixel_at(pixels, SIZE, 0, 0), [4]u8{0, 0, 0, 255}) // the corner is outside it
+}
+
+@(test)
+a_texture_fills_the_rectangle_the_right_way_up :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	// 2x2: the top row red, the bottom row green
+	image := [?]u8{255, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255}
+	texture := create_texture_from_pixels(raw_data(image[:]), 2, 2, .POINT)
+	defer destroy_texture(texture)
+
+	target := create_render_target({width = SIZE, height = SIZE, no_depth = true})
+	defer destroy_render_target(&target)
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(create_screen_camera(SIZE))
+	render_texture_rectangle(texture, {-4, -4}, {4, 4}) // 8 by 8 units, whatever the texture's 2 by 2
+	camera_end()
+	render_target_end()
+
+	pixels := read_render_target_pixels(target, context.temp_allocator)
+	testing.expect_value(t, pixel_at(pixels, SIZE, 8, 5), [4]u8{255, 0, 0, 255}) // the upper half is the top row
+	testing.expect_value(t, pixel_at(pixels, SIZE, 8, 10), [4]u8{0, 255, 0, 255})
+	testing.expect_value(t, pixel_at(pixels, SIZE, 3, 8), [4]u8{0, 0, 0, 255}) // x -5 is outside the rectangle
+	testing.expect_value(t, pixel_at(pixels, SIZE, 12, 8), [4]u8{0, 0, 0, 255}) // x 4 is too
+}
+
+@(test)
+a_font_with_no_texture_measures_like_one_with :: proc(t: ^testing.T) {
+	// No device here: this is the point. The advances are summed by hand from the baked glyphs, which are stb's own numbers
+	font := create_font_metrics(DEFAULT_FONT_BYTES, 16)
+	testing.expect_value(t, font.texture.width, 0)
+	testing.expect(t, font.ascent > 0 && font.descent >= 0)
+
+	expected: f32
+	for character in "Hello" do expected += font.baked_chars[int(character - 32)].xadvance
+	size := calculate_text_size(font, "Hello")
+	testing.expectf(t, size.x == expected / font.pixels_per_unit && size.x > 0, "width %v, by hand %v", size.x, expected)
+	testing.expect_value(t, size.y, (font.ascent + font.descent) / font.pixels_per_unit)
+
+	lines := wrap_text(font, "alpha beta gamma delta", size.x * 2, context.temp_allocator)
+	testing.expect(t, len(lines) > 1, "text twice as long as the width should wrap")
+	for line in lines do testing.expect(t, calculate_text_size(font, line).x <= size.x * 2 + 1e-4)
 }

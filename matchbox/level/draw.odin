@@ -48,6 +48,7 @@ get_entity_light :: proc(entity: Entity) -> (light: mb.Light, ok: bool) {
 		light = mb.create_area_disk_light(world.position, forward, component.area_size.x, color)
 	}
 
+	light.casts_shadow = component.casts_shadow // Matchbox lets one sun or spot throw it (Light.casts_shadow); the rest are read and left
 	return light, true
 }
 
@@ -101,8 +102,10 @@ get_level_lights :: proc(level: ^Level, allocator := context.allocator) -> [dyna
 	Draws every model, and a `MISSING_MODEL_COLOR` box for every model component whose file could not be loaded. Call it
 	inside `camera_start`, after `update_level`.
 
-	**`casts_shadow` is read from the file and ignored**: Matchbox has no shadow maps yet, so a caster is drawn like any other
-	model. The old `draw_level_shadow_casters` is gone with them.
+	A model's `casts_shadow` is passed on through `mb.set_shadow_casting`, and a light's through `Light.casts_shadow` (get_entity_light): the
+	first sun or spot that asks throws the shadow of every model that does. PC only; the handhelds draw none. The shadow map's size and
+	where it covers are `Lighting_Settings.shadow`, which the file does not carry: set them on `get_level_lighting`'s result.
+	The old `draw_level_shadow_casters` is gone.
 
 	The missing-model box is a solid cube and not the wire box `main` drew: no wire draw exists here (see `docs/the_game_port_plan.md`)
 */
@@ -119,6 +122,8 @@ render_level :: proc(level: ^Level) {
 			continue
 		}
 
+		mb.set_shadow_casting(component.casts_shadow)
 		mb.render_model(component.model^, transform, component.tint)
 	}
+	mb.set_shadow_casting(false) // what a game draws after the level is not the level's to decide
 }

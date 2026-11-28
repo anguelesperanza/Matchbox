@@ -90,6 +90,8 @@ Backend_State :: struct {
 	// The same with MultisampleEnable, for drawing into a multisampled target: that is what makes a line smooth there, but with one sample it
 	// draws a line wider than a pixel, so a plain target keeps the first set
 	multisampled_rasterizer_states:[Cull_Mode]^d3d11.IRasterizerState,
+	shadow_map:Shadow_Map, // the caster's depth, drawn at camera_end when a light casts (shadow_windows.odin)
+	camera_view_projection:matrix[4, 4]f32, // what camera_start set the frame constants to, which the shadow pass puts back
 	drawing_multisampled:bool, // what the target being drawn into is, kept by bind_screen and bind_render_target for set_render_state
 	samplers:[Filter_Mode]^d3d11.ISamplerState,
 

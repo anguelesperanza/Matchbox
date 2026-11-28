@@ -59,7 +59,7 @@ the_lights_block_matches_the_hlsl_layout :: proc(t:^testing.T) {
 	testing.expect_value(t, size_of(Lights_Block) % 16, 0)
 	// then the four scene rows, in mbsc's LIGHT_SCENE_NAMES order, the last thing in the block
 	testing.expect_value(t, offset_of(Lights_Block, ground), 16 + 5 * MAX_PC_LIGHTS * 16 + 16)
-	testing.expect_value(t, offset_of(Lights_Block, fog_range) + 16, size_of(Lights_Block))
+	testing.expect_value(t, offset_of(Lights_Block, shadow_parameters) + 16, size_of(Lights_Block))
 }
 
 // The scene's settings reach the block as the shader reads them: a zero Lighting_Settings means "as before", and each setting is worked by hand

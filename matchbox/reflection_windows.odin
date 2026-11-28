@@ -230,6 +230,11 @@ check_engine_blocks :: proc(reflection:^Shader_Reflection) -> string {
 			case "up": expected = int(offset_of(Lights_Block, up))
 			case "fog_color": expected = int(offset_of(Lights_Block, fog_color))
 			case "fog_range": expected = int(offset_of(Lights_Block, fog_range))
+			case "shadow_x": expected = int(offset_of(Lights_Block, shadow_x))
+			case "shadow_y": expected = int(offset_of(Lights_Block, shadow_y))
+			case "shadow_z": expected = int(offset_of(Lights_Block, shadow_z))
+			case "shadow_w": expected = int(offset_of(Lights_Block, shadow_w))
+			case "shadow_params": expected = int(offset_of(Lights_Block, shadow_parameters))
 			}
 		case .SKIN:
 			limit := mbi.skin_settings.joint_limit

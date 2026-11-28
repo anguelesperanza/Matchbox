@@ -9,6 +9,7 @@ package matchbox
 */
 
 import "core:math"
+import "core:math/linalg"
 import "core:log"
 import "core:sync"
 import "core:testing"
@@ -486,4 +487,103 @@ an_area_light_lights_what_is_in_front_of_it_and_not_what_is_behind :: proc(t:^te
 	// the same light turned to face up shines away from the floor: black
 	set_lights({create_area_disk_light({0, 2, 0}, {0, 1, 0}, 1)})
 	testing.expect_value(t, draw(&target, plane), [4]u8{0, 0, 0, 255})
+}
+
+// A small plane high up and off to one side, in the line of a sun, puts the middle of the floor in shadow. The floor beyond it stays lit, and
+// with set_shadow_casting left off the same plane casts nothing
+@(test)
+a_caster_shadows_the_floor_under_a_sun :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
+	saved_lighting := mbi.lighting
+	defer mbi.lighting = saved_lighting
+
+	// Straight down at 45 degrees: the plane at (-2, 2) throws its shadow on (0, 0), where the camera looks. Specular off: a highlight would saturate
+	sun := create_directional_light({1, -1, 0})
+	sun.specular = {}
+	sun.casts_shadow = true
+	set_lights({sun})
+	set_lighting({enabled = true, shadow = {resolution = 512}})
+	target := create_render_target({width = 8, height = 8})
+	defer destroy_render_target(&target)
+	vertices, indices := create_plane_geometry(40, context.temp_allocator)
+	floor := create_lit_mesh(vertices, indices)
+	defer destroy_mesh(floor)
+	small_vertices, small_indices := create_plane_geometry(1, context.temp_allocator)
+	caster := create_lit_mesh(small_vertices, small_indices)
+	defer destroy_mesh(caster)
+
+	draw :: proc(target:^Render_Target, floor, caster:Mesh, casting:bool) -> (middle, corner:[4]u8) {
+		render_target_start(target, [4]f32{0, 0, 0, 1})
+		camera_start(create_camera_3d({0, 3, 0.001}, {0, 0, 0}, 50))
+		set_shadow_casting(false)
+		render_mesh(floor)
+		set_shadow_casting(casting)
+		render_mesh(caster, linalg.matrix4_translate_f32({-2, 2, 0}), cull = .NONE)
+		set_shadow_casting(false)
+		camera_end()
+		render_target_end()
+		pixels := read_render_target_pixels(target^, context.temp_allocator)
+		return pixel_at(pixels, 8, 4, 4), pixel_at(pixels, 8, 1, 1)
+	}
+
+	// The sun at 45 degrees on a floor facing up: cos 45 of white, sRGB encoded on its way into the target
+	want := math.pow(f32(math.cos(math.PI / 4)), 1 / 2.4) * 1.055 - 0.055
+
+	middle, corner := draw(&target, floor, caster, true)
+	testing.expectf(t, middle.x <= 3, "in the shadow: %v", middle.x)
+	testing.expectf(t, abs(f32(corner.x) - want * 255) <= 4, "out of it: %v, wanted about %v", corner.x, want * 255)
+
+	middle, corner = draw(&target, floor, caster, false)
+	testing.expectf(t, abs(f32(middle.x) - want * 255) <= 4, "nothing casting: %v, wanted about %v", middle.x, want * 255)
+}
+
+// The same through a spot's cone, which makes its map with a perspective matrix: a plane on the line from the torch to the floor's middle
+@(test)
+a_caster_shadows_the_floor_under_a_spot :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
+	saved_lighting := mbi.lighting
+	defer mbi.lighting = saved_lighting
+
+	torch := create_spot_light({-3, 3, 0}, {1, -1, 0}, WHITE, 25, 40)
+	torch.specular = {}
+	torch.casts_shadow = true
+	set_lights({torch})
+	set_lighting({enabled = true, shadow = {resolution = 512, radius = 12}})
+	target := create_render_target({width = 8, height = 8})
+	defer destroy_render_target(&target)
+	vertices, indices := create_plane_geometry(40, context.temp_allocator)
+	floor := create_lit_mesh(vertices, indices)
+	defer destroy_mesh(floor)
+	small_vertices, small_indices := create_plane_geometry(1, context.temp_allocator)
+	caster := create_lit_mesh(small_vertices, small_indices)
+	defer destroy_mesh(caster)
+
+	draw :: proc(target:^Render_Target, floor, caster:Mesh, casting:bool) -> [4]u8 {
+		render_target_start(target, [4]f32{0, 0, 0, 1})
+		camera_start(create_camera_3d({0, 3, 0.001}, {0, 0, 0}, 50))
+		set_shadow_casting(false)
+		render_mesh(floor)
+		set_shadow_casting(casting)
+		render_mesh(caster, linalg.matrix4_translate_f32({-1.5, 1.5, 0}), cull = .NONE)
+		set_shadow_casting(false)
+		camera_end()
+		render_target_end()
+		return pixel_at(read_render_target_pixels(target^, context.temp_allocator), 8, 4, 4)
+	}
+
+	testing.expect_value(t, draw(&target, floor, caster, true).x, 0)
+	// The floor's middle is on the torch's axis, 4.2 away: bright enough that "lit" is not a rounding of black
+	testing.expectf(t, draw(&target, floor, caster, false).x > 40, "nothing casting: %v", draw(&target, floor, caster, false).x)
 }

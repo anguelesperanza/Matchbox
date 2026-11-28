@@ -46,6 +46,7 @@ Render_Item :: struct {
 	sequence:int, // the order it was queued in, which breaks ties in a screen pass
 	clip:Clip_Rectangle, // the pixels it is clipped to when `clipped` (clip.odin); a screen pass only
 	clipped:bool,
+	casts_shadow:bool, // set_shadow_casting's, as it was when this was queued (light.odin); PC draws it into the shadow map
 }
 
 /*Queues a mesh to be drawn at camera_end. `model` places it in the world.
@@ -76,6 +77,7 @@ queue_render :: proc(mesh:Mesh, model:matrix[4,4]f32, tint:[4]f32, blend:Blend_M
 	mbi.queued_items += 1
 	item.clip = mbi.clip.current
 	item.clipped = mbi.clip.active
+	item.casts_shadow = mbi.lighting.casting
 
 	// A screen pass paints see-through and solid items in one order, so both need a depth; a world pass only sorts the see-through
 	if blend == .ALPHA || mbi.screen_pass {

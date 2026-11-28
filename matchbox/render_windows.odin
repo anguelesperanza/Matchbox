@@ -216,6 +216,16 @@ render_item :: proc(item:Render_Item) {
 		mbi.device_context->PSSetSamplers(u32(pipeline.reflection.sampler), 1, &mbi.samplers[item.texture.filter])
 	}
 
+	// The shadow map, for a shader that lights: at its own register, read by mbs_light_shadow in the pixel shader and, for per-vertex lighting, the vertex one
+	if mbi.shadow_map.rendered && pipeline.reflection.blocks[.LIGHTS].present {
+		shadow_view := mbi.shadow_map.resource_view
+		shadow_sampler := mbi.shadow_map.sampler
+		mbi.device_context->PSSetShaderResources(SHADOW_MAP_REGISTER, 1, &shadow_view)
+		mbi.device_context->VSSetShaderResources(SHADOW_MAP_REGISTER, 1, &shadow_view)
+		mbi.device_context->PSSetSamplers(SHADOW_MAP_REGISTER, 1, &shadow_sampler)
+		mbi.device_context->VSSetSamplers(SHADOW_MAP_REGISTER, 1, &shadow_sampler)
+	}
+
 	mbi.device_context->DrawIndexed(item.mesh.index_count, 0, 0)
 }
 
@@ -420,6 +430,8 @@ set_render_constants :: proc(item:Render_Item) {
 set_lights_constants :: proc() {
 	if mbi.lights_constants == nil || mbi.lighting.settings.enabled == false do return
 	block := calculate_lights_block(mbi.lighting, mbi.view)
+	// A screen pass draws no shadow map (render_shadow_map), so a lit mesh in one is not shadowed by whatever the last world camera left
+	if mbi.screen_pass do block.shadow_parameters = {-1, 0, 0, 0}
 	update_buffer(mbi.lights_constants, &block, size_of(Lights_Block))
 }
 
@@ -724,6 +736,7 @@ camera_start :: proc(camera:Camera) {
 
 	// linalg builds OpenGL depth (-1..1); GL_TO_D3D_DEPTH converts it to D3D's 0..1
 	view_projection := GL_TO_D3D_DEPTH * calculate_camera_projection_gl(used, aspect) * mbi.view
+	mbi.camera_view_projection = view_projection // render_shadow_map puts it back after drawing from the light
 	set_frame_constants(view_projection, mbi.view)
 }
 
@@ -751,6 +764,7 @@ camera_end :: proc() {
 
 	sort_render_queue()
 	set_lights_constants()
+	render_shadow_map()
 	draw_pending_skybox() // first, so everything else covers it
 
 	target_pixels := get_draw_size()
@@ -804,6 +818,7 @@ destroy_pipeline :: proc() {
 	if mbi.frame_constants != nil do mbi.frame_constants->Release()
 	delete(mbi.game_shadow)
 
+	destroy_shadow_map()
 	destroy_states()
 	destroy_skybox_state()
 

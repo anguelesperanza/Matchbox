@@ -153,7 +153,7 @@ a_lit_shader_lists_the_lights_block :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
 	text := reflect(t, lit_shader("return light_diffuse(v.quat, v.view) * sample(a, v.uv) + light_specular(v.quat, v.view)"))
-	testing.expect(t, strings.contains(text, "block lights 3 5216\n"), text)
+	testing.expect(t, strings.contains(text, "block lights 3 5296\n"), text)
 	testing.expect(t, strings.contains(text, "value lights ambient [4]f32 0 16 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "value lights direction [4]f32 16 1024 64 16\n"), text)
 	testing.expect(t, strings.contains(text, "value lights diffuse [4]f32 1040 1024 64 16\n"), text)
@@ -165,11 +165,13 @@ a_lit_shader_lists_the_lights_block :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, "value lights up [4]f32 5168 16 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "value lights fog_color [4]f32 5184 16 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "value lights fog_range [4]f32 5200 16 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value lights shadow_x [4]f32 5216 16 0 0\n"), text)
+	testing.expect(t, strings.contains(text, "value lights shadow_params [4]f32 5280 16 0 0\n"), text)
 	testing.expect(t, strings.contains(text, "block render 1 112\n"), text)
 
 	// reached through a procedure of the shader's own, the call still counts
 	helper := strings.concatenate({lit_shader("return shade(v)"), "\nshade :: proc(v: Varying) -> [4]f32 {\n\treturn light_diffuse(v.quat, v.view)\n}\n"}, context.temp_allocator)
-	testing.expect(t, strings.contains(reflect(t, helper), "block lights 3 5216\n"))
+	testing.expect(t, strings.contains(reflect(t, helper), "block lights 3 5296\n"))
 
 	// and a shader that doesn't light has no lights block
 	unlit := reflect(t, lit_shader("return sample(a, v.uv)"))

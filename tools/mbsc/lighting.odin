@@ -76,16 +76,18 @@ get_max_lights :: proc(target: Target) -> int {
 LIGHT_UNIFORM_NAMES := [?]string{"lights_ambient", "lights_direction", "lights_diffuse", "lights_specular", "lights_position", "lights_cone"}
 
 /*
-	LIGHT_SCENE_NAMES are the four rows PC's block carries after `lights_count`, for what belongs to the scene rather than
+	LIGHT_SCENE_NAMES are the rows PC's block carries after `lights_count`, for what belongs to the scene rather than
 	to a light (Lighting_Settings in light.odin). The handhelds' blocks do not have them:
 	  - lights_ground: rgb the ground's ambient colour, for a hemisphere
 	  - lights_up: xyz the world's up in eye space, w 1 when the ambient is a hemisphere (the sky is `lights_ambient`)
 	  - lights_fog_color: rgb, w 1 when fog is on
 	  - lights_fog_range: x the distance fog starts, y 1 / (end - start), z the exposure, w the tonemap (0 none, 1 Reinhard, 2 ACES, 3 AgX)
+	  - lights_shadow_x .. _w: the four rows of the matrix taking an eye-space point to the shadow caster's clip space, so each coordinate is a dot product
+	  - lights_shadow_params: x the slot of the light that casts (-1 for none), y one texel of the shadow map in uv, z the depth bias, w how far to push a point out along its normal before looking it up
 	A tonemap other than none also stops the light sums being clamped to 1, since it is the curve that brings them back
 */
 @(rodata)
-LIGHT_SCENE_NAMES := [?]string{"lights_ground", "lights_up", "lights_fog_color", "lights_fog_range"}
+LIGHT_SCENE_NAMES := [?]string{"lights_ground", "lights_up", "lights_fog_color", "lights_fog_range", "lights_shadow_x", "lights_shadow_y", "lights_shadow_z", "lights_shadow_w", "lights_shadow_params"}
 
 // write_light_basics writes the two small functions both forms of the light functions use: the normal from the
 // quaternion, and a normalize that leaves a zero vector zero.
@@ -107,6 +109,7 @@ write_light_basics :: proc(builder: ^strings.Builder) {
 write_light_functions :: proc(builder: ^strings.Builder, render_block: string, loop_end: string) {
 	write_light_basics(builder)
 	write_light_finish(builder) // first: the sums below are limited by it
+	write_light_shadow(builder)
 
 	// One light seen from a pixel: the way to it in `l`, and how much of it arrives (the distance fade and a spot's
 	// cone), 1 for a sun. `position` is the pixel in eye space, which is the view vector negated
@@ -156,7 +159,7 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintfln(builder, "    int total = (int)(%s);", loop_end)
 	fmt.sbprintln(builder, "    for (int i = 0; i < total; i++) {")
 	fmt.sbprintln(builder, "        float3 l;")
-	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
+	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l) * mbs_light_shadow(i, -view, n);")
 	fmt.sbprintln(builder, "        sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);")
 	fmt.sbprintln(builder, "    }")
 	fmt.sbprintln(builder, "    return float4(mbs_light_limit(sum), 1.0);")
@@ -170,13 +173,42 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintfln(builder, "    int total = (int)(%s);", loop_end)
 	fmt.sbprintln(builder, "    for (int i = 0; i < total; i++) {")
 	fmt.sbprintln(builder, "        float3 l;")
-	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
+	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l) * mbs_light_shadow(i, -view, n);")
 	fmt.sbprintln(builder, "        float3 h = mbs_light_unit(l + v);")
 	fmt.sbprintln(builder, "        float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;")
 	fmt.sbprintfln(builder, "        sum += lights_specular[i].rgb * (facing * fade * pow(max(dot(n, h), 1e-8), %s_shininess));", render_block)
 	fmt.sbprintln(builder, "    }")
 	fmt.sbprintfln(builder, "    return float4(mbs_light_limit(sum * %s_specular_strength), 0.0);", render_block)
 	fmt.sbprintln(builder, "}")
+}
+
+// Which share of the light reaches a point, for the one light that casts a shadow (PC only; Lighting_Settings.shadow in light.odin). The map is
+// the depth the caster's pass wrote, looked up with a comparison sampler that does the "is this point nearer than what the light saw" test in
+// hardware and, on a bilinear filter, blends the four tests: the 3 x 3 grid of them below makes the edge soft over about three texels. Outside
+// the map is lit, not dark, so the shadow does not end in a hard wall where the map does
+@(private = "file")
+write_light_shadow :: proc(builder: ^strings.Builder) {
+	fmt.sbprint(builder, `
+Texture2D<float> mbs_shadow_map : register(t7);
+SamplerComparisonState mbs_shadow_sampler : register(s7);
+
+float mbs_light_shadow(int i, float3 position, float3 n) {
+    if (abs(lights_shadow_params.x - (float)i) > 0.5) return 1.0;
+    float4 p = float4(position + n * lights_shadow_params.w, 1.0);
+    float4 clip = float4(dot(lights_shadow_x, p), dot(lights_shadow_y, p), dot(lights_shadow_z, p), dot(lights_shadow_w, p));
+    if (clip.w <= 1e-6) return 1.0;
+    float3 ndc = clip.xyz / clip.w;
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) return 1.0;
+    float lit = 0.0;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            lit += mbs_shadow_map.SampleCmpLevelZero(mbs_shadow_sampler, uv + float2(dx, dy) * lights_shadow_params.y, ndc.z - lights_shadow_params.z);
+        }
+    }
+    return lit / 9.0;
+}
+`)
 }
 
 // The PC's scene finish (see LIGHT_SCENE_NAMES). The tonemap curves are the usual published ones: Reinhard's x / (1 + x), Narkowicz's

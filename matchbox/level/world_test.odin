@@ -162,6 +162,7 @@ test_a_light_turned_about_each_axis :: proc(t: ^testing.T) {
 		testing.expect_value(t, spot.diffuse, [4]f32{2, 1, 0.5, 1})
 		testing.expect_value(t, spot.inner_angle, 10)
 		testing.expect_value(t, spot.outer_angle, 25)
+		testing.expect(t, spot.casts_shadow, "the component's casts_shadow did not reach the light")
 
 		// A directional light keeps its direction too, from nowhere.
 		entity.light = Light_Component{kind = .DIRECTIONAL, color = mb.WHITE, intensity = 1}

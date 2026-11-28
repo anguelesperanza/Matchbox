@@ -2,6 +2,7 @@ package matchbox
 
 import "core:fmt"
 import "core:math"
+import "core:math/linalg"
 
 /*
 	light
@@ -74,6 +75,12 @@ Light :: struct {
 	outer_angle:f32, // SPOT only, degrees from the axis: faded to nothing by it
 	right:[3]f32, // AREA_RECT and AREA_DISK: the way the shape's width runs, world space, at right angles to `direction`; need not be unit length
 	area_size:[2]f32, // AREA_RECT: half the width and half the height; AREA_DISK: the radius in x
+	/*
+		PC only: this light throws shadows of what was queued under set_shadow_casting(true). One light does it, the first in the list that
+		asks and is a sun or a spot: a point or area light would need a map for every direction, and more than one caster a map each. The
+		handhelds ignore it
+	*/
+	casts_shadow:bool,
 }
 
 /*
@@ -110,6 +117,23 @@ Fog_Settings :: struct {
 	end:f32,
 }
 
+/*
+	How the one shadow is made (PC only; Light.casts_shadow). Zero in a field means "the default", not zero, since a map of no texels or a
+	volume of no size is not something anyone is asking for; the defaults are in the comments.
+*/
+Shadow_Settings :: struct {
+	resolution:int, // texels along a side of the shadow map; 2048. A bigger one is sharper and costs memory and fill
+	/*
+		What the map covers. A sun's map is a box, `radius` world units either side of `center` and as deep, which is as sharp as it is
+		small: put it where the player is, not around the whole level. A spot's covers its own cone out to `radius` from the light.
+		Outside it nothing is shadowed. 20 units
+	*/
+	center:[3]f32,
+	radius:f32,
+	depth_bias:f32, // how much nearer to the light than the map a point must be to count as lit, in the map's 0..1 depth; 0.002. Too small stripes surfaces, too big lifts shadows off their casters
+	normal_offset:f32, // how far, world units, a point is pushed out along its normal before it is looked up, which cures the stripes on slopes the depth bias cannot; 0.02
+}
+
 // Settings that belong to the whole scene rather than to one light.
 Lighting_Settings :: struct {
 	/*
@@ -130,6 +154,7 @@ Lighting_Settings :: struct {
 	fog:Fog_Settings,
 	exposure:f32, // multiplies the lit colour before the tonemap; 0 is read as 1, since an exposure of 0 would be a black screen and not a choice
 	tonemap:Tonemap,
+	shadow:Shadow_Settings,
 	mode:Lighting_Mode, // for every part whose material doesn't choose (Material.lighting)
 }
 
@@ -138,6 +163,7 @@ Lighting_State :: struct {
 	settings:Lighting_Settings,
 	lights:[LIGHT_SLOT_COUNT]Light,
 	light_count:int,
+	casting:bool, // set_shadow_casting: whether what is queued now throws a shadow
 }
 
 /*
@@ -168,6 +194,12 @@ Lights_Block :: struct {
 	up:Scene_Row,
 	fog_color:Scene_Row,
 	fog_range:Scene_Row,
+	// The shadow: the four rows of the matrix from eye space to the caster's clip space, then the caster's slot (-1 for none), a texel's width in the map, the depth bias and the normal offset
+	shadow_x:Scene_Row,
+	shadow_y:Scene_Row,
+	shadow_z:Scene_Row,
+	shadow_w:Scene_Row,
+	shadow_parameters:Scene_Row,
 }
 
 when ODIN_OS == .Windows {
@@ -235,6 +267,59 @@ set_lights :: proc(lights:[]Light) {
 */
 set_lighting :: proc(settings := Lighting_Settings{enabled = true, ambient = {0.2, 0.2, 0.2, 1}}) {
 	mbi.lighting.settings = settings
+}
+
+/*
+	set_shadow_casting chooses whether what is queued from now on throws a shadow, until it is called again (PC only; the handhelds draw no shadows). It
+	is separate from the light that casts: this says which things are in the way, `Light.casts_shadow` which light they are in the way of. A model
+	that is skinned or see-through casts none, whatever this says
+*/
+set_shadow_casting :: proc(enabled:bool) {
+	mbi.lighting.casting = enabled
+}
+
+// get_shadow_settings is what set_lighting's Shadow_Settings come to with the defaults filled in where it was left zero.
+get_shadow_settings :: proc(settings:Shadow_Settings) -> Shadow_Settings {
+	filled := settings
+	if filled.resolution <= 0 do filled.resolution = 2048
+	if filled.radius <= 0 do filled.radius = 20
+	if filled.depth_bias <= 0 do filled.depth_bias = 0.002
+	if filled.normal_offset <= 0 do filled.normal_offset = 0.02
+	return filled
+}
+
+// calculate_shadow_caster finds the light that casts the shadow: the first that asks and is a sun or a spot. -1 when there is none.
+calculate_shadow_caster :: proc(lighting:Lighting_State) -> int {
+	for slot in 0 ..< lighting.light_count {
+		light := lighting.lights[slot]
+		if light.casts_shadow && (light.kind == .DIRECTIONAL || light.kind == .SPOT) do return slot
+	}
+	return -1
+}
+
+/*
+	calculate_shadow_matrix is the caster's view of the world as a matrix: world space to D3D clip space (depth 0..1). A sun is looked at through a box
+	around `center`, set back `radius` along its direction so the box holds everything that can fall on it; a spot through a cone as wide as its
+	outer angle. The same matrix draws the map and, at the end of the chain, looks it up
+*/
+when ODIN_OS == .Windows {
+	calculate_shadow_matrix :: proc(light:Light, settings:Shadow_Settings) -> matrix[4,4]f32 {
+		shadow := get_shadow_settings(settings)
+		direction := calculate_unit_direction(light.direction).xyz
+		if direction == {} do direction = {0, -1, 0}
+		// look_at breaks when the way up is the way it looks
+		up := [3]f32{0, 1, 0} if abs(direction.y) < 0.99 else [3]f32{0, 0, 1}
+		if light.kind == .SPOT {
+			view := linalg.matrix4_look_at_f32(light.position, light.position + direction, up)
+			field_of_view := min(2 * light.outer_angle, 170) // the whole cone, from the light's centre line out to the edge on both sides
+			projection := linalg.matrix4_perspective_f32(math.to_radians(max(field_of_view, 1)), 1, 0.1, shadow.radius)
+			return GL_TO_D3D_DEPTH * projection * view
+		}
+		center := shadow.center
+		view := linalg.matrix4_look_at_f32(center - direction * shadow.radius, center, up)
+		projection := linalg.matrix_ortho3d_f32(-shadow.radius, shadow.radius, -shadow.radius, shadow.radius, 0, 2 * shadow.radius)
+		return GL_TO_D3D_DEPTH * projection * view
+	}
 }
 
 // get_max_lights is how many lights set_lights takes on this target: MAX_LIGHTS (8) on the 3DS and the Vita, MAX_PC_LIGHTS (64) on PC.
@@ -333,6 +418,17 @@ calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> 
 			1 / max(settings.fog.end - settings.fog.start, 1e-6),
 			settings.exposure if settings.exposure > 0 else 1,
 			f32(int(settings.tonemap)),
+		}
+		block.shadow_parameters = {-1, 0, 0, 0}
+		if caster := calculate_shadow_caster(lighting); caster >= 0 {
+			shadow := get_shadow_settings(settings.shadow)
+			// The block's points are in eye space, so the matrix starts from there: back to the world with the view's inverse, then the caster's
+			eye_to_light := calculate_shadow_matrix(lighting.lights[caster], settings.shadow) * linalg.inverse(view)
+			block.shadow_x = {eye_to_light[0, 0], eye_to_light[0, 1], eye_to_light[0, 2], eye_to_light[0, 3]}
+			block.shadow_y = {eye_to_light[1, 0], eye_to_light[1, 1], eye_to_light[1, 2], eye_to_light[1, 3]}
+			block.shadow_z = {eye_to_light[2, 0], eye_to_light[2, 1], eye_to_light[2, 2], eye_to_light[2, 3]}
+			block.shadow_w = {eye_to_light[3, 0], eye_to_light[3, 1], eye_to_light[3, 2], eye_to_light[3, 3]}
+			block.shadow_parameters = {f32(caster), 1 / f32(shadow.resolution), shadow.depth_bias, shadow.normal_offset}
 		}
 	}
 	return block

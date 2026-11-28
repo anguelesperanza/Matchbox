@@ -135,7 +135,7 @@ sky-crash finding.
   hemisphere ambient sky + ground), read by the lit shaders and the unlit one for fog. `Lighting_Settings` gains the fields as defaulted values that mean
   "as before", so existing scenes draw unchanged (checked pixel for pixel against the old build's numbers).
 - **7d, area lights.** *Done.* `AREA_RECT`/`AREA_DISK` as a closest-point-on-shape approximation in the PC shaders, `matchbox/level` stops flattening them.
-- **7e, shadows.** One shadow map for the first directional or spot caster: depth-only pass of the casters, 3x3 PCF in the lit shaders, resolution,
+- **7e, shadows.** *Done.* One shadow map for the first directional or spot caster: depth-only pass of the casters, 3x3 PCF in the lit shaders, resolution,
   extent and bias settings; `level.draw_level_shadow_casters` already exists. Needs a per-draw custom shader or a built-in depth pipeline.
 - Handhelds: none of 7b-7e is planned for them; `matchbox/level` keeps ignoring what a handheld cannot draw.
 
@@ -305,6 +305,19 @@ a hard-edged, slightly too bright penumbra elsewhere, with none of an area light
 disk faces away).
 *Not done:* Stargate's own area-light look was not compared; its numbers (`area_size` meaning, intensity) are taken at face value from the level format.
 
+**Phase 7e, shadows: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 282 pass; level 58; `tools/mbsc` 142; `matchbox/ui` 13; 3DS and Vita checks clean.
+One shadow map, for the first sun or spot with `Light.casts_shadow` set. `set_shadow_casting(true/false)` marks what is queued next as a caster (stored per `Render_Item`, so it follows the draw order like `set_shader`);
+`matchbox/level` calls it per model from `casts_shadow` and puts a light's flag on `Light.casts_shadow`. `Shadow_Settings` (in `Lighting_Settings.shadow`) holds `resolution` (2048), `center` and `radius` (20) of the volume a sun's
+orthographic map covers, `depth_bias` (0.002) and `normal_offset` (0.02); zero means the default, `get_shadow_settings` fills them. *How:* at the top of `camera_end` (world passes only) a depth-only pass draws the casters
+with the unlit mesh pipeline's vertex shader and no pixel shader into an R32 depth map, then puts the camera's target, viewport and frame constants back. The lit shaders look it up at `t7`/`s7` (declared by mbsc in the generated
+HLSL only) with a comparison sampler and a 3 x 3 grid of taps, so the edge is soft over about three texels; outside the map is lit. The block gains five rows (`lights_shadow_x`..`_w`, the matrix from eye space to the caster's clip space,
+and `lights_shadow_params`: slot, texel, bias, normal offset); only the caster's slot is multiplied by the shadow. *Limits:* skinned and see-through meshes cast nothing; point and area lights cast nothing; one caster; a screen
+pass is never shadowed; the handhelds draw no shadows and ignore both flags.
+*Measured:* the matrix puts the centre of a sun's box at the map's middle, half way through its depth, and a point a quarter box across at 0.5 (a unit test, no device); on the software device a small plane in the line of a
+sun, and of a spot (the perspective map), turns the floor under it from its lit value (cos 45 degrees as sRGB, worked by hand) to black while the floor beside it and the same scene without casting stay lit; the generated
+HLSL and reflections agree with `Lights_Block` (the startup size check). *Not done:* not looked at on a real window or GPU; the cost of a 2048 map on real hardware was not measured; bias and offset were not tuned on a real
+scene (slopes, thin walls); Stargate's own shadow look was not compared.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -335,6 +348,11 @@ New public names so far (the user reads this list at the end):
 | `light_finish(color, view)` | shader built-in (mbsc, PC only) | `tools/mbsc/builtins.odin`, `docs/shader_language.md` |
 | `Light_Kind.AREA_RECT`, `.AREA_DISK`; `Light.right`, `Light.area_size` | enum values, struct fields | `light.odin` (shared; PC only in effect) |
 | `create_area_rect_light(position, direction, right, width, height, color)`, `create_area_disk_light(position, direction, radius, color)` | procedures | `light.odin` (shared) |
+| `set_shadow_casting(enabled)` | procedure | `light.odin` (shared; PC only in effect) |
+| `Light.casts_shadow`, `Lighting_Settings.shadow` | struct fields | `light.odin` (shared) |
+| `Shadow_Settings` (`resolution`, `center`, `radius`, `depth_bias`, `normal_offset`), `get_shadow_settings(settings)` | struct, procedure | `light.odin` (shared) |
+| `calculate_shadow_caster(lighting)`, `calculate_shadow_matrix(light, settings)` | procedures | `light.odin` (the matrix is PC only) |
+| `Shadow_Map`, `SHADOW_MAP_REGISTER` | struct, constant (a shader register) | `shadow_windows.odin` |
 | `clip_start(min, max)` | procedure | `clip_windows.odin`, handheld stub |
 | `clip_end()` | procedure | `clip_windows.odin`, handheld stub |
 | `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |

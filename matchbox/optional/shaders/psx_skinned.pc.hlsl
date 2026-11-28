@@ -58,6 +58,11 @@ cbuffer mbs_lights_block : register(b3) {
     float4 lights_up;
     float4 lights_fog_color;
     float4 lights_fog_range;
+    float4 lights_shadow_x;
+    float4 lights_shadow_y;
+    float4 lights_shadow_z;
+    float4 lights_shadow_w;
+    float4 lights_shadow_params;
 };
 
 // The light built-ins, following the 3DS's fragment lighting unit (mbsc's lighting.odin says how).
@@ -107,6 +112,26 @@ float4 mbs_light_finish(float4 color, float3 view) {
     return float4(lerp(rgb, lights_fog_color.rgb, fog), color.a);
 }
 
+Texture2D<float> mbs_shadow_map : register(t7);
+SamplerComparisonState mbs_shadow_sampler : register(s7);
+
+float mbs_light_shadow(int i, float3 position, float3 n) {
+    if (abs(lights_shadow_params.x - (float)i) > 0.5) return 1.0;
+    float4 p = float4(position + n * lights_shadow_params.w, 1.0);
+    float4 clip = float4(dot(lights_shadow_x, p), dot(lights_shadow_y, p), dot(lights_shadow_z, p), dot(lights_shadow_w, p));
+    if (clip.w <= 1e-6) return 1.0;
+    float3 ndc = clip.xyz / clip.w;
+    float2 uv = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) return 1.0;
+    float lit = 0.0;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            lit += mbs_shadow_map.SampleCmpLevelZero(mbs_shadow_sampler, uv + float2(dx, dy) * lights_shadow_params.y, ndc.z - lights_shadow_params.z);
+        }
+    }
+    return lit / 9.0;
+}
+
 float mbs_light_sample(int i, float3 position, out float3 l) {
     float kind = lights_position[i].w;
     if (kind > 2.5) {
@@ -144,7 +169,7 @@ float4 mbs_light_diffuse(float4 q, float3 view) {
     int total = (int)(lights_count);
     for (int i = 0; i < total; i++) {
         float3 l;
-        float fade = mbs_light_sample(i, -view, l);
+        float fade = mbs_light_sample(i, -view, l) * mbs_light_shadow(i, -view, n);
         sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);
     }
     return float4(mbs_light_limit(sum), 1.0);
@@ -157,7 +182,7 @@ float4 mbs_light_specular(float4 q, float3 view) {
     int total = (int)(lights_count);
     for (int i = 0; i < total; i++) {
         float3 l;
-        float fade = mbs_light_sample(i, -view, l);
+        float fade = mbs_light_sample(i, -view, l) * mbs_light_shadow(i, -view, n);
         float3 h = mbs_light_unit(l + v);
         float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;
         sum += lights_specular[i].rgb * (facing * fade * pow(max(dot(n, h), 1e-8), render_shininess));

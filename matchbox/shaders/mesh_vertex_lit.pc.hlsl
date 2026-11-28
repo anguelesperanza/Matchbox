@@ -43,6 +43,11 @@ cbuffer mbs_lights_block : register(b3) {
     float4 lights_up;
     float4 lights_fog_color;
     float4 lights_fog_range;
+    float4 lights_shadow_x;
+    float4 lights_shadow_y;
+    float4 lights_shadow_z;
+    float4 lights_shadow_w;
+    float4 lights_shadow_params;
 };
 
 Varying vertex_main(Vertex_In input) {

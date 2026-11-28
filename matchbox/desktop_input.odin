@@ -13,6 +13,10 @@ Cursor_Shape :: enum {
 	RESIZE_VERTICAL, // north-south, over a horizontal splitter
 	HAND, // over something clickable
 	CROSSHAIR,
+	RESIZE_DIAGONAL_DOWN, // north-west to south-east, over a corner like the bottom right one
+	RESIZE_DIAGONAL_UP, // south-west to north-east
+	MOVE, // four arrows, over something that can be dragged about
+	NOT_ALLOWED, // over something that cannot be used now
 }
 
 // A file dropped on the window from Explorer, and where in the window it landed (pixels, as get_mouse_position gives them)

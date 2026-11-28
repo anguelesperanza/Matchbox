@@ -193,6 +193,28 @@ changes along its length, and nothing asks for one. Pixel tests: a line along Z 
 drawn first; the grid has one line per slice; the box draws a ring. Using triangle topology instead fails two of them.
 The handhelds get no-op stubs. The `level` comments now name `render_bounds_wires`. Not seen on a real screen.
 
+**Phase 4, B4 + B5 + the toolkit (C): done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 269 pass; `odin test matchbox/ui
+-define:ODIN_TEST_THREADS=1`: 13 pass (they share one `ui_state`, so one at a time).
+*B4:* `render_circle_outline` (a ring from two triangles a segment, so a see-through colour does not double at the joins; 16 to 96
+segments by radius) and `render_texture_rectangle` (a texture, such as a render target, into a rectangle, the right way up, with a `source`
+region). Both pixel-tested. *B5:* `create_font_metrics`: the same advances and ascent as `create_font`, with no texture, so no window or GPU;
+`calculate_text_size`, `calculate_line_height` and `wrap_text` work on it (tested with no device).
+*Cursor shapes:* Stargate's editor also uses a move cursor and two diagonal resizes, so `Cursor_Shape` gained `RESIZE_DIAGONAL_DOWN`,
+`RESIZE_DIAGONAL_UP`, `MOVE` and `NOT_ALLOWED`.
+*The toolkit, `matchbox/ui` (Windows only, 9 files):* ported from Stargate's `ui` package with the geometry turned over. The decisions: units are
+the screen pass's (`begin_frame` sets the screen height to the window height over the UI scale); `Rectangle` is `min`/`max` with
+`create_rectangle(top_left, size)` for layout; the pointer is *claimed* (`claim_pointer`), because `mb.is_mouse_captured` is the OS lock; the
+clip is kept in `ui` as well as forwarded to Matchbox, so hit tests work in a test with no screen pass; text uses Matchbox's fonts through
+`create_font_metrics` and is baked at size x scale, with Matchbox's default font unless `ui_state.font_settings.bytes` is set (Stargate's
+Adapa is its own asset, so it sets it). Names follow the house style: `render_*` draws, `calculate_*` works out, `get_*`, `is_*`; widgets
+that act and answer keep their verbs (`button`, `toggle`, `dropdown`, `context_menu`, `number_field`, `modal_begin`).
+*Tests:* Stargate's ten ported with every number turned over, plus three that did not exist because the arithmetic that flipped was
+untested there: the scroll view (origin, wheel, thumb drag, `scroll_to`) and a dropdown opening upwards. Mutations (the flip test off, the wheel sign
+reversed) each fail a test. *Seen:* `examples/ui-check` ran on this PC with a real mouse and keyboard: widgets, a clipped scroll view, a
+dropdown over everything, typing with a caret, a 3D viewport in a render target with the grid, a wire box and a ground marker that follows the
+pointer. Not seen: odd window heights, a UI scale other than 1, a second monitor.
+*Not ported:* Stargate's `Input.dropped` (use `mb.get_dropped_files`; its position is in window pixels) and its keyboard wrappers (use `mb.is_key_*`).
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -225,3 +247,8 @@ New public names so far (the user reads this list at the end):
 | `render_grid(slices, spacing, color, height := 0)` | procedure | `lines_windows.odin`, handheld stub |
 | `render_bounds_wires(lower, upper, color, model := identity)` | procedure | `lines_windows.odin`, handheld stub |
 | `create_line_mesh(vertices, indices)`, `create_line_geometry()` | procedures | `render_windows.odin`, `mesh.odin` |
+| `render_circle_outline(position, radius, thickness, color)` | procedure | `shapes.odin` |
+| `render_texture_rectangle(texture, min, max, z, tint, source)` | procedure | `sprite.odin` |
+| `create_font_metrics(bytes, pixel_size, pixels_per_unit)` | procedure | `font.odin` |
+| `Cursor_Shape` values `RESIZE_DIAGONAL_DOWN`, `RESIZE_DIAGONAL_UP`, `MOVE`, `NOT_ALLOWED` | enum values | `desktop_input.odin` |
+| the `matchbox/ui` package | package | see its files: `Rectangle`, `create_rectangle`, `create_rectangle_centred`, `calculate_rectangle_size`, `calculate_rectangle_centre`, `calculate_rectangle_intersection`, `get_rectangle_top_left`, `is_point_in_rectangle`, `begin_frame`, `end_frame`, `shutdown`, `set_scale`, `get_scale`, `get_display_scale`, `get_screen_rectangle`, `calculate_pixels`, pointer (`get_pointer_position`, `get_pointer_delta`, `get_pointer_wheel`, `is_button_pressed`, `is_button_held`, `is_button_released`, `claim_pointer`, `release_pointer`, `is_pointer_claimed`, `is_pointer_over_rectangle`), typing (`start_text_input`, `end_text_input`, `is_text_input_open`, `get_text_input`), drawing (`render_rectangle`, `render_rectangle_border`, `render_line`, `render_circle`, `render_circle_outline`, `render_triangle`, `render_texture`, `begin_clip`, `end_clip`, `is_point_in_clip`), text (`get_font`, `default_font`, `calculate_text_size`, `calculate_line_height`, `calculate_baseline_centred`, `render_text`, `wrap_text`), widgets (`button`, `calculate_button_enabled_if`, `toggle`, `Text_Field` with `update_text_field`, `render_text_field`, `set_text_field_text`, `insert_text_field_text`, `place_text_field`, `get_text_field_string`, `destroy_text_field`, `calculate_text_field_height`, `calculate_text_field_label_height`; `number_field`, `is_number_field_active`, `destroy_number_field`; `begin_scroll`, `end_scroll`, `scroll_to`, `get_scroll_max`; `dropdown`, `open_context_menu`, `context_menu`, `render_dropdown_overlay`, `is_dropdown_open`, `close_dropdown`, `calculate_dropdown_list`, `calculate_dropdown_row`, `get_dropdown_row_at`; `open_modal`, `close_modal`, `is_modal_open`, `modal_begin`, `modal_overlay`, `is_modal_dismissed`; `set_status`, `clear_status`, `get_status_text`, `calculate_status_alpha`, `render_status`), and their style and state structs and `*_STYLE` constants |

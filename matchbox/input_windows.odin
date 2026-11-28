@@ -323,6 +323,10 @@ load_cursors :: proc() {
 	mbi.cursors[.RESIZE_VERTICAL] = win.LoadCursorA(nil, win.IDC_SIZENS)
 	mbi.cursors[.HAND] = win.LoadCursorA(nil, win.IDC_HAND)
 	mbi.cursors[.CROSSHAIR] = win.LoadCursorA(nil, win.IDC_CROSS)
+	mbi.cursors[.RESIZE_DIAGONAL_DOWN] = win.LoadCursorA(nil, win.IDC_SIZENWSE)
+	mbi.cursors[.RESIZE_DIAGONAL_UP] = win.LoadCursorA(nil, win.IDC_SIZENESW)
+	mbi.cursors[.MOVE] = win.LoadCursorA(nil, win.IDC_SIZEALL)
+	mbi.cursors[.NOT_ALLOWED] = win.LoadCursorA(nil, win.IDC_NO)
 }
 
 /*

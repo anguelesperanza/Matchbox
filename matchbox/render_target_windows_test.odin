@@ -292,3 +292,50 @@ resizing_a_target_between_frames_keeps_it_drawable_and_costs_little :: proc(t:^t
 	log.infof("resize + draw + read back: %.3f ms a frame on the software device", per_frame)
 	testing.expect(t, per_frame < 50, "resizing a small target every frame should be cheap")
 }
+
+@(test)
+the_window_screenshot_is_red_first_and_the_right_size :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	// A 4x2 stand-in for the swapchain's buffer, blue first like the real one, cleared to orange
+	description := d3d11.TEXTURE2D_DESC {
+		Width = 4, Height = 2, MipLevels = 1, ArraySize = 1,
+		Format = .B8G8R8A8_UNORM,
+		SampleDesc = {Count = 1},
+		Usage = .DEFAULT,
+		BindFlags = {.RENDER_TARGET},
+	}
+	screen:^d3d11.ITexture2D
+	mbi.device->CreateTexture2D(&description, nil, &screen)
+	defer screen->Release()
+	view:^d3d11.IRenderTargetView
+	mbi.device->CreateRenderTargetView(screen, nil, &view)
+	defer view->Release()
+	orange := [4]f32{1, 0.5, 0, 1}
+	mbi.device_context->ClearRenderTargetView(view, &orange)
+
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
+	saved_framebuffer := mbi.framebuffer
+	defer mbi.framebuffer = saved_framebuffer
+	mbi.framebuffer = screen
+
+	pixels, size := read_window_pixels(context.temp_allocator)
+	testing.expect_value(t, size, [2]i32{4, 2})
+	testing.expect_value(t, len(pixels), 4 * 2 * 4)
+	testing.expect_value(t, pixel_at(pixels, 4, 3, 1), [4]u8{255, 128, 0, 255}) // red first, not blue first
+}
+
+@(test)
+the_minimum_window_size_is_grown_by_the_frame :: proc(t:^testing.T) {
+	// A drawing area of 640x400 needs a window bigger than that by its borders and title bar, and by the same amount for any area
+	style := i32(win.WS_OVERLAPPEDWINDOW)
+	small := calculate_minimum_tracking_size({640, 400}, style)
+	large := calculate_minimum_tracking_size({1280, 800}, style)
+	testing.expect(t, small.x > 640 && small.y > 400)
+	testing.expect_value(t, large.x - small.x, i32(640))
+	testing.expect_value(t, large.y - small.y, i32(400))
+}

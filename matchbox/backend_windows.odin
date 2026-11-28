@@ -33,6 +33,7 @@ Backend_State :: struct {
 	typed_text_length: int,
 	typed_high_surrogate: u16, // the first half of a character outside the BMP, waiting for its second
 	close_confirmation: bool, // set_close_confirmation: the close button asks the game instead of closing
+	minimum_window_size: [2]i32, // set_minimum_window_size, the drawing area in pixels; zero is no limit
 	close_requested: bool, // the window's close button was pressed this frame (WM_CLOSE)
 
 	mouse_wheel_value:i16,

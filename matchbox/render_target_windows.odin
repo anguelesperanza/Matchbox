@@ -109,28 +109,55 @@ bind_screen :: proc() {
 	for the GPU: not for every frame. The sRGB colour is as stored (what the screen would show), not decoded
 */
 read_render_target_pixels :: proc(target:Render_Target, allocator := context.allocator) -> []u8 {
+	pixels, _ := read_texture_pixels(target.texture.texture, allocator)
+	return pixels
+}
+
+/*
+	What the window is showing, as RGBA bytes, `width * 4` a row, top row first, with the size in pixels. For a
+	screenshot, and for checking a change to the picture from a script. Call it after the last draw of the frame and
+	before render_end: the swapchain throws the picture away when it presents, so afterwards it reads nothing sensible.
+	It reads the window's own buffer: a game drawing into an internal resolution target gets that target's picture only
+	once end_internal_frame has stretched it to the window, which render_end does, so read the target itself instead.
+	Waits for the GPU, like read_render_target_pixels
+*/
+read_window_pixels :: proc(allocator := context.allocator) -> (pixels:[]u8, size:[2]i32) {
+	return read_texture_pixels(mbi.framebuffer, allocator)
+}
+
+@(private)
+read_texture_pixels :: proc(texture:^d3d11.ITexture2D, allocator := context.allocator) -> (pixels:[]u8, size:[2]i32) {
 	description:d3d11.TEXTURE2D_DESC
-	target.texture.texture->GetDesc(&description)
+	texture->GetDesc(&description)
 	description.Usage = .STAGING
 	description.BindFlags = {}
 	description.CPUAccessFlags = {.READ}
+	description.MiscFlags = {}
 
 	staging:^d3d11.ITexture2D
 	result := mbi.device->CreateTexture2D(&description, nil, &staging)
 	ensure(win.SUCCEEDED(result), "Create staging texture failed")
 	defer staging->Release()
-	mbi.device_context->CopyResource(staging, target.texture.texture)
+	mbi.device_context->CopyResource(staging, texture)
 
 	mapped:d3d11.MAPPED_SUBRESOURCE
 	result = mbi.device_context->Map(staging, 0, .READ, {}, &mapped)
 	ensure(win.SUCCEEDED(result), "Map staging texture failed")
 	defer mbi.device_context->Unmap(staging, 0)
 
-	row_bytes := int(target.width) * 4
-	pixels := make([]u8, row_bytes * int(target.height), allocator)
-	for row in 0 ..< int(target.height) {
+	width, height := int(description.Width), int(description.Height)
+	row_bytes := width * 4
+	pixels = make([]u8, row_bytes * height, allocator)
+	for row in 0 ..< height {
 		source := ([^]u8)(mapped.pData)[row * int(mapped.RowPitch):]
 		copy(pixels[row * row_bytes:][:row_bytes], source[:row_bytes])
 	}
-	return pixels
+
+	// The swapchain's buffer is blue first; a screenshot is red first like every other picture here
+	if description.Format == .B8G8R8A8_UNORM_SRGB || description.Format == .B8G8R8A8_UNORM {
+		for index := 0; index < len(pixels); index += 4 {
+			pixels[index], pixels[index + 2] = pixels[index + 2], pixels[index]
+		}
+	}
+	return pixels, {i32(width), i32(height)}
 }

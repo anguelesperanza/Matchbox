@@ -279,6 +279,26 @@ set_close_confirmation :: proc(enabled:bool = true) {
 }
 
 /*
+	Stops the user dragging the window smaller than `width` by `height` pixels of drawing area (the part inside the
+	title bar and borders, which is what get_window_size reports). Zero for either is no limit on that side. The
+	limit is in force from the next time the user drags an edge, so set it right after init
+*/
+set_minimum_window_size :: proc(width:i32, height:i32) {
+	mbi.minimum_window_size = {width, height}
+}
+
+/*
+	The size of the whole window, borders and title bar included, that has a drawing area of `area` pixels. Windows'
+	WM_GETMINMAXINFO limits the outer size, so the game's inner size has to be grown by the frame first
+*/
+@(private)
+calculate_minimum_tracking_size :: proc(area:[2]i32, style:i32) -> win.POINT {
+	frame := win.RECT{0, 0, area[0], area[1]}
+	win.AdjustWindowRect(&frame, win.DWORD(style), win.FALSE)
+	return {frame.right - frame.left, frame.bottom - frame.top}
+}
+
+/*
 	Whether the user asked to close the window this frame (its close button, Alt+F4, the taskbar). Only ever true after
 	set_close_confirmation, and then the window is not closed until the game calls stop_running. Resets every frame
 */

@@ -45,6 +45,12 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			mbi.mouse_released = {}
 			mbi.mouse_held = {}
 
+		case win.WM_GETMINMAXINFO:
+			if mbi.minimum_window_size[0] > 0 || mbi.minimum_window_size[1] > 0 {
+				info := (^win.MINMAXINFO)(uintptr(lParam))
+				info.ptMinTrackSize = calculate_minimum_tracking_size(mbi.minimum_window_size, win.GetWindowLongW(window, win.GWL_STYLE))
+				return 0
+			}
 		case win.WM_SIZE:
 			mbi.did_resize = true
 			if wParam != win.SIZE_MINIMIZED {

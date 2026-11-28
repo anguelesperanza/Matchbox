@@ -123,9 +123,21 @@ sky-crash finding.
 
 **Phase 6: measure.** B6 with a real editor-sized screen; F comment fixes (small, can go in earlier).
 
-**Phase 7: D6 and A9 (decided: Matchbox gains them).** Shadows (one shadow map for the first directional or spot caster), fog,
-exposure and tonemap, hemisphere ambient, area lights; MSAA, minimum window size, window screenshot. Each is PC first.
-Planned in detail when phase 6 is done.
+**Phase 7: D6 and A9 (decided: Matchbox gains them).** Each is PC first; the handhelds get stubs or nothing. Planned 2026-11-28, in this order
+(cheap and independent first, the shader work last because every lit shader changes and the `.dxil`/`.spv` must be rebuilt together):
+
+- **7a, A9 small items.** `set_minimum_window_size` (WM_GETMINMAXINFO) and `read_window_pixels` (the back buffer as RGBA). *Done.*
+- **7b, MSAA.** The swapchain's flip-model is not used (`SwapEffect = .DISCARD`), so a multisampled swapchain is allowed; the work is the depth
+  buffer, the rasteriser's `MultisampleEnable`, and render targets (Stargate draws its viewport into one, where the grid lines shimmer), which need a
+  multisampled colour+depth pair resolved into the texture the UI samples. Shape: a `samples` field on `Render_Target_Description` and an
+  `init` option for the window; tested on WARP by counting edge pixels that are neither colour.
+- **7c, scene settings block (PC).** One new constant buffer, `Scene_Settings` (exposure, tonemap kind including AGX, fog colour/near/far/density,
+  hemisphere ambient sky + ground), read by the lit shaders and the unlit one for fog. `Lighting_Settings` gains the fields as defaulted values that mean
+  "as before", so existing scenes draw unchanged (checked pixel for pixel against the old build's numbers).
+- **7d, area lights.** `AREA_RECT`/`AREA_DISK` as a closest-point-on-shape approximation in the PC shaders, `matchbox/level` stops flattening them.
+- **7e, shadows.** One shadow map for the first directional or spot caster: depth-only pass of the casters, 3x3 PCF in the lit shaders, resolution,
+  extent and bias settings; `level.draw_level_shadow_casters` already exists. Needs a per-draw custom shader or a built-in depth pipeline.
+- Handhelds: none of 7b-7e is planned for them; `matchbox/level` keeps ignoring what a handheld cannot draw.
 
 ## 4. First check that the base works (from the document)
 
@@ -248,6 +260,12 @@ handhelds (the UI is PC only).
 `docs/g3_cameras_plan.md` and `docs/the_game_port_plan.md` still carry old names in their history tables, left as written.
 No new public names this phase.
 
+**Phase 7a, A9 minimum window size + window screenshot: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 274 pass; 3DS, Vita,
+ui and level checks pass. `set_minimum_window_size(width, height)` takes the drawing area and grows it by the frame (`calculate_minimum_tracking_size`,
+tested to grow by exactly the area's difference). `read_window_pixels()` returns RGBA (red first) and the size; tested on a blue-first stand-in buffer.
+*Not seen:* a real drag against the minimum on a real window, a real swapchain read. The screenshot must be taken before `render_end` (the swapchain
+discards on present).
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -266,6 +284,8 @@ New public names so far (the user reads this list at the end):
 | `Dropped_File` (`path`, `position`) | struct | `desktop_input.odin` (shared) |
 | `MAX_TEXT_INPUT` | constant (array size) | `backend_windows.odin` |
 | `Key` values: `NUMPAD_0`..`NUMPAD_9`, `MULTIPLY`, `ADD`, `SEPARATOR`, `SUBTRACT`, `DECIMAL`, `DIVIDE`, `KEYPAD_ENTER`, `F1`..`F12`, `NUMLOCK`, `SCROLL_LOCK`, `SEMICOLON`, `EQUALS`, `COMMA`, `MINUS`, `PERIOD`, `SLASH`, `GRAVE`, `LEFT_BRACKET`, `BACKSLASH`, `RIGHT_BRACKET`, `APOSTROPHE` | enum values | `input_windows.odin`, handheld `Key` |
+| `set_minimum_window_size(width, height)` | procedure | `input_windows.odin`, handheld stub |
+| `read_window_pixels(allocator := context.allocator)` | procedure | `render_target_windows.odin`, handheld stub |
 | `clip_start(min, max)` | procedure | `clip_windows.odin`, handheld stub |
 | `clip_end()` | procedure | `clip_windows.odin`, handheld stub |
 | `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |

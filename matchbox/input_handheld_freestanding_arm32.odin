@@ -215,6 +215,15 @@ is_close_requested :: proc() -> bool {
 set_close_confirmation :: proc(enabled:bool = true) {
 }
 
+/*Does nothing on the handhelds: the screen has one size*/
+set_minimum_window_size :: proc(width:i32, height:i32) {
+}
+
+/*There is no window to read on a handheld: no pixels and a zero size, so that a game written for the PC builds*/
+read_window_pixels :: proc(allocator := context.allocator) -> (pixels:[]u8, size:[2]i32) {
+	return nil, {}
+}
+
 /*There is no mouse on a handheld; so that a game written for the PC builds, this does nothing*/
 set_mouse_capture :: proc() {
 }

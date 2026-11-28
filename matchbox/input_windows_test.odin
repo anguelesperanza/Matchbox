@@ -2,6 +2,7 @@
 
 package matchbox
 
+import "base:intrinsics"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -25,6 +26,12 @@ Saved_Input :: struct {
 	close_confirmation:   bool,
 	close_requested:      bool,
 	is_running:           bool,
+	mouse_held:           [Mouse]bool,
+	mouse_wheel_value:    i16,
+	mouse_wheel_horizontal_value: i16,
+	cursor_shape:         Cursor_Shape,
+	cursors:              [Cursor_Shape]win.HCURSOR,
+	window:               win.HWND,
 }
 
 @(private = "file")
@@ -33,6 +40,7 @@ save_input :: proc() -> Saved_Input {
 	saved := Saved_Input{
 		mbi.keys_pressed, mbi.keys_released, mbi.keys_held, mbi.keys_repeated, mbi.typed_text, mbi.typed_text_length,
 		mbi.typed_high_surrogate, mbi.close_confirmation, mbi.close_requested, mbi.is_running,
+		mbi.mouse_held, mbi.mouse_wheel_value, mbi.mouse_wheel_horizontal_value, mbi.cursor_shape, mbi.cursors, mbi.window,
 	}
 	mbi.keys_pressed = {}
 	mbi.keys_released = {}
@@ -43,6 +51,10 @@ save_input :: proc() -> Saved_Input {
 	mbi.close_confirmation = false
 	mbi.close_requested = false
 	mbi.is_running = true
+	mbi.mouse_held = {}
+	mbi.mouse_wheel_value = 0
+	mbi.mouse_wheel_horizontal_value = 0
+	mbi.cursor_shape = .ARROW
 	return saved
 }
 
@@ -58,6 +70,13 @@ restore_input :: proc(saved: Saved_Input) {
 	mbi.close_confirmation = saved.close_confirmation
 	mbi.close_requested = saved.close_requested
 	mbi.is_running = saved.is_running
+	mbi.mouse_held = saved.mouse_held
+	mbi.mouse_wheel_value = saved.mouse_wheel_value
+	mbi.mouse_wheel_horizontal_value = saved.mouse_wheel_horizontal_value
+	mbi.cursor_shape = saved.cursor_shape
+	mbi.cursors = saved.cursors
+	mbi.window = saved.window
+	clear_dropped_files()
 	sync.mutex_unlock(&mbi_lock)
 }
 
@@ -259,4 +278,179 @@ the_close_button_is_held_back_only_when_asked :: proc(t: ^testing.T) {
 
 	start_frame()
 	testing.expect(t, is_close_requested() == false, "the request lasts one frame")
+}
+
+// A window that exists only so the calls that need one (SetCapture, GetDpiForWindow) have something real to talk to
+@(private = "file")
+create_test_window :: proc() -> win.HWND {
+	return win.CreateWindowExW(0, win.L("STATIC"), nil, 0, 0, 0, 16, 16, nil, nil, nil, nil)
+}
+
+// The wheel's delta is the high word of wParam, signed
+@(private = "file")
+wheel_wparam :: proc(delta: i16) -> win.WPARAM {
+	return win.WPARAM(u32(transmute(u16)delta) << 16)
+}
+
+@(test)
+a_frames_wheel_turns_add_up_and_stop_at_the_ends :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+
+	// The wheel's delta is the high word of wParam: one notch is 120, signed
+	notch := wheel_wparam(120)
+	back := wheel_wparam(-120)
+	window_event_proc(nil, win.WM_MOUSEWHEEL, notch, 0)
+	window_event_proc(nil, win.WM_MOUSEWHEEL, notch, 0)
+	window_event_proc(nil, win.WM_MOUSEWHEEL, back, 0)
+	testing.expect_value(t, get_mouse_wheel_value(), 120)
+
+	window_event_proc(nil, win.WM_MOUSEHWHEEL, notch, 0)
+	window_event_proc(nil, win.WM_MOUSEHWHEEL, notch, 0)
+	testing.expect_value(t, get_mouse_wheel_horizontal_value(), 240)
+
+	// A very long spin stops at the top of an i16 and does not wrap round to a large turn the other way
+	mbi.mouse_wheel_value = max(i16) - 50
+	window_event_proc(nil, win.WM_MOUSEWHEEL, notch, 0)
+	testing.expect_value(t, get_mouse_wheel_value(), max(i16))
+}
+
+@(test)
+the_window_holds_the_pointer_while_a_button_is_down :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+	window := create_test_window()
+	defer win.DestroyWindow(window)
+
+	// A drag that leaves the window keeps getting its moves and its release only if the window has the pointer
+	window_event_proc(window, win.WM_LBUTTONDOWN, 0, 0)
+	testing.expect(t, win.GetCapture() == window, "a button down should capture the pointer")
+
+	// A second button joins the first, and letting go of one of them is not the end of the drag
+	window_event_proc(window, win.WM_RBUTTONDOWN, 0, 0)
+	window_event_proc(window, win.WM_LBUTTONUP, 0, 0)
+	testing.expect(t, win.GetCapture() == window, "one button still down: the pointer is still held")
+
+	window_event_proc(window, win.WM_RBUTTONUP, 0, 0)
+	testing.expect(t, win.GetCapture() == nil, "the last release gives the pointer back")
+	testing.expect(t, is_mouse_held(.LEFT) == false && is_mouse_held(.RIGHT) == false)
+}
+
+@(test)
+losing_focus_gives_the_pointer_back :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+	window := create_test_window()
+	defer win.DestroyWindow(window)
+
+	window_event_proc(window, win.WM_LBUTTONDOWN, 0, 0)
+	window_event_proc(window, win.WM_KILLFOCUS, 0, 0)
+	testing.expect(t, win.GetCapture() == nil)
+	testing.expect(t, is_mouse_held(.LEFT) == false, "a button held when focus left must not stay held")
+}
+
+@(test)
+the_chosen_cursor_shows_over_the_window_only :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+	load_cursors()
+
+	set_cursor_shape(.TEXT)
+	testing.expect(t, win.GetCursor() == mbi.cursors[.TEXT], "the pointer should change at once, not on the next move")
+	testing.expect(t, mbi.cursors[.TEXT] != mbi.cursors[.ARROW], "the shapes should be different pointers")
+
+	// Windows asks which cursor to show for every move; over the client area the answer is the chosen one and "handled"
+	set_cursor_shape(.RESIZE_HORIZONTAL)
+	client := win.LPARAM(win.HTCLIENT)
+	win.SetCursor(mbi.cursors[.ARROW]) // as if Windows had put the default back, so only the message can set it
+	testing.expect_value(t, window_event_proc(nil, win.WM_SETCURSOR, 0, client), 1)
+	testing.expect(t, win.GetCursor() == mbi.cursors[.RESIZE_HORIZONTAL])
+
+	// With no pointers loaded (before init) the message is left to Windows and nothing is set
+	mbi.cursors = {}
+	testing.expect(t, window_event_proc(nil, win.WM_SETCURSOR, 0, client) != 1)
+	set_cursor_shape(.ARROW)
+}
+
+@(test)
+text_goes_to_the_clipboard_and_comes_back :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+	window := create_test_window()
+	defer win.DestroyWindow(window)
+	mbi.window = window
+
+	// Keep what the person had copied (text only: another kind of clipboard content is not put back)
+	before := strings.clone(get_clipboard_text(), context.temp_allocator)
+	defer if before != "" do set_clipboard_text(before)
+
+	words := "caf\u00e9 \U0001F600 and a second line\r\nof text"
+	if !testing.expect(t, set_clipboard_text(words), "the clipboard would not take the text (another program may have it open)") do return
+	testing.expect_value(t, get_clipboard_text(), words)
+
+	testing.expect(t, set_clipboard_text(""))
+	testing.expect_value(t, get_clipboard_text(), "")
+}
+
+// What Explorer hands a window on a drop: a header, then the names as UTF-16, each ended by a zero and the list by another
+@(private = "file")
+Drop_Header :: struct #packed {
+	files_offset: u32,
+	point:        [2]i32,
+	non_client:   win.BOOL,
+	wide:         win.BOOL,
+}
+
+@(private = "file")
+make_drop :: proc(position: [2]i32, names: []string) -> win.HDROP {
+	units: [dynamic]u16
+	defer delete(units)
+	for name in names {
+		append(&units, ..win.utf8_to_utf16(name, context.temp_allocator))
+		append(&units, 0)
+	}
+	append(&units, 0)
+
+	header := Drop_Header{files_offset = size_of(Drop_Header), point = position, wide = true}
+	memory := win.GlobalAlloc(win.GMEM_MOVEABLE | win.GMEM_ZEROINIT, uint(size_of(Drop_Header) + len(units) * 2))
+	bytes := ([^]byte)(win.GlobalLock(win.HGLOBAL(memory)))
+	intrinsics.mem_copy(bytes, &header, size_of(Drop_Header))
+	intrinsics.mem_copy(bytes[size_of(Drop_Header):], raw_data(units), len(units) * 2)
+	win.GlobalUnlock(win.HGLOBAL(memory))
+	return win.HDROP(memory)
+}
+
+@(test)
+dropped_files_come_with_the_place_they_landed :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+
+	drop := make_drop({310, 220}, {`C:\assets\models\crate.glb`, `D:\caf\u00e9\tree.glb`})
+	window_event_proc(nil, win.WM_DROPFILES, win.WPARAM(drop), 0)
+
+	files := get_dropped_files()
+	if !testing.expect_value(t, len(files), 2) do return
+	testing.expect_value(t, files[0].path, `C:\assets\models\crate.glb`)
+	testing.expect_value(t, files[1].path, `D:\caf\u00e9\tree.glb`)
+	testing.expect_value(t, files[0].position, [2]i32{310, 220})
+
+	// A new frame has none
+	clear_dropped_files()
+	testing.expect_value(t, len(get_dropped_files()), 0)
+}
+
+@(test)
+the_display_scale_is_the_monitors_dpi_over_96 :: proc(t: ^testing.T) {
+	saved := save_input()
+	defer restore_input(saved)
+	window := create_test_window()
+	defer win.DestroyWindow(window)
+
+	// No window yet (before init): 100%, not zero, which a UI would divide by
+	mbi.window = nil
+	testing.expect_value(t, get_display_scale(), 1)
+
+	mbi.window = window
+	testing.expect_value(t, get_display_scale(), f32(win.GetDpiForWindow(window)) / 96)
+	testing.expect(t, get_display_scale() >= 1)
 }

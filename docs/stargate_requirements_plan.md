@@ -106,6 +106,22 @@ the extended bit, a lone surrogate half kept, control characters typed, the clos
 `odin check` and `matchbox/level` still pass. Not run: a real window with a real keyboard (the tests send messages, not
 key presses). The "remaining keyboard keys" item in `fixes.md` is folded in and marked done.
 
+**Phase 1, A4-A8: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 252 pass (7 more). Wheel turns are
+added up per frame (saturating) and there is a horizontal wheel; the window holds the pointer (`SetCapture`) while any button
+is down and gives it back on the last release or on losing focus; cursor shapes are loaded at init and applied on
+`WM_SETCURSOR` over the client area; clipboard read and write; dropped files with their window position; `get_display_scale`.
+Mutation checks: wheel assigned instead of added, no `SetCapture`, no `ReleaseCapture` on the last release or on focus loss,
+the `WM_SETCURSOR` handler not setting the cursor, the drop position dropped, and an unsaturated wheel each fail a test
+(the cursor one first survived and its test was tightened). Handheld stubs added; 3DS, Vita and `matchbox/level` checks pass.
+
+Not verified, and why: a drag that really leaves the window with a real mouse (the tests prove the capture calls, not the
+hardware path); dropping a file from a real Explorer window (the test builds the same structure Explorer sends); and the
+display scale on a second monitor. **A8 reads the DPI of a process that is still only system-DPI aware** (`SetProcessDPIAware`),
+so on a mixed-scale setup it reports the primary monitor's scale and does not follow the window across monitors. Moving to
+per-monitor-v2 awareness (with `WM_DPICHANGED` and `AdjustWindowRectExForDpi`) changes every game's window handling and
+needs a second monitor to test, so it was not done: it is a decision for you when the editor needs it. The clipboard test
+replaces the clipboard text while it runs and puts the old text back (non-text contents, such as an image, are not restored).
+
 Two choices to know about: the close button is held back **only after `set_close_confirmation()`**, so no existing game
 stops closing (the requirements document's wording would have made the X do nothing in every game that did not call
 `stop_running`); and Windows' Alt-key and F10 messages (`WM_SYSKEYDOWN`) are still not handled, as the document says.
@@ -118,5 +134,13 @@ New public names so far (the user reads this list at the end):
 | `get_typed_text()` | procedure | `input_windows.odin`, handheld stub |
 | `is_close_requested()` | procedure | `input_windows.odin`, handheld stub |
 | `set_close_confirmation(enabled := true)` | procedure | `input_windows.odin`, handheld stub |
+| `get_mouse_wheel_horizontal_value()` | procedure | `input_windows.odin`, handheld stub |
+| `set_cursor_shape(shape)` | procedure | `input_windows.odin`, handheld stub |
+| `get_clipboard_text(allocator := context.temp_allocator)` | procedure | `input_windows.odin`, handheld stub |
+| `set_clipboard_text(text)` | procedure | `input_windows.odin`, handheld stub |
+| `get_dropped_files()` | procedure | `input_windows.odin`, handheld stub |
+| `get_display_scale()` | procedure | `input_windows.odin`, handheld stub |
+| `Cursor_Shape` (`ARROW`, `TEXT`, `RESIZE_HORIZONTAL`, `RESIZE_VERTICAL`, `HAND`, `CROSSHAIR`) | enum | `desktop_input.odin` (shared) |
+| `Dropped_File` (`path`, `position`) | struct | `desktop_input.odin` (shared) |
 | `MAX_TEXT_INPUT` | constant (array size) | `backend_windows.odin` |
 | `Key` values: `NUMPAD_0`..`NUMPAD_9`, `MULTIPLY`, `ADD`, `SEPARATOR`, `SUBTRACT`, `DECIMAL`, `DIVIDE`, `KEYPAD_ENTER`, `F1`..`F12`, `NUMLOCK`, `SCROLL_LOCK`, `SEMICOLON`, `EQUALS`, `COMMA`, `MINUS`, `PERIOD`, `SLASH`, `GRAVE`, `LEFT_BRACKET`, `BACKSLASH`, `RIGHT_BRACKET`, `APOSTROPHE` | enum values | `input_windows.odin`, handheld `Key` |

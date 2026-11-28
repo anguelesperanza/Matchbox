@@ -185,6 +185,7 @@ init :: proc(title:string, width:i32, height:i32) {
 	}
 
 	win.RegisterClassExW(&window_class)
+	load_cursors()
 	win.AdjustWindowRect(lpRect = &rectangle, dwStyle = win.WS_OVERLAPPEDWINDOW, bMenu = win.FALSE) // Adjust window
 
 
@@ -209,6 +210,9 @@ init :: proc(title:string, width:i32, height:i32) {
 	if mbi.window == nil {
 		return
 	}
+
+	// Files dragged from Explorer onto the window arrive as WM_DROPFILES (get_dropped_files)
+	win.DragAcceptFiles(mbi.window, win.TRUE)
 
 	// Setup D3D11
 	{

@@ -177,6 +177,35 @@ get_typed_text :: proc() -> string {
 	return ""
 }
 
+/*Always zero on the handhelds*/
+get_mouse_wheel_horizontal_value :: proc() -> i16 {
+	return 0
+}
+
+/*Does nothing on the handhelds: there is no pointer to change*/
+set_cursor_shape :: proc(shape:Cursor_Shape) {
+}
+
+/*Always "" on the handhelds*/
+get_clipboard_text :: proc(allocator := context.temp_allocator) -> string {
+	return ""
+}
+
+/*Always false on the handhelds*/
+set_clipboard_text :: proc(text:string) -> bool {
+	return false
+}
+
+/*Always empty on the handhelds: nothing can be dropped on a console's screen*/
+get_dropped_files :: proc() -> []Dropped_File {
+	return nil
+}
+
+/*Always 1 on the handhelds: the screen is the screen*/
+get_display_scale :: proc() -> f32 {
+	return 1
+}
+
 /*Always false on the handhelds: there is no window to close (a game quits on START)*/
 is_close_requested :: proc() -> bool {
 	return false

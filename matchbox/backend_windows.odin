@@ -36,6 +36,10 @@ Backend_State :: struct {
 	close_requested: bool, // the window's close button was pressed this frame (WM_CLOSE)
 
 	mouse_wheel_value:i16,
+	mouse_wheel_horizontal_value:i16, // positive is right; added up over the frame, like mouse_wheel_value
+	cursor_shape:Cursor_Shape, // what set_cursor_shape asked for
+	cursors:[Cursor_Shape]win.HCURSOR, // loaded at init; nil until then, and WM_SETCURSOR leaves the cursor alone while one is nil
+	dropped_files:[dynamic]Dropped_File, // this frame's, paths on the heap; freed when the next frame starts
 	mouse_position:[2]i32,
 	mouse_pressed:[Mouse]bool,
 	mouse_released:[Mouse]bool,

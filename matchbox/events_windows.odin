@@ -35,6 +35,7 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			mbi.keys_held = {}
 			mbi.keys_repeated = {}
 			mbi.typed_high_surrogate = 0
+			if win.GetCapture() == window do win.ReleaseCapture()
 	
 			mbi.gamepad_pressed = {}
 			mbi.gamepad_released = {}
@@ -82,8 +83,24 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 		case win.WM_MOUSEMOVE:
 			mbi.mouse_position = {win.GET_X_LPARAM(lParam),win.GET_Y_LPARAM(lParam)}
 			
+		// Added, not assigned: two wheel messages in one frame are both the player's, and the sum saturates rather than wraps
 		case win.WM_MOUSEWHEEL:
-			mbi.mouse_wheel_value = win.GET_WHEEL_DELTA_WPARAM(wParam)
+			mbi.mouse_wheel_value = add_wheel_delta(mbi.mouse_wheel_value, win.GET_WHEEL_DELTA_WPARAM(wParam))
+		case win.WM_MOUSEHWHEEL:
+			mbi.mouse_wheel_horizontal_value = add_wheel_delta(mbi.mouse_wheel_horizontal_value, win.GET_WHEEL_DELTA_WPARAM(wParam))
+
+		// The cursor over the window's own area is the one the game chose. Elsewhere (the title bar, the borders) Windows chooses
+		case win.WM_SETCURSOR:
+			if win.LOWORD(lParam) == win.HTCLIENT && mbi.mouse_capture.applied == false {
+				cursor := mbi.cursors[mbi.cursor_shape]
+				if cursor != nil {
+					win.SetCursor(cursor)
+					return 1
+				}
+			}
+
+		case win.WM_DROPFILES:
+			add_dropped_files(win.HDROP(wParam))
 
 		case win.WM_LBUTTONDOWN:
 			mbi.mouse_pressed[.LEFT] = true
@@ -127,7 +144,61 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			}
 		}
 
+	// A drag that leaves the window still has to end in the window's hands: while any button is down the window owns the
+	// pointer (SetCapture), so the move and the release are seen however far outside it goes, and `held` cannot stick
+	switch message {
+	case win.WM_LBUTTONDOWN, win.WM_RBUTTONDOWN, win.WM_MBUTTONDOWN, win.WM_XBUTTONDOWN,
+	     win.WM_LBUTTONUP, win.WM_RBUTTONUP, win.WM_MBUTTONUP, win.WM_XBUTTONUP:
+		update_pointer_capture(window)
+	}
+
 	return win.DefWindowProcW(window, message, wParam, lParam)
+}
+
+/*Holds the pointer for the window while a mouse button is down and gives it back when the last one is released*/
+@(private)
+update_pointer_capture :: proc(window: win.HWND) {
+	any_held := false
+	for held in mbi.mouse_held do any_held ||= held
+	if any_held {
+		if win.GetCapture() != window do win.SetCapture(window)
+	} else if win.GetCapture() == window {
+		win.ReleaseCapture()
+	}
+}
+
+// One wheel step is 120; the sum of a frame's steps stays inside an i16 by stopping at its ends
+@(private)
+add_wheel_delta :: proc(total: i16, delta: i16) -> i16 {
+	return i16(clamp(i32(total) + i32(delta), i32(min(i16)), i32(max(i16))))
+}
+
+/*Reads the files of a drop into this frame's list, with the window position they landed at, and gives the drop back to the shell*/
+@(private)
+add_dropped_files :: proc(drop: win.HDROP) {
+	defer win.DragFinish(drop)
+	heap := runtime.heap_allocator()
+
+	point: win.POINT
+	win.DragQueryPoint(drop, &point)
+
+	count := win.DragQueryFileW(drop, 0xFFFFFFFF, nil, 0)
+	for index in 0 ..< count {
+		length := win.DragQueryFileW(drop, index, nil, 0)
+		units := make([]u16, length + 1, heap)
+		defer delete(units, heap)
+		win.DragQueryFileW(drop, index, raw_data(units), length + 1)
+		path, error := win.utf16_to_utf8(units[:length], heap)
+		if error != nil do continue
+		append(&mbi.dropped_files, Dropped_File{path = path, position = {point.x, point.y}})
+	}
+}
+
+@(private)
+clear_dropped_files :: proc() {
+	heap := runtime.heap_allocator()
+	for file in mbi.dropped_files do delete(file.path, heap)
+	clear(&mbi.dropped_files)
 }
 
 /*
@@ -193,6 +264,8 @@ poll_events :: proc() {
 
 	
 	mbi.mouse_wheel_value = 0
+	mbi.mouse_wheel_horizontal_value = 0
+	clear_dropped_files()
 
 	event_message:win.MSG
 

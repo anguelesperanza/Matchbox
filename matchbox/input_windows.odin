@@ -289,8 +289,107 @@ is_close_requested :: proc() -> bool {
 get_mouse_position :: proc() -> [2]i32 {
 	return mbi.mouse_position
 }
+/*
+	The wheel's turn this frame, in steps of 120 (one notch), positive away from the player. Every message of the frame is
+	added up, so a quick spin is not lost to the last one
+*/
 get_mouse_wheel_value :: proc() -> i16 {
 	return mbi.mouse_wheel_value
+}
+
+/*The tilt wheel's or touchpad's sideways scroll this frame, in the same steps, positive to the right. Zero on most mice*/
+get_mouse_wheel_horizontal_value :: proc() -> i16 {
+	return mbi.mouse_wheel_horizontal_value
+}
+
+/*
+	Sets the picture the pointer has over the window, and keeps it until it is set again (set .ARROW to put it back). Only
+	over the window's own area: the title bar and borders are Windows'. Leaves a locked mouse (set_mouse_capture) that has
+	hidden the pointer alone
+*/
+set_cursor_shape :: proc(shape:Cursor_Shape) {
+	mbi.cursor_shape = shape
+	cursor := mbi.cursors[shape]
+	// Now, and not only at the next WM_SETCURSOR, which only comes when the pointer moves
+	if cursor != nil && mbi.mouse_capture.applied == false do win.SetCursor(cursor)
+}
+
+/*Loads the system pointers set_cursor_shape picks from; once, at init*/
+@(private)
+load_cursors :: proc() {
+	mbi.cursors[.ARROW] = win.LoadCursorA(nil, win.IDC_ARROW)
+	mbi.cursors[.TEXT] = win.LoadCursorA(nil, win.IDC_IBEAM)
+	mbi.cursors[.RESIZE_HORIZONTAL] = win.LoadCursorA(nil, win.IDC_SIZEWE)
+	mbi.cursors[.RESIZE_VERTICAL] = win.LoadCursorA(nil, win.IDC_SIZENS)
+	mbi.cursors[.HAND] = win.LoadCursorA(nil, win.IDC_HAND)
+	mbi.cursors[.CROSSHAIR] = win.LoadCursorA(nil, win.IDC_CROSS)
+}
+
+/*
+	The text on the clipboard, or "" when there is none (or it is not text). UTF-8, in `allocator`, which is the temp
+	allocator unless given another, so use it this frame or copy it
+*/
+get_clipboard_text :: proc(allocator := context.temp_allocator) -> string {
+	if win.OpenClipboard(mbi.window) == false do return ""
+	defer win.CloseClipboard()
+
+	handle := win.GetClipboardData(win.CF_UNICODETEXT)
+	if handle == nil do return ""
+	memory := win.GlobalLock(win.HGLOBAL(handle))
+	if memory == nil do return ""
+	defer win.GlobalUnlock(win.HGLOBAL(handle))
+
+	text, error := win.wstring_to_utf8(win.wstring(memory), -1, allocator)
+	if error != nil do return ""
+	return text
+}
+
+/*Puts text on the clipboard, replacing what was there. False if Windows would not take it (another program has it open)*/
+set_clipboard_text :: proc(text:string) -> bool {
+	units := win.utf8_to_utf16(text, context.temp_allocator)
+	bytes := (len(units) + 1) * size_of(u16) // the terminating zero the format wants
+	memory := win.GlobalAlloc(win.GMEM_MOVEABLE, uint(bytes))
+	if memory == nil do return false
+
+	destination := ([^]u16)(win.GlobalLock(win.HGLOBAL(memory)))
+	if destination == nil {
+		win.GlobalFree(memory)
+		return false
+	}
+	copy(destination[:len(units)], units)
+	destination[len(units)] = 0
+	win.GlobalUnlock(win.HGLOBAL(memory))
+
+	if win.OpenClipboard(mbi.window) == false {
+		win.GlobalFree(memory)
+		return false
+	}
+	defer win.CloseClipboard()
+	win.EmptyClipboard()
+	// On success the clipboard owns the memory; on failure it is still ours to free
+	if win.SetClipboardData(win.CF_UNICODETEXT, win.HANDLE(memory)) == nil {
+		win.GlobalFree(memory)
+		return false
+	}
+	return true
+}
+
+/*
+	The files dropped on the window this frame, each with where in the window it landed (pixels, top left, as
+	get_mouse_position). Empty on most frames. The paths are valid until the next poll_events: copy one to keep it
+*/
+get_dropped_files :: proc() -> []Dropped_File {
+	return mbi.dropped_files[:]
+}
+
+/*
+	How much bigger than 100% the window's monitor is scaled: 1 at 100%, 1.25 at 125%, 2 at 200%. Matchbox draws in real
+	pixels, so a UI that wants to stay the same physical size multiplies its sizes by this
+*/
+get_display_scale :: proc() -> f32 {
+	dots_per_inch := win.GetDpiForWindow(mbi.window)
+	if dots_per_inch == 0 do return 1
+	return f32(dots_per_inch) / 96
 }
 
 is_mouse_pressed :: proc(mouse:Mouse) -> bool {

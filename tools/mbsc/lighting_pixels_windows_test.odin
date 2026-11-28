@@ -36,7 +36,7 @@ fragment_main :: proc(v: Varying) -> [4]f32 {
 `
 
 @(private = "file")
-render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32, result: string) -> (pixel: [4]f32, message: string) {
+render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32, result: string, scene_rows := [4][4]f32{}) -> (pixel: [4]f32, message: string) {
 	source, _ := strings.replace(LIT_SHADER, "RESULT", result, 1, context.temp_allocator)
 	parsed := parse_shader("lit.mbs", source)
 	defer destroy_parsed(parsed)
@@ -56,7 +56,7 @@ render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32,
 	// the lights block: the ambient colour, then the slots' directions, diffuse colours, specular colours, positions and cones, a [4]f32
 	// each, then the count as an int in the next row
 	slots := get_max_lights(.PC)
-	lights := make([]f32, 4 + 5 * slots * 4 + 4, context.temp_allocator)
+	lights := make([]f32, 4 + 5 * slots * 4 + 4 + 16, context.temp_allocator) // the last 16: the four scene rows, ground, up, fog colour, fog range
 	ambient := scene.ambient
 	copy(lights[0:3], ambient[:])
 	for slot in 0 ..< 8 {
@@ -77,6 +77,10 @@ render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32,
 	copy(lights[4 + slots * 4 + past * 4:], []f32{1, 1, 1})
 	copy(lights[4 + 2 * slots * 4 + past * 4:], []f32{1, 1, 1})
 	lights[4 + 5 * slots * 4] = transmute(f32)i32(count)
+	for row, index in scene_rows {
+		row := row
+		copy(lights[4 + 5 * slots * 4 + 4 + index * 4:], row[:])
+	}
 	game := make([]f32, 8, context.temp_allocator)
 	quat_in, view_in := quat, view
 	copy(game[0:4], quat_in[:])
@@ -129,4 +133,75 @@ the_generated_hlsl_lights_as_the_formula_says :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, worst <= 1e-4, "the HLSL is %v from the formula", worst)
 	fmt.printfln("light HLSL: worst %.7f", worst)
+}
+
+// The PC's scene settings, with numbers worked by hand: hemisphere ambient, exposure, tonemaps and fog
+@(test)
+the_scene_settings_do_what_they_say :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	// rows: ground, up, fog colour, fog range (start, 1 / length, exposure, tonemap kind)
+	none := [4][4]f32{{}, {}, {}, {0, 1, 1, 0}}
+	front := [4]f32{0, 0, 0, 1} // the normal is +Z in eye space
+	eye := [3]f32{0, 0, 4}
+
+	near :: proc(t: ^testing.T, got: [4]f32, want: [4]f32, what: string) {
+		for lane in 0 ..< 4 {
+			testing.expectf(t, abs(got[lane] - want[lane]) < 0.002, "%s: got %v, want %v", what, got, want)
+			if abs(got[lane] - want[lane]) >= 0.002 do return
+		}
+	}
+
+	// no settings: the colour comes out as it went in (the clamp only)
+	got, message := render_light({}, 0, front, eye, "light_finish([4]f32{0.25, 0.5, 2.0, 0.5}, v.view)", none)
+	testing.expect_value(t, message, "")
+	near(t, got, {0.25, 0.5, 1, 0.5}, "no settings")
+
+	// exposure 2 doubles it
+	got, message = render_light({}, 0, front, eye, "light_finish([4]f32{0.125, 0.25, 0.5, 1.0}, v.view)", [4][4]f32{{}, {}, {}, {0, 1, 2, 0}})
+	near(t, got, {0.25, 0.5, 1, 1}, "exposure 2")
+
+	// Reinhard: x / (1 + x), so 1 is a half and 3 is three quarters
+	got, message = render_light({}, 0, front, eye, "light_finish([4]f32{1.0, 3.0, 0.0, 1.0}, v.view)", [4][4]f32{{}, {}, {}, {0, 1, 1, 1}})
+	near(t, got, {0.5, 0.75, 0, 1}, "Reinhard")
+
+	// ACES (Narkowicz): 1 is 2.54 / 3.16
+	got, message = render_light({}, 0, front, eye, "light_finish([4]f32{1.0, 0.0, 0.0, 1.0}, v.view)", [4][4]f32{{}, {}, {}, {0, 1, 1, 2}})
+	near(t, got, {2.54 / 3.16, 0, 0, 1}, "ACES")
+
+	// AgX has no number worked by hand here: it must rise with the light and stay on the screen
+	previous: f32 = -1
+	for light in ([?]f32{0.02, 0.18, 0.6, 1.5, 6}) {
+		text := fmt.tprintf("light_finish([4]f32{{%.3f, %.3f, %.3f, 1.0}}, v.view)", light, light, light)
+		got, message = render_light({}, 0, front, eye, text, [4][4]f32{{}, {}, {}, {0, 1, 1, 3}})
+		testing.expect_value(t, message, "")
+		testing.expectf(t, got.x > previous && got.x >= 0 && got.x <= 1, "AgX: %v after %v", got.x, previous)
+		previous = got.x
+	}
+
+	// Fog: nothing before the start, all of it at the end, half way a straight blend, and the alpha is the colour's own
+	fog_color := [4]f32{0, 0, 1, 1}
+	for fog_case in ([?][2]f32{{0, 0}, {2, 0}, {4, 0.5}, {6, 1}, {9, 1}}) {
+		rows := [4][4]f32{{}, {}, fog_color, {2, 0.25, 1, 0}} // from 2 to 6 units
+		got, message = render_light({}, 0, front, {0, 0, fog_case.x == 0 ? 1 : fog_case.x}, "light_finish([4]f32{1.0, 0.0, 0.0, 0.5}, v.view)", rows)
+		amount := fog_case.y
+		near(t, got, {1 - amount, 0, amount, 0.5}, fmt.tprintf("fog at %v", fog_case.x))
+	}
+
+	// Hemisphere: a normal facing the sky gets the sky's colour, one facing the ground the ground's, sideways half of each
+	sky := [3]f32{1, 0, 0}
+	ground := [4]f32{0, 0, 1, 0}
+	scene := Light_Scene{ambient = sky}
+	for up_case in ([?]struct {up: [4]f32, want: [4]f32}{{{0, 0, 1, 1}, {1, 0, 0, 1}}, {{0, 0, -1, 1}, {0, 0, 1, 1}}, {{0, 1, 0, 1}, {0.5, 0, 0.5, 1}}, {{0, 0, -1, 0}, {1, 0, 0, 1}}}) {
+		got, message = render_light(scene, 0, front, eye, "light_diffuse(v.quat, v.view)", [4][4]f32{ground, up_case.up, {}, {0, 1, 1, 0}})
+		testing.expect_value(t, message, "")
+		near(t, got, up_case.want, fmt.tprintf("hemisphere with up %v", up_case.up))
+	}
+
+	// A tonemap leaves the light above 1 for the curve, where with none it is clamped first
+	bright := Light_Scene{ambient = {3, 3, 3}}
+	got, message = render_light(bright, 0, front, eye, "light_diffuse(v.quat, v.view)", none)
+	near(t, got, {1, 1, 1, 1}, "clamped")
+	got, message = render_light(bright, 0, front, eye, "light_diffuse(v.quat, v.view)", [4][4]f32{{}, {}, {}, {0, 1, 1, 1}})
+	near(t, got, {3, 3, 3, 1}, "left bright for a tonemap")
 }

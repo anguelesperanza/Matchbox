@@ -173,6 +173,9 @@ test_sprite :: proc() -> Sprite {
 with_camera :: proc(t:^testing.T, camera:Camera, window_height:f32, body:proc(t:^testing.T)) {
 	sync.mutex_lock(&render_queue_lock)
 	defer sync.mutex_unlock(&render_queue_lock)
+	// the camera tests set the view and the window under mbi_lock, so this holds that too (render_queue_lock first, as the others take them)
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
 	defer free_all(context.temp_allocator)
 
 	// mbi is one global here, so put back every field this touches

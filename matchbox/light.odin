@@ -83,6 +83,29 @@ Lighting_Mode :: enum {
 	PER_VERTEX,
 }
 
+/*
+	The curve that brings a lit colour, which may be brighter than a screen can show, back into range (PC only; after the
+	exposure). NONE just clamps, which is how the scene looked before tonemaps existed. AGX is the one with the gentlest
+	highlights. The handhelds' lighting is already clamped by their hardware and ignores this
+*/
+Tonemap :: enum {
+	NONE,
+	REINHARD,
+	ACES,
+	AGX,
+}
+
+/*
+	Distance fog, on lit models (PC only): nothing nearer than `start` world units from the camera, everything `color` by `end`,
+	a straight blend between. It is applied after the tonemap, so `color` reaches the screen as written. The zero value is off
+*/
+Fog_Settings :: struct {
+	enabled:bool,
+	color:[4]f32,
+	start:f32,
+	end:f32,
+}
+
 // Settings that belong to the whole scene rather than to one light.
 Lighting_Settings :: struct {
 	/*
@@ -92,7 +115,17 @@ Lighting_Settings :: struct {
 		unlit. That flip was a real bug on main (its lighting.odin, "the fix for both defects").
 	*/
 	enabled:bool,
-	ambient:[4]f32, // the light every surface gets, whichever way it faces
+	ambient:[4]f32, // the light every surface gets, whichever way it faces; with `hemisphere`, the colour of the sky
+	/*
+		PC only, and the zero value of each means "as before": a flat ambient, no fog, an exposure of 1 and no tonemap, so a scene
+		that never heard of them draws as it always did. They are applied by the lit shaders (light_finish in mbsc), so an unlit model, a
+		sprite, text and the skybox are left alone
+	*/
+	hemisphere:bool, // ambient is lit from above and `ambient_ground` from below, blending with the surface's up-ness, rather than the same everywhere
+	ambient_ground:[4]f32,
+	fog:Fog_Settings,
+	exposure:f32, // multiplies the lit colour before the tonemap; 0 is read as 1, since an exposure of 0 would be a black screen and not a choice
+	tonemap:Tonemap,
 	mode:Lighting_Mode, // for every part whose material doesn't choose (Material.lighting)
 }
 
@@ -125,6 +158,20 @@ Lights_Block :: struct {
 	sun_count:i32, // the Vita's only, set by sort_lights_block_by_kind: how many of the first `count` slots are suns
 	point_count:i32, // the Vita's only: how many of the next are bulbs; the rest are spots
 	_padding:i32,
+	// PC's four scene rows (mbsc's LIGHT_SCENE_NAMES): the ground's ambient, the world's up in eye space (w: hemisphere on), the fog colour (w: fog on), and
+	// the fog's start and 1 / length, the exposure and the tonemap. Nothing on the handhelds, whose blocks do not have them
+	ground:Scene_Row,
+	up:Scene_Row,
+	fog_color:Scene_Row,
+	fog_range:Scene_Row,
+}
+
+when ODIN_OS == .Windows {
+	@(private)
+	Scene_Row :: [4]f32
+} else {
+	@(private)
+	Scene_Row :: struct {}
 }
 
 // create_directional_light makes a sun shining along `direction`, `color` used for both its diffuse and highlights.
@@ -238,6 +285,19 @@ calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> 
 				scale := 1 / max(inner - outer, 1e-6)
 				block.cone[slot] = {outer, inner, scale, -outer * scale}
 			}
+		}
+	}
+	when ODIN_OS == .Windows {
+		settings := lighting.settings
+		block.ground = settings.ambient_ground
+		up := view * [4]f32{0, 1, 0, 0}
+		block.up = {up.x, up.y, up.z, 1 if settings.hemisphere else 0}
+		block.fog_color = {settings.fog.color.r, settings.fog.color.g, settings.fog.color.b, 1 if settings.fog.enabled else 0}
+		block.fog_range = {
+			settings.fog.start,
+			1 / max(settings.fog.end - settings.fog.start, 1e-6),
+			settings.exposure if settings.exposure > 0 else 1,
+			f32(int(settings.tonemap)),
 		}
 	}
 	return block

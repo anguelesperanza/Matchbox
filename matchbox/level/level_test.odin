@@ -33,8 +33,13 @@ make_sample_level :: proc() -> Level {
 	level.settings.background = {0.05, 0.06, 0.09, 1}
 	level.settings.lighting.enabled = true
 	level.settings.lighting.ambient = {
-		color = {0.4, 0.45, 0.6, 1},
+		kind         = .HEMISPHERE,
+		color        = {0.4, 0.45, 0.6, 1},
+		ground_color = {0.2, 0.15, 0.1, 1},
 	}
+	level.settings.lighting.fog = {enabled = true, color = {0.7, 0.75, 0.8, 1}, start = 12, end = 80}
+	level.settings.lighting.exposure = 1.25
+	level.settings.lighting.tonemap = .AGX
 
 	append(&level.entities, Entity{
 		id        = 1,
@@ -319,4 +324,39 @@ test_a_newer_format_version_is_reported :: proc(t: ^testing.T) {
 	if testing.expectf(t, len(problems) == 1, "want one problem, got %v", problems) {
 		testing.expectf(t, strings.contains(problems[0], "version 99"), "the problem does not name the version: %q", problems[0])
 	}
+}
+
+// What the file says about the scene reaches Matchbox's settings, by name, and a file that says nothing means "as before"
+@(test)
+the_levels_lighting_becomes_matchbox_settings :: proc(t: ^testing.T) {
+	level := make_sample_level()
+	defer destroy_level(&level)
+
+	settings := get_level_lighting(&level)
+	testing.expect_value(t, settings.enabled, true)
+	testing.expect_value(t, settings.hemisphere, true)
+	testing.expect_value(t, settings.ambient, [4]f32{0.4, 0.45, 0.6, 1})
+	testing.expect_value(t, settings.ambient_ground, [4]f32{0.2, 0.15, 0.1, 1})
+	testing.expect_value(t, settings.fog, mb.Fog_Settings{enabled = true, color = {0.7, 0.75, 0.8, 1}, start = 12, end = 80})
+	testing.expect_value(t, settings.exposure, 1.25)
+	testing.expect_value(t, settings.tonemap, mb.Tonemap.AGX)
+
+	// the same through a file: the keys are the editor's own
+	data, err := marshal_level(level)
+	defer delete(data)
+	testing.expect(t, err == nil)
+	text := string(data)
+	for key in ([?]string{"\"HEMISPHERE\"", "\"ground_color\"", "\"fog\"", "\"exposure\"", "\"AGX\""}) {
+		testing.expectf(t, strings.contains(text, key), "the saved level has no %s", key)
+	}
+
+	// a level that never heard of them
+	empty := create_level()
+	defer destroy_level(&empty)
+	empty.settings.lighting.enabled = true
+	plain := get_level_lighting(&empty)
+	testing.expect_value(t, plain.hemisphere, false)
+	testing.expect_value(t, plain.fog.enabled, false)
+	testing.expect_value(t, plain.exposure, 0) // zero, which Matchbox reads as 1
+	testing.expect_value(t, plain.tonemap, mb.Tonemap.NONE)
 }

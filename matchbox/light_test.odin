@@ -57,6 +57,43 @@ lighting_starts_off :: proc(t:^testing.T) {
 the_lights_block_matches_the_hlsl_layout :: proc(t:^testing.T) {
 	testing.expect_value(t, offset_of(Lights_Block, count), 16 + 5 * MAX_PC_LIGHTS * 16)
 	testing.expect_value(t, size_of(Lights_Block) % 16, 0)
+	// then the four scene rows, in mbsc's LIGHT_SCENE_NAMES order, the last thing in the block
+	testing.expect_value(t, offset_of(Lights_Block, ground), 16 + 5 * MAX_PC_LIGHTS * 16 + 16)
+	testing.expect_value(t, offset_of(Lights_Block, fog_range) + 16, size_of(Lights_Block))
+}
+
+// The scene's settings reach the block as the shader reads them: a zero Lighting_Settings means "as before", and each setting is worked by hand
+@(test)
+scene_settings_reach_the_block :: proc(t:^testing.T) {
+	view := calculate_camera_view_matrix({position = {0, 0, 5}, target = {0, 0, 0}, up = {0, 1, 0}})
+
+	plain := calculate_lights_block({settings = {enabled = true}}, view)
+	testing.expect_value(t, plain.up.w, 0) // no hemisphere
+	testing.expect_value(t, plain.fog_color.w, 0) // no fog
+	testing.expect_value(t, plain.fog_range.z, 1) // an exposure of 0 is read as 1
+	testing.expect_value(t, plain.fog_range.w, 0) // no tonemap
+
+	lighting := Lighting_State{settings = {
+		enabled = true,
+		hemisphere = true,
+		ambient_ground = {0.1, 0.2, 0.3, 1},
+		fog = {enabled = true, color = {0.5, 0.6, 0.7, 1}, start = 10, end = 50},
+		exposure = 2,
+		tonemap = .AGX,
+	}}
+	block := calculate_lights_block(lighting, view)
+	testing.expect_value(t, block.ground, [4]f32{0.1, 0.2, 0.3, 1})
+	testing.expect_value(t, block.up, [4]f32{0, 1, 0, 1}) // looking along -Z, the world's up is the eye's up
+	testing.expect_value(t, block.fog_color, [4]f32{0.5, 0.6, 0.7, 1})
+	testing.expect_value(t, block.fog_range, [4]f32{10, 1.0 / 40.0, 2, 3})
+
+	// Turned to look along +X, the world's up is still the eye's up, and a sideways look does not move it
+	sideways := calculate_lights_block(lighting, calculate_camera_view_matrix({position = {5, 0, 0}, target = {0, 0, 0}, up = {0, 1, 0}}))
+	testing.expect_value(t, sideways.up, [4]f32{0, 1, 0, 1})
+
+	// Looking straight down, up in the world is toward the camera's back: -Z of the eye
+	down := calculate_lights_block(lighting, calculate_camera_view_matrix({position = {0, 5, 0}, target = {0, 0, 0}, up = {0, 0, -1}}))
+	testing.expect(t, abs(down.up.z - 1) < 1e-5 && abs(down.up.y) < 1e-5, "looking down, the world's up points back at the eye")
 }
 
 // A point light's place reaches the block in eye space with w = its kind, and a spot adds its axis and its cone's cosines; worked by hand from a camera at (0, 0, 5)

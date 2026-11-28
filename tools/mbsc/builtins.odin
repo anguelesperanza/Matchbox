@@ -113,6 +113,9 @@ BUILTINS := [?]Builtin {
 	// (docs/3ds_fragment_lighting_plan.md). Two built-ins because the language returns one value
 	{"light_diffuse", .LIGHTING, "light_diffuse(quat: [4]f32, view: [3]f32) -> [4]f32", true},
 	{"light_specular", .LIGHTING, "light_specular(quat: [4]f32, view: [3]f32) -> [4]f32", true},
+	// PC only (call it under `when TARGET == .PC`): the scene's exposure, tonemap and fog applied to a lit colour, with
+	// `view` the pixel's `out:"view"` varying so the fog can tell how far away it is. See lighting.odin
+	{"light_finish", .LIGHTING, "light_finish(color: [4]f32, view: [3]f32) -> [4]f32", true},
 
 	// matrices
 	{"transpose", .TRANSPOSE, "transpose(m: matrix[R, C]f32) -> matrix[C, R]f32", false},

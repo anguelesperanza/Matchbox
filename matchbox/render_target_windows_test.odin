@@ -388,3 +388,59 @@ a_multisampled_target_smooths_a_slanted_edge_and_a_plain_one_does_not :: proc(t:
 	pixels := read_render_target_pixels(target, context.temp_allocator)
 	testing.expect_value(t, pixel_at(pixels, 40, 39, 23), [4]u8{255, 0, 0, 255})
 }
+
+// A lit white plane filling a small target, lit by the ambient alone (no lights), read back as its middle pixel
+read_lit_plane :: proc(t:^testing.T, settings:Lighting_Settings) -> [4]u8 {
+	target := create_render_target({width = 8, height = 8})
+	defer destroy_render_target(&target)
+	vertices, indices := create_plane_geometry(40, context.temp_allocator)
+	plane := create_lit_mesh(vertices, indices)
+	defer destroy_mesh(plane)
+
+	set_lights({})
+	set_lighting(settings)
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(create_camera_3d({0, 3, 0.001}, {0, 0, 0}, 50)) // looking straight down at a plane whose normal is up: facing the eye
+	render_mesh(plane)
+	camera_end()
+	render_target_end()
+	pixels := read_render_target_pixels(target, context.temp_allocator)
+	return pixel_at(pixels, 8, 4, 4)
+}
+
+@(test)
+a_lit_model_gets_the_scenes_exposure_tonemap_fog_and_hemisphere :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
+	saved_lighting := mbi.lighting
+	defer mbi.lighting = saved_lighting
+
+	// Linear colour is encoded to sRGB on the way into the target: 0.5 is 188, 0.75 is 224, 1 is 255
+	half := Lighting_Settings{enabled = true, ambient = {0.5, 0.5, 0.5, 1}}
+	testing.expect_value(t, read_lit_plane(t, half), [4]u8{188, 188, 188, 255})
+
+	// exposure 2 turns that half into a whole; 0.5 stays what it was when exposure is left at its zero
+	doubled := half
+	doubled.exposure = 2
+	testing.expect_value(t, read_lit_plane(t, doubled), [4]u8{255, 255, 255, 255})
+
+	// an ambient of 3 is clamped to 1 with no tonemap, and brought to 3 / 4 by Reinhard (0.75 in linear light is 225 once sRGB-encoded)
+	bright := Lighting_Settings{enabled = true, ambient = {3, 3, 3, 1}}
+	testing.expect_value(t, read_lit_plane(t, bright), [4]u8{255, 255, 255, 255})
+	bright.tonemap = .REINHARD
+	testing.expect_value(t, read_lit_plane(t, bright), [4]u8{225, 225, 225, 255})
+
+	// fog that is complete at once replaces the surface with its own colour
+	fogged := half
+	fogged.fog = {enabled = true, color = {0, 0, 1, 1}, start = 0, end = 0.001}
+	testing.expect_value(t, read_lit_plane(t, fogged), [4]u8{0, 0, 255, 255})
+
+	// a hemisphere: this plane faces up, so it gets the sky's colour and none of the ground's
+	hemisphere := Lighting_Settings{enabled = true, ambient = {1, 0, 0, 1}, hemisphere = true, ambient_ground = {0, 0, 1, 1}}
+	testing.expect_value(t, read_lit_plane(t, hemisphere), [4]u8{255, 0, 0, 255})
+}

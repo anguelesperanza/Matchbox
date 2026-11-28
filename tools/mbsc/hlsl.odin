@@ -526,6 +526,9 @@ write_light_block :: proc(builder: ^strings.Builder) {
 	}
 	// where the loops stop: PC has 64 slots, and a scene rarely fills them (lighting.odin)
 	fmt.sbprintln(builder, "    int lights_count;")
+	for name in LIGHT_SCENE_NAMES {
+		fmt.sbprintfln(builder, "    float4 %s;", name)
+	}
 	fmt.sbprintln(builder, "};")
 }
 
@@ -888,7 +891,7 @@ builtin_call :: proc(h: ^Hlsl, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 		return "discard"
 	case "mod":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, "mod", node.args[0].type, node.args[1].type), list(h, node.args))
-	case "light_diffuse", "light_specular":
+	case "light_diffuse", "light_specular", "light_finish":
 		h.lights = true
 		return fmt.aprintf("mbs_%s(%s)", node.name, list(h, node.args))
 	case "sin_approx", "cos_approx", "normal_quaternion":

@@ -10,7 +10,7 @@ attribute weights [4]f32
 
 block frame 0 144
 block render 1 112
-block lights 3 5152
+block lights 3 5216
 block skin 4 12288
 
 value frame view_projection matrix[4,4]f32 0 64 0 0
@@ -29,6 +29,10 @@ value lights specular [4]f32 2064 1024 64 16
 value lights position [4]f32 3088 1024 64 16
 value lights cone [4]f32 4112 1024 64 16
 value lights count i32 5136 4 0 0
+value lights ground [4]f32 5152 16 0 0
+value lights up [4]f32 5168 16 0 0
+value lights fog_color [4]f32 5184 16 0 0
+value lights fog_range [4]f32 5200 16 0 0
 value skin row0 [4]f32 0 4096 256 16
 value skin row1 [4]f32 4096 4096 256 16
 value skin row2 [4]f32 8192 4096 256 16

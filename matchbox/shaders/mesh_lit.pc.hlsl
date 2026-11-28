@@ -41,6 +41,10 @@ cbuffer mbs_lights_block : register(b3) {
     float4 lights_position[64];
     float4 lights_cone[64];
     int lights_count;
+    float4 lights_ground;
+    float4 lights_up;
+    float4 lights_fog_color;
+    float4 lights_fog_range;
 };
 
 // The light built-ins, following the 3DS's fragment lighting unit (mbsc's lighting.odin says how).
@@ -51,6 +55,43 @@ float3 mbs_light_normal(float4 q) {
 
 float3 mbs_light_unit(float3 d) {
     return d * rsqrt(max(dot(d, d), 1e-12));
+}
+
+// Light sums are clamped to 1 unless a tonemap is on: then they are left bright for the curve to bring down
+float3 mbs_light_limit(float3 sum) {
+    return lights_fog_range.w > 0.5 ? max(sum, 0.0) : saturate(sum);
+}
+
+float3 mbs_agx_contrast(float3 x) {
+    float3 x2 = x * x;
+    float3 x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+float3 mbs_agx(float3 v) {
+    const float3x3 input_matrix = float3x3(0.842479062253094, 0.0423282422610123, 0.0423756549057051, 0.0784335999999992, 0.878468636469772, 0.0784336, 0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+    const float3x3 output_matrix = float3x3(1.19687900512017, -0.0528968517574562, -0.0529716355144438, -0.0980208811401368, 1.15190312990417, -0.0980434501171241, -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
+    v = mul(v, input_matrix);
+    v = clamp(log2(max(v, 1e-10)), -12.47393, 4.026069);
+    v = (v + 12.47393) / (4.026069 + 12.47393);
+    v = mbs_agx_contrast(v);
+    v = mul(v, output_matrix);
+    return pow(max(v, 0.0), 2.2); // the framebuffer is sRGB, so the picture is handed over as linear light
+}
+
+float3 mbs_tonemap(float3 c, float kind) {
+    if (kind > 2.5) return saturate(mbs_agx(c));
+    if (kind > 1.5) return saturate((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14));
+    if (kind > 0.5) return c / (1.0 + c);
+    return saturate(c);
+}
+
+// Exposure, then the curve, then fog, so the fog colour reaches the screen as it was chosen
+float4 mbs_light_finish(float4 color, float3 view) {
+    float3 rgb = color.rgb * lights_fog_range.z;
+    rgb = mbs_tonemap(rgb, lights_fog_range.w);
+    float fog = saturate((length(view) - lights_fog_range.x) * lights_fog_range.y) * lights_fog_color.w;
+    return float4(lerp(rgb, lights_fog_color.rgb, fog), color.a);
 }
 
 float mbs_light_sample(int i, float3 position, out float3 l) {
@@ -70,14 +111,14 @@ float mbs_light_sample(int i, float3 position, out float3 l) {
 
 float4 mbs_light_diffuse(float4 q, float3 view) {
     float3 n = mbs_light_normal(q);
-    float3 sum = lights_ambient.rgb;
+    float3 sum = lerp(lights_ambient.rgb, lerp(lights_ground.rgb, lights_ambient.rgb, dot(n, lights_up.xyz) * 0.5 + 0.5), lights_up.w);
     int total = (int)(lights_count);
     for (int i = 0; i < total; i++) {
         float3 l;
         float fade = mbs_light_sample(i, -view, l);
         sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);
     }
-    return float4(saturate(sum), 1.0);
+    return float4(mbs_light_limit(sum), 1.0);
 }
 
 float4 mbs_light_specular(float4 q, float3 view) {
@@ -92,7 +133,7 @@ float4 mbs_light_specular(float4 q, float3 view) {
         float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;
         sum += lights_specular[i].rgb * (facing * fade * pow(max(dot(n, h), 1e-8), render_shininess));
     }
-    return float4(saturate(sum * render_specular_strength), 0.0);
+    return float4(mbs_light_limit(sum * render_specular_strength), 0.0);
 }
 
 float4 mbs_normal_quaternion(float3 n) {
@@ -115,6 +156,9 @@ Varying vertex_main(Vertex_In input) {
 float4 fragment_main(Varying v) : SV_TARGET {
     float4 surface = tex.Sample(mbs_sampler, v.uv) * v.color;
     float4 color = (mbs_light_diffuse(v.quat, v.view) * surface) + mbs_light_specular(v.quat, v.view);
+    {
+        color = mbs_light_finish(color, v.view);
+    }
     if (color.w < render_alpha_cutoff) {
         discard;
     }

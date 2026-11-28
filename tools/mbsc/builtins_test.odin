@@ -80,6 +80,7 @@ CASES := [?]Builtin_Case {
 	{"normal_quaternion", "r = normal_quaternion(v3).x + normal_quaternion(v3).y + normal_quaternion(w3).w"},
 	{"light_diffuse", "r = light_diffuse(v4, v3).x"},
 	{"light_specular", "r = light_specular(v4, v3).y"},
+	{"light_finish", "r = light_finish(v4, v3).y"},
 	{"transpose", "r = (transpose(m4) * v4).y + (v4 * transpose(m4)).x"},
 	{"determinant", "r = determinant(m4) + determinant(m3)"},
 	{"sample", "r = sample(tex, v2).x"},
@@ -199,6 +200,8 @@ every_builtin_is_written_as_cg_that_compiles :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 
 	for case_ in CASES {
+		// PC only: the Vita's backend refuses it and says to call it under `when TARGET == .PC`
+		if case_.name == "light_finish" do continue
 		fragment_only := false
 		for builtin in BUILTINS {
 			if builtin.name == case_.name {

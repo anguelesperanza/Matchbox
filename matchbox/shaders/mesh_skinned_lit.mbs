@@ -101,6 +101,10 @@ vertex_main :: proc(input: Vertex_In) -> Varying {
 fragment_main :: proc(v:Varying) -> [4]f32 {
 	surface := sample(tex, v.uv) * v.color
 	color := light_diffuse(v.quat, v.view) * surface + light_specular(v.quat, v.view)
+	// PC only, before the alpha test (the 3DS wants that last; the finish leaves alpha alone): the scene's exposure, tonemap and fog (Lighting_Settings), which the handhelds' lighting has no room for
+	when TARGET == .PC {
+		color = light_finish(color, v.view)
+	}
 	if color.a < render.alpha_cutoff do discard()
 	return color
 }

@@ -71,9 +71,21 @@ get_max_lights :: proc(target: Target) -> int {
 // LIGHT_UNIFORM_NAMES are the lights block's fields, in the order the engine fills them: the ambient colour, then
 // for every slot the direction (towards the light for a sun, back along the axis for a spot), its diffuse and specular
 // colours, its position (w = kind: 0 directional, 1 point, 2 spot) and its cone (cos outer, cos inner, k = 1 / their difference, -outer * k), each a [4]f32. PC's
-// block adds `lights_count` (an int) after them (hlsl.odin).
+// block adds `lights_count` (an int) after them, then the rows of LIGHT_SCENE_NAMES (hlsl.odin).
 @(rodata)
 LIGHT_UNIFORM_NAMES := [?]string{"lights_ambient", "lights_direction", "lights_diffuse", "lights_specular", "lights_position", "lights_cone"}
+
+/*
+	LIGHT_SCENE_NAMES are the four rows PC's block carries after `lights_count`, for what belongs to the scene rather than
+	to a light (Lighting_Settings in light.odin). The handhelds' blocks do not have them:
+	  - lights_ground: rgb the ground's ambient colour, for a hemisphere
+	  - lights_up: xyz the world's up in eye space, w 1 when the ambient is a hemisphere (the sky is `lights_ambient`)
+	  - lights_fog_color: rgb, w 1 when fog is on
+	  - lights_fog_range: x the distance fog starts, y 1 / (end - start), z the exposure, w the tonemap (0 none, 1 Reinhard, 2 ACES, 3 AgX)
+	A tonemap other than none also stops the light sums being clamped to 1, since it is the curve that brings them back
+*/
+@(rodata)
+LIGHT_SCENE_NAMES := [?]string{"lights_ground", "lights_up", "lights_fog_color", "lights_fog_range"}
 
 // write_light_basics writes the two small functions both forms of the light functions use: the normal from the
 // quaternion, and a normalize that leaves a zero vector zero.
@@ -94,6 +106,7 @@ write_light_basics :: proc(builder: ^strings.Builder) {
 // reads. `loop_end` is what the loops count up to: a number, or the name of the uniform holding the count.
 write_light_functions :: proc(builder: ^strings.Builder, render_block: string, loop_end: string) {
 	write_light_basics(builder)
+	write_light_finish(builder) // first: the sums below are limited by it
 
 	// One light seen from a pixel: the way to it in `l`, and how much of it arrives (the distance fade and a spot's
 	// cone), 1 for a sun. `position` is the pixel in eye space, which is the view vector negated
@@ -118,14 +131,15 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 
 	fmt.sbprintln(builder, "\nfloat4 mbs_light_diffuse(float4 q, float3 view) {")
 	fmt.sbprintln(builder, "    float3 n = mbs_light_normal(q);")
-	fmt.sbprintln(builder, "    float3 sum = lights_ambient.rgb;")
+	// A hemisphere blends from the ground's colour (facing down) to the sky's (facing up); a flat ambient has lights_up.w = 0
+	fmt.sbprintln(builder, "    float3 sum = lerp(lights_ambient.rgb, lerp(lights_ground.rgb, lights_ambient.rgb, dot(n, lights_up.xyz) * 0.5 + 0.5), lights_up.w);")
 	fmt.sbprintfln(builder, "    int total = (int)(%s);", loop_end)
 	fmt.sbprintln(builder, "    for (int i = 0; i < total; i++) {")
 	fmt.sbprintln(builder, "        float3 l;")
 	fmt.sbprintln(builder, "        float fade = mbs_light_sample(i, -view, l);")
 	fmt.sbprintln(builder, "        sum += lights_diffuse[i].rgb * (max(dot(l, n), 0.0) * fade);")
 	fmt.sbprintln(builder, "    }")
-	fmt.sbprintln(builder, "    return float4(saturate(sum), 1.0);")
+	fmt.sbprintln(builder, "    return float4(mbs_light_limit(sum), 1.0);")
 	fmt.sbprintln(builder, "}")
 
 	// pow of exactly 0 is exp2(s * log2(0)), a NaN when the shininess is 0 too, so the base is kept just above it
@@ -141,9 +155,54 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	fmt.sbprintln(builder, "        float facing = dot(l, n) > 0.0 ? 1.0 : 0.0;")
 	fmt.sbprintfln(builder, "        sum += lights_specular[i].rgb * (facing * fade * pow(max(dot(n, h), 1e-8), %s_shininess));", render_block)
 	fmt.sbprintln(builder, "    }")
-	fmt.sbprintfln(builder, "    return float4(saturate(sum * %s_specular_strength), 0.0);", render_block)
+	fmt.sbprintfln(builder, "    return float4(mbs_light_limit(sum * %s_specular_strength), 0.0);", render_block)
 	fmt.sbprintln(builder, "}")
 }
+
+// The PC's scene finish (see LIGHT_SCENE_NAMES). The tonemap curves are the usual published ones: Reinhard's x / (1 + x), Narkowicz's
+// fit of the ACES curve, and AgX by way of the polynomial fit of its contrast curve that Three.js carries
+@(private = "file")
+write_light_finish :: proc(builder: ^strings.Builder) {
+	fmt.sbprint(builder, `
+// Light sums are clamped to 1 unless a tonemap is on: then they are left bright for the curve to bring down
+float3 mbs_light_limit(float3 sum) {
+    return lights_fog_range.w > 0.5 ? max(sum, 0.0) : saturate(sum);
+}
+
+float3 mbs_agx_contrast(float3 x) {
+    float3 x2 = x * x;
+    float3 x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+float3 mbs_agx(float3 v) {
+    const float3x3 input_matrix = float3x3(0.842479062253094, 0.0423282422610123, 0.0423756549057051, 0.0784335999999992, 0.878468636469772, 0.0784336, 0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+    const float3x3 output_matrix = float3x3(1.19687900512017, -0.0528968517574562, -0.0529716355144438, -0.0980208811401368, 1.15190312990417, -0.0980434501171241, -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
+    v = mul(v, input_matrix);
+    v = clamp(log2(max(v, 1e-10)), -12.47393, 4.026069);
+    v = (v + 12.47393) / (4.026069 + 12.47393);
+    v = mbs_agx_contrast(v);
+    v = mul(v, output_matrix);
+    return pow(max(v, 0.0), 2.2); // the framebuffer is sRGB, so the picture is handed over as linear light
+}
+
+float3 mbs_tonemap(float3 c, float kind) {
+    if (kind > 2.5) return saturate(mbs_agx(c));
+    if (kind > 1.5) return saturate((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14));
+    if (kind > 0.5) return c / (1.0 + c);
+    return saturate(c);
+}
+
+// Exposure, then the curve, then fog, so the fog colour reaches the screen as it was chosen
+float4 mbs_light_finish(float4 color, float3 view) {
+    float3 rgb = color.rgb * lights_fog_range.z;
+    rgb = mbs_tonemap(rgb, lights_fog_range.w);
+    float fog = saturate((length(view) - lights_fog_range.x) * lights_fog_range.y) * lights_fog_color.w;
+    return float4(lerp(rgb, lights_fog_color.rgb, fog), color.a);
+}
+`)
+}
+
 
 // CG_LIGHT_FUNCTIONS is the Vita's form of the light functions (the HLSL's are write_light_functions), made for what
 // the Vita's fragment unit is bound by: a lit pixel measured 26 fps with one sun and 11 with two more lights on the real
@@ -290,7 +349,7 @@ expression_calls_light :: proc(expression: ^IR_Expr) -> bool {
 	case IR_Construct:
 		return any_calls_light(e.args)
 	case IR_Builtin_Call:
-		return e.name == "light_diffuse" || e.name == "light_specular" || any_calls_light(e.args)
+		return e.name == "light_diffuse" || e.name == "light_specular" || e.name == "light_finish" || any_calls_light(e.args)
 	case IR_Proc_Call:
 		// the callee is in ir.procs too, so its body is walked there
 		return any_calls_light(e.args)
@@ -317,8 +376,9 @@ write_light_reflection :: proc(builder: ^strings.Builder, values: bool) {
 	row := 16
 	array_size := slots * row
 	count_offset := row + (len(LIGHT_UNIFORM_NAMES) - 1) * array_size
+	scene_offset := count_offset + row
 	if values == false {
-		fmt.sbprintfln(builder, "block lights %d %d", LIGHTS_REGISTER, count_offset + row)
+		fmt.sbprintfln(builder, "block lights %d %d", LIGHTS_REGISTER, scene_offset + len(LIGHT_SCENE_NAMES) * row)
 		return
 	}
 	fmt.sbprintfln(builder, "value lights ambient [4]f32 0 %d 0 0", row)
@@ -327,6 +387,9 @@ write_light_reflection :: proc(builder: ^strings.Builder, values: bool) {
 		fmt.sbprintfln(builder, "value lights %s [4]f32 %d %d %d %d", strings.trim_prefix(name, "lights_"), row + index * array_size, array_size, slots, row)
 	}
 	fmt.sbprintfln(builder, "value lights count i32 %d 4 0 0", count_offset)
+	for name, index in LIGHT_SCENE_NAMES {
+		fmt.sbprintfln(builder, "value lights %s [4]f32 %d %d 0 0", strings.trim_prefix(name, "lights_"), scene_offset + index * row, row)
+	}
 }
 
 // declares_lights says whether the shader declares the lights block itself (`@(uniform = .LIGHTS) lights`, G2 L5).

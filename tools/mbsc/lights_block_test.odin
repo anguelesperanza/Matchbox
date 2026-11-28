@@ -38,7 +38,7 @@ light_slot_count_is_the_targets :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, "mbs_light_diffuse") == false)
 
 	reflection, _ := generate_reflection(ir, context.temp_allocator)
-	testing.expectf(t, strings.contains(reflection, "block lights 3 5152\n"), "got:\n%s", reflection)
+	testing.expectf(t, strings.contains(reflection, "block lights 3 5216\n"), "got:\n%s", reflection)
 
 	pica_ir, pica_parsed, pica_message := build_ir_for(without_carriage_returns(VERTEX_LIGHTS), .PICA200)
 	defer destroy_parsed(pica_parsed)

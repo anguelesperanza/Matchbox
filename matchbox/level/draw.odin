@@ -50,6 +50,36 @@ get_entity_light :: proc(entity: Entity) -> (light: mb.Light, ok: bool) {
 }
 
 /*
+	The level's lighting as Matchbox takes it, ready for `mb.set_lighting`: the ambient (a hemisphere when the file says so),
+	fog, exposure and tonemap, which only the PC draws (the handhelds ignore them). Like `get_level_lights` it is handed back rather
+	than set, so a game can change a field first: `settings := get_level_lighting(&level); settings.exposure = 1.5`
+*/
+get_level_lighting :: proc(level: ^Level) -> mb.Lighting_Settings {
+	file := level.settings.lighting
+	return mb.Lighting_Settings {
+		enabled = file.enabled,
+		ambient = file.ambient.color,
+		hemisphere = file.ambient.kind == .HEMISPHERE,
+		ambient_ground = file.ambient.ground_color,
+		fog = {enabled = file.fog.enabled, color = file.fog.color, start = file.fog.start, end = file.fog.end},
+		exposure = file.exposure,
+		tonemap = get_matchbox_tonemap(file.tonemap),
+	}
+}
+
+// By name, not by position, so reordering either enum cannot change what a saved level looks like
+@(private)
+get_matchbox_tonemap :: proc(tonemap: Tonemap) -> mb.Tonemap {
+	switch tonemap {
+	case .NONE:     return .NONE
+	case .REINHARD: return .REINHARD
+	case .ACES:     return .ACES
+	case .AGX:      return .AGX
+	}
+	return .NONE
+}
+
+/*
 	Every light in the level, in list order, ready for `mb.set_lights`.
 
 	Handed back rather than set, because `set_lights` replaces the whole list:

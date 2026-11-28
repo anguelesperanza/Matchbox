@@ -968,6 +968,9 @@ builtin_call :: proc(h: ^Cg, e: ^IR_Expr, node: IR_Builtin_Call) -> string {
 		return "discard"
 	case "mod", "round":
 		return fmt.aprintf("%s(%s)", use_math_helper(h, node.name, node.args[0].type, node.args[1].type if len(node.args) > 1 else nil), list(h, node.args))
+	case "light_finish":
+		problem(h, "light_finish is PC only: call it under `when TARGET == .PC`")
+		return "float4(0.0, 0.0, 0.0, 0.0)"
 	case "light_diffuse", "light_specular":
 		h.lights = true
 		// Both built-ins run one shared pass over the lights (CG_LIGHT_FUNCTIONS), which only holds for one pair of arguments

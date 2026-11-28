@@ -544,9 +544,13 @@ settled_statements :: proc(module: ^Module, statements: []^ast.Stmt, into: ^[dyn
 			value, ok := eval_when(module, when_statement.cond)
 			if ok {
 				branch := when_statement.body if value else when_statement.else_stmt
+				// A `when` the target does not take, with no `else`, has no branch: nothing to add (this crashed on a nil)
+				if branch == nil {
+					continue
+				}
 				if block, is_block := branch.derived.(^ast.Block_Stmt); is_block {
 					settled_statements(module, block.stmts, into)
-				} else if branch != nil {
+				} else {
 					append(into, branch)
 				}
 			}

@@ -131,7 +131,7 @@ sky-crash finding.
   buffer, the rasteriser's `MultisampleEnable`, and render targets (Stargate draws its viewport into one, where the grid lines shimmer), which need a
   multisampled colour+depth pair resolved into the texture the UI samples. Shape: a `samples` field on `Render_Target_Description` and an
   `init` option for the window; tested on WARP by counting edge pixels that are neither colour.
-- **7c, scene settings block (PC).** One new constant buffer, `Scene_Settings` (exposure, tonemap kind including AGX, fog colour/near/far/density,
+- **7c, scene settings block (PC).** *Done.* One new constant buffer, `Scene_Settings` (exposure, tonemap kind including AGX, fog colour/near/far/density,
   hemisphere ambient sky + ground), read by the lit shaders and the unlit one for fog. `Lighting_Settings` gains the fields as defaulted values that mean
   "as before", so existing scenes draw unchanged (checked pixel for pixel against the old build's numbers).
 - **7d, area lights.** `AREA_RECT`/`AREA_DISK` as a closest-point-on-shape approximation in the PC shaders, `matchbox/level` stops flattening them.
@@ -277,6 +277,24 @@ widen every 1-pixel line (the grid test caught it: 8 lit pixels in a row instead
 0 half-covered pixels at 1 and 568 (window) / 324 (256 px target) at 4. *Not measured:* the GPU cost of 4x (fill rate, memory) on a real editor frame; the
 handhelds ignore it (`set_window_samples` answers 1). The internal-resolution target is not multisampled.
 
+**Phase 7c, hemisphere ambient, fog, exposure, tonemap: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 277 pass (stable over 4 runs);
+level 58; `tools/mbsc` 141; 3DS, Vita and ui checks clean.
+*Shape:* `Lighting_Settings` gains `hemisphere`, `ambient_ground`, `fog` (`Fog_Settings`), `exposure`, `tonemap` (`Tonemap`: NONE, REINHARD, ACES, AGX); the zero of each
+means "as before", so a scene that never heard of them is unchanged (an exposure of 0 is read as 1). The PC lights block carries four more rows after `lights_count`
+(`ground`, `up`, `fog_color`, `fog_range`; `Lights_Block` has them only on Windows, the handhelds' blocks are untouched). One new mbsc built-in, `light_finish(color, view)`,
+PC only, called under `when TARGET == .PC` in `mesh_lit.mbs` and `mesh_skinned_lit.mbs`; the generated `.pc.hlsl`/`.pc.refl` of those, `mesh_vertex_lit` and the optional psx shaders
+were rebuilt (their lights block grew). Order is exposure, tonemap, then fog, so the fog colour reaches the screen as written. While a tonemap is on, the light sums are no longer
+clamped to 1. `matchbox/level`'s `Lighting_Settings` now holds the file's `ambient.kind`/`ground_color`, `fog`, `exposure`, `tonemap`, and `get_level_lighting(&level)` makes Matchbox's
+settings from it, by name.
+*Measured:* mbsc's pixel test (the generated HLSL on the software device, numbers worked by hand): exposure 2 doubles, Reinhard 1 -> 0.5 and 3 -> 0.75, ACES 1 -> 2.54/3.16, fog 0/0.5/1
+at, half way and past its end with alpha kept, hemisphere sky/ground/sideways, a bright ambient left at 3 under a tonemap and clamped to 1 without. Matchbox test: a lit plane read back
+from a target (188 for 0.5, 255 for exposure 2, 255 then 225 for an ambient of 3 without and with Reinhard, solid blue in complete fog, the sky colour from a hemisphere).
+*Fixed on the way:* mbsc crashed (nil) on a `when` that is false for the target, has no `else` and sits in a fragment stage (`settled_statements`); two tests raced on `mbi`'s asset folders and
+camera (the asset-names and billboard tests now take the same locks as the others).
+*Not done / not known:* **AgX and ACES are the published approximations, not checked against Stargate's own shader** (Stargate's copy was not readable as source here), so a level may look slightly
+different in the editor; compare one scene side by side before trusting them. Fog and the tonemap apply to lit models only, not to unlit models, sprites, text, the skybox or per-vertex-lit parts
+(`mesh_vertex_lit` has no finish; it computes light in the vertex stage) and not to the 3DS or Vita. Not looked at on a real window.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -299,6 +317,12 @@ New public names so far (the user reads this list at the end):
 | `read_window_pixels(allocator := context.allocator)` | procedure | `render_target_windows.odin`, handheld stub |
 | `set_window_samples(samples)` | procedure | `render_windows.odin`, handheld stub |
 | `Render_Target_Settings.samples`, `Render_Target.samples` | struct fields | `render_target.odin` (shared) |
+| `Lighting_Settings.hemisphere`, `.ambient_ground`, `.fog`, `.exposure`, `.tonemap` | struct fields | `light.odin` (shared; PC only in effect) |
+| `Fog_Settings` (`enabled`, `color`, `start`, `end`) | struct | `light.odin` (shared) |
+| `Tonemap` (`NONE`, `REINHARD`, `ACES`, `AGX`) | enum | `light.odin` (shared) |
+| `get_level_lighting(level)` | procedure | `level/draw.odin` |
+| `Level_Ambient.kind`/`.ground_color`, `Level_Fog`, `Lighting_Settings.fog`/`.exposure`/`.tonemap`, `Ambient_Kind`, `Tonemap` | level file types | `level/level.odin` |
+| `light_finish(color, view)` | shader built-in (mbsc, PC only) | `tools/mbsc/builtins.odin`, `docs/shader_language.md` |
 | `clip_start(min, max)` | procedure | `clip_windows.odin`, handheld stub |
 | `clip_end()` | procedure | `clip_windows.odin`, handheld stub |
 | `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |

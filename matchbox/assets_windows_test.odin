@@ -26,6 +26,9 @@ make_tree :: proc(root:string, files:[]string) {
 @(test)
 asset_names_merge_both_folders_nest_filter_and_sort :: proc(t:^testing.T) {
 	defer free_all(context.temp_allocator)
+	// The shader tests set the asset folders too, under the render queue's lock, so this holds both (in the order the others take them)
+	sync.mutex_lock(&render_queue_lock)
+	defer sync.mutex_unlock(&render_queue_lock)
 	sync.mutex_lock(&mbi_lock)
 	defer sync.mutex_unlock(&mbi_lock)
 	saved_asset, saved_target := mbi.asset_path, mbi.target_asset_path
@@ -64,6 +67,9 @@ asset_names_merge_both_folders_nest_filter_and_sort :: proc(t:^testing.T) {
 @(test)
 checked_loaders_say_no_and_do_not_stop :: proc(t:^testing.T) {
 	defer free_all(context.temp_allocator)
+	// The shader tests set the asset folders too, under the render queue's lock, so this holds both (in the order the others take them)
+	sync.mutex_lock(&render_queue_lock)
+	defer sync.mutex_unlock(&render_queue_lock)
 	sync.mutex_lock(&mbi_lock)
 	defer sync.mutex_unlock(&mbi_lock)
 	saved_asset, saved_target := mbi.asset_path, mbi.target_asset_path

@@ -229,17 +229,46 @@ Light_Kind :: enum {
 }
 
 /*
-	The part of a level's lighting that Matchbox's lighting reads: whether it runs, and the ambient colour.
-	**A subset of the file's `lighting` block** (which also has a pipeline, shadows, fog, a tonemap and a cluster grid
-	from `main`): json.unmarshal skips keys it has no field for, so those are ignored on load and not written back
+	The part of a level's lighting that Matchbox's lighting reads: whether it runs, the ambient (flat or a hemisphere), fog, and
+	the exposure and tonemap. **A subset of the file's `lighting` block** (which also has shadows, a pipeline and a cluster grid
+	from `main`): json.unmarshal skips keys it has no field for, so those are ignored on load and not written back. Every
+	field here is a key the editor writes, under the names it writes them; a key left out reads as its zero, which means
+	"as before" (flat ambient, no fog, an exposure of 1, no tonemap). `get_level_lighting` makes Matchbox's settings from it
 */
 Lighting_Settings :: struct {
-	enabled: bool,
-	ambient: Level_Ambient,
+	enabled:  bool,
+	ambient:  Level_Ambient,
+	fog:      Level_Fog,
+	exposure: f32,
+	tonemap:  Tonemap,
+}
+
+Ambient_Kind :: enum {
+	CONSTANT, // `color` everywhere
+	HEMISPHERE, // `color` from above, blending to `ground_color` from below
 }
 
 Level_Ambient :: struct {
-	color: [4]f32,
+	kind:         Ambient_Kind,
+	color:        [4]f32,
+	ground_color: [4]f32,
+}
+
+// Distance fade: nothing nearer than `start`, everything `color` by `end`
+Level_Fog :: struct {
+	enabled: bool,
+	color:   [4]f32,
+	start:   f32,
+	end:     f32,
+}
+
+// The curve that brings lit colour back into what a display can show, after exposure. Its own enum, not Matchbox's, so a
+// renamed value there cannot change what a saved level means (the same reason `Light_Kind` is here)
+Tonemap :: enum {
+	NONE,
+	REINHARD,
+	ACES,
+	AGX,
 }
 
 Light_Component :: struct {

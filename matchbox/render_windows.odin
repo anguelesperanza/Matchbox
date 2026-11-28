@@ -286,6 +286,7 @@ create_states :: proc() {
 			CullMode = .BACK,
 			FrontCounterClockwise = true,
 			DepthClipEnable = true,
+			ScissorEnable = true, // every draw sets its scissor (set_scissor), the whole target when it has no clip
 		},
 
 		.NONE = {
@@ -293,6 +294,7 @@ create_states :: proc() {
 			CullMode = .NONE,
 			FrontCounterClockwise = true,
 			DepthClipEnable = true,
+			ScissorEnable = true,
 		},
 	}
 
@@ -663,6 +665,12 @@ camera_start :: proc(camera:Camera) {
 	mbi.pixel_scale = calculate_camera_snap_scale(camera, window.y)
 
 	mbi.view = calculate_camera_view_matrix(used) // render_mesh needs it to sort transparent items
+	if camera.screen {
+		// What clip_start needs to turn HUD units into this target's pixels
+		mbi.clip.units_to_pixels = window.y / calculate_camera_view_height(used)
+		mbi.clip.centre_units = {used.position.x, used.position.y}
+		mbi.clip.target_pixels = {draw_size.x, draw_size.y}
+	}
 	mbi.camera_active = true
 	mbi.screen_pass = camera.screen
 	mbi.camera_fov_y = used.fov_y if used.projection == .PERSPECTIVE else 0 // billboards read these two (billboard.odin)
@@ -685,6 +693,7 @@ camera_end :: proc() {
 		mbi.skybox.has_pending = false
 		clear(&mbi.opaque_items)
 		clear(&mbi.transparent_items)
+		mbi.queued_items = 0
 		clear(&mbi.skin_state.rows)
 		mbi.camera_active = false
 		mbi.screen_pass = false
@@ -696,27 +705,44 @@ camera_end :: proc() {
 	// A screen camera has no depth buffer to lean on, so what is drawn last lands on top
 	depth_opaque := Depth_Mode.OPAQUE
 	depth_transparent := Depth_Mode.TRANSPARENT
-	if mbi.screen_pass == true {
-		depth_opaque = .DISABLED
-		depth_transparent = .DISABLED
-	}
 
 	sort_render_queue()
 	set_lights_constants()
 	draw_pending_skybox() // first, so everything else covers it
 
-	for item in mbi.opaque_items {
-		set_render_state(depth_opaque, .NONE, item.cull)
-		render_item(item)
-	}
+	target_pixels := get_draw_size()
+	set_scissor({}, false, target_pixels) // the whole target, until an item says otherwise
 
-	for item in mbi.transparent_items {
-		set_render_state(depth_transparent, .ALPHA, item.cull)
-		render_item(item)
+	if mbi.screen_pass {
+		// One order for solid and see-through alike, each with its own blend (order_screen_pass_items says why)
+		ensure(mbi.clip.depth == 0, "clip_start without a clip_end before screen_end")
+		was_clipped := false
+		previous: Clip_Rectangle
+		for item in order_screen_pass_items(mbi.opaque_items[:], mbi.transparent_items[:]) {
+			// The scissor only changes when the clip does, so a list of rows under one clip sets it once
+			if item.clipped != was_clipped || (item.clipped && item.clip != previous) {
+				set_scissor(item.clip, item.clipped, target_pixels)
+				was_clipped = item.clipped
+				previous = item.clip
+			}
+			set_render_state(.DISABLED, item.blend, item.cull)
+			render_item(item)
+		}
+	} else {
+		for item in mbi.opaque_items {
+			set_render_state(depth_opaque, .NONE, item.cull)
+			render_item(item)
+		}
+
+		for item in mbi.transparent_items {
+			set_render_state(depth_transparent, .ALPHA, item.cull)
+			render_item(item)
+		}
 	}
 
 	clear(&mbi.opaque_items)
 	clear(&mbi.transparent_items)
+	mbi.queued_items = 0
 	clear(&mbi.skin_state.rows)
 	mbi.camera_active = false
 	mbi.screen_pass = false

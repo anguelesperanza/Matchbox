@@ -72,6 +72,8 @@ bind_render_target :: proc(target:^Render_Target, clear_color:Maybe([4]f32)) {
 
 	viewport := d3d11.VIEWPORT{Width = f32(target.width), Height = f32(target.height), MaxDepth = 1}
 	mbi.device_context->RSSetViewports(1, &viewport)
+	// Scissor is always on (clip.odin) and an unset one is empty, which would draw nothing: start with the whole target
+	set_scissor({}, false, {i32(target.width), i32(target.height)})
 
 	if color, ok := clear_color.?; ok {
 		color := color
@@ -97,6 +99,7 @@ bind_screen :: proc() {
 		MaxDepth = 1,
 	}
 	mbi.device_context->RSSetViewports(1, &viewport)
+	set_scissor({}, false, {mbi.window_size[0], mbi.window_size[1]})
 	mbi.device_context->OMSetRenderTargets(1, &mbi.framebuffer_view, mbi.depth_view)
 	set_render_state(.OPAQUE, .NONE, .BACK)
 }

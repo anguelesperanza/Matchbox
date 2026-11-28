@@ -67,6 +67,46 @@ nothing or return zero.
 - B1: whole-pixel edges (snap the screen camera's origin, or a pixel-snap switch).
 - Check: pixel-readback tests (`read_render_target_pixels`) for a panel over a dim, a clip inside a clip, a 1-unit line at odd and even heights.
 
+**Phase 2 in detail (read from the code 2026-11-28; nothing built yet).**
+
+*B2, paint order.* `queue_render` puts a `.NONE` item in `opaque_items` and an `.ALPHA` item in `transparent_items`, and
+`camera_end` draws the whole first list then the whole second. A screen pass skips the opaque sort, and the transparent sort
+is a stable sort by `depth`, which is only computed for `.ALPHA` items (the view-space distance of the item's origin).
+`shape_blend` makes a rectangle `.ALPHA` only when its alpha is below 1. So today a see-through dim submitted *before* a
+solid panel is drawn *after* it. The change, for a screen pass only: compute `depth` for every item, concatenate the two
+lists, stable-sort by depth (so z is the layer, equal z keeps submission order), and draw in that order with each item's own
+blend state. 3D passes and handhelds are untouched. **The one behaviour change** is for games that draw HUD in a screen pass
+and relied on "solid first, see-through second": text submitted before a solid background at the same z used to appear on top
+and will now be covered, which is what "drawn last lands on top" promises. Seven examples use `screen_start`; they are
+checked before and after (pixel readback of a render target), and each is fixed or noted.
+
+*B3, clipping.* D3D11 needs `ScissorEnable = true` on the rasterizer states and an `RSSetScissorRects` per draw. Plan: both
+states get scissor enabled; every item carries a clip (pixels, or "none" = the whole target) recorded at queue time, because
+items are drawn at `camera_end`, long after they were queued; `camera_end` sets the rectangle when it changes. The clip is
+given in screen-pass units (min bottom left, max top right) and converted with the screen camera's scale, centre origin and
++Y up, to window pixels (or render-target pixels while a target is active), rounded to whole pixels and clamped to the target.
+A fixed-depth stack (`MAX_CLIP_DEPTH`) intersects each new clip with the one below. Proposed names, in the house `thing_start` /
+`thing_end` pattern (`screen_start`, `camera_start`): `clip_start(min, max)`, `clip_end()`, and `get_clip_rectangle()`
+for the UI's pointer test. It is an error outside a screen pass, with a message. An empty intersection draws nothing.
+
+*B1, whole-pixel edges.* The requirements document says an odd window height puts the centre in the middle of a pixel and
+blurs every 1-unit line. That is **not yet shown**: shapes are untextured quads with no multisampling, so a misplaced edge
+makes a line one or two pixels thick, or shimmer, rather than blur, and text (linear-filtered glyph sprites) is the case that
+would blur. So B1 starts with a measurement: pixel-readback tests of a 1-unit line, a 1-unit outline and a glyph at an even and
+an odd window height and at UI scale 1, 1.25 and 2. If they show a problem, the fix is to snap the screen camera's origin to a
+pixel edge (`calculate_camera_snapped` already does this for orthographic cameras with `pixel_snap`, but the screen camera does
+not set it). A scale like 1.25 puts unit positions between pixels whatever the origin does, so the UI layer still rounds its
+own rectangles to whole pixels (`calculate_snapped_to_pixel` exists). `set_screen_height` every frame is confirmed fine: a plain field write.
+
+*Check for the phase:* the example from section 4, built up in steps: panel over dim over panel (B2), a list clipped inside a
+clipped scroll view (B3), the pixel-line measurements (B1); each asserted on pixels read back from a render target, plus the
+existing `render-check` and `render-target-check` examples unchanged.
+
+*Risks:* the render loop is shared by every PC game, so the 3D path must draw byte-identical frames (checked with the
+existing render checks before and after); per-item scissor and blend changes cost state changes per item in a screen pass
+(measured later, B6); clip applies only to the screen pass, so a clipped 3D viewport is drawn into a render target at the
+size of its panel instead.
+
 **Phase 3: 3D for the viewport (D1, D2).** New files, so it can run beside phase 2 with a different writer.
 - D1: depth-tested 3D lines (line-list topology or camera-facing quads), `render_grid`, `render_bounds_wires`; many lines per
   frame without one item each. Also fixes the `level` comments that name `draw_bounds_wires`.
@@ -126,6 +166,21 @@ Two choices to know about: the close button is held back **only after `set_close
 stops closing (the requirements document's wording would have made the X do nothing in every game that did not call
 `stop_running`); and Windows' Alt-key and F10 messages (`WM_SYSKEYDOWN`) are still not handled, as the document says.
 
+**Phase 2, B2 + B3 done, B1 measured and not needed: 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 259 pass.
+*B2:* in a screen pass `camera_end` merges the opaque and see-through lists, stable-sorts by z (the layer, farther first) then by
+submission order, and draws each item with its own blend; 3D passes and the handhelds are unchanged. A modal (dim, then solid
+panel) now covers what is under it. Mutating the screen-pass branch off fails two tests.
+*B3:* `clip_start(min, max)` / `clip_end()` / `get_clip_rectangle()` in HUD units; nested clips are cut down to the shared area;
+each queued item carries its pixel rectangle, and `camera_end` sets the D3D scissor only when it changes. Scissor is enabled on
+both rasterizer states, so every place that binds a target (`bind_render_target`, `bind_screen`) sets the whole target as the
+scissor (an unset scissor is empty and would draw nothing). A clip that leaves nothing draws nothing. Making the scissor ignore
+the clip fails three tests. Handheld stubs do nothing (a clip there shows everything). 3DS, Vita, `matchbox/level` checks pass
+and 57 level tests pass; the PC examples that use `screen_start` still `odin check` (`render-check` does not on Windows
+because of `o3dx/ctru` socket names; it was not run before this change, so I did not look further).
+*B1:* measured with a one-unit-thick rectangle at window heights 64, 65, 99 and 100: always exactly one row, no part-lit pixel.
+Shapes are untextured quads with no multisampling, so there is nothing to blur; **no change made**. Text (linear-filtered glyphs)
+is the one thing an odd height could soften, and it was not measured here. Not seen: any of this on a real screen.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -144,3 +199,8 @@ New public names so far (the user reads this list at the end):
 | `Dropped_File` (`path`, `position`) | struct | `desktop_input.odin` (shared) |
 | `MAX_TEXT_INPUT` | constant (array size) | `backend_windows.odin` |
 | `Key` values: `NUMPAD_0`..`NUMPAD_9`, `MULTIPLY`, `ADD`, `SEPARATOR`, `SUBTRACT`, `DECIMAL`, `DIVIDE`, `KEYPAD_ENTER`, `F1`..`F12`, `NUMLOCK`, `SCROLL_LOCK`, `SEMICOLON`, `EQUALS`, `COMMA`, `MINUS`, `PERIOD`, `SLASH`, `GRAVE`, `LEFT_BRACKET`, `BACKSLASH`, `RIGHT_BRACKET`, `APOSTROPHE` | enum values | `input_windows.odin`, handheld `Key` |
+| `clip_start(min, max)` | procedure | `clip_windows.odin`, handheld stub |
+| `clip_end()` | procedure | `clip_windows.odin`, handheld stub |
+| `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |
+| `MAX_CLIP_DEPTH` | constant (array size) | `clip.odin` (shared) |
+| `Clip_Rectangle`, `Clip_State` | structs | `clip.odin` (shared) |

@@ -33,6 +33,8 @@ Matchbox_Info :: struct {
 	camera_window_height:f32, // pixels tall, of the target that camera draws to (the 3DS bottom screen is not the top one's)
 	opaque_items:[dynamic]Render_Item,
 	transparent_items:[dynamic]Render_Item,
+	queued_items:int, // how many draws this pass has queued: the order a screen pass paints equal depths in (render.odin)
+	clip:Clip_State, // clip_start's rectangles and what the screen pass is drawn through (clip.odin)
 	pixel_scale:f32,
 	screen_height:f32,
 	bottom_screen_layout:Bottom_Screen_Layout,

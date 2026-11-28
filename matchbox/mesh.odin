@@ -112,6 +112,19 @@ create_triangle_geometry :: proc(allocator := context.allocator) -> (vertices:[]
 	return
 }
 
+/*A line from (0,0,0) to (1,0,0), for the PC's 3D lines: render_line_3d stretches it between any two points. Drawn as a line list, not triangles*/
+create_line_geometry :: proc(allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
+	vertices = make([]Vertex, 2, allocator)
+	indices = make([]u16, 2, allocator)
+
+	white := [4]f32{1, 1, 1, 1}
+	vertices[0] = {position = {0, 0, 0}, uv = {0, 0}, color = white}
+	vertices[1] = {position = {1, 0, 0}, uv = {1, 0}, color = white}
+
+	indices[0], indices[1] = 0, 1
+	return
+}
+
 /*A circle of radius 1 centred on the origin, as a fan of `segments` triangles*/
 create_circle_geometry :: proc(segments:int = 48, allocator := context.allocator) -> (vertices:[]Vertex, indices:[]u16) {
 	assert(segments >= 3 && segments <= 65534, "A circle needs 3 to 65534 segments")

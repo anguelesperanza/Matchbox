@@ -44,6 +44,7 @@ Matchbox_Info :: struct {
 	sprite_mesh:Mesh,
 	triangle_mesh:Mesh,
 	circle_mesh:Mesh,
+	line_mesh:Mesh, // the PC's 3D lines (lines_windows.odin); the handhelds draw none, so theirs stays empty
 
 	shader_state:Shader_State, // set_shader: the game shader everything queued next is drawn with (shader.odin)
 	lighting:Lighting_State, // set_lights and set_lighting; off and empty until a game calls them (light.odin)

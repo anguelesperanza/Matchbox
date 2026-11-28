@@ -324,6 +324,11 @@ init :: proc(title:string, width:i32, height:i32) {
 		delete(triangle_vertices)
 		delete(triangle_indices)
 
+		line_vertices, line_indices := create_line_geometry()
+		mbi.line_mesh = create_line_mesh(line_vertices, line_indices)
+		delete(line_vertices)
+		delete(line_indices)
+
 		circle_vertices, circle_indices := create_circle_geometry()
 		mbi.circle_mesh = create_mesh(circle_vertices, circle_indices)
 		delete(circle_vertices)
@@ -373,6 +378,7 @@ cleanup :: proc() {
 
 	destroy_mesh(mbi.triangle_mesh)
 	destroy_mesh(mbi.circle_mesh)
+	destroy_mesh(mbi.line_mesh)
 	destroy_mesh(mbi.sprite_mesh)
 	destroy_pipeline()
 	// mbi.blend_state->Release()

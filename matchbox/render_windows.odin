@@ -76,12 +76,20 @@ Mesh :: struct {
 	index_count:u32,
 	lit:bool, // made by create_lit_mesh: Lit_Vertex, 48 bytes a vertex, with normals
 	skinned:bool, // made by create_skinned_mesh: Skinned_Vertex, 56 bytes a vertex, with joints and weights (also lit)
+	lines:bool, // drawn as a line list, one pixel wide, not as triangles (create_line_mesh)
 }
 
 
 /*Copies vertices and indices to the GPU. The slices can be freed afterwards*/
 create_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
 	return create_mesh_from_bytes(mem.slice_to_bytes(vertices), len(vertices), indices)
+}
+
+/*Copies two or more vertices and their indices to the GPU as a line list, each pair of indices one line*/
+create_line_mesh :: proc(vertices:[]Vertex, indices:[]u16) -> (mesh:Mesh) {
+	mesh = create_mesh(vertices, indices)
+	mesh.lines = true
+	return
 }
 
 /*Copies vertices with normals and indices to the GPU, for a model part. The slices can be freed afterwards*/
@@ -180,7 +188,7 @@ render_item :: proc(item:Render_Item) {
 
 	upload_game_constants()
 
-	mbi.device_context->IASetPrimitiveTopology(.TRIANGLELIST)
+	mbi.device_context->IASetPrimitiveTopology(.LINELIST if item.mesh.lines else .TRIANGLELIST)
 	mbi.device_context->IASetInputLayout(pipeline.input_layout)
 	mbi.device_context->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset)
 	mbi.device_context->IASetIndexBuffer(item.mesh.index_buffer, .R16_UINT, 0)

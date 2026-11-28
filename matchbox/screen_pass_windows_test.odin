@@ -3,7 +3,7 @@
 package matchbox
 
 /*
-	The screen pass (the HUD): the order things are painted in, and what a clip does to them. Drawn on a real D3D11 device
+	The screen pass (the HUD): the order things are painted in, and what a clip does to them. Also the 3D lines, which need the same device. Drawn on a real D3D11 device
 	(the software one, WARP) into a render target and read back pixel by pixel, one unit a pixel so the numbers are by hand.
 	Colours are 0, 1 or a half, which sRGB leaves alone at 0 and 1; a see-through black over white is 0.5 linear, 188 in sRGB
 */
@@ -20,6 +20,7 @@ Saved_Device :: struct {
 	opaque_items:      [dynamic]Render_Item,
 	transparent_items: [dynamic]Render_Item,
 	sprite_mesh:       Mesh,
+	line_mesh:         Mesh,
 	camera_active:     bool,
 	state:             Render_Target_State,
 	clip:              Clip_State,
@@ -28,7 +29,7 @@ Saved_Device :: struct {
 @(private = "file")
 start_device :: proc() -> (saved: Saved_Device, ok: bool) {
 	sync.mutex_lock(&render_queue_lock)
-	saved = {mbi.backend, mbi.opaque_items, mbi.transparent_items, mbi.sprite_mesh, mbi.camera_active, mbi.render_target_state, mbi.clip}
+	saved = {mbi.backend, mbi.opaque_items, mbi.transparent_items, mbi.sprite_mesh, mbi.line_mesh, mbi.camera_active, mbi.render_target_state, mbi.clip}
 
 	device: ^d3d11.IDevice
 	device_context: ^d3d11.IDeviceContext
@@ -48,6 +49,10 @@ start_device :: proc() -> (saved: Saved_Device, ok: bool) {
 	mbi.sprite_mesh = create_mesh(vertices, indices)
 	delete(vertices)
 	delete(indices)
+	line_vertices, line_indices := create_line_geometry()
+	mbi.line_mesh = create_line_mesh(line_vertices, line_indices)
+	delete(line_vertices)
+	delete(line_indices)
 	return saved, true
 }
 
@@ -57,6 +62,7 @@ stop_device :: proc(saved: Saved_Device) {
 		device := mbi.device
 		device_context := mbi.device_context
 		destroy_mesh(mbi.sprite_mesh)
+		destroy_mesh(mbi.line_mesh)
 		mbi.white_texture_view->Release()
 		mbi.white_texture->Release()
 		destroy_pipeline()
@@ -67,6 +73,7 @@ stop_device :: proc(saved: Saved_Device) {
 	mbi.opaque_items = saved.opaque_items
 	mbi.transparent_items = saved.transparent_items
 	mbi.sprite_mesh = saved.sprite_mesh
+	mbi.line_mesh = saved.line_mesh
 	mbi.camera_active = saved.camera_active
 	mbi.render_target_state = saved.state
 	mbi.clip = saved.clip
@@ -283,4 +290,77 @@ a_one_pixel_rectangle_is_one_crisp_pixel_at_odd_and_even_heights :: proc(t: ^tes
 		}
 		testing.expectf(t, lit == 1 && partial == 0, "height %v: %v rows lit, %v of them part-lit", height, lit, partial)
 	}
+}
+
+// Counts the pixels of one colour in the whole picture
+@(private = "file")
+count_pixels :: proc(pixels: []u8, colour: [3]u8) -> int {
+	count := 0
+	for index in 0 ..< len(pixels) / 4 {
+		if pixels[index * 4] == colour[0] && pixels[index * 4 + 1] == colour[1] && pixels[index * 4 + 2] == colour[2] do count += 1
+	}
+	return count
+}
+
+@(test)
+a_3d_line_along_z_is_seen_and_a_nearer_surface_hides_it :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	// From (0, 5, 5) looking at the origin, a line along Z (which render_line, flat in XY, could not draw) runs down the middle
+	camera := create_camera_3d({0, 5, 5}, {0, 0, 0}, 70)
+	target := create_render_target({width = SIZE * 4, height = SIZE * 4})
+	defer destroy_render_target(&target)
+
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(camera)
+	render_line_3d({0, 0, -3}, {0, 0, 3}, WHITE_OPAQUE)
+	camera_end()
+	render_target_end()
+	seen := count_pixels(read_render_target_pixels(target, context.temp_allocator), {255, 255, 255})
+	testing.expect(t, seen >= 10 && seen <= 80, "a one pixel line across a 64 pixel picture should light a few dozen pixels")
+
+	// The same line behind a big quad at z = 4, queued first so only the depth test can hide it
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(camera)
+	render_rectangle({0, 0, 4}, {40, 40}, {0, 1, 0, 1})
+	render_line_3d({0, 0, -3}, {0, 0, 3}, WHITE_OPAQUE)
+	camera_end()
+	render_target_end()
+	hidden := count_pixels(read_render_target_pixels(target, context.temp_allocator), {255, 255, 255})
+	testing.expect_value(t, hidden, 0)
+}
+
+@(test)
+a_grid_draws_a_line_for_every_slice_and_a_box_draws_its_edges :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	camera := create_camera_3d({0, 9, 0.01}, {0, 0, 0}, 60) // straight down, so the grid is a square seen flat
+	target := create_render_target({width = 64, height = 64})
+	defer destroy_render_target(&target)
+
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(camera)
+	render_grid(4, 1, {0.5, 0.5, 0.5, 1}) // lines at -2..2; the ones through the origin are the same colour here (alpha is already 1)
+	camera_end()
+	render_target_end()
+	pixels := read_render_target_pixels(target, context.temp_allocator)
+	// Five lines each way, so along the middle row there are five crossings of the vertical ones at most
+	lit_in_row := 0
+	for x in 0 ..< 64 do if pixel_at(pixels, 64, x, 20).r > 0 do lit_in_row += 1
+	testing.expect_value(t, lit_in_row, 5)
+
+	// A unit box: 12 edges, which from straight above show as a square (the near and far faces overlap)
+	render_target_start(&target, [4]f32{0, 0, 0, 1})
+	camera_start(camera)
+	render_bounds_wires({-1, 0, -1}, {1, 1, 1}, WHITE_OPAQUE)
+	camera_end()
+	render_target_end()
+	boxed := count_pixels(read_render_target_pixels(target, context.temp_allocator), {255, 255, 255})
+	testing.expect(t, boxed > 40, "the box's outline should light a ring of pixels")
 }

@@ -31,7 +31,7 @@ line numbers) were **not** opened; only the repository and branch were confirmed
 | D4 | correct | `load_model_checked` exists; `load_skybox_*` and `load_texture` stop on bad input |
 | D5 | unconfirmed | targets are fixed-size and do not nest, as stated; whether destroy + create between frames is cheap and safe on PC is untested |
 | D6 | correct | three light kinds plus ambient |
-| F | correct | the four comments name procedures that do not exist (`draw_bounds_wires`, `get_pref_path`, `fixed_camera_add_shot`, `camera_shot_contains`) |
+| F | correct | the four comments name procedures that do not exist (`get_pref_path`, `fixed_camera_add_shot`, `camera_shot_contains`) |
 
 ## 2. Decisions
 
@@ -181,6 +181,18 @@ because of `o3dx/ctru` socket names; it was not run before this change, so I did
 Shapes are untextured quads with no multisampling, so there is nothing to blur; **no change made**. Text (linear-filtered glyphs)
 is the one thing an odd height could soften, and it was not measured here. Not seen: any of this on a real screen.
 
+**Phase 3, D1 + D2 done: 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 266 pass.
+*D2:* `ray.odin` (shared by every target, pure maths). The ray and the projection use `calculate_camera_projection_gl` and the view
+matrix, the same ones `camera_start` draws with. Screen points are in screen-pass units (+Y up). Stargate's 28-case ray-box table
+(made in Python by another algorithm) and its plane, sphere, oriented-box and round-trip tests are ported with the cases unchanged;
+the y flip is the only difference. Flipping the ndc y in `calculate_ray_from_screen` fails the round trip.
+*D1:* a line is one draw of a shared two-vertex mesh drawn as a **line list** (new `Mesh.lines`, `LINELIST` topology), stretched
+between its ends by the model matrix, so there are no per-frame vertices; 1 pixel wide, depth-tested. A 40 by 40 grid is 82 draws
+(not measured for cost). A thickness was left out on purpose: a thick line would need a camera-facing quad whose pixel width
+changes along its length, and nothing asks for one. Pixel tests: a line along Z is seen, and is hidden behind a nearer quad
+drawn first; the grid has one line per slice; the box draws a ring. Using triangle topology instead fails two of them.
+The handhelds get no-op stubs. The `level` comments now name `render_bounds_wires`. Not seen on a real screen.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -204,3 +216,12 @@ New public names so far (the user reads this list at the end):
 | `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |
 | `MAX_CLIP_DEPTH` | constant (array size) | `clip.odin` (shared) |
 | `Clip_Rectangle`, `Clip_State` | structs | `clip.odin` (shared) |
+| `Ray` (`origin`, `direction`) | struct | `ray.odin` (shared) |
+| `calculate_ray_point(ray, distance)` | procedure | `ray.odin` (shared) |
+| `calculate_ray_from_screen(camera, point, min, max)` | procedure | `ray.odin` (shared) |
+| `calculate_world_to_screen(camera, point, min, max)` | procedure | `ray.odin` (shared) |
+| `calculate_ray_plane`, `calculate_ray_sphere`, `calculate_ray_box`, `calculate_ray_oriented_box` | procedures | `ray.odin` (shared) |
+| `render_line_3d(start, end, color)` | procedure | `lines_windows.odin`, handheld stub |
+| `render_grid(slices, spacing, color, height := 0)` | procedure | `lines_windows.odin`, handheld stub |
+| `render_bounds_wires(lower, upper, color, model := identity)` | procedure | `lines_windows.odin`, handheld stub |
+| `create_line_mesh(vertices, indices)`, `create_line_geometry()` | procedures | `render_windows.odin`, `mesh.odin` |

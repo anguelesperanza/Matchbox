@@ -14,7 +14,7 @@ package level
 
 	**The level package stores and answers; it does not draw.** The editor draws
 	shapes, and a game that wants to see its own triggers has
-	`mb.draw_bounds_wires` for exactly the pair `shape_bounds` returns.
+	`mb.render_bounds_wires` for exactly the pair `shape_bounds` returns.
 */
 
 import "core:math/linalg"
@@ -43,7 +43,7 @@ SHAPE_DEFAULTS :: Shape_Defaults{size = 0.5, color = {0.35, 0.85, 0.55, 1}}
 /*
 	The world-space corners of the box a shape takes up: the pair
 	`mb.Camera_Shot` reads as `zone_min` and `zone_max`, and the pair
-	`mb.draw_bounds_wires` draws.
+	`mb.render_bounds_wires` draws.
 
 		shot: mb.Camera_Shot
 		shot.zone_min, shot.zone_max, _ = level.get_level_shape_bounds(&yard, "hall")

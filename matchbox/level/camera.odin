@@ -117,7 +117,7 @@ get_level_camera :: proc(level: ^Level, name: string) -> (camera: mb.Camera, ok:
 	game reads the shot back in one call:
 
 		shot, ok := level.get_level_camera_shot(&house, "fixed_angle_one")
-		if ok do mb.fixed_camera_add_shot(&rig, shot)
+		if ok do mb.add_fixed_camera_shot(&rig, shot)
 
 	**Which child is which is decided by component, not by name.** The camera is
 	the group's own camera component, or the first child that has one. The zone

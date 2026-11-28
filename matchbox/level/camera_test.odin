@@ -252,7 +252,7 @@ test_a_shot_takes_its_lens_from_the_camera_and_its_zone_from_the_bounds :: proc(
 
 	// The character has to be able to stand in it, or the shot never comes on
 	// screen however right its numbers look. Written out rather than called
-	// through `mb.camera_shot_contains`, which is private to Matchbox.
+	// through `is_point_in_camera_shot`, which is private to Matchbox.
 	inside := true
 	for axis in 0 ..< 3 {
 		if shot.position[axis] < shot.zone_min[axis] || shot.position[axis] > shot.zone_max[axis] do inside = false

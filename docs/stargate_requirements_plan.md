@@ -229,6 +229,25 @@ and the target stays drawable with the new size. **That is a software device; a 
 measured.** `destroy_render_target` was already guarded against the target being drawn into.
 *Not done:* anything for D3 on the handhelds (the listing and the checked loaders are PC only; a handheld level still loads what `find_asset` finds).
 
+**Phase 6, B6 + F: done 2026-11-28 (uncommitted at the time of writing).**
+*B6, measured:* `examples/ui-bench` (`odin run examples/ui-bench -o:speed`) draws an editor-sized 1920x1080 frame: three scroll panels of 50 text rows
+(about 1500 glyphs each), 12 buttons, a clipped scroll view, and a 3D viewport target with an 82-line grid, times 1, 2, 4 and 8. This PC's monitor
+refreshes at 120 Hz, so every frame was 8.33 ms (vsync) at all four loads, i.e. the GPU kept up.
+
+| Load | Draws a frame | UI build (CPU) | Submit (`screen_end`, CPU) |
+|---|---|---|---|
+| x1 (an inspector with a long list) | 3539 | 0.17 ms | 0.84 ms |
+| x2 | 6992 | 0.30 ms | 1.72 ms |
+| x4 | 13898 | 0.58 ms | 3.68 ms |
+| x8 | 27710 | 1.05 ms | 7.10 ms |
+
+*Verdict:* one draw per glyph and per rectangle is enough. The real editor screen is about x1, which costs about 1 ms of CPU; cost grows
+linearly (about 0.26 ms per thousand draws). **No batching of screen-pass items.** *Not measured:* a 60 Hz or weaker GPU than this PC's, and the
+handhelds (the UI is PC only).
+*F:* three comments brought into line with the renamed procedures (`level/camera.odin`, `level/camera_test.odin`, `level/load.odin`).
+`docs/g3_cameras_plan.md` and `docs/the_game_port_plan.md` still carry old names in their history tables, left as written.
+No new public names this phase.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |

@@ -107,7 +107,7 @@ load_level_models :: proc(level: ^Level) -> (missing: int) {
 
 	Through `core:os` rather than Matchbox, which reads files but has no reason
 	to write into a game's own folder: saving a level is for the editor, on a
-	desktop. A game saving its players' progress wants `mb.get_pref_path`.
+	desktop. Matchbox has no per-user save folder yet, so a game saving its players' progress picks its own.
 */
 save_level :: proc(level: Level, path: string, instancing := true, allocator := context.allocator) -> Level_Error {
 	data := marshal_level(level, instancing, allocator) or_return

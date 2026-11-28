@@ -218,8 +218,7 @@ Model_Component :: struct {
 	entity's world transform, so the rotate gizmo aims a light and there is no
 	second direction to keep in step with the first. Plan section 4.
 */
-// The kinds of light a level file can hold. Matchbox draws the first three; the two area kinds are read, kept and
-// saved, and drawn as point lights (see `get_entity_light`), so a level made for a richer engine still loads
+// The kinds of light a level file can hold. All five are drawn on PC; the handhelds draw the two area kinds as point lights at their centre
 Light_Kind :: enum {
 	DIRECTIONAL,
 	POINT,

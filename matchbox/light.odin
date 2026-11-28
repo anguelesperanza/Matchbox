@@ -51,6 +51,8 @@ Light_Kind :: enum {
 	DIRECTIONAL, // a sun: a direction and no place, everything is lit from the same angle (the zero value)
 	POINT, // a bulb: a place, shining every way, fading with distance
 	SPOT, // a torch: a place and a direction, lit inside a cone, fading with distance and towards the cone's edge
+	AREA_RECT, // PC only: a flat rectangle shining from its front face (`direction` is the way it faces). Elsewhere it is a point light at its centre
+	AREA_DISK, // PC only: the same as a disk of radius `area_size.x`. Elsewhere a point light
 }
 
 /*
@@ -70,6 +72,8 @@ Light :: struct {
 	specular:[4]f32,
 	inner_angle:f32, // SPOT only, degrees from the axis: full brightness inside it
 	outer_angle:f32, // SPOT only, degrees from the axis: faded to nothing by it
+	right:[3]f32, // AREA_RECT and AREA_DISK: the way the shape's width runs, world space, at right angles to `direction`; need not be unit length
+	area_size:[2]f32, // AREA_RECT: half the width and half the height; AREA_DISK: the radius in x
 }
 
 /*
@@ -147,7 +151,7 @@ Lights_Block :: struct {
 	direction:[LIGHT_SLOT_COUNT][4]f32, // DIRECTIONAL: towards the light; SPOT: back along its axis, the way a sun's is; eye space, w = 0, unit length (the 3DS's vertex program has no instructions to spare for normalizing); zero when unused
 	diffuse:[LIGHT_SLOT_COUNT][4]f32,
 	specular:[LIGHT_SLOT_COUNT][4]f32,
-	position:[LIGHT_SLOT_COUNT][4]f32, // eye space, w = the kind: 0 directional, 1 point, 2 spot
+	position:[LIGHT_SLOT_COUNT][4]f32, // eye space, w = the kind: 0 directional, 1 point, 2 spot, and on PC 3 a rectangle and 4 a disk (an area light's centre)
 	cone:[LIGHT_SLOT_COUNT][4]f32, // SPOT: cos(outer angle), cos(inner angle), then k = 1 / (the difference) and -outer * k, so a shader works the cone out as cos * k + (-outer * k), two instructions on the 3DS where subtracting and scaling is three; zero otherwise
 	/*
 		Where PC's shader loop stops, so a scene with one sun doesn't pay for 64 slots. The Vita's per-pixel shader
@@ -187,6 +191,23 @@ create_point_light :: proc(position:[3]f32, color:[4]f32 = WHITE) -> Light {
 // create_spot_light makes a torch at `position` shining along `direction`, full brightness inside `inner_angle` degrees of the axis and none past `outer_angle`.
 create_spot_light :: proc(position, direction:[3]f32, color:[4]f32 = WHITE, inner_angle:f32 = 20, outer_angle:f32 = 30) -> Light {
 	return Light{kind = .SPOT, position = position, direction = direction, diffuse = color, specular = color, inner_angle = inner_angle, outer_angle = outer_angle}
+}
+
+/*
+	create_area_rect_light makes a flat rectangle of light, `width` along `right` and `height` across it, centred on `position` and facing
+	`direction` (the way its light goes). It shines only from its front. PC only: the handhelds draw it as a point light at `position`.
+	The light is the nearest point of the rectangle to each pixel shining as a point light does, so it fades with distance like one
+*/
+create_area_rect_light :: proc(position, direction, right:[3]f32, width, height:f32, color:[4]f32 = WHITE) -> Light {
+	return Light{kind = .AREA_RECT, position = position, direction = direction, right = right, area_size = {width * 0.5, height * 0.5}, diffuse = color, specular = color}
+}
+
+// create_area_disk_light makes a flat disk of light of `radius` centred on `position` and facing `direction`, like create_area_rect_light.
+create_area_disk_light :: proc(position, direction:[3]f32, radius:f32, color:[4]f32 = WHITE) -> Light {
+	// A disk is round, so which way is "right" is only the direction its two axes are measured from: any one at right angles will do
+	helper := [3]f32{1, 0, 0} if abs(direction.x) < 0.9 * math.sqrt(max(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z, 1e-12)) else [3]f32{0, 1, 0}
+	right := [3]f32{direction.y * helper.z - direction.z * helper.y, direction.z * helper.x - direction.x * helper.z, direction.x * helper.y - direction.y * helper.x}
+	return Light{kind = .AREA_DISK, position = position, direction = direction, right = right, area_size = {radius, 0}, diffuse = color, specular = color}
 }
 
 /*
@@ -267,13 +288,27 @@ calculate_lights_block :: proc(lighting:Lighting_State, view:matrix[4,4]f32) -> 
 		light := lighting.lights[slot]
 		block.diffuse[slot] = light.diffuse
 		block.specular[slot] = light.specular
-		kind := f32(int(light.kind))
+		// The handhelds' lighting has no area lights: the point light at the centre is the nearest it can do
+		effective := light.kind
+		when ODIN_OS != .Windows {
+			if effective == .AREA_RECT || effective == .AREA_DISK do effective = .POINT
+		}
+		kind := f32(int(effective))
 		block.position[slot].w = kind
-		switch light.kind {
+		switch effective {
 		case .DIRECTIONAL:
 			// reversed, to point towards the light
 			towards := view * [4]f32{-light.direction.x, -light.direction.y, -light.direction.z, 0}
 			block.direction[slot] = calculate_unit_direction(towards.xyz)
+		case .AREA_RECT, .AREA_DISK:
+			// The way it faces, not reversed like a sun's: the shader tests which side of the shape a pixel is on. Its half height rides in
+			// the direction's w and its right vector and half width in `cone` (mbsc's mbs_light_sample)
+			place := view * [4]f32{light.position.x, light.position.y, light.position.z, 1}
+			block.position[slot] = {place.x, place.y, place.z, kind}
+			facing := calculate_unit_direction((view * [4]f32{light.direction.x, light.direction.y, light.direction.z, 0}).xyz)
+			right := calculate_unit_direction((view * [4]f32{light.right.x, light.right.y, light.right.z, 0}).xyz)
+			block.direction[slot] = {facing.x, facing.y, facing.z, light.area_size.y}
+			block.cone[slot] = {right.x, right.y, right.z, light.area_size.x}
 		case .POINT, .SPOT:
 			place := view * [4]f32{light.position.x, light.position.y, light.position.z, 1}
 			block.position[slot] = {place.x, place.y, place.z, kind}

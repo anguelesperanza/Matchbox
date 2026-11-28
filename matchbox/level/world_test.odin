@@ -168,11 +168,20 @@ test_a_light_turned_about_each_axis :: proc(t: ^testing.T) {
 		sun, _ := get_entity_light(entity^)
 		expect_near(t, sun.direction, c.forward, fmt.tprintf("%s: directional direction", what))
 
-		// Matchbox has no area lights: one comes back as a point light at the same place
+		// An area light keeps its place, faces along the entity's forward with its width along the entity's X, and its size
+		// (the component's half-extents, the light's too)
 		entity.light = Light_Component{kind = .AREA_RECT, color = mb.WHITE, intensity = 1, area_size = {1, 0.5}}
 		panel, _ := get_entity_light(entity^)
-		testing.expect_value(t, panel.kind, mb.Light_Kind.POINT)
+		testing.expect_value(t, panel.kind, mb.Light_Kind.AREA_RECT)
 		expect_near(t, panel.position, {1, 2, 3}, fmt.tprintf("%s: area light position", what))
+		expect_near(t, panel.direction, c.forward, fmt.tprintf("%s: area light facing", what))
+		expect_near(t, panel.right, c.right, fmt.tprintf("%s: area light width direction", what))
+		testing.expect_value(t, panel.area_size, [2]f32{1, 0.5})
+
+		entity.light = Light_Component{kind = .AREA_DISK, color = mb.WHITE, intensity = 1, area_size = {2, 0}}
+		disk, _ := get_entity_light(entity^)
+		testing.expect_value(t, disk.kind, mb.Light_Kind.AREA_DISK)
+		testing.expect_value(t, disk.area_size.x, 2)
 	}
 }
 

@@ -40,10 +40,12 @@ get_entity_light :: proc(entity: Entity) -> (light: mb.Light, ok: bool) {
 		light = mb.create_point_light(world.position, color)
 	case .SPOT:
 		light = mb.create_spot_light(world.position, forward, color, component.inner_angle, component.outer_angle)
-	case .AREA_RECT, .AREA_DISK:
-		// Matchbox has no area lights: a point light at the same place is the nearest it can do, and a bright
-		// one where an area light was meant to spread. Shadows are not cast either, so `casts_shadow` is not read
-		light = mb.create_point_light(world.position, color)
+	case .AREA_RECT:
+		// Faces along the entity's forward, its width along the entity's X. The component keeps half-extents, the light takes whole sizes
+		right := linalg.quaternion128_mul_vector3(world.rotation, [3]f32{1, 0, 0})
+		light = mb.create_area_rect_light(world.position, forward, right, component.area_size.x * 2, component.area_size.y * 2, color)
+	case .AREA_DISK:
+		light = mb.create_area_disk_light(world.position, forward, component.area_size.x, color)
 	}
 
 	return light, true

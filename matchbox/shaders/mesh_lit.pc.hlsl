@@ -96,6 +96,22 @@ float4 mbs_light_finish(float4 color, float3 view) {
 
 float mbs_light_sample(int i, float3 position, out float3 l) {
     float kind = lights_position[i].w;
+    if (kind > 2.5) {
+        float3 normal = lights_direction[i].xyz;
+        float3 right = lights_cone[i].xyz;
+        float3 up = cross(normal, right);
+        float3 away = position - lights_position[i].xyz;
+        float2 local = float2(dot(away, right), dot(away, up));
+        float2 extent = float2(lights_cone[i].w, lights_direction[i].w);
+        float reach = length(local);
+        float2 nearest = kind > 3.5 ? local * min(1.0, extent.x / max(reach, 1e-12)) : clamp(local, -extent, extent);
+        float3 to = lights_position[i].xyz + right * nearest.x + up * nearest.y - position;
+        float squared = max(dot(to, to), 1e-12);
+        float inverse = rsqrt(squared);
+        float d = squared * inverse;
+        l = to * inverse;
+        return (dot(away, normal) > 0.0 ? 1.0 : 0.0) / (1.0 + d * (0.09 + 0.032 * d));
+    }
     float is_point = step(0.5, kind);
     float is_spot = step(1.5, kind);
     float3 axis = lights_direction[i].xyz;

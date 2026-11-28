@@ -146,3 +146,25 @@ the_vita_block_sorts_lights_by_kind :: proc(t:^testing.T) {
 	testing.expect(t, block.cone[3][2] > 0)
 	testing.expect_value(t, block.cone[0], [4]f32{})
 }
+
+// An area light reaches the block as PC's shader reads it: the centre with its kind, the facing (not reversed) with the half height, the right vector with the half width
+@(test)
+area_lights_reach_the_block_facing_outwards :: proc(t:^testing.T) {
+	lighting:Lighting_State
+	lighting.lights[0] = create_area_rect_light({1, 2, 3}, {0, -1, 0}, {1, 0, 0}, 4, 2) // half sizes 2 and 1
+	lighting.lights[1] = create_area_disk_light({0, 0, 0}, {0, 0, -1}, 1.5)
+	lighting.light_count = 2
+	block := calculate_lights_block(lighting, calculate_camera_view_matrix({position = {0, 0, 5}, target = {0, 0, 0}, up = {0, 1, 0}}))
+
+	// the camera looks along -Z from z = 5, so eye space is world space moved 5 toward -Z
+	testing.expect_value(t, block.position[0], [4]f32{1, 2, -2, 3})
+	testing.expect_value(t, block.direction[0], [4]f32{0, -1, 0, 1})
+	testing.expect_value(t, block.cone[0], [4]f32{1, 0, 0, 2})
+	testing.expect_value(t, block.position[1], [4]f32{0, 0, -5, 4})
+	testing.expect_value(t, block.direction[1].xyz, [3]f32{0, 0, -1})
+	testing.expect_value(t, block.direction[1].w, 0)
+	testing.expect_value(t, block.cone[1].w, 1.5)
+	// the disk's right is at right angles to its facing, and unit length
+	right := block.cone[1].xyz
+	testing.expect(t, abs(right.x * right.x + right.y * right.y + right.z * right.z - 1) < 1e-5 && abs(right.z) < 1e-5, "a disk's right vector is a unit vector across its face")
+}

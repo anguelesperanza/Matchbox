@@ -1,6 +1,7 @@
 package mbsc
 
 import "core:fmt"
+import "core:math"
 import "core:strings"
 import "core:testing"
 
@@ -62,6 +63,7 @@ render_light :: proc(scene: Light_Scene, count: int, quat: [4]f32, view: [3]f32,
 	for slot in 0 ..< 8 {
 		direction, diffuse, specular := scene.direction[slot], scene.diffuse[slot], scene.specular[slot]
 		copy(lights[4 + slot * 4:], direction[:])
+		lights[4 + slot * 4 + 3] = scene.extent[slot]
 		copy(lights[4 + slots * 4 + slot * 4:], diffuse[:])
 		copy(lights[4 + 2 * slots * 4 + slot * 4:], specular[:])
 		position := [4]f32{scene.position[slot].x, scene.position[slot].y, scene.position[slot].z, f32(scene.kind[slot])}
@@ -204,4 +206,47 @@ the_scene_settings_do_what_they_say :: proc(t: ^testing.T) {
 	near(t, got, {1, 1, 1, 1}, "clamped")
 	got, message = render_light(bright, 0, front, eye, "light_diffuse(v.quat, v.view)", [4][4]f32{{}, {}, {}, {0, 1, 1, 1}})
 	near(t, got, {3, 3, 3, 1}, "left bright for a tonemap")
+}
+
+// Area lights, with numbers worked by hand: a rectangle and a disk facing -Z from the origin, a pixel looking up at them from z = -3
+@(test)
+area_lights_shine_from_their_nearest_point_and_their_front_only :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	// a surface whose normal is +Z, toward the light; the pixel sits at `at`, which the shader is told as the view vector negated
+	front := [4]f32{0, 0, 0, 1}
+	fade :: proc(distance: f32) -> f32 {return 1 / (1 + distance * (0.09 + 0.032 * distance))}
+
+	area := proc(kind: int, half_width, half_height: f32) -> Light_Scene {
+		scene: Light_Scene
+		scene.kind[0] = kind // 3 a rectangle, 4 a disk
+		scene.direction[0] = {0, 0, -1} // faces -Z
+		scene.extent[0] = half_height
+		scene.position[0] = {0, 0, 0}
+		scene.cone[0] = {1, 0, 0, half_width} // right is +X
+		scene.diffuse[0] = {1, 1, 1}
+		return scene
+	}
+	check :: proc(t: ^testing.T, scene: Light_Scene, at: [3]f32, want: f32, what: string) {
+		got, message := render_light(scene, 1, {0, 0, 0, 1}, -at, "light_diffuse(v.quat, v.view)")
+		testing.expect_value(t, message, "")
+		testing.expectf(t, abs(got.x - want) < 0.002, "%s: got %v, want %v", what, got.x, want)
+	}
+
+	rectangle := area(3, 1, 0.5)
+	check(t, rectangle, {0, 0, -3}, fade(3), "straight in front of the rectangle")
+	// beside it: the nearest point is its edge (1, 0, 0), 5 away, and the light comes 3/5 of the way along the normal
+	check(t, rectangle, {5, 0, -3}, 0.6 * fade(5), "past the rectangle's side")
+	// above it, in the rectangle's short direction: the nearest point is (0, +-0.5), so a pixel 2 off is 1.5 off it
+	check(t, rectangle, {0, 2, -3}, 3 / math.sqrt(f32(3 * 3 + 1.5 * 1.5)) * fade(math.sqrt(f32(3 * 3 + 1.5 * 1.5))), "past the rectangle's end")
+	check(t, rectangle, {0, 0, 3}, 0, "behind the rectangle")
+
+	disk := area(4, 1, 0)
+	check(t, disk, {0.7, 0.7, -3}, fade(3), "in front of the disk, inside its radius")
+	// outside: the nearest point is on the rim, a unit from the centre toward the pixel
+	rim := [3]f32{0.7071068, 0.7071068, 0}
+	to := [3]f32{rim.x - 1.4, rim.y - 1.4, 3}
+	distance := math.sqrt(to.x * to.x + to.y * to.y + to.z * to.z)
+	check(t, disk, {1.4, 1.4, -3}, 3 / distance * fade(distance), "past the disk's rim")
+	check(t, disk, {0, 0, 3}, 0, "behind the disk")
 }

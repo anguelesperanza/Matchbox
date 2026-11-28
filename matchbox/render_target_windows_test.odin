@@ -8,6 +8,7 @@ package matchbox
 	one grey is checked against the sRGB curve worked out separately (0.5 linear is 188/255)
 */
 
+import "core:math"
 import "core:log"
 import "core:sync"
 import "core:testing"
@@ -443,4 +444,46 @@ a_lit_model_gets_the_scenes_exposure_tonemap_fog_and_hemisphere :: proc(t:^testi
 	// a hemisphere: this plane faces up, so it gets the sky's colour and none of the ground's
 	hemisphere := Lighting_Settings{enabled = true, ambient = {1, 0, 0, 1}, hemisphere = true, ambient_ground = {0, 0, 1, 1}}
 	testing.expect_value(t, read_lit_plane(t, hemisphere), [4]u8{255, 0, 0, 255})
+}
+
+@(test)
+an_area_light_lights_what_is_in_front_of_it_and_not_what_is_behind :: proc(t:^testing.T) {
+	defer free_all(context.temp_allocator)
+	saved, ok := start_device()
+	defer stop_device(saved)
+	if ok == false do return
+
+	sync.mutex_lock(&mbi_lock)
+	defer sync.mutex_unlock(&mbi_lock)
+	saved_lighting := mbi.lighting
+	defer mbi.lighting = saved_lighting
+
+	// A unit disk 2 above the floor's middle, shining down: the nearest point to the middle is the disk's centre, 2 away
+	fade := 1 / (1 + 2 * (0.09 + 0.032 * 2.0))
+	want := math.pow(f32(fade), 1 / 2.4) * 1.055 - 0.055 // linear to sRGB, which the target encodes on the way in
+	below := create_area_disk_light({0, 2, 0}, {0, -1, 0}, 1)
+	below.specular = {} // the diffuse alone: a highlight straight under a light would saturate
+	set_lights({below})
+	set_lighting({enabled = true})
+	target := create_render_target({width = 8, height = 8})
+	defer destroy_render_target(&target)
+	vertices, indices := create_plane_geometry(40, context.temp_allocator)
+	plane := create_lit_mesh(vertices, indices)
+	defer destroy_mesh(plane)
+
+	draw :: proc(target:^Render_Target, plane:Mesh) -> [4]u8 {
+		render_target_start(target, [4]f32{0, 0, 0, 1})
+		camera_start(create_camera_3d({0, 3, 0.001}, {0, 0, 0}, 50))
+		render_mesh(plane)
+		camera_end()
+		render_target_end()
+		return pixel_at(read_render_target_pixels(target^, context.temp_allocator), 8, 4, 4)
+	}
+
+	lit := draw(&target, plane)
+	testing.expectf(t, abs(f32(lit.x) - want * 255) <= 3, "lit from in front: %v, wanted about %v", lit.x, want * 255)
+
+	// the same light turned to face up shines away from the floor: black
+	set_lights({create_area_disk_light({0, 2, 0}, {0, 1, 0}, 1)})
+	testing.expect_value(t, draw(&target, plane), [4]u8{0, 0, 0, 255})
 }

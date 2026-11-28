@@ -115,6 +115,26 @@ write_light_functions :: proc(builder: ^strings.Builder, render_block: string, l
 	// both sides anyway. A sun gets a harmless `to` (its position row is zero) that the lerp throws away
 	fmt.sbprintln(builder, "\nfloat mbs_light_sample(int i, float3 position, out float3 l) {")
 	fmt.sbprintln(builder, "    float kind = lights_position[i].w;")
+	// PC only, kinds 3 (rectangle) and 4 (disk): the light is the point of the shape nearest the pixel, which then shines as a point
+	// light does, from its front face only. `lights_direction` is the way it faces (not reversed, unlike a sun's) with its half height in w,
+	// `lights_cone` the unit right vector with the half width (a disk's radius) in w. A cheap stand-in for integrating over the shape, and
+	// exact for a pixel straight in front of a point inside it
+	fmt.sbprintln(builder, "    if (kind > 2.5) {")
+	fmt.sbprintln(builder, "        float3 normal = lights_direction[i].xyz;")
+	fmt.sbprintln(builder, "        float3 right = lights_cone[i].xyz;")
+	fmt.sbprintln(builder, "        float3 up = cross(normal, right);")
+	fmt.sbprintln(builder, "        float3 away = position - lights_position[i].xyz;")
+	fmt.sbprintln(builder, "        float2 local = float2(dot(away, right), dot(away, up));")
+	fmt.sbprintln(builder, "        float2 extent = float2(lights_cone[i].w, lights_direction[i].w);")
+	fmt.sbprintln(builder, "        float reach = length(local);")
+	fmt.sbprintln(builder, "        float2 nearest = kind > 3.5 ? local * min(1.0, extent.x / max(reach, 1e-12)) : clamp(local, -extent, extent);")
+	fmt.sbprintln(builder, "        float3 to = lights_position[i].xyz + right * nearest.x + up * nearest.y - position;")
+	fmt.sbprintln(builder, "        float squared = max(dot(to, to), 1e-12);")
+	fmt.sbprintln(builder, "        float inverse = rsqrt(squared);")
+	fmt.sbprintln(builder, "        float d = squared * inverse;")
+	fmt.sbprintln(builder, "        l = to * inverse;")
+	fmt.sbprintln(builder, "        return (dot(away, normal) > 0.0 ? 1.0 : 0.0) / (1.0 + d * (0.09 + 0.032 * d));")
+	fmt.sbprintln(builder, "    }")
 	fmt.sbprintln(builder, "    float is_point = step(0.5, kind);")
 	fmt.sbprintln(builder, "    float is_spot = step(1.5, kind);")
 	fmt.sbprintln(builder, "    float3 axis = lights_direction[i].xyz;")

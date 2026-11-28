@@ -134,7 +134,7 @@ sky-crash finding.
 - **7c, scene settings block (PC).** *Done.* One new constant buffer, `Scene_Settings` (exposure, tonemap kind including AGX, fog colour/near/far/density,
   hemisphere ambient sky + ground), read by the lit shaders and the unlit one for fog. `Lighting_Settings` gains the fields as defaulted values that mean
   "as before", so existing scenes draw unchanged (checked pixel for pixel against the old build's numbers).
-- **7d, area lights.** `AREA_RECT`/`AREA_DISK` as a closest-point-on-shape approximation in the PC shaders, `matchbox/level` stops flattening them.
+- **7d, area lights.** *Done.* `AREA_RECT`/`AREA_DISK` as a closest-point-on-shape approximation in the PC shaders, `matchbox/level` stops flattening them.
 - **7e, shadows.** One shadow map for the first directional or spot caster: depth-only pass of the casters, 3x3 PCF in the lit shaders, resolution,
   extent and bias settings; `level.draw_level_shadow_casters` already exists. Needs a per-draw custom shader or a built-in depth pipeline.
 - Handhelds: none of 7b-7e is planned for them; `matchbox/level` keeps ignoring what a handheld cannot draw.
@@ -295,6 +295,16 @@ camera (the asset-names and billboard tests now take the same locks as the other
 different in the editor; compare one scene side by side before trusting them. Fog and the tonemap apply to lit models only, not to unlit models, sprites, text, the skybox or per-vertex-lit parts
 (`mesh_vertex_lit` has no finish; it computes light in the vertex stage) and not to the 3DS or Vita. Not looked at on a real window.
 
+**Phase 7d, area lights: done 2026-11-28 (uncommitted at the time of writing).** `odin test matchbox`: 279 pass; level 58; `tools/mbsc` 142; 3DS and Vita checks clean.
+`Light_Kind` gains `AREA_RECT` and `AREA_DISK`, `Light` gains `right` and `area_size` (half-extents; a disk's radius in x), with `create_area_rect_light(position, direction, right, width, height, color)` and
+`create_area_disk_light(position, direction, radius, color)`. *How it is lit:* the nearest point of the shape to each pixel (clamped to the rectangle, or pulled in to the rim for a disk) shines as a point light does,
+with the engine's one distance curve, from the front face only (a pixel behind the shape gets nothing). It is a stand-in for integrating over the shape: exact for a pixel straight in front of a point inside it, and
+a hard-edged, slightly too bright penumbra elsewhere, with none of an area light's soft falloff and no spread highlight. In the block, kinds 3 and 4; the facing (not reversed, unlike a sun's) with the half height in
+`direction.w`, the right vector with the half width in `cone`. The handhelds turn an area light into a point light at its centre. `matchbox/level` now builds real area lights (facing the entity's forward, its width along the entity's X).
+*Measured:* mbsc's pixel test with numbers worked by hand (in front, past the side, past the end, behind, a disk inside and past its rim); a lit plane read back from a target (the fade of a disk 2 above it, and black when the
+disk faces away).
+*Not done:* Stargate's own area-light look was not compared; its numbers (`area_size` meaning, intensity) are taken at face value from the level format.
+
 New public names so far (the user reads this list at the end):
 
 | Name | Kind | Where |
@@ -323,6 +333,8 @@ New public names so far (the user reads this list at the end):
 | `get_level_lighting(level)` | procedure | `level/draw.odin` |
 | `Level_Ambient.kind`/`.ground_color`, `Level_Fog`, `Lighting_Settings.fog`/`.exposure`/`.tonemap`, `Ambient_Kind`, `Tonemap` | level file types | `level/level.odin` |
 | `light_finish(color, view)` | shader built-in (mbsc, PC only) | `tools/mbsc/builtins.odin`, `docs/shader_language.md` |
+| `Light_Kind.AREA_RECT`, `.AREA_DISK`; `Light.right`, `Light.area_size` | enum values, struct fields | `light.odin` (shared; PC only in effect) |
+| `create_area_rect_light(position, direction, right, width, height, color)`, `create_area_disk_light(position, direction, radius, color)` | procedures | `light.odin` (shared) |
 | `clip_start(min, max)` | procedure | `clip_windows.odin`, handheld stub |
 | `clip_end()` | procedure | `clip_windows.odin`, handheld stub |
 | `get_clip_rectangle()` | procedure | `clip_windows.odin`, handheld stub |

@@ -30,6 +30,7 @@ Light_Scene :: struct {
 	cone:              [8][4]f32, // a spot's cos(outer angle), cos(inner angle) 1 / their difference and minus the outer cosine times it
 	diffuse:           [8][3]f32,
 	specular:          [8][3]f32,
+	extent:            [8]f32, // an area light's half height, which rides in the direction row's w
 	shininess:         f32,
 	specular_strength: f32,
 }

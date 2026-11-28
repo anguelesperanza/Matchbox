@@ -550,7 +550,7 @@ when !VITA {
 			case .DIRECTIONAL:
 				position := c3d.C3D_FVec{x = direction.x, y = direction.y, z = direction.z, w = 0}
 				c3d.C3D_LightPosition(&light, &position)
-			case .POINT, .SPOT:
+			case .POINT, .SPOT, .AREA_RECT, .AREA_DISK: // calculate_lights_block turns an area light into a point light here, so the last two never arrive
 				place := block.position[slot]
 				position := c3d.C3D_FVec{x = place.x, y = place.y, z = place.z, w = 1}
 				c3d.C3D_LightPosition(&light, &position)

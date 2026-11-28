@@ -5,7 +5,7 @@ error[MBS-E1]: `sin` is not available in 3DS vertex shaders
    |                                  ^^^^^^^^^^^^^^^^^^^^^ no instruction for this on the target
    |
    = note: it is used in `vertex_main`; the PICA200 vertex unit has no instruction for it, and mbsc doesn't swap in a close one
-   = help: use `sin_approx(x)`, which states its error
+   = help: use `sin_approx(x)`, which states its error. It grows with the angle (section 15), so a hash like `fract(sin(x) * 43758.5)` can't use it: write a hash with no sine, such as `fract(dot(fract(p * 0.1031), q))`
    = more: docs/shader_errors.md#mbs-e1
 
 mbsc: e01_vertex_builtin.mbs: 1 error(s)

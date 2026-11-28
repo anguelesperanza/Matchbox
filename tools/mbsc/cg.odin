@@ -37,6 +37,15 @@ RESERVED := [?]string {
 		"main", "fixed", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE", "tex1D", "tex2D", "tex3D", "texCUBE",
 		"tex2Dlod", "tex2Dbias", "tex2Dgrad", "tex2Dproj", "POSITION", "COLOR", "COLOR0", "TEXCOORD0", "WPOS", "TEXUNIT0",
 	"uint", "uniform", "unorm", "unsigned", "vector", "vertexshader", "void", "volatile", "while",
+	// More words psp2cgc rejects as a name, found by trying each one as a local (the Cg spec reserves them for C++-isms
+	// it never implemented; `column` and `row` are not on the spec's list at all, which is how crt.mbs hit one)
+	"asm_fragment", "auto", "catch", "char", "column", "const_cast", "decl", "delete", "dword", "dynamic_cast", "emit",
+	"enum", "explicit", "friend", "goto", "long", "mutable", "new", "operator", "pass", "pixelfragment", "private",
+	"protected", "public", "reinterpret_cast", "row", "samplerRECT", "sampler_state", "short", "signed", "sizeof",
+	"static_cast", "template", "texture1D", "texture2D", "texture3D", "textureCUBE", "textureRECT", "this", "throw",
+	"try", "typeid", "typename", "union", "using", "vertexfragment", "virtual",
+	"half2", "half3", "half4", "float2", "float3", "float4", "float2x2", "float3x3", "float4x4", "float4x3", "float3x4",
+	"int2", "int3", "int4", "bool2", "bool3", "bool4", "fixed2", "fixed3", "fixed4", "half2x2", "half3x3", "half4x4",
 	// intrinsics a shader could be tempted to name something after
 	"abs", "acos", "all", "any", "asin", "atan", "atan2", "ceil", "clamp", "clip", "cos", "cosh", "cross", "ddx",
 	"ddy", "degrees", "determinant", "distance", "dot", "exp", "exp2", "floor", "fmod", "frac", "fwidth",

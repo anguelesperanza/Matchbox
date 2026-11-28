@@ -20,11 +20,69 @@ package matchbox
 */
 
 import "core:mem"
+import "core:strings"
 
 import "vito/gfx"
 import "vito/sce"
 
 when VITA {
+
+	/*
+		The lights and the material as ONE program holds them. psp2cgc keeps a uniform only in the program that reads it, so
+		the built-ins have these in the one program their lighting mode says, and a game shader may have each in its vertex
+		program, its fragment program or both. A nil field is skipped by gfx.set_uniform, so writing a set to a program that
+		does not hold it costs nothing
+	*/
+	Light_Parameters :: struct {
+		ambient:^sce.GxmProgramParameter,
+		direction:^sce.GxmProgramParameter,
+		diffuse:^sce.GxmProgramParameter,
+		specular:^sce.GxmProgramParameter,
+		position:^sce.GxmProgramParameter,
+		cone:^sce.GxmProgramParameter,
+		split:^sce.GxmProgramParameter, // per pixel only: where the suns, the bulbs and all the lights end in the sorted block (nil per vertex, whose loop runs all 8)
+		shininess:^sce.GxmProgramParameter,
+		specular_strength:^sce.GxmProgramParameter,
+	}
+
+	/*
+		One uniform of a game shader, in the vertex program and in the fragment program. The built-ins read each engine
+		uniform in one known program, but a game shader reads any in either (a tint or the time is as likely to be used by
+		the fragment stage), and psp2cgc drops it from the program that does not. nil where it is not
+	*/
+	Dual_Parameter :: struct {
+		vertex:^sce.GxmProgramParameter,
+		fragment:^sce.GxmProgramParameter,
+	}
+
+	// The engine's uniforms a game shader may read, besides the lights
+	Engine_Uniform :: enum {
+		VIEW_PROJECTION,
+		VIEW,
+		MODEL,
+		TINT,
+		UV_RECTANGLE,
+		ALPHA_CUTOFF,
+		TIME,
+		SKIN_ROW0,
+		SKIN_ROW1,
+		SKIN_ROW2,
+	}
+
+	/*What a game shader's pipeline has that a built-in's does not: where each uniform lives, found once at load. nil in the built-ins*/
+	Game_Bindings :: struct {
+		engine:[Engine_Uniform]Dual_Parameter,
+		vertex_lights:Light_Parameters,
+		fragment_lights:Light_Parameters,
+		/*
+			Any lights_* uniform is read. Such a shader draws only while lighting is on (choose_game_shader): the lights are filled
+			at camera_end only then, so with lighting off it would read zeros and draw black
+		*/
+		reads_lights:bool,
+		uniforms:[]Dual_Parameter, // one per game uniform, in the order of Vita_Game_Uniforms.entries
+		texture_units:[4]u32, // the fragment program's samplers that were kept, in the order the reflection lists them; the first takes the draw's texture
+		texture_count:int,
+	}
 
 	/*
 		Everything one shader needs to draw. Two live in Backend_State: `mbi.pipeline` and
@@ -59,16 +117,8 @@ when VITA {
 
 		// The lit pipelines' alone, nil in the unlit one. mbsc's names (tools/mbsc/lighting.odin)
 		view_uniform:^sce.GxmProgramParameter, // the vertex program's: eye space
-		// The rest are the fragment program's per pixel and the vertex program's per vertex
-		lights_ambient_uniform:^sce.GxmProgramParameter,
-		lights_direction_uniform:^sce.GxmProgramParameter,
-		lights_diffuse_uniform:^sce.GxmProgramParameter,
-		lights_specular_uniform:^sce.GxmProgramParameter,
-		lights_position_uniform:^sce.GxmProgramParameter,
-		lights_cone_uniform:^sce.GxmProgramParameter,
-		lights_split_uniform:^sce.GxmProgramParameter, // per pixel only: where the suns, the bulbs and all the lights end in the sorted block (nil per vertex, whose loop runs all 8)
-		shininess_uniform:^sce.GxmProgramParameter,
-		specular_strength_uniform:^sce.GxmProgramParameter,
+		// The fragment program's per pixel and the vertex program's per vertex
+		lights:Light_Parameters,
 
 		// The skinned shaders' alone, nil in the others: the joint palette as three arrays of float4, `mbi.skin_settings.joint_limit` each
 		skin_row0_uniform:^sce.GxmProgramParameter,
@@ -76,6 +126,9 @@ when VITA {
 		skin_row2_uniform:^sce.GxmProgramParameter,
 
 		white_texture:gfx.Texture, // bound for untextured draws: the shader always samples. mbi.pipeline's serves both
+
+		// A game shader's alone (shader_vita_freestanding_arm32.odin); nil in the built-ins, which use the fields above
+		game:^Game_Bindings,
 	}
 
 	/*
@@ -255,16 +308,235 @@ when VITA {
 			// psp2cgc keeps a uniform only in the program that reads it: the fragment one per pixel, the vertex
 			// one per vertex
 			reads := pipeline.fragment_shader if mode == .PER_PIXEL else vertex
-			pipeline.lights_ambient_uniform = find(reads, "lights_ambient")
-			pipeline.lights_direction_uniform = find(reads, "lights_direction")
-			pipeline.lights_diffuse_uniform = find(reads, "lights_diffuse")
-			pipeline.lights_specular_uniform = find(reads, "lights_specular")
-			pipeline.lights_position_uniform = find(reads, "lights_position")
-			pipeline.lights_cone_uniform = find(reads, "lights_cone")
-			if mode == .PER_PIXEL do pipeline.lights_split_uniform = find(reads, "lights_split")
-			pipeline.shininess_uniform = find(reads, "render_shininess")
-			pipeline.specular_strength_uniform = find(reads, "render_specular_strength")
+			pipeline.lights.ambient = find(reads, "lights_ambient")
+			pipeline.lights.direction = find(reads, "lights_direction")
+			pipeline.lights.diffuse = find(reads, "lights_diffuse")
+			pipeline.lights.specular = find(reads, "lights_specular")
+			pipeline.lights.position = find(reads, "lights_position")
+			pipeline.lights.cone = find(reads, "lights_cone")
+			if mode == .PER_PIXEL do pipeline.lights.split = find(reads, "lights_split")
+			pipeline.lights.shininess = find(reads, "render_shininess")
+			pipeline.lights.specular_strength = find(reads, "render_specular_strength")
 		}
+	}
+
+	/*
+		Makes a Render_Pipeline for a GAME shader from the bytes of its two .gxp files and the text of its .vita.refl (docs/shader_cg.md,
+		"Vita reflection"), the same programs the built-ins have: one vertex program for the mesh layout it reads, and one fragment
+		program per blend mode. What differs from load_render_pipeline, which reads nothing but its arguments and stops on any
+		engine uniform that is missing:
+		- every engine uniform is optional, because psp2cgc drops one the program never reads, and each may be in either program
+		  (Dual_Parameter), so a missing one is nil and every write skips it. Only the built-ins stop on a missing uniform: their
+		  shader is the engine's own, so a missing one is a bug in the engine, not a choice the shader made
+		- the vertex inputs are the ones the reflection lists AND the program kept. An input psp2cgc dropped is left out: gfx.attribute
+		  gives a missing one register 0, which another attribute owns, and Vita3K accepts two attributes on one register where
+		  real GXM crashed (see the skinned built-ins)
+		- a normal in the reflection means the Lit_Vertex layout, whether or not the shader reads the lights
+		- the texture units come from the program, by the names the reflection lists, not from a fixed "tex"
+		The programs register a copy of the bytes (gfx.register_program), so the slices need not outlive the call; the reflection's
+		strings are only read here, and its game entries' names are kept by the caller. Anything the engine cannot honour stops
+		with a message, as in load_render_pipeline
+	*/
+	@(private)
+	create_game_render_pipeline :: proc(vertex_gxp:[]u8, fragment_gxp:[]u8, reflection:^Vita_Reflection, game_entries:[]Vita_Game_Entry, skinned:bool) -> (pipeline:Render_Pipeline) {
+		pipeline.skinned = skinned
+		ok:bool
+		pipeline.vertex_shader, ok = gfx.register_program(vertex_gxp)
+		if !ok do fail_pipeline("A game vertex .gxp could not be registered")
+		pipeline.fragment_shader, ok = gfx.register_program(fragment_gxp)
+		if !ok do fail_pipeline("A game fragment .gxp could not be registered")
+		vertex := pipeline.vertex_shader
+		fragment := pipeline.fragment_shader
+		reads_normal := vita_reads_normal(reflection)
+
+		attributes:[6]sce.GxmVertexAttribute
+		count := 0
+		for attribute in reflection.attributes {
+			offset:uintptr
+			format, components:u8
+			switch attribute.name {
+			case "position": offset, format, components = offset_of(Lit_Vertex, position), sce.GXM_ATTRIBUTE_FORMAT_F32, 3
+			case "texcoord": offset, format, components = offset_of(Lit_Vertex, uv), sce.GXM_ATTRIBUTE_FORMAT_F32, 2
+			case "color":    offset, format, components = offset_of(Lit_Vertex, color), sce.GXM_ATTRIBUTE_FORMAT_F32, 4
+			case "normal":   offset, format, components = offset_of(Lit_Vertex, normal), sce.GXM_ATTRIBUTE_FORMAT_F32, 3
+			// Joints are whole numbers 0 to 255 for the program to use as an index; weights are normalised to 0 to 1
+			case "joints":   offset, format, components = offset_of(Skinned_Vertex, joints), sce.GXM_ATTRIBUTE_FORMAT_U8, 4
+			case "weights":  offset, format, components = offset_of(Skinned_Vertex, weights), sce.GXM_ATTRIBUTE_FORMAT_U8N, 4
+			case:
+				print("a game shader reads a vertex input the engine has no data for:", attribute.name)
+				fail_pipeline("A game shader reads a vertex input the engine's meshes do not have")
+			}
+			if !skinned && (attribute.name == "joints" || attribute.name == "weights") {
+				print("a game shader that is not a _skinned variant reads", attribute.name)
+				fail_pipeline("Only a _skinned game shader may read joints and weights")
+			}
+			name := get_parameter_name("a_", attribute.name)
+			if gfx.parameter(vertex, name) == nil do continue // dropped by psp2cgc: left out, see above
+			attributes[count] = gfx.attribute(vertex, name, u16(offset), format, components)
+			count += 1
+		}
+		if count == 0 do fail_pipeline("A game vertex program keeps none of the vertex inputs")
+
+		if skinned {
+			pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:count], size_of(Skinned_Vertex))
+		} else if reads_normal {
+			pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:count], size_of(Lit_Vertex))
+		} else {
+			pipeline.vertex_program = gfx.create_vertex_program(vertex, attributes[:count], size_of(Vertex))
+			// A lit mesh's vertices start with a whole Vertex, so the same attributes read it with the longer stride
+			pipeline.lit_vertex_program = gfx.create_vertex_program(vertex, attributes[:count], size_of(Lit_Vertex))
+			if pipeline.lit_vertex_program == nil do fail_pipeline("The game shader's program for lit meshes could not be made")
+		}
+		if pipeline.vertex_program == nil do fail_pipeline("A game vertex program could not be made")
+
+		blends := [Blend_Mode]gfx.Blend {
+			.NONE = .None,
+			.ALPHA = .Alpha,
+		}
+		for blend, mode in blends {
+			pipeline.fragment_programs[mode] = gfx.create_fragment_program(fragment, vertex, blend)
+			if pipeline.fragment_programs[mode] == nil do fail_pipeline("A game fragment program could not be made")
+		}
+
+		bindings := new(Game_Bindings)
+		pipeline.game = bindings
+		find :: proc(pipeline:^Render_Pipeline, name:cstring) -> Dual_Parameter {
+			return {vertex = gfx.parameter(pipeline.vertex_shader, name), fragment = gfx.parameter(pipeline.fragment_shader, name)}
+		}
+		bindings.engine[.VIEW_PROJECTION] = find(&pipeline, "frame_view_projection")
+		bindings.engine[.VIEW] = find(&pipeline, "frame_view")
+		bindings.engine[.MODEL] = find(&pipeline, "render_model")
+		bindings.engine[.TINT] = find(&pipeline, "render_tint")
+		bindings.engine[.UV_RECTANGLE] = find(&pipeline, "render_uv_rectangle")
+		bindings.engine[.ALPHA_CUTOFF] = find(&pipeline, "render_alpha_cutoff")
+		bindings.engine[.TIME] = find(&pipeline, "frame_time")
+		bindings.engine[.SKIN_ROW0] = find(&pipeline, "skin_row0")
+		bindings.engine[.SKIN_ROW1] = find(&pipeline, "skin_row1")
+		bindings.engine[.SKIN_ROW2] = find(&pipeline, "skin_row2")
+
+		// The same names the built-in lit shaders use, wherever this program has them. The block is written to both programs
+		// and each takes what it holds
+		find_lights :: proc(program:gfx.Program) -> (lights:Light_Parameters, reads:bool) {
+			lights.ambient = gfx.parameter(program, "lights_ambient")
+			lights.direction = gfx.parameter(program, "lights_direction")
+			lights.diffuse = gfx.parameter(program, "lights_diffuse")
+			lights.specular = gfx.parameter(program, "lights_specular")
+			lights.position = gfx.parameter(program, "lights_position")
+			lights.cone = gfx.parameter(program, "lights_cone")
+			lights.split = gfx.parameter(program, "lights_split")
+			lights.shininess = gfx.parameter(program, "render_shininess")
+			lights.specular_strength = gfx.parameter(program, "render_specular_strength")
+			reads = lights.ambient != nil || lights.direction != nil || lights.diffuse != nil || lights.specular != nil || lights.position != nil || lights.cone != nil || lights.split != nil
+			return
+		}
+		vertex_reads, fragment_reads:bool
+		bindings.vertex_lights, vertex_reads = find_lights(vertex)
+		bindings.fragment_lights, fragment_reads = find_lights(fragment)
+		bindings.reads_lights = vertex_reads || fragment_reads
+
+		bindings.uniforms = make([]Dual_Parameter, len(game_entries))
+		missing := 0
+		for entry, index in game_entries {
+			bindings.uniforms[index] = find(&pipeline, get_parameter_name("", entry.name))
+			if bindings.uniforms[index].vertex == nil && bindings.uniforms[index].fragment == nil {
+				// Not an error: psp2cgc drops a uniform no code reaches. Printed so a name the compiler spelled differently shows up
+				missing += 1
+				print("a game uniform is in neither program:", entry.name)
+			}
+		}
+
+		for texture in reflection.textures {
+			if bindings.texture_count == len(bindings.texture_units) do break
+			name := get_parameter_name("", texture.name)
+			if gfx.parameter(fragment, name) == nil do continue // a sampler the program never reads is dropped too
+			bindings.texture_units[bindings.texture_count] = gfx.texture_unit(fragment, name)
+			bindings.texture_count += 1
+		}
+
+		print("game pipeline:", len(reflection.attributes), "inputs,", count, "kept; game uniforms", len(game_entries), "missing", missing, "; textures", bindings.texture_count, "; lights", bindings.reads_lights)
+		return
+	}
+
+	/*`prefix` and `name` as one null-terminated string, on the temp allocator: gfx.parameter takes a cstring*/
+	@(private = "file")
+	get_parameter_name :: proc(prefix:string, name:string) -> cstring {
+		joined, _ := strings.concatenate({prefix, name}, context.temp_allocator)
+		text, _ := strings.clone_to_cstring(joined, context.temp_allocator)
+		return text
+	}
+
+	/*Gives back a game pipeline's programs. The GPU must be idle: the caller waits first (destroy_shader)*/
+	@(private)
+	destroy_game_render_pipeline :: proc(pipeline:^Render_Pipeline) {
+		unload_render_pipeline(pipeline)
+		if pipeline.game != nil {
+			delete(pipeline.game.uniforms)
+			free(pipeline.game)
+		}
+		pipeline^ = {}
+	}
+
+	/*
+		Draws one item with a game shader: the same writes as the built-ins' render_item, but each to whichever program holds
+		the uniform, and then the game's own uniforms from the shader's CPU copy. Every uniform is written on every draw,
+		because use_programs reserves fresh buffers for it
+	*/
+	@(private = "file")
+	render_game_item :: proc(item:Render_Item, blend:Blend_Mode, data:^Shader_Data, pipeline:^Render_Pipeline) {
+		bindings := pipeline.game
+		vertex_program := pipeline.vertex_program
+		// A shader that does not read the normal still draws lit meshes, through the program with their stride
+		if item.mesh.lit && !item.mesh.skinned && pipeline.lit_vertex_program != nil do vertex_program = pipeline.lit_vertex_program
+		vertex_uniforms, fragment_uniforms := gfx.use_programs(vertex_program, pipeline.fragment_programs[blend])
+
+		write_dual :: proc(vertex_uniforms:rawptr, fragment_uniforms:rawptr, parameter:Dual_Parameter, values:[]f32) {
+			gfx.set_uniform(vertex_uniforms, parameter.vertex, values)
+			gfx.set_uniform(fragment_uniforms, parameter.fragment, values)
+		}
+		write_dual_matrix :: proc(vertex_uniforms:rawptr, fragment_uniforms:rawptr, parameter:Dual_Parameter, matrix_value:^matrix[4, 4]f32) {
+			gfx.set_uniform_matrix(vertex_uniforms, parameter.vertex, matrix_value)
+			gfx.set_uniform_matrix(fragment_uniforms, parameter.fragment, matrix_value)
+		}
+
+		model := item.model
+		tint := item.tint
+		uv := item.uv_rectangle
+		cutoff := item.alpha_cutoff
+		seconds := f32(get_time())
+		write_dual_matrix(vertex_uniforms, fragment_uniforms, bindings.engine[.VIEW_PROJECTION], &mbi.camera_view_projection)
+		write_dual_matrix(vertex_uniforms, fragment_uniforms, bindings.engine[.VIEW], &mbi.view)
+		write_dual_matrix(vertex_uniforms, fragment_uniforms, bindings.engine[.MODEL], &model)
+		write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.TINT], tint[:])
+		write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.UV_RECTANGLE], uv[:])
+		write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.ALPHA_CUTOFF], ([^]f32)(&cutoff)[:1])
+		write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.TIME], ([^]f32)(&seconds)[:1])
+		// The lights are this camera's, filled at camera_end while lighting is on; a shader that reads them is not drawn otherwise
+		// (choose_game_shader). The material is written either way: it is per part, not per light
+		write_light_parameters(&bindings.vertex_lights, vertex_uniforms, item.material)
+		write_light_parameters(&bindings.fragment_lights, fragment_uniforms, item.material)
+		if item.mesh.skinned {
+			rows := get_skin_rows(item)
+			limit := mbi.skin_settings.joint_limit
+			write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.SKIN_ROW0], ([^]f32)(raw_data(rows))[:4 * limit])
+			write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.SKIN_ROW1], ([^]f32)(raw_data(rows[limit:]))[:4 * limit])
+			write_dual(vertex_uniforms, fragment_uniforms, bindings.engine[.SKIN_ROW2], ([^]f32)(raw_data(rows[2 * limit:]))[:4 * limit])
+		}
+
+		game := &data.game
+		for entry, index in game.entries {
+			write_dual(vertex_uniforms, fragment_uniforms, bindings.uniforms[index], game.values[entry.offset:][:entry.floats])
+		}
+		game.dirty = false
+
+		// The draw's texture goes to the first sampler the shader kept; any others get plain white, which leaves the colour as it is
+		// when it is multiplied in (as on PC)
+		for index in 0 ..< bindings.texture_count {
+			texture := item.texture.texture if index == 0 else nil
+			if texture == nil do texture = &mbi.pipeline.white_texture
+			sce.sceGxmSetFragmentTexture(gfx.ctx, bindings.texture_units[index], &texture.texture)
+		}
+		sce.sceGxmSetVertexStream(gfx.ctx, 0, item.mesh.vertices)
+		sce.sceGxmDraw(gfx.ctx, .TRIANGLES, .U16, item.mesh.indices, item.mesh.index_count)
 	}
 
 	/*The SCE error says why, and it is lost unless printed before stopping*/
@@ -307,6 +579,11 @@ when VITA {
 	*/
 	@(private)
 	render_item :: proc(item:Render_Item, blend:Blend_Mode) {
+		// A game shader replaces the built-in for the meshes it has a pipeline for (shader_vita_freestanding_arm32.odin)
+		if data, pipeline := choose_game_shader(item); pipeline != nil {
+			render_game_item(item, blend, data, pipeline)
+			return
+		}
 		lit := item.mesh.lit && mbi.lighting.settings.enabled
 		pipeline := &mbi.pipeline
 		if lit {
@@ -360,23 +637,29 @@ when VITA {
 	*/
 	@(private = "file")
 	set_light_uniforms :: proc(pipeline:^Render_Pipeline, vertex_uniforms:rawptr, fragment_uniforms:rawptr, material:Material) {
-		lights := &mbi.camera_lights
 		gfx.set_uniform_matrix(vertex_uniforms, pipeline.view_uniform, &mbi.view)
 		buffer := fragment_uniforms if pipeline.lighting == .PER_PIXEL else vertex_uniforms
-		gfx.set_uniform(buffer, pipeline.lights_ambient_uniform, lights.ambient[:])
-		gfx.set_uniform(buffer, pipeline.lights_direction_uniform, ([^]f32)(&lights.direction)[:4 * LIGHT_SLOT_COUNT])
-		gfx.set_uniform(buffer, pipeline.lights_diffuse_uniform, ([^]f32)(&lights.diffuse)[:4 * LIGHT_SLOT_COUNT])
-		gfx.set_uniform(buffer, pipeline.lights_specular_uniform, ([^]f32)(&lights.specular)[:4 * LIGHT_SLOT_COUNT])
-		gfx.set_uniform(buffer, pipeline.lights_position_uniform, ([^]f32)(&lights.position)[:4 * LIGHT_SLOT_COUNT])
-		gfx.set_uniform(buffer, pipeline.lights_cone_uniform, ([^]f32)(&lights.cone)[:4 * LIGHT_SLOT_COUNT])
-		if pipeline.lights_split_uniform != nil {
+		write_light_parameters(&pipeline.lights, buffer, material)
+	}
+
+	/*Writes this camera's lights and a part's material into one program's buffer, to whichever of the uniforms that program holds (a nil one is skipped)*/
+	@(private = "file")
+	write_light_parameters :: proc(parameters:^Light_Parameters, buffer:rawptr, material:Material) {
+		lights := &mbi.camera_lights
+		gfx.set_uniform(buffer, parameters.ambient, lights.ambient[:])
+		gfx.set_uniform(buffer, parameters.direction, ([^]f32)(&lights.direction)[:4 * LIGHT_SLOT_COUNT])
+		gfx.set_uniform(buffer, parameters.diffuse, ([^]f32)(&lights.diffuse)[:4 * LIGHT_SLOT_COUNT])
+		gfx.set_uniform(buffer, parameters.specular, ([^]f32)(&lights.specular)[:4 * LIGHT_SLOT_COUNT])
+		gfx.set_uniform(buffer, parameters.position, ([^]f32)(&lights.position)[:4 * LIGHT_SLOT_COUNT])
+		gfx.set_uniform(buffer, parameters.cone, ([^]f32)(&lights.cone)[:4 * LIGHT_SLOT_COUNT])
+		if parameters.split != nil {
 			split := [3]f32{f32(lights.sun_count), f32(lights.sun_count + lights.point_count), f32(lights.count)}
-			gfx.set_uniform(buffer, pipeline.lights_split_uniform, split[:])
+			gfx.set_uniform(buffer, parameters.split, split[:])
 		}
 		shininess := material.shininess
 		strength := material.specular_strength
-		gfx.set_uniform(buffer, pipeline.shininess_uniform, ([^]f32)(&shininess)[:1])
-		gfx.set_uniform(buffer, pipeline.specular_strength_uniform, ([^]f32)(&strength)[:1])
+		gfx.set_uniform(buffer, parameters.shininess, ([^]f32)(&shininess)[:1])
+		gfx.set_uniform(buffer, parameters.specular_strength, ([^]f32)(&strength)[:1])
 	}
 
 	/*

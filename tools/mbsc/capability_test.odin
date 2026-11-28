@@ -1,5 +1,6 @@
 package mbsc
 
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -124,4 +125,23 @@ a_mistake_in_every_target_is_listed_once :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(report, "pc    1 problem"), report)
 	// the 3DS has the shared mistake and, in this shader, a matrix product its vertex unit can't do
 	testing.expect(t, strings.contains(report, "3ds   2 problems"), report)
+}
+
+@(test)
+a_fragment_error_does_not_send_the_author_to_a_builtin_that_fails_too :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	source, _ := strings.replace(no_carriage_returns(BASE), "\toutput.color = input.color * sin(input.position.x)\n", "", 1, context.temp_allocator)
+	for pair in ([?][2]string{
+		{"sin(v.color.x)", "no sine or cosine, even `sin_approx`"},
+		{"sin_approx(v.color.x)", "no sine or cosine, even `sin_approx`"},
+		{"dot(v.color, v.color)", "per-pixel vector maths"},
+		{"smoothstep(0.0, 1.0, v.color.x)", "ramp texture"},
+	}) {
+		changed, _ := strings.replace(source, "return sample(tex, v.uv) * v.color", fmt.aprintf("return sample(tex, v.uv) * %s", pair[0], allocator = context.temp_allocator), 1, context.temp_allocator)
+		messages := messages_for(changed, .PICA200)
+		testing.expect(t, strings.contains(messages, "MBS-E2"), messages)
+		testing.expect(t, strings.contains(messages, pair[1]), messages)
+		testing.expect(t, strings.contains(messages, "help: use `sin_approx(x)`") == false, messages)
+	}
 }

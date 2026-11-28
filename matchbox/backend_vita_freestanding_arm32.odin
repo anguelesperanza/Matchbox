@@ -89,7 +89,9 @@ when VITA {
 		itself, because `context` belongs to the caller and nothing calls Odin before odin_main
 	*/
 	start_runtime :: proc "contextless" () -> runtime.Context {
-		return vito.init()
+		context = vito.init()
+		context.logger = create_handheld_logger()
+		return context
 	}
 
 	/*Undoes start_runtime. Called after `main` returns*/

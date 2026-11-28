@@ -31,6 +31,7 @@ package matchbox
 import "core:math"
 import "core:math/linalg"
 import "core:mem"
+import "core:strings"
 
 import "o3dx/c3d"
 import "o3dx/ctru"
@@ -47,22 +48,35 @@ when !VITA {
 		skinned:bool, // made by create_skinned_mesh: Skinned_Vertex, 56 bytes a vertex (also lit)
 	}
 
-	/*Everything one shader needs to draw. Two live in Backend_State: `mbi.pipeline` and `mbi.lit_pipeline`*/
+	/*Everything one shader needs to draw. The built-ins live in Backend_State (`mbi.pipeline`, `mbi.lit_pipeline`, ...); a game's is made by create_game_render_pipeline*/
 	Render_Pipeline :: struct {
 		shader_bytes:[]u32, // the .shbin. The parsed program points into it, so it lives as long as the program
 		shader_binary:^ctru.DVLB_s,
 		program:ctru.shaderProgram_s,
 		/*
-			nil for the unlit shader. Otherwise it reads Lit_Vertex's normal as attribute 3, and is
-			lit per pixel with the lighting unit bound, or per vertex from the light uniforms below
+			How the fragment lighting unit is used: .PER_PIXEL binds it, .PER_VERTEX leaves it off and the program lights
+			from the light uniforms below, nil is neither. A built-in is told which; a game shader's is .PER_PIXEL when its
+			.tev reads the unit's results and nil otherwise (a game shader that lights in its own code reads the light
+			uniforms it declares and needs no mode: they are set wherever they are found)
 		*/
 		lighting:Maybe(Lighting_Mode),
+		/*
+			Reads Lit_Vertex's normal as attribute 3, so only lit meshes draw with it. Apart from `lighting` because a
+			shader can read the normal without using the lighting unit (a game's hologram, shield and snow do): the unit
+			needs the normal, the normal does not need the unit
+		*/
+		reads_normal:bool,
 		skinned:bool, // reads a Skinned_Vertex: six attributes, and a joint palette in registers
+		is_game:bool, // made from a game's files: its engine uniforms are optional, and it may have game uniforms
 
-		// Register of each engine uniform, found by name. mbsc names them <block>_<field>
+		// Register of each engine uniform, found by name; -1 where the program has none, and nothing is set there. The
+		// built-ins must have the ones they use (load_render_pipeline stops otherwise); a game shader declares only
+		// what it reads. mbsc names them <block>_<field>
 		model_uniform:i32,
 		view_projection_uniform:i32,
 		view_uniform:i32, // a lit shader's eye space; -1 in the unlit one, which has none
+		time_uniform:i32, // frame_time: a game shader's alone, the built-ins never read it
+		alpha_cutoff_uniform:i32, // render_alpha_cutoff read by the vertex program: a game shader's alone
 		// The per-vertex shader's alone, -1 in the others: the lights block and the material, read by the program
 		lights_ambient_uniform:i32,
 		lights_direction_uniform:i32, // the first of LIGHT_SLOT_COUNT registers, as are the next two
@@ -82,6 +96,12 @@ when !VITA {
 
 		tev:Tev_Plan,
 		white_texture:c3d.C3D_Tex, // bound for untextured draws, so the plan's TEXTURE0 leaves the colour alone. mbi.pipeline's serves both
+
+		// A game shader's own uniforms, held on the CPU and uploaded whole at every bind (upload_game_uniforms)
+		game:Pica_Game_Uniforms,
+		// Copies of a game shader's .tev and reflection text, which its plan and uniform names point into: the caller
+		// may free what it read. Empty for the built-ins, whose .tev is a #load
+		source_text:[2]string,
 	}
 
 	/*
@@ -184,6 +204,8 @@ when !VITA {
 	}
 
 	destroy_mesh :: proc(mesh:Mesh) {
+		// The GPU may still be reading these buffers for the last frame
+		c3d.FrameSync()
 		if mesh.indices != nil do ctru.linearFree(mesh.indices)
 		if mesh.vertices != nil do ctru.linearFree(mesh.vertices)
 	}
@@ -216,68 +238,241 @@ when !VITA {
 		create_lighting_unit(mbi.lit_pipeline.tev.lighting)
 	}
 
-	/*Loads one shader from romfs, finds its uniforms and reads its TexEnv plan*/
+	/*Loads one built-in shader from romfs. A missing file, uniform or plan stops with a message*/
 	@(private = "file")
 	load_render_pipeline :: proc(pipeline:^Render_Pipeline, shader_path:string, tev_text:string, lighting:Maybe(Lighting_Mode), skinned := false) {
-		pipeline.lighting = lighting
-		pipeline.skinned = skinned
 		path_buffer:[256]u8
 		path, path_ok := build_path(path_buffer[:], mbi.asset_path, shader_path)
 		ensure(path_ok, "Shader path is too long")
-		pipeline.shader_bytes = read_file_words(path)
-		if len(pipeline.shader_bytes) == 0 {
+		shader_bytes := read_file_words(path)
+		if len(shader_bytes) == 0 {
 			print("romfs has no", shader_path)
 			panic("A shader is missing from romfs: 3ds_build.bat assembles each with picasso")
 		}
+		message := build_render_pipeline(pipeline, shader_bytes, tev_text, "", lighting, skinned, false)
+		if message != "" {
+			print(shader_path, message)
+			panic("A built-in shader could not be loaded")
+		}
+	}
 
-		pipeline.shader_binary = ctru.DVLB_ParseFile(raw_data(pipeline.shader_bytes), u32(len(pipeline.shader_bytes) * size_of(u32)))
+	/*
+		Builds a Render_Pipeline for a game's shader from what its three files hold: the `.3ds.shbin` words, the `.3ds.tev`
+		text and the `.3ds.refl` text. Reading them (romfs, load_shader) is the caller's job, so this is the one place a
+		game shader and a built-in are the same thing, and a game does not need its files `#load`ed.
+
+		Takes the shbin words: they become the pipeline's and are freed with it, or here when this fails. The two texts
+		are copied, so the caller may free them. `skinned` says which vertex layout the caller means to draw it with
+		(a `_skinned` shader); the reflection must agree. `message` is empty when it worked, and otherwise says what
+		the engine cannot honour; the pipeline is then unusable and holds nothing to free.
+
+		What a game shader gets that a built-in does not: engine uniforms are optional (it declares only the ones it
+		reads, and the rest are -1 and not set), the lighting unit is used when its .tev reads the unit's results, the
+		normal is read when its reflection has the `normal` attribute, and any uniform of its own is held in
+		`pipeline.game` and uploaded at every bind
+	*/
+	@(private)
+	create_game_render_pipeline :: proc(pipeline:^Render_Pipeline, shader_bytes:[]u32, tev_text, reflection_text:string, skinned := false) -> (message:string) {
+		return build_render_pipeline(pipeline, shader_bytes, tev_text, reflection_text, nil, skinned, true)
+	}
+
+	/*Gives a game shader's pipeline back. The built-ins are given back by destroy_render_pipeline*/
+	@(private)
+	destroy_game_render_pipeline :: proc(pipeline:^Render_Pipeline) {
+		if mbi.bound_pipeline == pipeline do mbi.bound_pipeline = nil
+		unload_render_pipeline(pipeline)
+	}
+
+	/*
+		The engine uniforms a program may declare, which are exactly the fields mbsc's engine blocks have (tools/mbsc/engine.odin).
+		One that is not here comes from a compiler newer than this runtime, and would be left holding whatever a
+		register held, so it stops the load rather than draw wrong
+	*/
+	@(private = "file")
+	is_supported_engine_uniform :: proc(name:string) -> bool {
+		switch name {
+		case "frame_view_projection", "frame_time", "frame_view":
+			return true
+		case "render_model", "render_tint", "render_uv_rectangle", "render_alpha_cutoff", "render_shininess", "render_specular_strength":
+			return true
+		case "lights_ambient", "lights_direction", "lights_diffuse", "lights_specular", "lights_position", "lights_cone":
+			return true
+		case "skin_row0", "skin_row1", "skin_row2":
+			return true
+		}
+		return false
+	}
+
+	/*The vertex input register an attribute has in the layouts use_render_pipeline builds; -1 for a name the engine's meshes lack*/
+	@(private = "file")
+	get_attribute_register :: proc(name:string) -> int {
+		switch name {
+		case "position": return 0
+		case "texcoord": return 1
+		case "color":    return 2
+		case "normal":   return 3
+		case "joints":   return 4
+		case "weights":  return 5
+		}
+		return -1
+	}
+
+	@(private = "file")
+	join_message :: proc(parts:[]string) -> string {
+		// The temp allocator: the message is read once, by whoever reports it
+		return strings.concatenate(parts, context.temp_allocator)
+	}
+
+	/*
+		Loads the program, finds its uniforms and reads its TexEnv plan, for a built-in or a game shader (`is_game`).
+		The built-ins say their `lighting` and must have every uniform the engine sets for it; a game shader's `lighting`
+		and `reads_normal` come from its files, and its uniforms are optional
+	*/
+	@(private = "file")
+	build_render_pipeline :: proc(pipeline:^Render_Pipeline, shader_bytes:[]u32, tev_text, reflection_text:string, lighting:Maybe(Lighting_Mode), skinned, is_game:bool) -> (message:string) {
+		pipeline^ = {}
+		pipeline.shader_bytes = shader_bytes
+		pipeline.skinned = skinned
+		pipeline.is_game = is_game
+		pipeline.lighting = lighting
+		pipeline.reads_normal = lighting != nil
+
+		pipeline.shader_binary = ctru.DVLB_ParseFile(raw_data(shader_bytes), u32(len(shader_bytes) * size_of(u32)))
 		if pipeline.shader_binary == nil {
-			print(shader_path, "is not a shader binary")
-			panic("A .shbin in romfs is not a shader binary")
+			delete(shader_bytes)
+			pipeline^ = {}
+			return "the .shbin is not a shader binary"
 		}
 		ctru.shaderProgramInit(&pipeline.program)
 		ctru.shaderProgramSetVsh(&pipeline.program, pipeline.shader_binary.DVLE)
+		defer if message != "" do unload_render_pipeline(pipeline)
 
-		find :: proc(pipeline:^Render_Pipeline, shader_path:string, name:cstring) -> i32 {
+		// A game's texts are copied, because the plan and the uniform names point into them
+		tev_source := tev_text
+		reflection:Pica_Reflection
+		defer destroy_pica_reflection(&reflection)
+		if is_game {
+			pipeline.source_text = {strings.clone(tev_text), strings.clone(reflection_text)}
+			tev_source = pipeline.source_text[0]
+			parsed, reflection_ok, reflection_message := parse_pica_reflection(pipeline.source_text[1])
+			if !reflection_ok do return join_message({"the .3ds.refl could not be read: ", reflection_message})
+			reflection = parsed
+		}
+
+		tev, tev_ok, tev_message := parse_tev_plan(tev_source)
+		if !tev_ok do return join_message({"the .3ds.tev plan could not be read: ", tev_message})
+		pipeline.tev = tev
+
+		// Which engine uniforms to look for. A built-in looks for what its kind uses, and stops when one is missing, as
+		// it always has; a game shader may have any of them, and none is required. -1 is not found, and nothing is set there
+		missing:cstring
+		find :: proc(pipeline:^Render_Pipeline, name:cstring, wanted, required:bool, missing:^cstring) -> i32 {
+			if !wanted do return -1
 			location := i32(ctru.shaderInstanceGetUniformLocation(pipeline.program.vertexShader, name))
-			if location < 0 {
-				print(shader_path, "has no uniform", name)
-				panic("A uniform the engine sets is missing from a shader")
-			}
+			if location < 0 && required && missing^ == nil do missing^ = name
 			return location
 		}
-		pipeline.model_uniform = find(pipeline, shader_path, "render_model")
-		pipeline.view_projection_uniform = find(pipeline, shader_path, "frame_view_projection")
-		pipeline.view_uniform = find(pipeline, shader_path, "frame_view") if lighting != nil else -1
+		required := !is_game
 		per_vertex := lighting == .PER_VERTEX
-		pipeline.lights_ambient_uniform = find(pipeline, shader_path, "lights_ambient") if per_vertex else -1
-		pipeline.lights_direction_uniform = find(pipeline, shader_path, "lights_direction") if per_vertex else -1
-		pipeline.lights_diffuse_uniform = find(pipeline, shader_path, "lights_diffuse") if per_vertex else -1
-		pipeline.lights_specular_uniform = find(pipeline, shader_path, "lights_specular") if per_vertex else -1
-		pipeline.lights_position_uniform = find(pipeline, shader_path, "lights_position") if per_vertex else -1
-		pipeline.lights_cone_uniform = find(pipeline, shader_path, "lights_cone") if per_vertex else -1
-		pipeline.shininess_uniform = find(pipeline, shader_path, "render_shininess") if per_vertex else -1
-		pipeline.specular_strength_uniform = find(pipeline, shader_path, "render_specular_strength") if per_vertex else -1
-		pipeline.skin_row0_uniform = find(pipeline, shader_path, "skin_row0") if skinned else -1
-		pipeline.skin_row1_uniform = find(pipeline, shader_path, "skin_row1") if skinned else -1
-		pipeline.skin_row2_uniform = find(pipeline, shader_path, "skin_row2") if skinned else -1
-		pipeline.tint_uniform = find(pipeline, shader_path, "render_tint")
-		pipeline.uv_rectangle_uniform = find(pipeline, shader_path, "render_uv_rectangle")
+		wants_view := is_game || lighting != nil
+		wants_lights := is_game || per_vertex
+		wants_skin := is_game || skinned
+		pipeline.model_uniform = find(pipeline, "render_model", true, required, &missing)
+		pipeline.view_projection_uniform = find(pipeline, "frame_view_projection", true, required, &missing)
+		pipeline.view_uniform = find(pipeline, "frame_view", wants_view, required, &missing)
+		pipeline.time_uniform = find(pipeline, "frame_time", is_game, false, &missing)
+		pipeline.alpha_cutoff_uniform = find(pipeline, "render_alpha_cutoff", is_game, false, &missing)
+		pipeline.lights_ambient_uniform = find(pipeline, "lights_ambient", wants_lights, required, &missing)
+		pipeline.lights_direction_uniform = find(pipeline, "lights_direction", wants_lights, required, &missing)
+		pipeline.lights_diffuse_uniform = find(pipeline, "lights_diffuse", wants_lights, required, &missing)
+		pipeline.lights_specular_uniform = find(pipeline, "lights_specular", wants_lights, required, &missing)
+		pipeline.lights_position_uniform = find(pipeline, "lights_position", wants_lights, required, &missing)
+		pipeline.lights_cone_uniform = find(pipeline, "lights_cone", wants_lights, required, &missing)
+		pipeline.shininess_uniform = find(pipeline, "render_shininess", wants_lights, required, &missing)
+		pipeline.specular_strength_uniform = find(pipeline, "render_specular_strength", wants_lights, required, &missing)
+		pipeline.skin_row0_uniform = find(pipeline, "skin_row0", wants_skin, required, &missing)
+		pipeline.skin_row1_uniform = find(pipeline, "skin_row1", wants_skin, required, &missing)
+		pipeline.skin_row2_uniform = find(pipeline, "skin_row2", wants_skin, required, &missing)
+		pipeline.tint_uniform = find(pipeline, "render_tint", true, required, &missing)
+		pipeline.uv_rectangle_uniform = find(pipeline, "render_uv_rectangle", true, required, &missing)
+		if missing != nil do return join_message({"a uniform the engine sets is missing from the shader: ", string(missing)})
 
-		tev, tev_ok, tev_message := parse_tev_plan(tev_text)
-		if !tev_ok {
-			print(shader_path, "TexEnv plan:", tev_message)
-			panic("A .3ds.tev plan could not be read")
-		}
 		for stage in tev.stages[:tev.stage_count] {
-			ensure(stage.constant_uniform == "", "A TexEnv constant from a uniform needs game uniforms, which the 3DS does not have yet")
+			if stage.constant_uniform != "" do return "a TexEnv constant from a uniform is not supported on the 3DS yet: use a literal `constant r g b a`"
 		}
-		ensure(tev.alpha_test.uniform == "" || tev.alpha_test.uniform == "render_alpha_cutoff", "The alpha test reads a uniform the engine does not set")
-		ensure(tev.texture_count <= 1, "Only one texture per draw is bound yet")
-		// Only the per-pixel shader's plan sets the lighting unit up; the per-vertex one's light is in its colour
-		lights := tev.lighting.diffuse || tev.lighting.specular
-		ensure(lights == (lighting == .PER_PIXEL), "A shader's .tev plan uses the lighting unit when the engine doesn't draw it per pixel, or the other way round")
-		pipeline.tev = tev
+		if tev.alpha_test.uniform != "" && tev.alpha_test.uniform != "render_alpha_cutoff" do return "the alpha test reads a uniform the engine does not set: only render_alpha_cutoff, or a literal reference"
+		if tev.texture_count > 1 do return "only one texture per draw is bound yet"
+
+		uses_unit := tev.lighting.diffuse || tev.lighting.specular
+		if !is_game {
+			// Only the per-pixel shader's plan sets the lighting unit up; the per-vertex one's light is in its colour
+			if uses_unit != (lighting == .PER_PIXEL) do return "the .tev plan uses the lighting unit when the engine doesn't draw it per pixel, or the other way round"
+			return ""
+		}
+
+		// ---- a game shader: what its files say decides how it draws ----
+		for attribute in reflection.attributes {
+			register := get_attribute_register(attribute.name)
+			if register < 0 do return join_message({"the shader reads a vertex attribute the engine's meshes do not have: ", attribute.name})
+			if register != attribute.index do return join_message({"the attribute ", attribute.name, " is not in the register the engine's vertex layout puts it in"})
+		}
+		has_joints, has_weights := false, false
+		for attribute in reflection.attributes {
+			has_joints ||= attribute.name == "joints"
+			has_weights ||= attribute.name == "weights"
+		}
+		if skinned != (has_joints && has_weights) || has_joints != has_weights do return "the shader is not drawn as it was loaded: a skinned one reads joints and weights, and a plain one reads neither"
+
+		pipeline.reads_normal = pica_reads_normal(&reflection)
+		if uses_unit {
+			pipeline.lighting = .PER_PIXEL
+			if !pipeline.reads_normal do return "the .tev plan uses the lighting unit, which needs the vertex program to read the normal (attribute normal)"
+			// The unit is set up once, from the built-in lit shader's plan (create_lighting_unit), and the game shader draws through it
+			built_in := mbi.lit_pipeline.tev.lighting
+			if tev.lighting.clamp_highlights != built_in.clamp_highlights || tev.lighting.two_sided != built_in.two_sided || tev.lighting.fresnel != built_in.fresnel {
+				return "the .tev plan sets the lighting unit up differently from the engine's (clamp_highlights, two_sided, fresnel): one unit serves every lit shader"
+			}
+		}
+
+		for uniform in reflection.uniforms {
+			if is_engine_uniform(uniform.name) && !is_supported_engine_uniform(uniform.name) {
+				return join_message({"the shader declares an engine uniform this runtime does not know: ", uniform.name})
+			}
+		}
+		if (pipeline.skin_row0_uniform >= 0 || pipeline.skin_row1_uniform >= 0 || pipeline.skin_row2_uniform >= 0) && !skinned {
+			return "the shader reads the joint palette but was loaded as a plain one"
+		}
+
+		pipeline.game = create_pica_game_uniforms(&reflection)
+		for &entry in pipeline.game.entries {
+			name := strings.clone_to_cstring(entry.name, context.temp_allocator)
+			entry.location = i32(ctru.shaderInstanceGetUniformLocation(pipeline.program.vertexShader, name))
+			if entry.location < 0 do return join_message({"the reflection lists a uniform the .shbin does not have: ", entry.name})
+		}
+		return ""
+	}
+
+	/*
+		Uploads a game shader's own uniforms to the registers they live in. Called at every bind: citro3d keeps one array
+		of registers for every program (as set_camera_uniforms notes), so what another shader wrote there is what this one
+		would read, and what was uploaded last time is not trusted to have survived. A bool is one of the boolean
+		registers, set with its own call; a matrix is a register a row, as the engine's are
+	*/
+	@(private = "file")
+	upload_game_uniforms :: proc(pipeline:^Render_Pipeline) {
+		game := &pipeline.game
+		for entry in game.entries {
+			if entry.location < 0 do continue
+			if entry.is_bool {
+				c3d.C3D_BoolUnifSet(.VERTEX_SHADER, entry.location, game.flags[entry.first])
+				continue
+			}
+			for row in 0 ..< entry.registers {
+				value := game.registers[entry.first + row]
+				c3d.C3D_FVUnifSet(.VERTEX_SHADER, entry.location + i32(row), value.x, value.y, value.z, value.w)
+			}
+		}
+		game.dirty = false
 	}
 
 	@(private = "file")
@@ -285,6 +480,10 @@ when !VITA {
 		ctru.shaderProgramFree(&pipeline.program)
 		if pipeline.shader_binary != nil do ctru.DVLB_Free(pipeline.shader_binary)
 		delete(pipeline.shader_bytes)
+		destroy_pica_game_uniforms(&pipeline.game)
+		delete(pipeline.source_text[0])
+		delete(pipeline.source_text[1])
+		pipeline^ = {}
 	}
 
 	@(private)
@@ -439,6 +638,8 @@ when !VITA {
 	*/
 	@(private = "file")
 	choose_render_pipeline :: proc(item:Render_Item) -> ^Render_Pipeline {
+		// The item's own shader first: it was stored with the item, so it wins over every built-in rule below
+		if game := choose_game_pipeline(item); game != nil do return game
 		if item.mesh.skinned do return &mbi.skinned_lit_pipeline if mbi.lighting.settings.enabled else &mbi.skinned_pipeline
 		if !item.mesh.lit || !mbi.lighting.settings.enabled do return &mbi.pipeline
 		switch get_lighting_mode(item.material) {
@@ -457,7 +658,11 @@ when !VITA {
 	*/
 	@(private = "file")
 	use_render_pipeline :: proc(pipeline:^Render_Pipeline) {
-		if mbi.bound_pipeline == pipeline do return
+		if mbi.bound_pipeline == pipeline {
+			// Bound already: its registers are as they were, so only a game uniform set since needs uploading
+			if pipeline.game.dirty do upload_game_uniforms(pipeline)
+			return
+		}
 		mbi.bound_pipeline = pipeline
 		c3d.C3D_BindProgram(&pipeline.program)
 
@@ -468,7 +673,7 @@ when !VITA {
 		c3d.AttrInfo_AddLoader(attributes, 0, .FLOAT, 3) // position
 		c3d.AttrInfo_AddLoader(attributes, 1, .FLOAT, 2) // uv
 		c3d.AttrInfo_AddLoader(attributes, 2, .FLOAT, 4) // color
-		if pipeline.lighting != nil || pipeline.skinned do c3d.AttrInfo_AddLoader(attributes, 3, .FLOAT, 3) // normal
+		if pipeline.reads_normal || pipeline.skinned do c3d.AttrInfo_AddLoader(attributes, 3, .FLOAT, 3) // normal
 		if pipeline.skinned {
 			// Bytes, which the loader hands the shader as the numbers 0 to 255: a joint is used as an address, a weight is
 			// scaled by 1/255 in the program (mesh_skinned_lit.mbs, under `when TARGET == .PICA200`)
@@ -488,6 +693,7 @@ when !VITA {
 		c3d.C3D_LightEnvBind(&mbi.lighting_unit.environment if pipeline.lighting == .PER_PIXEL else nil)
 
 		set_camera_uniforms(pipeline)
+		if pipeline.is_game do upload_game_uniforms(pipeline)
 	}
 
 	/*
@@ -499,22 +705,29 @@ when !VITA {
 	@(private = "file")
 	set_camera_uniforms :: proc(pipeline:^Render_Pipeline) {
 		set_matrix_uniform(pipeline.view_projection_uniform, mbi.camera_view_projection)
-		if pipeline.view_uniform >= 0 do set_matrix_uniform(pipeline.view_uniform, mbi.view)
-		if pipeline.lighting != .PER_VERTEX do return
+		set_matrix_uniform(pipeline.view_uniform, mbi.view)
+		if pipeline.time_uniform >= 0 {
+			// The same seconds-since-init PC puts in frame.time (set_frame_constants); one value in every lane, which the program reads as a scalar
+			seconds := f32(get_time())
+			set_vector_uniform(pipeline.time_uniform, {seconds, seconds, seconds, seconds})
+		}
 
+		// Wherever the program declares the lights, which for the built-ins is the per-vertex shader alone. An array's
+		// location is its first register, so each is checked on its own: -1 + slot would be a real register
 		lights := &mbi.camera_lights
 		set_vector_uniform(pipeline.lights_ambient_uniform, lights.ambient)
 		for slot in 0 ..< LIGHT_SLOT_COUNT {
-			set_vector_uniform(pipeline.lights_direction_uniform + i32(slot), lights.direction[slot])
-			set_vector_uniform(pipeline.lights_diffuse_uniform + i32(slot), lights.diffuse[slot])
-			set_vector_uniform(pipeline.lights_specular_uniform + i32(slot), lights.specular[slot])
-			set_vector_uniform(pipeline.lights_position_uniform + i32(slot), lights.position[slot])
-			set_vector_uniform(pipeline.lights_cone_uniform + i32(slot), lights.cone[slot])
+			if pipeline.lights_direction_uniform >= 0 do set_vector_uniform(pipeline.lights_direction_uniform + i32(slot), lights.direction[slot])
+			if pipeline.lights_diffuse_uniform >= 0 do set_vector_uniform(pipeline.lights_diffuse_uniform + i32(slot), lights.diffuse[slot])
+			if pipeline.lights_specular_uniform >= 0 do set_vector_uniform(pipeline.lights_specular_uniform + i32(slot), lights.specular[slot])
+			if pipeline.lights_position_uniform >= 0 do set_vector_uniform(pipeline.lights_position_uniform + i32(slot), lights.position[slot])
+			if pipeline.lights_cone_uniform >= 0 do set_vector_uniform(pipeline.lights_cone_uniform + i32(slot), lights.cone[slot])
 		}
 	}
 
 	@(private = "file")
 	set_vector_uniform :: proc(location:i32, v:[4]f32) {
+		if location < 0 do return // a game shader declares only what it reads
 		c3d.C3D_FVUnifSet(.VERTEX_SHADER, location, v.x, v.y, v.z, v.w)
 	}
 
@@ -598,6 +811,7 @@ when !VITA {
 	/*Uploads one matrix a row per register, which is how the generated program reads it (dp4 per row)*/
 	@(private)
 	set_matrix_uniform :: proc(location:i32, m:matrix[4, 4]f32) {
+		if location < 0 do return // a game shader declares only what it reads
 		for row in 0 ..< 4 {
 			c3d.C3D_FVUnifSet(.VERTEX_SHADER, location + i32(row), m[row, 0], m[row, 1], m[row, 2], m[row, 3])
 		}
@@ -609,6 +823,7 @@ when !VITA {
 	*/
 	@(private = "file")
 	set_skin_uniforms :: proc(pipeline:^Render_Pipeline, item:Render_Item) {
+		if pipeline.skin_row0_uniform < 0 && pipeline.skin_row1_uniform < 0 && pipeline.skin_row2_uniform < 0 do return
 		rows := get_skin_rows(item)
 		limit := mbi.skin_settings.joint_limit
 		for joint in 0 ..< limit {
@@ -621,18 +836,17 @@ when !VITA {
 	/*Issues the draw call for one queued item. The pipeline is bound and the render state set*/
 	@(private)
 	render_item :: proc(pipeline:^Render_Pipeline, item:Render_Item) {
-		switch pipeline.lighting {
-		case .PER_PIXEL:
-			set_lighting_unit_material(item.material)
-		case .PER_VERTEX:
-			// A single float is written to every lane: the program reads it as a scalar from any one
-			shininess := item.material.shininess
-			strength := item.material.specular_strength
-			c3d.C3D_FVUnifSet(.VERTEX_SHADER, pipeline.shininess_uniform, shininess, shininess, shininess, shininess)
-			c3d.C3D_FVUnifSet(.VERTEX_SHADER, pipeline.specular_strength_uniform, strength, strength, strength, strength)
-		}
+		if pipeline.lighting == .PER_PIXEL do set_lighting_unit_material(item.material)
+		// The material the per-vertex shader (or a game shader that lights in its own code) reads; -1, and skipped, in
+		// the others. A single float is written to every lane: the program reads it as a scalar from any one
+		shininess := item.material.shininess
+		strength := item.material.specular_strength
+		set_vector_uniform(pipeline.shininess_uniform, {shininess, shininess, shininess, shininess})
+		set_vector_uniform(pipeline.specular_strength_uniform, {strength, strength, strength, strength})
+		cutoff := item.alpha_cutoff
+		set_vector_uniform(pipeline.alpha_cutoff_uniform, {cutoff, cutoff, cutoff, cutoff})
 		set_matrix_uniform(pipeline.model_uniform, item.model)
-		c3d.C3D_FVUnifSet(.VERTEX_SHADER, pipeline.tint_uniform, item.tint.r, item.tint.g, item.tint.b, item.tint.a)
+		set_vector_uniform(pipeline.tint_uniform, {item.tint.r, item.tint.g, item.tint.b, item.tint.a})
 		// The queue holds coordinates over the image, v down, as on PC. A real texture sits in the
 		// corner of a larger, upside-down canvas (texture_3ds_freestanding_arm32.odin); the white
 		// one is the same colour everywhere, so its coordinates are left alone
@@ -642,7 +856,7 @@ when !VITA {
 			uv = calculate_canvas_uv_rectangle(item.texture, uv)
 			texture = item.texture.texture
 		}
-		c3d.C3D_FVUnifSet(.VERTEX_SHADER, pipeline.uv_rectangle_uniform, uv[0], uv[1], uv[2], uv[3])
+		set_vector_uniform(pipeline.uv_rectangle_uniform, {uv[0], uv[1], uv[2], uv[3]})
 		c3d.C3D_TexBind(0, texture)
 
 		buffers := c3d.C3D_GetBufInfo()
@@ -650,7 +864,7 @@ when !VITA {
 		if pipeline.skinned {
 			set_skin_uniforms(pipeline, item)
 			c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Skinned_Vertex), 6, 0x543210) // attributes 0 to 5 in order
-		} else if pipeline.lighting != nil {
+		} else if pipeline.reads_normal {
 			c3d.BufInfo_Add(buffers, item.mesh.vertices, size_of(Lit_Vertex), 4, 0x3210) // attributes 0 to 3, the normal last
 		} else if item.mesh.lit {
 			// Lighting is off: 0xE is a 12-byte padding component that steps over the normal, so
@@ -719,7 +933,8 @@ when !VITA {
 		// A render target is a texture, not a panel on its side: no tilt
 		panel := TILT_TO_PANEL if mbi.render_target_state.is_active == false else linalg.MATRIX4F32_IDENTITY
 		mbi.camera_view_projection = panel * GL_TO_PICA_DEPTH * calculate_camera_projection_gl(used, window.x / window.y) * mbi.view
-		set_camera_uniforms(mbi.bound_pipeline)
+		// nil after destroy_shader freed the pipeline that was bound: the first draw binds one and sets these then
+		if mbi.bound_pipeline != nil do set_camera_uniforms(mbi.bound_pipeline)
 	}
 
 	/*Sorts and draws everything queued since camera_start*/

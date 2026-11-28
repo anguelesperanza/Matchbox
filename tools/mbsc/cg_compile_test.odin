@@ -111,3 +111,55 @@ the_vito_compiler_is_found_when_it_is_there :: proc(t: ^testing.T) {
 		fmt.eprintln("    (psp2cgc not found: the Cg programs are not compiled by these tests)")
 	}
 }
+
+// A shader whose fragment stage has a local called NAME, replaced by each word under test
+@(private = "file")
+RESERVED_NAME_SHADER :: `
+@(texture = 0) tex:Texture2D
+
+Vertex_In :: struct {
+	position: [3]f32 ` + "`attr:\"position\"`" + `,
+	uv: [2]f32 ` + "`attr:\"texcoord\"`" + `,
+}
+
+Varying :: struct {
+	position: [4]f32 ` + "`out:\"position\"`" + `,
+	uv: [2]f32 ` + "`out:\"texcoord0\"`" + `,
+}
+
+vertex_main :: proc(input: Vertex_In) -> Varying {
+	output: Varying
+	output.position = [4]f32{input.position.x, input.position.y, input.position.z, 1.0}
+	output.uv = input.uv
+	return output
+}
+
+fragment_main :: proc(v:Varying) -> [4]f32 {
+	NAME := v.uv.x * 2.0
+	return [4]f32{NAME, NAME, 0.0, 1.0}
+}
+`
+
+// Every word psp2cgc rejects as a name, found by trying each one (a local named `column` stopped crt.mbs). A shader's own
+// name for something must never reach the Cg unchanged when it is one of these: safe_name puts `mbs_` in front
+@(test)
+names_psp2cgc_rejects_are_renamed :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+
+	words := [?]string {
+		"column", "row", "auto", "char", "long", "short", "operator", "template", "this", "public",
+		"goto", "float2", "float4x4", "half3", "int2", "bool4", "texture2D", "typename", "virtual",
+	}
+	for word in words {
+		source, _ := strings.replace_all(RESERVED_NAME_SHADER, "NAME", word, context.temp_allocator)
+		programs, ok := generate_cg_text(t, source, word)
+		if ok == false {
+			continue
+		}
+		// The shader's name is not what Cg is given...
+		testing.expectf(t, strings.contains(programs.fragment, fmt.tprintf(" %s = ", word)) == false, "`%s` reached the Cg as it is", word)
+		testing.expectf(t, strings.contains(programs.fragment, fmt.tprintf("mbs_%s", word)), "`%s` was not renamed", word)
+		// ...and the real compiler takes what it is given (skipped without psp2cgc)
+		expect_cg_compiles(t, programs, word)
+	}
+}

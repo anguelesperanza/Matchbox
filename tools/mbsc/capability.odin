@@ -174,7 +174,7 @@ Missing :: struct {
 
 @(rodata, private = "file")
 THREE_DS_MISSING := [?]Missing {
-	{"sin", "use `sin_approx(x)`, which states its error"},
+	{"sin", "use `sin_approx(x)`, which states its error. It grows with the angle (section 15), so a hash like `fract(sin(x) * 43758.5)` can't use it: write a hash with no sine, such as `fract(dot(fract(p * 0.1031), q))`"},
 	{"cos", "use `cos_approx(x)`, which states its error"},
 	{"tan", "write `sin_approx(x) / cos_approx(x)`, keeping `cos_approx` away from zero"},
 	{"asin", "work it out on the CPU and pass the result as a uniform, or give the 3DS its own version with `when TARGET == .PICA200`"},
@@ -371,6 +371,23 @@ check_uniform_registers :: proc(module: ^Module, vertex: map[string]bool) {
 @(rodata, private = "file")
 THREE_DS_FRAGMENT_BUILTINS := [?]string{"sample", "lerp", "saturate", "dot3_signed", "discard", "light_diffuse", "light_specular"}
 
+// What to do instead of a built-in the combiners have no mode for. This is not `find_missing`'s text: that one is about
+// the vertex unit, and advice such as "use `sin_approx`" is wrong here, where `sin_approx` is just as impossible.
+@(private = "file")
+fragment_help :: proc(name: string) -> string {
+	switch name {
+	case "sin", "cos", "tan", "sin_approx", "cos_approx", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh":
+		return "the fragment stage has no sine or cosine, even `sin_approx`: work it out in `vertex_main` and pass the result as a varying (it is interpolated linearly across the triangle), or sample a ramp texture whose coordinate is a `texcoord` varying; on the 3DS only, `when TARGET == .PICA200 { ... }`"
+	case "dot", "length", "distance", "normalize", "cross", "reflect", "refract":
+		return "per-pixel vector maths has no combiner mode (DOT3 works only on 8-bit colours biased by 0.5, as `dot3_signed`): do it in `vertex_main` and pass the result as a varying, which is interpolated rather than recomputed per pixel; for lighting call `light_diffuse` and `light_specular`, which use the 3DS's lighting unit"
+	case "floor", "fract", "round", "trunc", "ceil", "mod", "fmod", "abs", "sign", "min", "max", "clamp", "step", "smoothstep":
+		return "the combiners can only add, subtract, multiply and blend: sample a ramp texture that holds the curve (a `step` or `smoothstep` is a few texels), with its coordinate a `texcoord` varying from `vertex_main`; or compute the value in `vertex_main` and pass it as a varying; or give the 3DS its own version: `when TARGET == .PICA200 { ... }`"
+	case "sqrt", "inverse_sqrt", "pow", "exp", "exp2", "ln", "log2", "log10":
+		return "the combiners have no powers, roots or logarithms: compute it in `vertex_main` and pass the result as a varying, bake it into a texture, or give the 3DS its own version: `when TARGET == .PICA200 { ... }`"
+	}
+	return "do the work in the vertex stage and pass the result as `color`, or give the 3DS its own version: `when TARGET == .PICA200 { ... }`"
+}
+
 @(private = "file")
 check_3ds_fragment :: proc(module: ^Module, fragment: map[string]bool) {
 	reported := make(map[rawptr]bool, context.temp_allocator)
@@ -382,10 +399,7 @@ check_3ds_fragment :: proc(module: ^Module, fragment: map[string]bool) {
 		}
 		if slice.contains(THREE_DS_FRAGMENT_BUILTINS[:], edge.callee) == false {
 			reported[edge.node] = true
-			help := "do the work in the vertex stage and pass the result as `color`, or give the 3DS its own version: `when TARGET == .PICA200 { ... }`"
-			if missing, found := find_missing(edge.callee); found {
-				help = missing.help
-			}
+			help := fragment_help(edge.callee)
 			error(
 				module,
 				"MBS-E2",

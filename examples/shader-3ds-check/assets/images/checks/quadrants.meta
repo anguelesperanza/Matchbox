@@ -1,0 +1,4 @@
+# render-check: a 2 x 2 grid of 6 x 10 frames
+ppu     = 10
+columns = 2
+rows    = 2

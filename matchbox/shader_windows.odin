@@ -163,10 +163,9 @@ destroy_shader :: proc(shader: Shader) {
 choose_shader :: proc(item: Render_Item) -> ^Shader_Data {
 	data := (^Shader_Data)(item.shader.data)
 	if data == nil do return nil
-	if item.mesh.skinned do return data if data.has_skinned else nil
-	if data.has_plain == false do return nil
-	if data.reads_normal && item.mesh.lit == false do return nil
-	return data
+	facts := Shader_Facts{has_plain = data.has_plain, has_skinned = data.has_skinned, reads_normal = data.reads_normal}
+	// The rule is shared with the 3DS (shader_pica.odin)
+	return data if choose_shader_variant(facts, item.mesh.skinned, item.mesh.lit) != .NONE else nil
 }
 
 /*Copies a game shader's uniforms to the GPU if one was set since the last draw*/

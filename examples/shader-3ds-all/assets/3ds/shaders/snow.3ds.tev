@@ -1,0 +1,10 @@
+mbs-tev 2
+target 3ds
+
+stage 0 MULTIPLY_ADD FRAGMENT_PRIMARY PRIMARY_COLOR FRAGMENT_SECONDARY
+
+lighting diffuse specular
+lighting_table D0 NH
+lighting_clamp_highlights true
+lighting_two_sided false
+lighting_fresnel secondary_alpha_zero

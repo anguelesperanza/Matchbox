@@ -1,6 +1,6 @@
 # Game shaders: opt-in, PC first (proposal)
 
-**Status: built 2026-11-27, PC only. The user approved the API and answered D1-D5 (below).** This is the "custom shaders in the engine"
+**Status: built 2026-11-27 on PC; since the same day the 3DS and the Vita load game shaders too (romfs/shaders and the .vpk's assets/shaders; see game_shaders_3ds_plan.md and game_shaders_vita_plan.md). The user approved the API and answered D1-D5 (below).** This is the "custom shaders in the engine"
 item of Phase S, brought forward because a game that wants the PSX look must not carry it when it does not.
 
 ## What exists today (read from the code)
@@ -54,8 +54,8 @@ render_upscaled_target :: proc(target, fit, tint, shader := Shader{})     // a p
   (documented; `farlite` could automate it later).
 - **Cost to a game that does not use it: none** (no pipeline created, no bytes in the binary). A game that does pays the HLSL compile at
   `load_shader`, between frames, like `load_model`.
-- **Handhelds:** the names exist and stop with "custom shaders are PC only for now", as the skybox does. Making them real needs
-  S8a/S8b or a build step that runs mbsc, picasso and vito per game shader; I would write that plan once the PC side is proven.
+- **Handhelds:** done after this plan was written: each project's build_shaders.bat runs mbsc and then picasso (3DS) or psp2cgc
+  (Vita), and the loaders read the files at run time (the two handheld plans have the steps).
 
 ## Also proposed, same principle (small)
 

@@ -125,6 +125,10 @@ hardware lighting sources, which are reserved.
 
 **Fix.** Move the work to the vertex stage, simplify the expression, or give the 3DS its own branch.
 
+The `help:` depends on the built-in: trigonometry (even `sin_approx`), vector maths (`dot`, `normalize`, `length`), and `floor`,
+`abs`, `min`, `max`, `step`, `smoothstep` each get their own advice (vertex varying, ramp texture, `light_diffuse`), listed in
+section 14 of the language reference.
+
 ---
 
 ## MBS-E3

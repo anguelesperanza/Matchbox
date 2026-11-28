@@ -38,7 +38,11 @@ when VITA {
 	*/
 	print :: proc(args: ..any) {
 		buffer:[1024]u8
-		line := fmt.bprintln(buffer[:], ..args, sep = " ")
+		// bprintln into a full buffer cuts the line off and loses its newline too, so a long log message ran into the next one in
+		// the file; format into all but the last byte and put the newline there ourselves
+		text := fmt.bprint(buffer[:len(buffer) - 1], ..args, sep = " ")
+		buffer[len(text)] = '\n'
+		line := string(buffer[:len(text) + 1])
 		vito.write(line) // one write: Vita3K logs each sceClibPrintf call as a line of its own
 
 		start_print_log(&mbi.print_log)

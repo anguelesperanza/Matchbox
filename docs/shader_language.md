@@ -519,6 +519,22 @@ This table is the source for the `help:` lines of `MBS-E1`, so a message always 
 | `sample` in the vertex stage | sample in the fragment stage, or pass the data in a uniform |
 | `sample_lod`, `sample_bias`, `sample_grad`, `ddx`, `ddy`, `fwidth` | no 3DS equivalent; use `sample` |
 
+In a 3DS **fragment** shader nothing in this table applies: `sin_approx` and every other built-in except `sample`, `lerp`,
+`saturate`, `dot3_signed`, `discard` and the lighting calls is `MBS-E2`, and the `help:` says so rather than sending you to
+`sin_approx`. What to do there:
+
+| Built-in in a 3DS fragment shader | Do this |
+|---|---|
+| `sin`, `cos`, `sin_approx`, `cos_approx`, the other trigonometry | compute it in `vertex_main` and pass a varying (interpolated linearly), or sample a ramp texture through a `texcoord` varying |
+| `dot`, `length`, `distance`, `normalize`, `cross`, `reflect`, `refract` | compute it in `vertex_main` and pass a varying (interpolated, not renormalised per pixel); for lighting use `light_diffuse` / `light_specular` |
+| `floor`, `fract`, `abs`, `min`, `max`, `clamp`, `step`, `smoothstep`, `mod` and the like | a ramp texture holding the curve (a `step` or `smoothstep` is a few texels), its coordinate a `texcoord` varying; or the vertex stage |
+| `sqrt`, `pow`, `exp`, `ln` and the like | the vertex stage, a baked texture, or `when TARGET == .PICA200` |
+
+**A `sin` hash does not move to the 3DS vertex stage by swapping in `sin_approx`.** The usual `fract(sin(dot(p, k)) * 43758.5453)`
+feeds `sin` an angle of hundreds and multiplies the result by 43758: the 3DS's error of 1e-4 to 3e-3 (section 15) becomes a
+whole different number, and `sin_approx` itself is accurate only for small angles. Use a hash with no sine, for example
+`q := fract(p * 0.1031); q += dot(q, q.yx + 33.33); fract((q.x + q.y) * q.x)`, on every target.
+
 ## 15. `sin_approx` and `cos_approx`
 
 `sin` and `cos` don't exist on the 3DS, and mbsc never quietly swaps in something close. `sin_approx` and `cos_approx`

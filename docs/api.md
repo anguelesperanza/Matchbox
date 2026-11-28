@@ -225,8 +225,9 @@ destroy_mesh :: proc(mesh:Mesh)
 set_shader_value :: proc(name:string, value:any, shader := Shader{})
 
 // Game shaders (shader.odin, docs/game_shaders_plan.md). A shader exists only after the game loads it; the PSX ones are in
-// matchbox/optional/shaders/ and a game copies the ones it uses into assets/pc/shaders/. PC only: on the 3DS and Vita
-// load_shader panics "Custom shaders are PC only for now"
+// matchbox/optional/shaders/ and a game copies the ones it uses into assets/pc/shaders/. On the 3DS
+// and Vita the shader is built ahead of time by the project's build_shaders.bat and read at run time (romfs/shaders on the 3DS,
+// the .vpk's assets/shaders on the Vita); a missing file stops load_shader and is ok = false from load_shader_checked
 load_shader :: proc(name:string) -> Shader
 load_shader_checked :: proc(name:string) -> (Shader, bool)
 destroy_shader :: proc(shader:Shader)

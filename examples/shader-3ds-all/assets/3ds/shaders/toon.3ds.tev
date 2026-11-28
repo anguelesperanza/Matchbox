@@ -1,0 +1,10 @@
+mbs-tev 2
+target 3ds
+
+stage 0 MODULATE FRAGMENT_PRIMARY PRIMARY_COLOR
+
+lighting diffuse
+lighting_table D0 NH
+lighting_clamp_highlights true
+lighting_two_sided false
+lighting_fresnel secondary_alpha_zero

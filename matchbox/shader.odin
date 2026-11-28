@@ -20,8 +20,10 @@ package matchbox
 	**Uniforms** are the ones the shader declares with `@(uniform)`, set by name with `set_shader_value(name, value, shader)`.
 	A post-processing shader is a plain shader given to `render_upscaled_target`, which draws the target's picture with it.
 
-	PC only for now: the handhelds take a shader built at build time (S8a/S8b), so there the names stop with a message
-	(shader_handheld_freestanding_arm32.odin), as the skybox does
+	On the handhelds the shader is built ahead of time by the project's build_shaders.bat (mbsc, then picasso for the 3DS or
+	psp2cgc for the Vita) and read at run time: from romfs/shaders on the 3DS (shader_3ds_freestanding_arm32.odin) and from
+	the .vpk's app0:/assets/shaders on the Vita (shader_vita_freestanding_arm32.odin). Same names, same set_shader_value; a
+	missing file is `ok` = false from load_shader_checked and a stop from load_shader
 */
 
 // Zero is the built-in. What it points to differs per target (shader_windows.odin)

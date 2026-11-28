@@ -1,0 +1,24 @@
+mbs-reflection 1
+target vita
+
+attribute position [3]f32
+attribute texcoord [2]f32
+attribute color [4]f32
+attribute normal [3]f32
+
+uniform frame_view_projection matrix[4,4]f32 0
+uniform frame_time f32 0
+uniform frame_view matrix[4,4]f32 0
+uniform render_model matrix[4,4]f32 0
+uniform render_tint [4]f32 0
+uniform render_uv_rectangle [4]f32 0
+uniform render_alpha_cutoff f32 0
+uniform render_shininess f32 0
+uniform render_specular_strength f32 0
+uniform heat f32 0
+uniform lights_ambient [4]f32 0
+uniform lights_direction [4]f32 8
+uniform lights_diffuse [4]f32 8
+uniform lights_specular [4]f32 8
+uniform lights_position [4]f32 8
+uniform lights_cone [4]f32 8

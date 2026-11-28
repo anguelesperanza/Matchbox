@@ -181,6 +181,18 @@ if errorlevel 1 goto :fail
 picasso -o %ROMFS%\shaders\mesh_skinned_lit.shbin matchbox\shaders\mesh_skinned_lit.3ds.v.pica
 if errorlevel 1 goto :fail
 :: ---------------------------------------------------------------
+:: A game's own shaders (load_shader reads them from romfs at run time): the three files
+:: mbsc and build_shaders.bat write per shader. A game without the folder gets none, and
+:: romfs\shaders is the built-ins alone. Game shader files left by an earlier build are
+:: deleted first (the built-ins are named <name>.shbin, never .3ds.), so a shader taken
+:: out of the game is taken out of the build
+:: ---------------------------------------------------------------
+for %%e in (shbin tev refl) do (
+    for %%f in (%ROMFS%\shaders\*.3ds.%%e) do del "%%f"
+)
+call :copy_game_shaders assets\3ds\shaders
+if not "%SRC%"=="." call :copy_game_shaders %SRC%\assets\3ds\shaders
+:: ---------------------------------------------------------------
 :: Compile Odin → ARM assembly
 :: ---------------------------------------------------------------
 echo.
@@ -280,6 +292,21 @@ for /r "%~1" %%f in (*.png *.jpg *.jpeg) do (
     if exist "%STAGE%\images\!NAME!.meta" del "%STAGE%\images\!NAME!.meta"
 )
 xcopy /E /Y /I "%~1" %STAGE%\images >nul
+exit /b 0
+:: ---------------------------------------------------------------
+:: Copies the game's shader files (<name>.3ds.shbin, .tev and .refl) out of one folder into
+:: romfs\shaders, where load_shader reads them at run time. A later folder's shader of the
+:: same name replaces an earlier one's, as images do
+:: ---------------------------------------------------------------
+:copy_game_shaders
+if not exist "%~1" exit /b 0
+echo Copying game shaders from %~1...
+for %%e in (shbin tev refl) do (
+    for %%f in ("%~1\*.3ds.%%e") do (
+        echo  - %%~nxf
+        copy /Y "%%f" "%ROMFS%\shaders\%%~nxf" >nul
+    )
+)
 exit /b 0
 :: ---------------------------------------------------------------
 :: Matchbox: turns every glTF in one models folder into %MODELOUT%\<name>.mbm with

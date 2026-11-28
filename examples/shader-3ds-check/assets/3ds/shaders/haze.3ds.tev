@@ -1,0 +1,6 @@
+mbs-tev 2
+target 3ds
+
+texture 0 tex texcoord 0
+
+stage 0 REPLACE TEXTURE0

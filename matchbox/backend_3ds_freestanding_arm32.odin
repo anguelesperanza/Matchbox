@@ -118,6 +118,7 @@ when !VITA {
 	start_runtime :: proc "contextless" () -> runtime.Context {
 		context = o3dx.init()
 		context.assertion_failure_proc = report_crash
+		context.logger = create_handheld_logger()
 		return context
 	}
 

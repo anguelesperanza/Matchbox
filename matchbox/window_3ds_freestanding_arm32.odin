@@ -130,6 +130,9 @@ when !VITA {
 
 	/*Cleans up resources created by Matchbox*/
 	cleanup :: proc() {
+		// The last frame may still be executing on the GPU, and the frees below hand its meshes and shader programs back. The Vita
+		// waits (gfx.finish); without this the heavier scenes froze or crashed the 3DS on quit
+		c3d.FrameSync()
 		destroy_font(mbi.print_log.font)
 		mbi.print_log.font = {}
 		destroy_mesh(mbi.triangle_mesh)

@@ -78,6 +78,8 @@ Done: the keypad (`NUMPAD_0`..`NUMPAD_9`, `MULTIPLY`, `ADD`, `SEPARATOR`, `SUBTR
 ## PSX Shaders need work -- logs of geometry flickering happening
 ## custom shaders (ones added by a user and not loaded into the game) need 3DS and Vita Backend support
 ## Find an api way to handle creating logs to avoid using `when` keyboard in standalone projects
+## Decide on per-monitor DPI (the window is not per-monitor DPI aware, so moving it to a monitor with another scale is untested)
+## Opt-in game shaders: farlite must copy the shader files into a game when it updates Matchbox
 
 # Nice to haves
 

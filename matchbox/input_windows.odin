@@ -127,6 +127,56 @@ Key :: enum {
 	X = win.VK_X,
 	Y = win.VK_Y,
 	Z = win.VK_Z,
+
+	// The keypad. Numbers only arrive with NumLock on; with it off Windows sends the arrows, Home, End and so on instead
+	NUMPAD_0 = win.VK_NUMPAD0,
+	NUMPAD_1 = win.VK_NUMPAD1,
+	NUMPAD_2 = win.VK_NUMPAD2,
+	NUMPAD_3 = win.VK_NUMPAD3,
+	NUMPAD_4 = win.VK_NUMPAD4,
+	NUMPAD_5 = win.VK_NUMPAD5,
+	NUMPAD_6 = win.VK_NUMPAD6,
+	NUMPAD_7 = win.VK_NUMPAD7,
+	NUMPAD_8 = win.VK_NUMPAD8,
+	NUMPAD_9 = win.VK_NUMPAD9,
+	MULTIPLY = win.VK_MULTIPLY,
+	ADD = win.VK_ADD,
+	SEPARATOR = win.VK_SEPARATOR,
+	SUBTRACT = win.VK_SUBTRACT,
+	DECIMAL = win.VK_DECIMAL,
+	DIVIDE = win.VK_DIVIDE,
+	// Windows has no virtual key for the keypad's Enter: it is RETURN with the extended-key bit set. RETURN answers for both
+	// Enter keys, and KEYPAD_ENTER only for the keypad's, so a game that cares which one can tell. The value is an unused one
+	KEYPAD_ENTER = 0x0E,
+
+	F1 = win.VK_F1,
+	F2 = win.VK_F2,
+	F3 = win.VK_F3,
+	F4 = win.VK_F4,
+	F5 = win.VK_F5,
+	F6 = win.VK_F6,
+	F7 = win.VK_F7,
+	F8 = win.VK_F8,
+	F9 = win.VK_F9,
+	F10 = win.VK_F10,
+	F11 = win.VK_F11,
+	F12 = win.VK_F12,
+	NUMLOCK = win.VK_NUMLOCK,
+	SCROLL_LOCK = win.VK_SCROLL,
+
+	// The punctuation keys, named for the character on a US layout. Windows reports the key's place, not what it types, so on
+	// another layout these are the same physical keys with other characters (use the typed text for what was written)
+	SEMICOLON = win.VK_OEM_1,
+	EQUALS = win.VK_OEM_PLUS,
+	COMMA = win.VK_OEM_COMMA,
+	MINUS = win.VK_OEM_MINUS,
+	PERIOD = win.VK_OEM_PERIOD,
+	SLASH = win.VK_OEM_2,
+	GRAVE = win.VK_OEM_3,
+	LEFT_BRACKET = win.VK_OEM_4,
+	BACKSLASH = win.VK_OEM_5,
+	RIGHT_BRACKET = win.VK_OEM_6,
+	APOSTROPHE = win.VK_OEM_7,
 	
 }
 
@@ -198,6 +248,42 @@ is_key_held :: proc(key:Key) -> bool {
 
 is_key_released :: proc(key:Key) -> bool {
 	return mbi.keys_released[key]
+}
+
+/*
+	Checks if a key went down this frame or is auto-repeating while it is held. `is_key_pressed` is true once per press (a
+	shortcut such as Ctrl+Z fires once however long it is held); this one also fires at the keyboard's repeat rate, which is
+	what moving a text caret or deleting with backspace wants
+*/
+is_key_repeated :: proc(key:Key) -> bool {
+	return mbi.keys_repeated[key]
+}
+
+/*
+	The text typed this frame, as UTF-8, for filling a text field. It is what the keyboard layout produced (so shifted
+	letters, other layouts and dead keys come out right), not key presses. Control characters are left out: Backspace,
+	Tab and Enter arrive as keys. Valid until the next poll_events. If more than MAX_TEXT_INPUT bytes are typed in one
+	frame the rest are dropped
+*/
+get_typed_text :: proc() -> string {
+	return string(mbi.typed_text[:mbi.typed_text_length])
+}
+
+/*
+	When on, the window's close button (and Alt+F4, the taskbar) no longer closes the window: it is reported by
+	is_close_requested and the game decides, usually by asking "save changes?" and then calling stop_running. Off by
+	default, which is how every game closed before this existed
+*/
+set_close_confirmation :: proc(enabled:bool = true) {
+	mbi.close_confirmation = enabled
+}
+
+/*
+	Whether the user asked to close the window this frame (its close button, Alt+F4, the taskbar). Only ever true after
+	set_close_confirmation, and then the window is not closed until the game calls stop_running. Resets every frame
+*/
+is_close_requested :: proc() -> bool {
+	return mbi.close_requested
 }
 
 get_mouse_position :: proc() -> [2]i32 {

@@ -68,6 +68,17 @@ Right now, creating a sprite requires a texture. Really, calling create_sprite s
 
 Done: `create_cube_geometry`, `create_quad_geometry`, `create_triangle_geometry`, `create_circle_geometry`, `create_plane_geometry`, `create_sphere_geometry` and `create_cylinder_geometry`. They build vertices and indices on the CPU; `create_mesh` and `create_lit_mesh` upload them.
 
+## FPS set -> Have a proc to set the max FPS limit
+## VSYNC toggle -> Have a proc to toggle vsync on and off
+## [x] Add remaining keyboard keys to input on pc
+
+Done: the keypad (`NUMPAD_0`..`NUMPAD_9`, `MULTIPLY`, `ADD`, `SEPARATOR`, `SUBTRACT`, `DECIMAL`, `DIVIDE`, `KEYPAD_ENTER`), `F1`..`F12`, `NUMLOCK`, `SCROLL_LOCK` and the punctuation keys (`SEMICOLON`, `EQUALS`, `COMMA`, `MINUS`, `PERIOD`, `SLASH`, `GRAVE`, `LEFT_BRACKET`, `BACKSLASH`, `RIGHT_BRACKET`, `APOSTROPHE`), with `is_key_repeated` apart from `is_key_pressed`. The handheld `Key` has the same names.
+
+## Add logging to Matchbox (need to check if runtime for 3DS and Vita can do this as original runtime support could not)
+## PSX Shaders need work -- logs of geometry flickering happening
+## custom shaders (ones added by a user and not loaded into the game) need 3DS and Vita Backend support
+## Find an api way to handle creating logs to avoid using `when` keyboard in standalone projects
+
 # Nice to haves
 
 These are things that would be nice for Matchbox to have but are not a requirement

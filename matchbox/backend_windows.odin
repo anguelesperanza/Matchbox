@@ -17,6 +17,9 @@ import "vendor:directx/d3d11"
 import "vendor:directx/dxgi"
 import gi "vendor:windows/GameInput"
 
+// Bytes of typed text kept per frame: a fixed array bound, so a constant. A person types a few characters a frame; a paste would not come through WM_CHAR
+MAX_TEXT_INPUT :: 256
+
 Backend_State :: struct {
 	// Win32
 	window:win.HWND,
@@ -25,6 +28,12 @@ Backend_State :: struct {
 	keys_pressed: #sparse [Key]bool,
 	keys_released: #sparse [Key]bool,
 	keys_held: #sparse [Key]bool,
+	keys_repeated: #sparse [Key]bool, // went down this frame, auto-repeats included; keys_pressed leaves the repeats out
+	typed_text: [MAX_TEXT_INPUT]u8, // UTF-8 typed this frame (WM_CHAR)
+	typed_text_length: int,
+	typed_high_surrogate: u16, // the first half of a character outside the BMP, waiting for its second
+	close_confirmation: bool, // set_close_confirmation: the close button asks the game instead of closing
+	close_requested: bool, // the window's close button was pressed this frame (WM_CLOSE)
 
 	mouse_wheel_value:i16,
 	mouse_position:[2]i32,

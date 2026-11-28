@@ -90,6 +90,50 @@ Key :: enum {
 	X,
 	Y,
 	Z,
+
+	// The same names as the PC's keypad, function and punctuation keys, so a game written for the PC builds
+	NUMPAD_0,
+	NUMPAD_1,
+	NUMPAD_2,
+	NUMPAD_3,
+	NUMPAD_4,
+	NUMPAD_5,
+	NUMPAD_6,
+	NUMPAD_7,
+	NUMPAD_8,
+	NUMPAD_9,
+	MULTIPLY,
+	ADD,
+	SEPARATOR,
+	SUBTRACT,
+	DECIMAL,
+	DIVIDE,
+	KEYPAD_ENTER,
+	F1,
+	F2,
+	F3,
+	F4,
+	F5,
+	F6,
+	F7,
+	F8,
+	F9,
+	F10,
+	F11,
+	F12,
+	NUMLOCK,
+	SCROLL_LOCK,
+	SEMICOLON,
+	EQUALS,
+	COMMA,
+	MINUS,
+	PERIOD,
+	SLASH,
+	GRAVE,
+	LEFT_BRACKET,
+	BACKSLASH,
+	RIGHT_BRACKET,
+	APOSTROPHE,
 }
 
 /*
@@ -121,6 +165,25 @@ is_key_held :: proc(key:Key) -> bool {
 
 is_key_released :: proc(key:Key) -> bool {
 	return false
+}
+
+/*Always false on the handhelds*/
+is_key_repeated :: proc(key:Key) -> bool {
+	return false
+}
+
+/*Always empty on the handhelds: there is no keyboard to type on*/
+get_typed_text :: proc() -> string {
+	return ""
+}
+
+/*Always false on the handhelds: there is no window to close (a game quits on START)*/
+is_close_requested :: proc() -> bool {
+	return false
+}
+
+/*Does nothing on the handhelds, so that a game written for the PC builds*/
+set_close_confirmation :: proc(enabled:bool = true) {
 }
 
 /*There is no mouse on a handheld; so that a game written for the PC builds, this does nothing*/

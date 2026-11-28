@@ -11,11 +11,20 @@ package matchbox
 import win "core:sys/windows"
 import gi "vendor:windows/GameInput"
 import "base:runtime"
+import "core:reflect"
+import "core:unicode/utf8"
 
 /*The window callback procedure for processing events (a win32 requirement)*/
 window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam: win.WPARAM, lParam: win.LPARAM) -> win.LRESULT {
 	context = runtime.default_context()
 	switch message {
+		// Off by default, so a game that never heard of this still closes: DefWindowProc destroys the window. With
+		// set_close_confirmation on, nothing is destroyed here and the game decides (is_close_requested, stop_running)
+		case win.WM_CLOSE:
+			if mbi.close_confirmation {
+				mbi.close_requested = true
+				return 0
+			}
 		case win.WM_QUIT:
 			stop_running()
 		case win.WM_DESTROY:
@@ -24,6 +33,8 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 			mbi.keys_pressed = {}
 			mbi.keys_released = {}
 			mbi.keys_held = {}
+			mbi.keys_repeated = {}
+			mbi.typed_high_surrogate = 0
 	
 			mbi.gamepad_pressed = {}
 			mbi.gamepad_released = {}
@@ -40,29 +51,33 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 				mbi.window_size[1] = i32(win.HIWORD(lParam))
 			}
 		case win.WM_KEYDOWN:
-			switch wParam {
-				case win.VK_A..=win.VK_Z:
-					mbi.keys_pressed[cast(Key)wParam] = true
-					mbi.keys_held[cast(Key)wParam] = true
-				case win.VK_0 ..= win.VK_9:
-					mbi.keys_pressed[cast(Key)wParam] = true
-					mbi.keys_held[cast(Key)wParam] = true
-				case win.VK_BACK ..= win.VK_HELP:
-					mbi.keys_pressed[cast(Key)wParam] = true
-					mbi.keys_held[cast(Key)wParam] = true
+			if key, ok := get_key_from_message(wParam, lParam); ok {
+				// Bit 30 of lParam is the key's state before this message: set means it was already down, so this is the
+				// keyboard's auto-repeat. Only a first press counts as pressed, so a shortcut fires once however long it is held
+				is_repeat := (lParam & (1 << 30)) != 0
+				if is_repeat == false do mbi.keys_pressed[key] = true
+				mbi.keys_repeated[key] = true
+				mbi.keys_held[key] = true
+				// The keypad's Enter is RETURN to Windows, so it answers as RETURN as well as KEYPAD_ENTER
+				if key == .KEYPAD_ENTER {
+					if is_repeat == false do mbi.keys_pressed[.RETURN] = true
+					mbi.keys_repeated[.RETURN] = true
+					mbi.keys_held[.RETURN] = true
+				}
 			}
 		case win.WM_KEYUP:
-			switch wParam {
-				case win.VK_A..=win.VK_Z:
-					mbi.keys_held[cast(Key)wParam] = false
-					mbi.keys_released[cast(Key)wParam] = true
-				case win.VK_0 ..= win.VK_9:
-					mbi.keys_held[cast(Key)wParam] = false
-					mbi.keys_released[cast(Key)wParam] = true
-				case win.VK_BACK ..= win.VK_HELP:
-					mbi.keys_held[cast(Key)wParam] = false
-					mbi.keys_released[cast(Key)wParam] = true
+			if key, ok := get_key_from_message(wParam, lParam); ok {
+				mbi.keys_held[key] = false
+				mbi.keys_released[key] = true
+				if key == .KEYPAD_ENTER {
+					mbi.keys_held[.RETURN] = false
+					mbi.keys_released[.RETURN] = true
+				}
 			}
+
+		// The text the layout made of the keys, one UTF-16 unit at a time: a character outside the BMP arrives as two
+		case win.WM_CHAR:
+			add_typed_unit(u16(wParam))
 
 		case win.WM_MOUSEMOVE:
 			mbi.mouse_position = {win.GET_X_LPARAM(lParam),win.GET_Y_LPARAM(lParam)}
@@ -115,6 +130,48 @@ window_event_proc :: proc "stdcall" (window: win.HWND, message: win.UINT, wParam
 	return win.DefWindowProcW(window, message, wParam, lParam)
 }
 
+/*
+	The Key a key message is for. Windows' virtual keys are what Key is made of, so most pass straight through; the keypad's
+	Enter is the one a virtual key cannot tell from the main Enter, and is told by the extended-key bit (lParam bit 24).
+	`ok` is false for a key Key has no name for
+*/
+@(private)
+get_key_from_message :: proc(wParam: win.WPARAM, lParam: win.LPARAM) -> (key: Key, ok: bool) {
+	if wParam == win.VK_RETURN && (lParam & (1 << 24)) != 0 do return .KEYPAD_ENTER, true
+	key = Key(wParam)
+	return key, reflect.enum_value_has_name(key)
+}
+
+/*
+	Adds one UTF-16 unit from WM_CHAR to this frame's typed text. Control characters are skipped (Backspace, Tab and Enter
+	come in as keys). The first half of a surrogate pair is held until its second arrives; a lone half is dropped
+*/
+@(private)
+add_typed_unit :: proc(unit: u16) {
+	character: rune
+	switch {
+	case unit < 0x20 || unit == 0x7F:
+		return
+	case unit >= 0xD800 && unit <= 0xDBFF:
+		mbi.typed_high_surrogate = unit
+		return
+	case unit >= 0xDC00 && unit <= 0xDFFF:
+		high := mbi.typed_high_surrogate
+		mbi.typed_high_surrogate = 0
+		if high == 0 do return
+		character = rune(0x10000) + (rune(high - 0xD800) << 10) + rune(unit - 0xDC00)
+	case:
+		mbi.typed_high_surrogate = 0
+		character = rune(unit)
+	}
+
+	encoded, width := utf8.encode_rune(character)
+	// A character that does not fit is dropped whole, never cut in the middle
+	if mbi.typed_text_length + width > MAX_TEXT_INPUT do return
+	copy(mbi.typed_text[mbi.typed_text_length:], encoded[:width])
+	mbi.typed_text_length += width
+}
+
 /*Process the events sent to the window (events/inputs/etc)*/
 poll_events :: proc() {
 
@@ -127,6 +184,9 @@ poll_events :: proc() {
 	// Before processing messages clear the input for keys pressed
 	mbi.keys_pressed = {}
 	mbi.keys_released = {}
+	mbi.keys_repeated = {}
+	mbi.typed_text_length = 0
+	mbi.close_requested = false
 	
 	mbi.mouse_pressed = {}
 	mbi.mouse_released = {}
